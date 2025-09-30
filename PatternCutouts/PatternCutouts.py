@@ -4,15 +4,14 @@ parent_dir = os.path.dirname(current_dir)
 shared_folder = os.path.join(parent_dir, "SharedUtils")
 if current_dir not in sys.path: sys.path.append(current_dir)
 if shared_folder not in sys.path: sys.path.append(shared_folder)
-
-import adsk.core, adsk.fusion
-from adsk.core import Point3D, Vector3D
-import CustomComputeFeature, Inputs, math
-import importlib
-import utils
+import importlib, CustomComputeFeature, Inputs, utils
 importlib.reload(CustomComputeFeature)
 importlib.reload(Inputs)
 importlib.reload(utils)
+import adsk.core, adsk.fusion
+
+from adsk.core import Point3D, Vector3D
+import math
 
 
 _feature: CustomComputeFeature.CustomComputeFeature = None
@@ -105,8 +104,8 @@ class TrianglePattern(CustomComputeFeature.CustomComputeFeature):
             return triangles
             
         else:
-            result = create_cross(face, cut, self.inputs)
-            # result = create_rhombuses(face, cut, self.inputs)
+            # result = create_cross(face, cut, self.inputs)
+            result = create_rhombuses(face, cut, self.inputs)
             # result = create_triangles(face, cut, self.inputs)
             mgr.transform(result, utils.matrix.transform_into_face(face, cut))
             return result
