@@ -1,16 +1,17 @@
 import sys, os
-shared_path = os.path.dirname(__file__)
-if shared_path not in sys.path:
-    sys.path.append(shared_path)
-
-import adsk.core, adsk.fusion
-import CustomComputeFeature, Inputs
-import math, utils
-from typing import Tuple
-import importlib
-importlib.reload(utils)
+current_dir = os.path.dirname(__file__)
+parent_dir = os.path.dirname(current_dir)
+shared_folder = os.path.join(parent_dir, "SharedUtils")
+if current_dir not in sys.path: sys.path.append(current_dir)
+if shared_folder not in sys.path: sys.path.append(shared_folder)
+import importlib, CustomComputeFeature, Inputs, utils
 importlib.reload(CustomComputeFeature)
 importlib.reload(Inputs)
+importlib.reload(utils)
+import adsk.core, adsk.fusion
+
+import math
+from typing import Tuple
 
 
 _feature: CustomComputeFeature.CustomComputeFeature = None
@@ -27,13 +28,12 @@ class ClamexInputs(Inputs.Inputs):
     def __init__(self, units_manager: adsk.core.UnitsManager):
         units = units_manager.defaultLengthUnits
         self.edge = Inputs.SelectionInput('edge', 'Edge', 'LinearEdges', 1, 0, False, 'Select edge along which access holes should be placed.')
-        # self.size = Inputs.DropDownInput('size', 'Size', [['Clamex P10', 10], ['Clamex P14', 14]], 10, 'Tool Tip TODO')
-        # self.spacing = Inputs.FloatInput('spacing', 'Spacing', 20, 'Tool Tip TODO', units)
-        # self.start_offset = Inputs.FloatInput('startOffset', 'Start Offset', 6, 'Tool Tip TODO', units)
-        # self.end_offset = Inputs.FloatInput('endOffset', 'End Offset', 6, 'Tool Tip TODO', units)
+        self.size = Inputs.DropDownInput('size', 'Size', [['Clamex P10', 10], ['Clamex P14', 14]], 10, 'Size variant of the Clamex connector.')
+        self.spacing = Inputs.FloatInput('spacing', 'Spacing', 20, 'Minimum spacing between the connectors.', units)
+        self.start_offset = Inputs.FloatInput('startOffset', 'Start Offset', 6, 'Offset of the first connector from the start of the edge.', units)
+        self.end_offset = Inputs.FloatInput('endOffset', 'End Offset', 6, 'Offset of the last connector to the end of the edge.', units)
         self.selections = [self.edge]
-        self.values = []
-        # self.values = [self.size, self.spacing, self.start_offset, self.end_offset]
+        self.values = [self.size, self.spacing, self.start_offset, self.end_offset]
 
 
 class ClamexFeature(CustomComputeFeature.CustomComputeFeature):
@@ -51,45 +51,40 @@ class ClamexFeature(CustomComputeFeature.CustomComputeFeature):
         return ClamexInputs(self.app.activeProduct.unitsManager)
 
     def compute(self, feature: adsk.fusion.CustomFeature) -> None:
-        pass
-        # base_feature = utils.get_base_feature(feature)
-        # for edge in self.inputs.edge.get_from_dependencies(feature):
-        #     access_face, slot_face = get_access_and_slot_faces(edge)
-        #     newBody = create_hole_bodies_union(edge, access_face, slot_face, self.inputs)
-        #     base_feature.startEdit()
-        #     base_feature.updateBody(base_feature.bodies.item(0), newBody)
-        #     base_feature.finishEdit()
+        base_feature = utils.fusion.get_base_feature(feature)
+        for idx, edge in enumerate(self.inputs.edge.get_from_dependencies(feature)):
+            access_face, slot_face = get_access_and_slot_faces(edge)
+            new_access, new_guide = create_hole_bodies(edge, access_face, slot_face, self.inputs)
+            base_feature.startEdit()
+            base_feature.updateBody(base_feature.bodies.item(idx * 2), new_access)
+            base_feature.updateBody(base_feature.bodies.item(idx * 2 + 1), new_guide)
+            base_feature.finishEdit()
 
     def execute(self, base_feature: adsk.fusion.BaseFeature) -> adsk.fusion.Feature:
-        return base_feature
-        # last_feature: adsk.fusion.CombineFeature = None
-        # for edge in self.inputs.edge.value:
-        #     access_face, slot_face = get_access_and_slot_faces(edge)
-        #     base_feature.startEdit()
-        #     hole_bodies = create_hole_bodies_union(edge, access_face, slot_face, self.inputs)
-        #     self.component.bRepBodies.add(hole_bodies, base_feature)
-        #     base_feature.finishEdit()
+        last_feature: adsk.fusion.CombineFeature = base_feature
+        for edge in self.inputs.edge.value:
+            access_face, slot_face = get_access_and_slot_faces(edge)
+            access_holes, guide_holes = create_hole_bodies(edge, access_face, slot_face, self.inputs)
+            base_feature.startEdit()
+            self.component.bRepBodies.add(access_holes, base_feature)
+            self.component.bRepBodies.add(guide_holes, base_feature)
+            base_feature.finishEdit()
 
-        #     access_combine_input = self.component.features.combineFeatures.createInput(access_face.body, utils.as_object_collection(base_feature.bodies))
-        #     access_combine_input.operation = adsk.fusion.FeatureOperations.CutFeatureOperation
-        #     access_combine_input.isKeepToolBodies = True
-        #     self.component.features.combineFeatures.add(access_combine_input)
+            cut_coll = adsk.core.ObjectCollection.createWithArray([base_feature.bodies.item(0)])
+            access_combine_input = self.component.features.combineFeatures.createInput(access_face.body, cut_coll)
+            access_combine_input.operation = adsk.fusion.FeatureOperations.CutFeatureOperation
+            self.component.features.combineFeatures.add(access_combine_input)
 
-        #     guide_body = utils.find_perpendicular_face_containing_edge(edge, access_face).body
-        #     guide_combine_input = self.component.features.combineFeatures.createInput(guide_body, utils.as_object_collection(base_feature.bodies))
-        #     guide_combine_input.operation = adsk.fusion.FeatureOperations.CutFeatureOperation
-        #     last_feature = self.component.features.combineFeatures.add(guide_combine_input)
-        # return last_feature
-
-    def pre_select(self, entity):
-        if self.edited_custom_feature:
-            return False
-        else:
-            return True
+            guide_body = utils.brep.find_perpendicular_face_containing_edge(edge, access_face).body
+            cut_coll = adsk.core.ObjectCollection.createWithArray([base_feature.bodies.item(0)])
+            guide_combine_input = self.component.features.combineFeatures.createInput(guide_body, cut_coll)
+            guide_combine_input.operation = adsk.fusion.FeatureOperations.CutFeatureOperation
+            last_feature = self.component.features.combineFeatures.add(guide_combine_input)
+        return last_feature
 
 
 def get_access_and_slot_faces(edge: adsk.fusion.BRepEdge) -> Tuple[adsk.fusion.BRepFace, adsk.fusion.BRepFace]:
-    access_face = utils.largest_face_of_edge(edge)
+    access_face = utils.brep.largest_face_of_edge(edge)
     slot_face = None
     for f in edge.faces:
         if f != access_face:
@@ -116,8 +111,8 @@ def guide_hole_positions(access_positions: list[adsk.core.Point2D], thickness) -
     offset = 10.1/2
     return [y for p in access_positions for y in (adsk.core.Point2D.create(p.x-offset, thickness/2), adsk.core.Point2D.create(p.x+offset, thickness/2))]
 
-def create_hole_bodies_union(edge: adsk.fusion.BRepEdge, access_face: adsk.fusion.BRepFace, slot_face: adsk.fusion.BRepFace, inputs: ClamexInputs) -> adsk.fusion.BRepBody:
-    thickness = utils.get_board_thickness(access_face)
+def create_hole_bodies(edge: adsk.fusion.BRepEdge, access_face: adsk.fusion.BRepFace, slot_face: adsk.fusion.BRepFace, inputs: ClamexInputs) -> tuple[adsk.fusion.BRepBody, adsk.fusion.BRepBody]:
+    thickness = utils.brep.get_board_thickness(access_face)
     access_positions = access_hole_positions(edge, inputs.spacing.value, inputs.start_offset.value, inputs.end_offset.value)
     guide_positions = guide_hole_positions(access_positions, thickness)
 
@@ -148,10 +143,13 @@ def create_hole_bodies_union(edge: adsk.fusion.BRepEdge, access_face: adsk.fusio
         holeDepth = 0.8
         return mgr.createCylinderOrCone(adsk.core.Point3D.create(0, 0, 0), holeRadius, adsk.core.Point3D.create(0, 0, -holeDepth), holeRadius)
 
-    access_bodies = utils.create_bodies_at_points_on_face(access_positions, access_face, edge, access_hole)
-    guide_bodies = utils.create_bodies_at_points_on_face(guide_positions, slot_face, edge, guide_hole)
-    result = access_bodies[0]
-    for body in (access_bodies[1:] + guide_bodies):
-        mgr.booleanOperation(result, body, adsk.fusion.BooleanTypes.UnionBooleanType)
-    return result
+    access_bodies = utils.brep.create_bodies_at_points_on_face(access_positions, access_face, edge, access_hole)
+    guide_bodies = utils.brep.create_bodies_at_points_on_face(guide_positions, slot_face, edge, guide_hole)
+    access_union = access_bodies[0]
+    for body in (access_bodies[1:]):
+        mgr.booleanOperation(access_union, body, adsk.fusion.BooleanTypes.UnionBooleanType)
+    guide_union = guide_bodies[0]
+    for body in (guide_bodies[1:]):
+        mgr.booleanOperation(guide_union, body, adsk.fusion.BooleanTypes.UnionBooleanType)
+    return access_union, guide_union
 

@@ -1,7 +1,7 @@
 {
 	"autodeskProduct":	"Fusion360",
 	"type":	"addin",
-	"id":	"5e0d212a-608c-4329-bc29-1f33753b5450",
+	"id":	"de.anton-reisemobile.clamex",
 	"author":	"",
 	"description":	{
 		"":	""
