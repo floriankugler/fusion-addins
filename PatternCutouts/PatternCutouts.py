@@ -127,6 +127,7 @@ def create_triangles(face: adsk.fusion.BRepFace, cut: Vector3D,  inputs: Triangl
     columns = max(1, math.floor((horizontal_space + spacing) / (inputs.preferred_width.value + spacing)))
     width = inputs.preferred_width.value
     height = inputs.preferred_height.value
+    ratio = width/height
 
     def point_angle(width, height):
         base_angle = math.atan(height/(width/2))
@@ -150,14 +151,14 @@ def create_triangles(face: adsk.fusion.BRepFace, cut: Vector3D,  inputs: Triangl
 
     def height_deviation(h):
         actual_height = h - fillet_height_offset(point_angle(width, h))
-        return actual_height - height
+        return actual_height - vertical_space
 
     vertical_spacing = visual_spacing(point_angle(width, height))
     
     if inputs.adaptive.value:
         width = (horizontal_space - (columns - 1) * spacing) / columns
-        height_lower = height
-        height_upper = height * 2
+        height_lower = width/ratio * 0.5
+        height_upper = width/ratio * 2
         if rows > 1:
             height = utils.misc.binary_search(height_lower, height_upper, spacing_deviation, 0, 0.1)
         else:
