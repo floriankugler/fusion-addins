@@ -63,7 +63,7 @@ class CustomComputeFeature(ABC):
             self.custom_feature_def.editCommandId = self.edit_command_id
 
             # Connect to the compute event for the custom feature.
-            compute_custom_feature = ComputeCustomFeature(self.compute)
+            compute_custom_feature = ComputeCustomFeature(self._compute)
             self.custom_feature_def.customFeatureCompute.add(compute_custom_feature)
             self._handlers.append(compute_custom_feature)
 
@@ -126,7 +126,7 @@ class CustomComputeFeature(ABC):
             self._handlers.append(on_execute)  
 
     def _execute(self):
-        self.cache_selection_inputs()
+        self.update_inputs_from_ui()
         base_feature = self.component.features.baseFeatures.add()
         end_feature = self.execute(base_feature)
 
@@ -143,12 +143,12 @@ class CustomComputeFeature(ABC):
             sel.create_named_values(feature)
 
     def _execute_preview(self):
-        self.cache_selection_inputs()
+        self.update_inputs_from_ui()
         base_feature = self.component.features.baseFeatures.add()
         self.execute(base_feature)
 
     def _edit_execute(self):
-        self.cache_selection_inputs()
+        self.update_inputs_from_ui()
         # self.compute(self.edited_custom_feature)
 
         for sel in self.inputs.selections:
@@ -186,9 +186,21 @@ class CustomComputeFeature(ABC):
                 sel.input.addSelection(e)
         self._initial_selection = False
 
-    def cache_selection_inputs(self):
+    def _compute(self, feature: adsk.fusion.CustomFeature):
+        if not self.inputs:
+            self.inputs = self.create_inputs()
+        self.update_inputs_from_feature(feature)
+        self.compute(feature)
+
+    def update_inputs_from_ui(self):
         for input in self.inputs.values + self.inputs.selections:
             input.update_value_from_input()
+
+    def update_inputs_from_feature(self, feature: adsk.fusion.CustomFeature):
+        for sel in self.inputs.selections:
+            sel.value = sel.get_from_dependencies(feature)
+        for val in self.inputs.values:
+            val.update_value_from_params(feature.parameters)
 
     def _pre_select(self, entity):
         if self._initial_selection:

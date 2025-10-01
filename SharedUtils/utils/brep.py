@@ -60,12 +60,12 @@ def get_opposite_face(face: adsk.fusion.BRepFace) -> adsk.fusion.BRepFace:
     if not is_planar(face): 
         raise ValueError("Face must be planar.")
 
-    opposite_face = None
+    faces = []
     for f in face.body.faces:
         if f != face and is_parallel(face, f):
-            opposite_face = f
-            break
-    return opposite_face
+            faces.append(f)
+    faces.sort(key=lambda x: x.area)
+    return faces[-1]
 
 def get_board_thickness(face: adsk.fusion.BRepFace) -> float:
     if not is_planar(face): 

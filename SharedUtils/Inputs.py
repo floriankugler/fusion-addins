@@ -56,6 +56,13 @@ class ValueInput(Input):
     def create_value_input_from_inputs(self) -> adsk.core.ValueInput:
         return adsk.core.ValueInput.createByReal(self.value)
 
+    def update_value_from_params(self, params: adsk.fusion.CustomFeatureParameters):
+        if not params:
+            return
+        val = self.get_value_from_params(params)
+        if val is not None:
+            self.value = val
+
 class CheckboxInput(ValueInput):
     input: adsk.core.BoolValueCommandInput
 
@@ -181,6 +188,8 @@ class SelectionByEntityTokenInput(Input):
         self.lower_bound = lower_bound
         self.upper_bound = upper_bound
         self.is_editable = is_editable
+        self.tokens = []
+        self.value = None
 
     def create_input(self, inputs: adsk.core.CommandInput, params: adsk.fusion.CustomFeatureParameters, editing: bool):
         self.input = inputs.addSelectionInput(self.id, self.name, self.tool_tip)

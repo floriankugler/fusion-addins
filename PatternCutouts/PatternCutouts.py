@@ -64,10 +64,8 @@ class TrianglePattern(CustomComputeFeature.CustomComputeFeature):
 
     def compute(self, feature: adsk.fusion.CustomFeature) -> None:
         base_feature = utils.fusion.get_base_feature(feature)
-        faces = self.inputs.faces.get_from_dependencies(feature)
-        profiles = self.inputs.profiles.get_from_dependencies(feature)
-        for idx in range(len(faces)):
-            newBody = self.create_pattern_for_face(faces[idx], profiles)
+        for idx, face in enumerate(self.inputs.faces.value):
+            newBody = self.create_pattern_for_face(face, self.inputs.profiles.value)
             base_feature.startEdit()
             base_feature.updateBody(base_feature.bodies[idx], newBody)
             base_feature.finishEdit()
