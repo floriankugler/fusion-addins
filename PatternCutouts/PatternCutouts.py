@@ -25,10 +25,17 @@ def stop(context):
     del _feature
 
 class TriangleInputs(Inputs.Inputs):
+    types = {
+        'Triangles': 0,
+        'Rhombuses': 1,
+        'Cross': 2,
+    }
+
     def __init__(self, units_manager: adsk.core.UnitsManager):
         units = units_manager.defaultLengthUnits
         self.faces = Inputs.SelectionByEntityTokenInput('faces', 'Faces', 'PlanarFaces', 1, 0, False, 'Select faces to create triangle pockets on.')
         self.profiles = Inputs.SelectionInput('profiles', 'Profiles', 'Profiles', 0, 0, True, 'Select profiles on a single face to restrict the pattern to these profiles. Only makes sense if a single face is selected.')
+        self.type = Inputs.DropDownInput('type', 'Type', TriangleInputs.types.items(), TriangleInputs.types['Triangles'], 'The type of pattern to use.')
         self.preferred_width = Inputs.FloatInput('preferred_width', 'Preferred Width', 10, 'Indicates the preferred width of the shape.', units)
         self.preferred_height = Inputs.FloatInput('preferred_height', 'Preferred Height', 15, 'Indicates the preferred height of the shape.', units)
         self.spacing = Inputs.FloatInput('spacing', 'Spacing', 2, 'Spacing between the shapes.', units)
@@ -38,7 +45,7 @@ class TriangleInputs(Inputs.Inputs):
         self.adaptive = Inputs.CheckboxInput('adaptive', 'Adaptive', True, 'Prioritzes filling up the available space with the pattern over adhering to the width/height values, treating them more a starting point.')
         self.remainder = Inputs.FloatInput('remainder', 'Remaining Material', 0, 'Thickness of the remaining material to leave untouched.', units)
         self.selections = [self.faces, self.profiles]
-        self.values = [self.preferred_width, self.preferred_height, self.spacing, self.inset, self.fillet, self.compensate_fillet, self.adaptive, self.remainder]
+        self.values = [self.type, self.preferred_width, self.preferred_height, self.spacing, self.inset, self.fillet, self.compensate_fillet, self.adaptive, self.remainder]
 
 
 class TrianglePattern(CustomComputeFeature.CustomComputeFeature):
@@ -60,7 +67,7 @@ class TrianglePattern(CustomComputeFeature.CustomComputeFeature):
         faces = self.inputs.faces.get_from_dependencies(feature)
         profiles = self.inputs.profiles.get_from_dependencies(feature)
         for idx in range(len(faces)):
-            newBody = self.create_triangles_for_face(faces[idx], profiles)
+            newBody = self.create_pattern_for_face(faces[idx], profiles)
             base_feature.startEdit()
             base_feature.updateBody(base_feature.bodies[idx], newBody)
             base_feature.finishEdit()
@@ -69,7 +76,7 @@ class TrianglePattern(CustomComputeFeature.CustomComputeFeature):
         last_feature: adsk.fusion.CombineFeature = None
 
         for face in self.inputs.faces.value:
-            triangles = self.create_triangles_for_face(face, self.inputs.profiles.value)
+            triangles = self.create_pattern_for_face(face, self.inputs.profiles.value)
             base_feature.startEdit()
             self.component.bRepBodies.add(triangles, base_feature)
             base_feature.finishEdit()
@@ -80,7 +87,7 @@ class TrianglePattern(CustomComputeFeature.CustomComputeFeature):
 
         return last_feature 
 
-    def create_triangles_for_face(self, face: adsk.fusion.BRepFace, profiles: list[adsk.fusion.Profile]) -> adsk.fusion.BRepBody:
+    def create_pattern_for_face(self, face: adsk.fusion.BRepFace, profiles: list[adsk.fusion.Profile]) -> adsk.fusion.BRepBody:
         mgr = adsk.fusion.TemporaryBRepManager.get()
         opposite_face = utils.brep.get_opposite_face(face)
         depth = abs(utils.brep.distance_along_normal_between_faces(face, opposite_face))
@@ -88,28 +95,35 @@ class TrianglePattern(CustomComputeFeature.CustomComputeFeature):
         cut_normal = utils.brep.normal_towards_face(face, opposite_face)
         cut = utils.vector.scaled_by(cut_normal, depth)
 
+        type = self.inputs.type.value
+        generator = None
+        if type == TriangleInputs.types['Triangles']:
+            generator = create_triangles    
+        elif type == TriangleInputs.types['Rhombuses']:
+            generator = create_rhombuses
+        elif type == TriangleInputs.types['Cross']:
+            generator = create_cross
+        else:
+            return
+
         if len(profiles) > 0:
-            triangles = None
+            result = None
             for profile in profiles:
                 sketch = profile.parentSketch
                 profile_body = mgr.copy(profile.face.body)
                 mgr.transform(profile_body, utils.matrix.transform_from_root(sketch.origin, sketch.xDirection, sketch.yDirection))
                 profile_face = profile_body.faces[0]
-                next_triangles = create_triangles(profile_face, cut, self.inputs)
+                next_triangles = generator(profile_face, cut, self.inputs)
                 mgr.transform(next_triangles, utils.matrix.transform_into_face(profile_face, cut))
-                if triangles:
-                    mgr.booleanOperation(triangles, next_triangles, adsk.fusion.BooleanTypes.UnionBooleanType)
+                if result:
+                    mgr.booleanOperation(result, next_triangles, adsk.fusion.BooleanTypes.UnionBooleanType)
                 else:
-                    triangles = next_triangles
-            return triangles
-            
+                    result = next_triangles
+            return result
         else:
-            # result = create_cross(face, cut, self.inputs)
-            result = create_rhombuses(face, cut, self.inputs)
-            # result = create_triangles(face, cut, self.inputs)
+            result = generator(face, cut, self.inputs)
             mgr.transform(result, utils.matrix.transform_into_face(face, cut))
             return result
-            
 
 
 def create_triangles(face: adsk.fusion.BRepFace, cut: Vector3D,  inputs: TriangleInputs) -> adsk.fusion.BRepBody:
