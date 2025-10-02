@@ -34,6 +34,7 @@ class CustomComputeFeature(ABC):
             c = self.__class__
             resource_dir = 'Resources/' + c.plugin_name
             self._initial_selection = False
+            self.inputs = None
 
             # Create the command definition for the creation command.
             create_cmd_def = self.ui.commandDefinitions.addButtonDefinition(self.create_command_id, c.plugin_name, c.plugin_tooltip, resource_dir)        
