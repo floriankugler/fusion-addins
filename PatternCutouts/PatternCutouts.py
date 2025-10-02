@@ -29,6 +29,7 @@ class TriangleInputs(Inputs.Inputs):
         'Triangles': 0,
         'Rhombuses': 1,
         'Cross': 2,
+        'Rounded Rectangle': 3,
     }
 
     def __init__(self, units_manager: adsk.core.UnitsManager):
@@ -101,6 +102,8 @@ class TrianglePattern(CustomComputeFeature.CustomComputeFeature):
             generator = create_rhombuses
         elif type == TriangleInputs.types['Cross']:
             generator = create_cross
+        elif type == TriangleInputs.types['Rounded Rectangle']:
+            generator = create_rounded_rect
         else:
             return
 
@@ -349,21 +352,36 @@ def create_cross(face: adsk.fusion.BRepFace, cut: Vector3D,  inputs: TriangleInp
     return result
     
 
-
-
-def froli(face: adsk.fusion.BRepFace, cut: Vector3D,  inputs: TriangleInputs) -> adsk.fusion.BRepBody:
+def create_rounded_rect(face: adsk.fusion.BRepFace, cut: Vector3D,  inputs: TriangleInputs) -> adsk.fusion.BRepBody:
+    mgr = adsk.fusion.TemporaryBRepManager.get()
     long_edge, short_edge = utils.brep.longest_and_adjecent_edge_of_face(face)
     face_length = long_edge.length
     face_width = short_edge.length
-    vertical_space = face_width - 2 * inputs.inset.value
-    horizontal_space = face_length - 2 * inputs.inset.value
+    height = face_width - 2 * inputs.inset.value
+    width = face_length - 2 * inputs.inset.value
 
-    def spacing(length):
-        available = length - 13.6
-        remainders = [((available/x % 1) * x, x) for x in [16.3, 17.5, 18.7]]
-        remainders.sort(key=lambda x: x[0])
-        return remainders[0][1]
+    result = utils.brep.rounded_rectangle(width, height, cut.length, inputs.fillet.value)
+    result_bb = result.preciseBoundingBox
+    offset_x = face_length/2 - (result_bb.maxPoint.x + result_bb.minPoint.x)/2
+    offset_y = face_width/2 - (result_bb.maxPoint.y + result_bb.minPoint.y)/2
+    mgr.transform(result, utils.matrix.translation_matrix(Vector3D.create(offset_x, offset_y, 0)))
+    return result
 
-    horizontal_grid = spacing(horizontal_space)
-    vertical_grid = spacing(vertical_space)
+
+
+# def froli(face: adsk.fusion.BRepFace, cut: Vector3D,  inputs: TriangleInputs) -> adsk.fusion.BRepBody:
+#     long_edge, short_edge = utils.brep.longest_and_adjecent_edge_of_face(face)
+#     face_length = long_edge.length
+#     face_width = short_edge.length
+#     vertical_space = face_width - 2 * inputs.inset.value
+#     horizontal_space = face_length - 2 * inputs.inset.value
+
+#     def spacing(length):
+#         available = length - 13.6
+#         remainders = [((available/x % 1) * x, x) for x in [16.3, 17.5, 18.7]]
+#         remainders.sort(key=lambda x: x[0])
+#         return remainders[0][1]
+
+#     horizontal_grid = spacing(horizontal_space)
+#     vertical_grid = spacing(vertical_space)
 
