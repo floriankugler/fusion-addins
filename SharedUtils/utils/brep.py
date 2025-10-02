@@ -5,26 +5,16 @@ import adsk.core, adsk.fusion
 from adsk.core import OrientedBoundingBox3D, Point3D, Vector3D, Matrix3D
 
 def normal_into_face(edge: adsk.fusion.BRepEdge, face: adsk.fusion.BRepFace) -> Vector3D:
-    start_point = edge.startVertex.geometry
-    point: Point3D = None
-    for e in face.edges:
-        if e == edge:
-            continue
-        if edge.startVertex.geometry.isEqualTo(e.startVertex.geometry):
-            point = e.endVertex.geometry
-            break
-        if edge.startVertex.geometry.isEqualTo(e.endVertex.geometry):
-            point = e.startVertex.geometry
-            break
-    edge_dir = start_point.vectorTo(edge.endVertex.geometry)
-    edge_dir.normalize()
-    diff = start_point.vectorTo(point)
-    projection = edge_dir.dotProduct(diff)
-    normal = diff
-    v = edge_dir.copy()
-    v.scaleBy(projection)
-    normal.subtract(v)
-    normal.normalize()
+    edge_normal = normal_along_edge(edge)
+    opposite_face = get_opposite_face(face)
+    thickness_normal = normal_towards_face(face, opposite_face)
+    normal = edge_normal.crossProduct(thickness_normal)
+    edge_mid = vector.add(edge.startVertex.geometry.asVector(), vector.scaled_by(edge_normal, edge.length/2))
+    test_point = vector.add(edge_mid, vector.scaled_by(normal, 0.1)).asPoint()
+    eval = face.evaluator
+    _, test_param = eval.getParameterAtPoint(test_point)
+    if not eval.isParameterOnFace(test_param):
+        normal.scaleBy(-1)
     return normal
 
 def distance_along_normal_between_faces(face1: adsk.fusion.BRepFace, face2: adsk.fusion.BRepFace) -> float:
