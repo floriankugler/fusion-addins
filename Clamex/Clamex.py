@@ -95,7 +95,7 @@ def get_access_and_slot_faces(edge: adsk.fusion.BRepEdge) -> Tuple[adsk.fusion.B
 def access_hole_positions(edge: adsk.fusion.BRepEdge, spacing: float, start_offset: float, end_offset: float) -> list[adsk.core.Point2D]:
     distance_from_edge = 0.75
     available_length = edge.length - start_offset - end_offset
-    number_of_holes = math.ceil(available_length/spacing)
+    number_of_holes = max(1, math.ceil(available_length/spacing))
     start = edge.length/2
     computed_spacing = 0
     if number_of_holes > 1:
