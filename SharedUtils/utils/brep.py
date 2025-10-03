@@ -5,17 +5,18 @@ import adsk.core, adsk.fusion
 from adsk.core import OrientedBoundingBox3D, Point3D, Vector3D, Matrix3D
 
 def normal_into_face(edge: adsk.fusion.BRepEdge, face: adsk.fusion.BRepFace) -> Vector3D:
+    loop = next(l for l in face.loops if l.isOuter)
+    edge_idx = misc.as_list(loop.edges).index(edge)
+    adjecent_edge = loop.edges[edge_idx + 1] if edge_idx < len(loop.edges) - 1 else loop.edges[0]
+    face_normal = normal_along_edge(adjecent_edge)
     edge_normal = normal_along_edge(edge)
-    opposite_face = get_opposite_face(face)
-    thickness_normal = normal_towards_face(face, opposite_face)
-    normal = edge_normal.crossProduct(thickness_normal)
     edge_mid = vector.add(edge.startVertex.geometry.asVector(), vector.scaled_by(edge_normal, edge.length/2))
-    test_point = vector.add(edge_mid, vector.scaled_by(normal, 0.1)).asPoint()
+    test_point = vector.add(edge_mid, vector.scaled_by(face_normal, 0.1)).asPoint()
     eval = face.evaluator
     _, test_param = eval.getParameterAtPoint(test_point)
     if not eval.isParameterOnFace(test_param):
-        normal.scaleBy(-1)
-    return normal
+        face_normal.scaleBy(-1)
+    return face_normal
 
 def distance_along_normal_between_faces(face1: adsk.fusion.BRepFace, face2: adsk.fusion.BRepFace) -> float:
     if not is_parallel(face1, face2):
