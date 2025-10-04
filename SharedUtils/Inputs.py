@@ -242,60 +242,6 @@ class SelectionByEntityTokenInput(Input):
             feature.customNamedValues.remove(self.dependency_id(idx))
             idx += 1
 
-class FaceSelectionByEdgesInput(SelectionInput):
-    def __init__(self, id, name, lower_bound, upper_bound, is_editable, tool_tip):
-        super().__init__(id, name, 'PlanarFaces', lower_bound, upper_bound, is_editable, tool_tip)
-
-    def dependency_id(self, idx, suffix = ''):
-        if not suffix:
-            return f"{self.id}__{idx}"    
-        else:
-            return f"{self.id}__{idx}__{suffix}"
-
-    def create_dependencies(self, feature_input: adsk.fusion.CustomFeatureInput):
-        for idx in range(0, len(self.value)):
-            face: adsk.fusion.BRepFace = self.value[idx]
-            edges = utils.brep.outer_edges_of_face(face)
-            for idx2 in range(len(edges)):
-                feature_input.addDependency(self.dependency_id(idx, idx2), edges[idx2])
-
-    def get_from_dependencies(self, feature: adsk.fusion.CustomFeature) -> list[adsk.core.Base]:
-        result = []
-        idx = 0
-        while dep := feature.dependencies.itemById(self.dependency_id(idx, 0)):
-            edges = [dep.entity]
-            idx2 = 1
-            while dep := feature.dependencies.itemById(self.dependency_id(idx, idx2)):
-                edges.append(dep.entity)
-                idx2 += 1
-            face = utils.brep.common_face_of_edges(edges)
-            result.append(face)
-            idx += 1
-        return result
-
-    def update_dependencies(self, feature: adsk.fusion.CustomFeature):
-        for idx in range(0, len(self.value)):
-            face: adsk.fusion.BRepFace = self.value[idx]
-            edges = utils.brep.outer_edges_of_face(face)
-            for idx2 in range(len(edges)):
-                dep = feature.dependencies.itemById(self.dependency_id(idx, idx2))
-                if dep:
-                    dep.entity = edges[idx2]
-                else:
-                    feature.dependencies.add(self.dependency_id(idx, idx2), edges[idx2])
-            idx2 = len(edges)
-            while dep := feature.dependencies.itemById(self.dependency_id(idx, idx2)):
-                dep.deleteMe()
-                idx2 += 1
-        
-        idx = len(self.value)
-        while dep := feature.dependencies.itemById(self.dependency_id(idx, 0)):
-            dep.deleteMe()
-            while dep := feature.dependencies.itemById(self.dependency_id(idx, idx2)):
-                dep.deleteMe()
-                idx2 += 1
-            idx += 1
-
 
 class Inputs(ABC):
     selections: list[SelectionInput]
