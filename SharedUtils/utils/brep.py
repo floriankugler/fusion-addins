@@ -17,6 +17,10 @@ def normal_into_face(edge: adsk.fusion.BRepEdge, face: adsk.fusion.BRepFace) -> 
     if not eval.isParameterOnFace(test_param):
         face_normal.scaleBy(-1)
     return face_normal
+def adjecent_edge(edge: adsk.fusion.BRepEdge, face: adsk.fusion.BRepFace) -> adsk.fusion.BRepEdge:
+    loop = next(l for l in face.loops if l.isOuter)
+    edge_idx = misc.as_list(loop.edges).index(edge)
+    return loop.edges[edge_idx + 1] if edge_idx < len(loop.edges) - 1 else loop.edges[0]
 
 def distance_along_normal_between_faces(face1: adsk.fusion.BRepFace, face2: adsk.fusion.BRepFace) -> float:
     if not is_parallel(face1, face2):
@@ -106,21 +110,10 @@ def find_perpendicular_face_containing_edge(edge: adsk.fusion.BRepEdge, referenc
     return result
 
 def longest_and_adjecent_edge_of_face(face: adsk.fusion.BRepFace) -> tuple[adsk.fusion.BRepEdge, adsk.fusion.BRepEdge]:
-    loop = face.loops[0]
-    length = 0
-    longestIdx = None
-    for idx in range(len(loop.edges)):
-        edge = loop.edges[idx]
-        if edge.length > length:
-            length = edge.length
-            longestIdx = idx
-    longest_edge = loop.edges[longestIdx]
-    short_edge = None
-    if longestIdx < len(loop.edges) - 1:
-        short_edge = loop.edges[longestIdx + 1]
-    else:
-        short_edge = loop.edges[0]
-    return (longest_edge, short_edge)
+    loop = next(l for l in face.loops if l.isOuter)
+    longest_edge = sorted(loop.edges, key=lambda e: e.length, reverse=True)[0]
+    next_edge = adjecent_edge(longest_edge, face)
+    return (longest_edge, next_edge)
 
 def outer_edges_of_face(face: adsk.fusion.BRepFace) -> list[adsk.fusion.BRepEdge]:
     loop = next((x for x in face.loops if x.isOuter), None)
