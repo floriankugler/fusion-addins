@@ -5,18 +5,17 @@ import adsk.core, adsk.fusion
 from adsk.core import OrientedBoundingBox3D, Point3D, Vector3D, Matrix3D
 
 def normal_into_face(edge: adsk.fusion.BRepEdge, face: adsk.fusion.BRepFace) -> Vector3D:
-    loop = next(l for l in face.loops if l.isOuter)
-    edge_idx = misc.as_list(loop.edges).index(edge)
-    adjecent_edge = loop.edges[edge_idx + 1] if edge_idx < len(loop.edges) - 1 else loop.edges[0]
-    face_normal = normal_along_edge(adjecent_edge)
-    edge_normal = normal_along_edge(edge)
-    edge_mid = vector.add(edge.startVertex.geometry.asVector(), vector.scaled_by(edge_normal, edge.length/2))
-    test_point = vector.add(edge_mid, vector.scaled_by(face_normal, 0.1)).asPoint()
     eval = face.evaluator
+    _, face_normal = eval.getNormalAtParameter(eval.parametricRange().minPoint)
+    edge_normal = normal_along_edge(edge)
+    result = edge_normal.crossProduct(face_normal)
+    edge_mid = vector.add(edge.startVertex.geometry.asVector(), vector.scaled_by(edge_normal, edge.length/2))
+    test_point = vector.add(edge_mid, vector.scaled_by(result, 0.1)).asPoint()
     _, test_param = eval.getParameterAtPoint(test_point)
     if not eval.isParameterOnFace(test_param):
-        face_normal.scaleBy(-1)
-    return face_normal
+        result.scaleBy(-1)
+    return result
+
 def adjecent_edge(edge: adsk.fusion.BRepEdge, face: adsk.fusion.BRepFace) -> adsk.fusion.BRepEdge:
     loop = next(l for l in face.loops if l.isOuter)
     edge_idx = misc.as_list(loop.edges).index(edge)
