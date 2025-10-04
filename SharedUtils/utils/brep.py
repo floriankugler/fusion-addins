@@ -148,32 +148,6 @@ def normal_along_edge(edge: adsk.fusion.BRepEdge) -> Vector3D:
     result.normalize()
     return result
 
-def coordinates_at_point_on_face(point: adsk.core.Point2D, face: adsk.fusion.BRepFace, edge: adsk.fusion.BRepEdge) -> Matrix3D:
-    edge_dir = edge.startVertex.geometry.vectorTo(edge.endVertex.geometry)
-    edge_dir.normalize()
-    y = normal_into_face(edge, face)
-    z = normal_towards_face(face, get_opposite_face(face))
-    origin: Vector3D = edge.startVertex.geometry.asVector()
-    x_offset = edge_dir.copy()
-    x_offset.scaleBy(point.x)
-    y_offset = y.copy()
-    y_offset.scaleBy(point.y)
-    origin.add(x_offset)
-    origin.add(y_offset)
-    matrix = Matrix3D.create()
-    matrix.setWithCoordinateSystem(origin.asPoint(), edge_dir, y, z)
-    return matrix
-
-def create_bodies_at_points_on_face(points: list[adsk.core.Point2D], face: adsk.fusion.BRepFace, edge: adsk.fusion.BRepEdge, create_body: Callable[[], adsk.fusion.BRepBody]) -> list[adsk.fusion.BRepBody]:
-    mgr: adsk.fusion.TemporaryBRepManager = adsk.fusion.TemporaryBRepManager.get()
-    result = []
-    for point in points:
-        b = create_body()
-        matrix = coordinates_at_point_on_face(point, face, edge)
-        mgr.transform(b, matrix)
-        result.append(b)
-    return result
-
 def fillet_cut_body(point: Point3D, leg1: Vector3D, leg2: Vector3D, fillet_radius: float, thickness) -> adsk.fusion.BRepBody:
     mgr = adsk.fusion.TemporaryBRepManager.get()
     leg1.normalize()
@@ -274,3 +248,47 @@ def rhombus(width, height, thickness, fillet_radius) -> adsk.fusion.BRepBody:
         mgr.booleanOperation(box, cut2, adsk.fusion.BooleanTypes.DifferenceBooleanType)
     return box
 
+# Creates a cylinder with point at the cylinder's lower circle's center, height is positive z.
+def cylinder(point: Point3D, radius: float, height: float) -> adsk.fusion.BRepBody:
+    mgr = adsk.fusion.TemporaryBRepManager.get()
+    return mgr.createCylinderOrCone(point, radius, Point3D.create(point.x, point.y, point.z + height), radius)
+    
+# Creates a slot with the length along x, thickness positive in z. Origin is at the center bottom of the first cylinder.
+def slot(length: float, radius: float, thickness: float) -> adsk.fusion.BRepBody:
+    mgr = adsk.fusion.TemporaryBRepManager.get()
+    cyl1 = cylinder(adsk.core.Point3D.create(-length/2, 0, -thickness/2), radius, thickness)
+    cyl2 = transformed(cyl1, matrix.translation_matrix(Vector3D.create(length, 0, 0)))
+    box = mgr.createBox(adsk.core.OrientedBoundingBox3D.create(adsk.core.Point3D.create(), adsk.core.Vector3D.create(1, 0, 0), adsk.core.Vector3D.create(0, 1, 0), length, radius * 2, thickness ))
+    mgr.booleanOperation(box, cyl1, adsk.fusion.BooleanTypes.UnionBooleanType)
+    mgr.booleanOperation(box, cyl2, adsk.fusion.BooleanTypes.UnionBooleanType)
+    mgr.transform(box, matrix.translation_matrix(Vector3D.create(length/2, 0, thickness/2)))
+    return box
+
+def transformed(body: adsk.fusion.BRepBody, transform: Matrix3D) -> adsk.fusion.BRepBody:
+    mgr = adsk.fusion.TemporaryBRepManager.get()
+    copy = mgr.copy(body)
+    mgr.transform(copy, transform)
+    return copy
+
+def union(bodies: list[adsk.fusion.BRepBody]) -> adsk.fusion.BRepBody:
+    mgr = adsk.fusion.TemporaryBRepManager.get()
+    result = mgr.copy(bodies[0])
+    for body in bodies[1:]:
+        mgr.booleanOperation(result, body, adsk.fusion.BooleanTypes.UnionBooleanType)
+    return result
+
+# Constructs a right handed coordinate system on the face with the z axis pointing away from the body. The origin is either at the edges start or end vertex to ensure right handedness.
+def coordinate_system_on_face(face: adsk.fusion.BRepFace, edge: adsk.fusion.BRepEdge) -> tuple[Point3D, Vector3D, Vector3D, Vector3D]:
+    origin = edge.startVertex.geometry
+    face_normal_into_body = normal_towards_face(face, get_opposite_face(face))
+    x = normal_along_edge(edge)
+    y = normal_into_face(edge, face)
+    z = x.crossProduct(y)
+    # Make sure we have a right hand coordinate system with z pointing away from the body, otherwise flip the x axis.
+    if vector.dot_product(z, face_normal_into_body) > 0:
+        origin = edge.endVertex.geometry
+        x.scaleBy(-1)
+        z = x.crossProduct(y)
+    return (origin, x, y, z)
+
+    

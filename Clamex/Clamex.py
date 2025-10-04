@@ -1,4 +1,6 @@
 import sys, os
+
+from utils.matrix import translation_matrix
 current_dir = os.path.dirname(__file__)
 parent_dir = os.path.dirname(current_dir)
 shared_folder = os.path.join(parent_dir, "SharedUtils")
@@ -9,6 +11,7 @@ importlib.reload(CustomComputeFeature)
 importlib.reload(Inputs)
 importlib.reload(utils)
 import adsk.core, adsk.fusion
+from adsk.core import Point3D, Vector3D
 
 import math
 from typing import Tuple
@@ -115,44 +118,34 @@ def guide_hole_positions(access_positions: list[adsk.core.Point2D], thickness) -
     return [y for p in access_positions for y in (adsk.core.Point2D.create(p.x-offset, thickness/2), adsk.core.Point2D.create(p.x+offset, thickness/2))]
 
 def create_hole_bodies(edge: adsk.fusion.BRepEdge, access_face: adsk.fusion.BRepFace, slot_face: adsk.fusion.BRepFace, guide_face: adsk.fusion.BRepFace, inputs: ClamexInputs) -> tuple[adsk.fusion.BRepBody, adsk.fusion.BRepBody]:
+    mgr = adsk.fusion.TemporaryBRepManager.get()
     thickness = utils.brep.get_board_thickness(access_face)
     access_positions = access_hole_positions(edge, inputs.spacing.value, inputs.start_offset.value, inputs.end_offset.value)
     guide_positions = guide_hole_positions(access_positions, thickness)
 
-    mgr = adsk.fusion.TemporaryBRepManager.get()
+    access_hole = None
     access_depth = thickness/2
-
-    def access_hole() -> adsk.fusion.BRepBody:
-        hole_radius = 0.6/2
-        if inputs.size.value == 14:
-            return mgr.createCylinderOrCone(adsk.core.Point3D.create(0, 0, 0), hole_radius, adsk.core.Point3D.create(0, 0, access_depth), hole_radius)
-        else:
-            hole1 = mgr.createCylinderOrCone(adsk.core.Point3D.create(0, 0, 0), hole_radius, adsk.core.Point3D.create(0, 0, access_depth), hole_radius)
-            hole2 = mgr.createCylinderOrCone(adsk.core.Point3D.create(0, -0.25, 0), hole_radius, adsk.core.Point3D.create(0, -0.25, access_depth), hole_radius)
-            box = mgr.createBox(adsk.core.OrientedBoundingBox3D.create(
-                adsk.core.Point3D.create(0, -0.25/2, access_depth/2),
-                adsk.core.Vector3D.create(0, 1, 0),
-                adsk.core.Vector3D.create(1, 0, 0),
-                0.25,
-                hole_radius * 2,
-                access_depth
-            ))
-            mgr.booleanOperation(box, hole1, adsk.fusion.BooleanTypes.UnionBooleanType)
-            mgr.booleanOperation(box, hole2, adsk.fusion.BooleanTypes.UnionBooleanType)
-            return box
+    hole_radius = 0.6/2
+    if inputs.size.value == 14:
+        access_hole = utils.brep.cylinder(Point3D.create(0, 0, -access_depth), hole_radius, access_depth)
+    else:
+        access_hole = utils.brep.slot(0.25, hole_radius, access_depth)
+        mgr.transform(access_hole, utils.matrix.combine_transforms([
+            utils.matrix.rotation_matrix(-math.pi/2, Vector3D.create(0, 0, 1), Point3D.create(0, 0, 0)),
+            utils.matrix.mirror_matrix(Point3D.create(), Vector3D.create(1, 1, -1))
+        ]))
 
     guide_hole_depth = utils.brep.get_board_thickness(guide_face) if inputs.through_guide_holes.value else 0.8
-    def guide_hole() -> adsk.fusion.BRepBody:
-        hole_radius = 0.77/2
-        return mgr.createCylinderOrCone(adsk.core.Point3D.create(0, 0, 0), hole_radius, adsk.core.Point3D.create(0, 0, -guide_hole_depth), hole_radius)
+    hole_radius = 0.77/2
+    guide_hole = utils.brep.cylinder(Point3D.create(0, 0, -guide_hole_depth), hole_radius, guide_hole_depth)
 
-    access_bodies = utils.brep.create_bodies_at_points_on_face(access_positions, access_face, edge, access_hole)
-    guide_bodies = utils.brep.create_bodies_at_points_on_face(guide_positions, slot_face, edge, guide_hole)
-    access_union = access_bodies[0]
-    for body in (access_bodies[1:]):
-        mgr.booleanOperation(access_union, body, adsk.fusion.BooleanTypes.UnionBooleanType)
-    guide_union = guide_bodies[0]
-    for body in (guide_bodies[1:]):
-        mgr.booleanOperation(guide_union, body, adsk.fusion.BooleanTypes.UnionBooleanType)
-    return access_union, guide_union
+    access_bodies = utils.brep.union([utils.brep.transformed(access_hole, utils.matrix.translation_matrix(Vector3D.create(p.x, p.y, 0))) for p in access_positions])
+    guide_bodies = utils.brep.union([utils.brep.transformed(guide_hole, utils.matrix.translation_matrix(Vector3D.create(p.x, p.y, 0))) for p in guide_positions])
+
+    origin, x, access_y, _ = utils.brep.coordinate_system_on_face(access_face, edge)
+    guide_y = utils.brep.normal_into_face(edge, slot_face)
+    mgr.transform(access_bodies, utils.matrix.transform_from_root(origin, x, access_y))
+    mgr.transform(guide_bodies, utils.matrix.transform_from_root(origin, x, guide_y))
+    return access_bodies, guide_bodies
+
 
