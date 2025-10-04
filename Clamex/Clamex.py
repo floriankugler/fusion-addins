@@ -1,6 +1,5 @@
 import sys, os
 
-from utils.matrix import translation_matrix
 current_dir = os.path.dirname(__file__)
 parent_dir = os.path.dirname(current_dir)
 shared_folder = os.path.join(parent_dir, "SharedUtils")
@@ -12,9 +11,7 @@ importlib.reload(Inputs)
 importlib.reload(utils)
 import adsk.core, adsk.fusion
 from adsk.core import Point3D, Vector3D
-
 import math
-from typing import Tuple
 
 
 _feature: CustomComputeFeature.CustomComputeFeature = None
@@ -89,7 +86,7 @@ class ClamexFeature(CustomComputeFeature.CustomComputeFeature):
         return last_feature
 
 
-def get_access_and_slot_faces(edge: adsk.fusion.BRepEdge) -> Tuple[adsk.fusion.BRepFace, adsk.fusion.BRepFace]:
+def get_access_and_slot_faces(edge: adsk.fusion.BRepEdge) -> tuple[adsk.fusion.BRepFace, adsk.fusion.BRepFace]:
     access_face = utils.brep.largest_face_of_edge(edge)
     slot_face = None
     for f in edge.faces:
