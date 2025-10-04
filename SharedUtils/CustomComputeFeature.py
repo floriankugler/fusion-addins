@@ -2,6 +2,7 @@ import adsk.core, adsk.fusion, traceback
 from typing import Callable
 from abc import ABC, abstractmethod
 import Inputs
+from utils.fusion import new_event_handler
 
 
 class CustomComputeFeature(ABC):
@@ -50,12 +51,12 @@ class CustomComputeFeature(ABC):
                                                                     'Edit ' + c.plugin_name, '')        
 
             # Connect to the command created event for the create command.
-            create_command_created = CreateCommandCreatedHandler(self._create_ui)
+            create_command_created = new_event_handler(self._create_ui, adsk.core.CommandCreatedEventHandler)
             create_cmd_def.commandCreated.add(create_command_created)
             self._handlers.append(create_command_created)
 
             # Connect to the command created event for the edit command.
-            edit_command_created = EditCommandCreatedHandler(self._create_ui)
+            edit_command_created = new_event_handler(self._create_ui, adsk.core.CommandCreatedEventHandler)
             edit_cmd_def.commandCreated.add(edit_command_created)
             self._handlers.append(edit_command_created)
 
@@ -64,7 +65,7 @@ class CustomComputeFeature(ABC):
             self.custom_feature_def.editCommandId = self.edit_command_id
 
             # Connect to the compute event for the custom feature.
-            compute_custom_feature = ComputeCustomFeature(self._compute)
+            compute_custom_feature = new_event_handler(self._compute, adsk.fusion.CustomFeatureEventHandler)
             self.custom_feature_def.customFeatureCompute.add(compute_custom_feature)
             self._handlers.append(compute_custom_feature)
 
@@ -91,7 +92,9 @@ class CustomComputeFeature(ABC):
         except:
             show_message('Stop Failed:\n{}'.format(traceback.format_exc()))
 
-    def _create_ui(self, command: adsk.core.Command) -> None:
+    def _create_ui(self, args: adsk.core.EventArgs) -> None:
+        command = adsk.core.CommandCreatedEventArgs.cast(args).command
+
         self.edited_custom_feature = self.ui.activeSelections.item(0).entity if self.ui.activeSelections.count > 0 else None
         editing = self.edited_custom_feature != None
         params = self.edited_custom_feature.parameters if editing else None
@@ -101,32 +104,32 @@ class CustomComputeFeature(ABC):
             input.create_input(command.commandInputs, params, editing)
 
         # Connect to the needed command related events.
-        on_execute_preview = ExecutePreviewHandler(self._execute_preview)
+        on_execute_preview = new_event_handler(self._execute_preview, adsk.core.CommandEventHandler)
         command.executePreview.add(on_execute_preview)
         self._handlers.append(on_execute_preview)
 
-        on_pre_select = PreSelectHandler(self._pre_select)
+        on_pre_select = new_event_handler(self._pre_select, adsk.core.SelectionEventHandler)
         command.preSelect.add(on_pre_select)
         self._handlers.append(on_pre_select)
 
-        on_validate = ValidateInputsHandler()
+        on_validate = new_event_handler(lambda _: _, adsk.core.ValidateInputsEventHandler)
         command.validateInputs.add(on_validate)
         self._handlers.append(on_validate)
 
         if editing:
-            onExecute = EditExecuteHandler(self._edit_execute)
+            onExecute = new_event_handler(self._edit_execute, adsk.core.CommandEventHandler)
             command.execute.add(onExecute)
             self._handlers.append(onExecute)  
 
-            on_activate = EditActivateHandler(self._activate_edit)
+            on_activate = new_event_handler(self._activate_edit, adsk.core.CommandEventHandler)
             command.activate.add(on_activate)
             self._handlers.append(on_activate)
         else:
-            on_execute = CreateExecuteHandler(self._execute)
+            on_execute = new_event_handler(self._execute, adsk.core.CommandEventHandler)
             command.execute.add(on_execute)
             self._handlers.append(on_execute)  
 
-    def _execute(self):
+    def _execute(self, _):
         self.update_inputs_from_ui()
         base_feature = self.component.features.baseFeatures.add()
         end_feature = self.execute(base_feature)
@@ -143,12 +146,12 @@ class CustomComputeFeature(ABC):
         for sel in self.inputs.selections:
             sel.create_named_values(feature)
 
-    def _execute_preview(self):
+    def _execute_preview(self, _):
         self.update_inputs_from_ui()
         base_feature = self.component.features.baseFeatures.add()
         self.execute(base_feature)
 
-    def _edit_execute(self):
+    def _edit_execute(self, _):
         self.update_inputs_from_ui()
         # self.compute(self.edited_custom_feature)
 
@@ -164,7 +167,9 @@ class CustomComputeFeature(ABC):
             self.is_rolled_for_edit = False
         self.edited_custom_feature = None
 
-    def _activate_edit(self, command: adsk.core.Command):
+    def _activate_edit(self, args: adsk.core.EventArgs):
+        command = adsk.core.CommandEventArgs.cast(args).command
+
         # Save the current position of the timeline.
         des: adsk.fusion.Design = self.app.activeProduct
         timeline = des.timeline
@@ -187,7 +192,8 @@ class CustomComputeFeature(ABC):
                 sel.input.addSelection(e)
         self._initial_selection = False
 
-    def _compute(self, feature: adsk.fusion.CustomFeature):
+    def _compute(self, args: adsk.core.EventArgs):
+        feature = adsk.fusion.CustomFeatureEventArgs.cast(args).customFeature
         if not self.inputs:
             self.inputs = self.create_inputs()
         self.update_inputs_from_feature(feature)
@@ -203,11 +209,12 @@ class CustomComputeFeature(ABC):
         for val in self.inputs.values:
             val.update_value_from_params(feature.parameters)
 
-    def _pre_select(self, entity):
+    def _pre_select(self, args: adsk.core.EventArgs):
+        event_args = adsk.core.SelectionEventArgs.cast(args)
         if self._initial_selection:
-            return True
+            event_args.isSelectable = True
         else:
-            return self.pre_select(entity)
+            event_args.isSelectable = self.pre_select(event_args.selection.entity)
 
     def pre_select(self, entity):
         return True
@@ -228,121 +235,6 @@ class CustomComputeFeature(ABC):
     @abstractmethod
     def execute(self, base_feature: adsk.fusion.BaseFeature) -> adsk.fusion.Feature:
         pass
-
-
-
-class CreateCommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
-    def __init__(self, create_ui: Callable[[adsk.core.Command], None]):
-        super().__init__()
-        self.create_ui = create_ui
-    def notify(self, args):
-        try:
-            event_args = adsk.core.CommandCreatedEventArgs.cast(args)
-            self.create_ui(event_args.command)
-        except:
-            show_message('CommandCreated failed: {}\n'.format(traceback.format_exc()))
-
-class EditCommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
-    def __init__(self, create_ui: Callable[[adsk.core.Command], None]):
-        super().__init__()
-        self.create_ui = create_ui
-    def notify(self, args):
-        try:
-            event_args = adsk.core.CommandCreatedEventArgs.cast(args)
-            self.create_ui(event_args.command)
-        except:
-            show_message('CommandCreated failed: {}\n'.format(traceback.format_exc()))
-
-class ExecutePreviewHandler(adsk.core.CommandEventHandler):
-    def __init__(self, execute: Callable):
-        super().__init__()
-        self.execute = execute
-    def notify(self, args):
-        try:
-            event_args = adsk.core.CommandEventArgs.cast(args)        
-            self.execute()
-        except:
-            event_args.executeFailed = True
-            show_message('ExecutePreview: {}\n'.format(traceback.format_exc()))
-
-class CreateExecuteHandler(adsk.core.CommandEventHandler):
-    def __init__(self, execute: Callable):
-        super().__init__()
-        self.execute = execute
-    def notify(self, args):
-        try:
-            event_args = adsk.core.CommandEventArgs.cast(args)        
-            self.execute()
-        except:
-            event_args.executeFailed = True
-            show_message('Execute: {}\n'.format(traceback.format_exc()))
-
-class EditActivateHandler(adsk.core.CommandEventHandler):
-    def __init__(self, activate_edit: Callable[[adsk.core.Command], None]):
-        super().__init__()
-        self.activate_edit = activate_edit
-    def notify(self, args):
-        try:
-            event_args = adsk.core.CommandEventArgs.cast(args)
-            self.activate_edit(event_args.command)
-        except:
-            show_message('Execute: {}\n'.format(traceback.format_exc()))
-
-class EditExecuteHandler(adsk.core.CommandEventHandler):
-    def __init__(self, execute: Callable):
-        super().__init__()
-        self.execute = execute
-    def notify(self, args):
-        try:
-            event_args = adsk.core.CommandEventArgs.cast(args)        
-            self.execute()
-        except:
-            event_args.executeFailed = True
-            show_message('Execute: {}\n'.format(traceback.format_exc()))
-
-class ComputeCustomFeature(adsk.fusion.CustomFeatureEventHandler):
-    def __init__(self, compute: Callable[[adsk.fusion.CustomFeature], None]):
-        super().__init__()
-        self.compute = compute
-    def notify(self, args):
-        try:
-            event_args: adsk.fusion.CustomFeatureEventArgs = args
-            self.compute(event_args.customFeature)
-        except:
-            show_message('CustomFeatureCompute: {}\n'.format(traceback.format_exc()))
-
-
-class PreSelectHandler(adsk.core.SelectionEventHandler):
-    def __init__(self, pre_select: Callable[[adsk.core.Base], bool]):
-        super().__init__()
-        self.pre_select = pre_select
-    def notify(self, args):
-        try:
-            event_args = adsk.core.SelectionEventArgs.cast(args)
-            event_args.isSelectable = self.pre_select(event_args.selection.entity)
-        except:
-            show_message('PreSelectEventHandler: {}\n'.format(traceback.format_exc()))
-
-class ValidateInputsHandler(adsk.core.ValidateInputsEventHandler):
-    def __init__(self):
-        super().__init__()
-    def notify(self, args):
-        try:
-            event_args = adsk.core.ValidateInputsEventArgs.cast(args)
-            return
-            # Verify the inputs have valid expressions.
-            # if not all( [_lengthInput.isValidExpression, _widthInput.isValidExpression,
-            #             _depthInput.isValidExpression, _radiusInput.isValidExpression] ):
-            #     eventArgs.areInputsValid = False
-            #     return
-
-            # Verify the sizes are valid.
-            # diam = _radiusInput.value * 2
-            # if diam + 0.01 > _lengthInput.value or diam + 0.01 > _widthInput.value:
-            #     eventArgs.areInputsValid = False
-            #     return
-        except:
-            show_message('ValidateInputsHandler: {}\n'.format(traceback.format_exc()))
 
 
 

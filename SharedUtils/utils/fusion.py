@@ -2,6 +2,7 @@ from typing import Any, Callable
 import adsk.core, adsk.fusion
 from adsk.core import Point3D
 from . import misc
+import traceback, inspect
 
 
 def as_object_collection(objs):
@@ -57,5 +58,25 @@ def point_to_str(point: Point3D) -> str:
 def str_to_point(str: str) -> Point3D:
     comps = [float(x) for x in str.split(';')]
     return Point3D.create(comps[0], comps[1], comps[2])
+
+def new_event_handler(handler, superclass):
+	class EventHandler(superclass):
+		def notify(self, eventArgs):
+			try:
+				handler(eventArgs)
+			except:
+				handleException()
+	return EventHandler()
+
+def log(message):
+	userInterface = adsk.core.Application.get().userInterface
+	userInterface.palettes.itemById('TextCommands').writeText(message)
+
+def handleException():
+	frameInfo = inspect.stack()[1]
+	prefix = ''
+	if 'self' in frameInfo.frame.f_locals:
+		prefix = frameInfo.frame.f_locals['self'].__class__.__name__ + '.'
+	log(f'{prefix}{frameInfo.function}: {traceback.format_exc()}\n')
 
 
