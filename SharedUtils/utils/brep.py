@@ -85,7 +85,7 @@ def face_contains_edge(face: adsk.fusion.BRepFace, edge: adsk.fusion.BRepEdge) -
 
     return face.boundingBox.contains(edge.startVertex.geometry) and face.boundingBox.contains(edge.endVertex.geometry)
 
-def find_perpendicular_face_containing_edge(edge: adsk.fusion.BRepEdge, reference_face: adsk.fusion.BRepFace) -> Optional[adsk.fusion.BRepFace]:
+def find_perpendicular_face_containing_edge(edge: adsk.fusion.BRepEdge, reference_face: adsk.fusion.BRepFace, condition: Callable[[adsk.fusion.BRepFace], bool] = lambda _: True) -> Optional[adsk.fusion.BRepFace]:
     tol = 1e-6
     if not is_planar(reference_face):
         raise ValueError("Only works with planar reference face")
@@ -99,7 +99,7 @@ def find_perpendicular_face_containing_edge(edge: adsk.fusion.BRepEdge, referenc
             if body == edge.body:
                 continue
             for face in body.faces:
-                if face_contains_edge(face, edge) and is_perpendicular(face, reference_face):
+                if face_contains_edge(face, edge) and is_perpendicular(face, reference_face) and condition(face):
                     nonlocal result
                     result = face
                     return True

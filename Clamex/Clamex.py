@@ -55,7 +55,7 @@ class ClamexFeature(CustomComputeFeature.CustomComputeFeature):
         base_feature = utils.fusion.get_base_feature(feature)
         for idx, edge in enumerate(self.inputs.edge.get_from_dependencies(feature)):
             access_face, slot_face = get_access_and_slot_faces(edge)
-            guide_face = utils.brep.find_perpendicular_face_containing_edge(edge, access_face)
+            guide_face = find_guide_face(edge, access_face, slot_face)
             new_access, new_guide = create_hole_bodies(edge, access_face, slot_face, guide_face, self.inputs)
             base_feature.startEdit()
             base_feature.updateBody(base_feature.bodies.item(idx * 2), new_access)
@@ -66,7 +66,7 @@ class ClamexFeature(CustomComputeFeature.CustomComputeFeature):
         last_feature: adsk.fusion.CombineFeature = base_feature
         for edge in self.inputs.edge.value:
             access_face, slot_face = get_access_and_slot_faces(edge)
-            guide_face = utils.brep.find_perpendicular_face_containing_edge(edge, access_face)
+            guide_face = find_guide_face(edge, access_face, slot_face)
             
             access_holes, guide_holes = create_hole_bodies(edge, access_face, slot_face, guide_face, self.inputs)
             base_feature.startEdit()
@@ -84,6 +84,25 @@ class ClamexFeature(CustomComputeFeature.CustomComputeFeature):
             guide_combine_input.operation = adsk.fusion.FeatureOperations.CutFeatureOperation
             last_feature = self.component.features.combineFeatures.add(guide_combine_input)
         return last_feature
+
+def find_guide_face(edge: adsk.fusion.BRepEdge, access_face: adsk.fusion.BRepFace, slot_face: adsk.fusion.BRepFace) -> adsk.fusion.BRepFace:
+    slot_normal = utils.brep.normal_into_face(edge, slot_face)
+    slot_dir = utils.vector.scaled_by(slot_normal, 0.5)
+    edge_normal = utils.brep.normal_along_edge(edge)
+    step = utils.vector.scaled_by(edge_normal, 5)
+    start = utils.vector.add(edge.startVertex.geometry.asVector(), slot_dir)
+    test_points = []
+    for x in range(0, math.floor(edge.length/5)):
+        test_points.append(utils.vector.add(start, utils.vector.scaled_by(step, x)).asPoint())
+
+    def check_face(face: adsk.fusion.BRepFace):
+        for t in test_points:
+            _, param = face.evaluator.getParameterAtPoint(t)
+            if face.evaluator.isParameterOnFace(param):
+                return True
+        return False
+
+    return utils.brep.find_perpendicular_face_containing_edge(edge, access_face, check_face)
 
 
 def get_access_and_slot_faces(edge: adsk.fusion.BRepEdge) -> tuple[adsk.fusion.BRepFace, adsk.fusion.BRepFace]:
