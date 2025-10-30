@@ -20,3 +20,9 @@ In there you can run the addin by switching on the run toggle. Optionally, you c
 To work on the addins, make sure you have VS Code installed, right-click on the plugin's name in Fusion's addin panel and choose "Edit in code editor".
 
 ![](img/doc3.png)
+
+## License
+
+GNU General Public License v3.0 or later
+
+See [COPYING](COPYING) to see the full text.
