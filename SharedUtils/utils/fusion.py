@@ -17,6 +17,9 @@ def get_base_feature(custom_feature: adsk.fusion.CustomFeature) -> adsk.fusion.B
             return feature
 
 def traverse_occurrence_tree(occurence: adsk.fusion.Occurrence, process: Callable[[adsk.fusion.Occurrence], bool]):
+    previous = None
+    current = occurence
+
     def search_down(occ: adsk.fusion.Occurrence) -> bool:
         # Search this component first
         if process(occ):
@@ -24,12 +27,13 @@ def traverse_occurrence_tree(occurence: adsk.fusion.Occurrence, process: Callabl
 
         # Recurse into children (occurrences)
         for occ in occ.childOccurrences:
+            if occ == previous:
+                continue
             if search_down(occ):
                 return True
 
         return False
 
-    current = occurence
     while current:
         # 1. Search current + children
         if search_down(current):
@@ -48,6 +52,7 @@ def traverse_occurrence_tree(occurence: adsk.fusion.Occurrence, process: Callabl
             if search_down(sibling_occ):
                 return
 
+        previous = current
         current = parent
 
     return None
