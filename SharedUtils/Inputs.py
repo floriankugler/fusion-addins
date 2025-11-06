@@ -38,10 +38,6 @@ class ValueInput(Input):
         self.default_value = default_value
         self.units = units
 
-    @abstractmethod
-    def create_value_input(self, value) -> adsk.core.ValueInput:
-        pass
-
     def get_value_from_params(self, params: adsk.fusion.CustomFeatureParameters):
         if not params:
             return self.default_value
@@ -79,8 +75,6 @@ class CheckboxInput(ValueInput):
     def get_value_from_input(self):
         return self.input.value
 
-    def create_value_input(self, value) -> adsk.core.ValueInput:
-        return adsk.core.ValueInput.createByBoolean(value)
 
 class FloatInput(ValueInput):
     input: adsk.core.ValueCommandInput
@@ -95,8 +89,6 @@ class FloatInput(ValueInput):
     def get_value_from_input(self):
         return self.input.value
 
-    def create_value_input(self, value) -> adsk.core.ValueInput:
-        return adsk.core.ValueInput.createByReal(value)
 
 class DropDownInput(ValueInput):
     input: adsk.core.ButtonRowCommandInput
@@ -119,8 +111,6 @@ class DropDownInput(ValueInput):
             if option[0] == name:
                 return option[1]
 
-    def create_value_input(self, value) -> adsk.core.ValueInput:
-        return adsk.core.ValueInput.createByReal(value)
 
 class SelectionInput(Input):
     input: adsk.core.SelectionCommandInput
