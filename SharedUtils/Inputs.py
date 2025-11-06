@@ -125,20 +125,17 @@ class DropDownInput(ValueInput):
 class SelectionInput(Input):
     input: adsk.core.SelectionCommandInput
     value: list[adsk.core.Base]
-    is_editable: bool
 
-    def __init__(self, id, name, filter, lower_bound, upper_bound, is_editable, tool_tip):
+    def __init__(self, id, name, filter, lower_bound, upper_bound, tool_tip):
         super().__init__(id, name, tool_tip)
         self.filter = filter
         self.lower_bound = lower_bound
         self.upper_bound = upper_bound
-        self.is_editable = is_editable
 
     def create_input(self, inputs: adsk.core.CommandInput, params: adsk.fusion.CustomFeatureParameters, editing: bool):
         self.input = inputs.addSelectionInput(self.id, self.name, self.tool_tip)
         self.input.addSelectionFilter(self.filter)
         self.input.setSelectionLimits(self.lower_bound, self.upper_bound)
-        # self.input.isVisible = self.is_editable or not editing
 
     def get_value_from_input(self) -> list[adsk.core.Base]:
         result = []
@@ -180,14 +177,12 @@ class SelectionInput(Input):
 class SelectionByEntityTokenInput(Input):
     input: adsk.core.SelectionCommandInput
     value: list[adsk.core.Base]
-    is_editable: bool
 
-    def __init__(self, id, name, filter, lower_bound, upper_bound, is_editable, tool_tip):
+    def __init__(self, id, name, filter, lower_bound, upper_bound, tool_tip):
         super().__init__(id, name, tool_tip)
         self.filter = filter
         self.lower_bound = lower_bound
         self.upper_bound = upper_bound
-        self.is_editable = is_editable
         self.tokens = []
         self.value = None
 
@@ -195,7 +190,6 @@ class SelectionByEntityTokenInput(Input):
         self.input = inputs.addSelectionInput(self.id, self.name, self.tool_tip)
         self.input.addSelectionFilter(self.filter)
         self.input.setSelectionLimits(self.lower_bound, self.upper_bound)
-        # self.input.isVisible = self.is_editable or not editing
 
     def get_value_from_input(self) -> list[adsk.core.Base]:
         result = []

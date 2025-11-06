@@ -34,8 +34,8 @@ class TriangleInputs(Inputs.Inputs):
 
     def __init__(self, units_manager: adsk.core.UnitsManager):
         units = units_manager.defaultLengthUnits
-        self.faces = Inputs.SelectionByEntityTokenInput('faces', 'Faces', 'PlanarFaces', 1, 0, False, 'Select faces to create triangle pockets on.')
-        self.profiles = Inputs.SelectionInput('profiles', 'Profiles', 'Profiles', 0, 0, True, 'Select profiles on a single face to restrict the pattern to these profiles. Only makes sense if a single face is selected.')
+        self.faces = Inputs.SelectionByEntityTokenInput('faces', 'Faces', 'PlanarFaces', 1, 0, 'Select faces to create triangle pockets on.')
+        self.profiles = Inputs.SelectionInput('profiles', 'Profiles', 'Profiles', 0, 0, 'Select profiles on a single face to restrict the pattern to these profiles. Only makes sense if a single face is selected.')
         self.type = Inputs.DropDownInput('type', 'Type', TriangleInputs.types.items(), TriangleInputs.types['Triangles'], 'The type of pattern to use.')
         self.preferred_width = Inputs.FloatInput('preferred_width', 'Preferred Width', 10, 'Indicates the preferred width of the shape.', units)
         self.preferred_height = Inputs.FloatInput('preferred_height', 'Preferred Height', 15, 'Indicates the preferred height of the shape.', units)

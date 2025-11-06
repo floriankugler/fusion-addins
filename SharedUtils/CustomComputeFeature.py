@@ -185,8 +185,6 @@ class CustomComputeFeature(ABC):
         # Update selection inputs
         self._initial_selection = True
         for sel in self.inputs.selections:
-            if not sel.is_editable:
-                sel.input.hasFocus = False
             entities = sel.get_from_dependencies(self.edited_custom_feature)
             for e in entities:
                 sel.input.addSelection(e)
