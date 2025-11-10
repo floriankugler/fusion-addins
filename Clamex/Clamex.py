@@ -53,7 +53,7 @@ class ClamexFeature(CustomComputeFeature.CustomComputeFeature):
 
     def compute(self, feature: adsk.fusion.CustomFeature) -> None:
         base_feature = utils.fusion.get_base_feature(feature)
-        for idx, edge in enumerate(self.inputs.edge.get_from_dependencies(feature)):
+        for idx, edge in enumerate(self.inputs.edge.value):
             access_face, slot_face = get_access_and_slot_faces(edge)
             guide_face = find_guide_face(edge, access_face, slot_face)
             new_access, new_guide = create_hole_bodies(edge, access_face, slot_face, guide_face, self.inputs)

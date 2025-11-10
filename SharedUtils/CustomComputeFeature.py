@@ -18,6 +18,7 @@ class CustomComputeFeature(ABC):
     restore_timeline_object: adsk.fusion.TimelineObject
     is_rolled_for_edit: bool
     inputs: Inputs.Inputs
+    compute_disabled: bool
 
     @property
     def create_command_id(self) -> str:
@@ -36,6 +37,7 @@ class CustomComputeFeature(ABC):
             resource_dir = 'Resources/' + c.plugin_name
             self._initial_selection = False
             self.inputs = None
+            self.compute_disabled = False
 
             # Create the command definition for the creation command.
             create_cmd_def = self.ui.commandDefinitions.addButtonDefinition(self.create_command_id, c.plugin_name, c.plugin_tooltip, resource_dir)        
@@ -135,16 +137,16 @@ class CustomComputeFeature(ABC):
         end_feature = self.execute(base_feature)
 
         feat_input = self.component.features.customFeatures.createInput(self.custom_feature_def)
-        for sel in self.inputs.selections:
-            sel.create_dependencies(feat_input)
-        for val in self.inputs.values:
-            value_input = val.create_value_input_from_inputs()
-            feat_input.addCustomParameter(val.id, val.name, value_input, val.units, True)
+        for sel in self.inputs.selections + self.inputs.values:
+            sel.create_in_feature_input(feat_input)
 
+        self.compute_disabled = True
         feat_input.setStartAndEndFeatures(base_feature, end_feature)
         feature = self.component.features.customFeatures.add(feat_input)
         for sel in self.inputs.selections:
             sel.create_named_values(feature)
+        self.compute_disabled = False
+        self.inputs = None
 
     def _execute_preview(self, _):
         self.update_inputs_from_ui()
@@ -153,12 +155,10 @@ class CustomComputeFeature(ABC):
 
     def _edit_execute(self, _):
         self.update_inputs_from_ui()
-        # self.compute(self.edited_custom_feature)
+        self.remove_all_dependencies_and_named_values()
 
-        for sel in self.inputs.selections:
-            sel.update_dependencies(self.edited_custom_feature)
-        for val in self.inputs.values:
-            val.update_param_from_input(self.edited_custom_feature.parameters)
+        for sel in self.inputs.selections + self.inputs.values:
+            sel.update_in_feature(self.edited_custom_feature)
 
         self.compute(self.edited_custom_feature)
 
@@ -166,6 +166,7 @@ class CustomComputeFeature(ABC):
             self.restore_timeline_object.rollTo(False)
             self.is_rolled_for_edit = False
         self.edited_custom_feature = None
+        self.inputs = None
 
     def _activate_edit(self, args: adsk.core.EventArgs):
         command = adsk.core.CommandEventArgs.cast(args).command
@@ -185,12 +186,12 @@ class CustomComputeFeature(ABC):
         # Update selection inputs
         self._initial_selection = True
         for sel in self.inputs.selections:
-            entities = sel.get_from_dependencies(self.edited_custom_feature)
-            for e in entities:
-                sel.input.addSelection(e)
+            sel.update_from_feature(self.edited_custom_feature)
         self._initial_selection = False
 
     def _compute(self, args: adsk.core.EventArgs):
+        if self.compute_disabled:
+            return
         feature = adsk.fusion.CustomFeatureEventArgs.cast(args).customFeature
         if not self.inputs:
             self.inputs = self.create_inputs()
@@ -199,13 +200,20 @@ class CustomComputeFeature(ABC):
 
     def update_inputs_from_ui(self):
         for input in self.inputs.values + self.inputs.selections:
-            input.update_value_from_input()
+            input.update_from_input()
 
     def update_inputs_from_feature(self, feature: adsk.fusion.CustomFeature):
-        for sel in self.inputs.selections:
-            sel.value = sel.get_from_dependencies(feature)
-        for val in self.inputs.values:
-            val.update_value_from_params(feature.parameters)
+        for sel in self.inputs.selections + self.inputs.values:
+            sel.update_from_feature(feature)
+
+    def remove_all_dependencies_and_named_values(self):
+        self.edited_custom_feature.dependencies.deleteAll()
+        namedValuesToDelete = []
+        for idx in range(self.edited_custom_feature.customNamedValues.count):
+            id = self.edited_custom_feature.customNamedValues.idByIndex(idx)
+            namedValuesToDelete.append(id)
+        for id in namedValuesToDelete:
+            self.edited_custom_feature.customNamedValues.remove(id)
 
     def _pre_select(self, args: adsk.core.EventArgs):
         event_args = adsk.core.SelectionEventArgs.cast(args)
