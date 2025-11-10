@@ -45,8 +45,7 @@ class TriangleInputs(Inputs.Inputs):
         self.compensate_fillet = Inputs.CheckboxInput('compensate_fillet', 'Compensate Fillet', False, 'Makes all triangles in one row appear to be bottom and top aligned, irrespective of the fillet applied to the corners')
         self.adaptive = Inputs.CheckboxInput('adaptive', 'Adaptive', True, 'Prioritzes filling up the available space with the pattern over adhering to the width/height values, treating them more a starting point.')
         self.remainder = Inputs.FloatInput('remainder', 'Remaining Material', 0, 'Thickness of the remaining material to leave untouched.', units)
-        self.selections = [self.faces, self.profiles]
-        self.values = [self.type, self.preferred_width, self.preferred_height, self.spacing, self.inset, self.fillet, self.compensate_fillet, self.adaptive, self.remainder]
+        super().__init__()
 
 
 class TrianglePattern(CustomComputeFeature.CustomComputeFeature):

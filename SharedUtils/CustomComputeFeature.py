@@ -102,7 +102,7 @@ class CustomComputeFeature(ABC):
         params = self.edited_custom_feature.parameters if editing else None
 
         self.inputs = self.create_inputs()
-        for input in self.inputs.selections + self.inputs.values:
+        for input in self.inputs.inputs:
             input.create_input(command.commandInputs, params, editing)
 
         # Connect to the needed command related events.
@@ -137,13 +137,13 @@ class CustomComputeFeature(ABC):
         end_feature = self.execute(base_feature)
 
         feat_input = self.component.features.customFeatures.createInput(self.custom_feature_def)
-        for sel in self.inputs.selections + self.inputs.values:
+        for sel in self.inputs.inputs:
             sel.create_in_feature_input(feat_input)
 
         self.compute_disabled = True
         feat_input.setStartAndEndFeatures(base_feature, end_feature)
         feature = self.component.features.customFeatures.add(feat_input)
-        for sel in self.inputs.selections:
+        for sel in self.inputs.inputs:
             sel.create_named_values(feature)
         self.compute_disabled = False
         self.inputs = None
@@ -157,7 +157,7 @@ class CustomComputeFeature(ABC):
         self.update_inputs_from_ui()
         self.remove_all_dependencies_and_named_values()
 
-        for sel in self.inputs.selections + self.inputs.values:
+        for sel in self.inputs.inputs:
             sel.update_in_feature(self.edited_custom_feature)
 
         self.compute(self.edited_custom_feature)
@@ -185,7 +185,7 @@ class CustomComputeFeature(ABC):
 
         # Update selection inputs
         self._initial_selection = True
-        for sel in self.inputs.selections:
+        for sel in self.inputs.inputs:
             sel.update_from_feature(self.edited_custom_feature)
         self._initial_selection = False
 
@@ -199,11 +199,11 @@ class CustomComputeFeature(ABC):
         self.compute(feature)
 
     def update_inputs_from_ui(self):
-        for input in self.inputs.values + self.inputs.selections:
+        for input in self.inputs.inputs:
             input.update_from_input()
 
     def update_inputs_from_feature(self, feature: adsk.fusion.CustomFeature):
-        for sel in self.inputs.selections + self.inputs.values:
+        for sel in self.inputs.inputs:
             sel.update_from_feature(feature)
 
     def remove_all_dependencies_and_named_values(self):

@@ -37,6 +37,9 @@ class Input(ABC):
     def update_from_input(self):
         pass
 
+    def create_named_values(self, feature: adsk.fusion.CustomFeature):
+        pass
+
 
 class CheckboxInput(Input):
     default_value: bool
@@ -216,5 +219,10 @@ class SelectionByEntityTokenInput(Input):
 
 
 class Inputs(ABC):
-    selections: list[SelectionByEntityTokenInput]
-    values: list[Input]
+    inputs: list[Input]
+
+    def __init__(self):
+        self.inputs = []
+        for _, value in vars(self).items():
+            if isinstance(value, Input):
+                self.inputs.append(value)

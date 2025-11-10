@@ -33,8 +33,7 @@ class ClamexInputs(Inputs.Inputs):
         self.start_offset = Inputs.FloatInput('startOffset', 'Start Offset', 6, 'Offset of the first connector from the start of the edge.', units)
         self.end_offset = Inputs.FloatInput('endOffset', 'End Offset', 6, 'Offset of the last connector to the end of the edge.', units)
         self.through_guide_holes = Inputs.CheckboxInput('throughGuideHoles', 'Through Guide Holes', False, 'If checked the guide holes are punched all the way through to the opposite face.')
-        self.selections = [self.edge]
-        self.values = [self.size, self.spacing, self.start_offset, self.end_offset, self.through_guide_holes]
+        super().__init__()
 
 
 class ClamexFeature(CustomComputeFeature.CustomComputeFeature):
