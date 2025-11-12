@@ -27,8 +27,8 @@ def stop(context):
 class ClamexInputs(Inputs.Inputs):
     def __init__(self, units_manager: adsk.core.UnitsManager):
         units = units_manager.defaultLengthUnits
-        self.edge = Inputs.SelectionByEntityTokenInput('edge', 'Edge', 'LinearEdges', 1, 0, 'Select edge along which access holes should be placed.')
-        self.size = Inputs.DropDownInput('size', 'Size', [['Clamex P10', 10], ['Clamex P14', 14]], 10, 'Size variant of the Clamex connector.')
+        self.edge = Inputs.SelectionByEntityTokenInput('edge', 'Edge', 'LinearEdges', 1, 0, False, 'Select edge along which access holes should be placed.')
+        self.size = Inputs.DropDownInput('size', 'Size', [['Clamex P10', 10], ['Clamex P14', 14], ['Cabineo 8', 8], ['Cabineo 12', 12], ['Cabineo 8 M6', 6]], 10, 'Size variant of the Lamello connector.')
         self.spacing = Inputs.FloatInput('spacing', 'Spacing', 20, 'Minimum spacing between the connectors.', units)
         self.start_offset = Inputs.FloatInput('startOffset', 'Start Offset', 6, 'Offset of the first connector from the start of the edge.', units)
         self.end_offset = Inputs.FloatInput('endOffset', 'End Offset', 6, 'Offset of the last connector to the end of the edge.', units)
@@ -113,8 +113,7 @@ def get_access_and_slot_faces(edge: adsk.fusion.BRepEdge) -> tuple[adsk.fusion.B
             break
     return (access_face, slot_face)
 
-def access_hole_positions(edge: adsk.fusion.BRepEdge, spacing: float, start_offset: float, end_offset: float) -> list[adsk.core.Point2D]:
-    distance_from_edge = 0.75
+def access_hole_positions(edge: adsk.fusion.BRepEdge, spacing: float, start_offset: float, end_offset: float, distance_from_edge: float) -> list[adsk.core.Point2D]:
     available_length = edge.length - start_offset - end_offset
     number_of_holes = max(1, math.ceil(available_length/spacing))
     start = edge.length/2
@@ -132,35 +131,65 @@ def guide_hole_positions(access_positions: list[adsk.core.Point2D], thickness) -
     offset = 10.1/2
     return [y for p in access_positions for y in (adsk.core.Point2D.create(p.x-offset, thickness/2), adsk.core.Point2D.create(p.x+offset, thickness/2))]
 
+def cabineo_screw_hole_positions(access_positions: list[adsk.core.Point2D]) -> list[adsk.core.Point2D]:
+    screw_distance_from_surface = 0.5 
+    return [adsk.core.Point2D.create(p.x, screw_distance_from_surface) for p in access_positions]
+
 def create_hole_bodies(edge: adsk.fusion.BRepEdge, access_face: adsk.fusion.BRepFace, slot_face: adsk.fusion.BRepFace, guide_face: adsk.fusion.BRepFace, inputs: ClamexInputs) -> tuple[adsk.fusion.BRepBody, adsk.fusion.BRepBody]:
     mgr = adsk.fusion.TemporaryBRepManager.get()
     thickness = utils.brep.get_board_thickness(access_face)
-    access_positions = access_hole_positions(edge, inputs.spacing.value, inputs.start_offset.value, inputs.end_offset.value)
-    guide_positions = guide_hole_positions(access_positions, thickness)
+    size = inputs.size.value # Identifier nubmer for type of connector
+    is_clamex = size == 10 or size == 14 # bool
+    distance_from_edge = .75 if is_clamex else .36 
+    access_positions = access_hole_positions(edge, inputs.spacing.value, inputs.start_offset.value, inputs.end_offset.value, distance_from_edge)
 
-    access_hole = None
-    access_depth = thickness/2
-    hole_radius = 0.6/2
-    if inputs.size.value == 14:
-        access_hole = utils.brep.cylinder(Point3D.create(0, 0, -access_depth), hole_radius, access_depth)
-    else:
-        access_hole = utils.brep.slot(0.25, hole_radius, access_depth)
-        mgr.transform(access_hole, utils.matrix.combine_transforms([
+    if is_clamex: 
+        guide_positions = guide_hole_positions(access_positions, thickness)
+
+        access_hole = None
+        access_depth = thickness/2
+        hole_radius = 0.6/2
+        if inputs.size.value == 14:
+            access_hole = utils.brep.cylinder(Point3D.create(0, 0, -access_depth), hole_radius, access_depth)
+        else:
+            access_hole = utils.brep.slot(0.25, hole_radius, access_depth)
+            mgr.transform(access_hole, utils.matrix.combine_transforms([
             utils.matrix.rotation_matrix(-math.pi/2, Vector3D.create(0, 0, 1), Point3D.create(0, 0, 0)),
             utils.matrix.mirror_matrix(Point3D.create(), Vector3D.create(1, 1, -1))
-        ]))
+            ]))
 
-    guide_hole_depth = utils.brep.get_board_thickness(guide_face) if inputs.through_guide_holes.value else 0.8
-    hole_radius = 0.77/2
-    guide_hole = utils.brep.cylinder(Point3D.create(0, 0, -guide_hole_depth), hole_radius, guide_hole_depth)
+        guide_hole_depth = utils.brep.get_board_thickness(guide_face) if inputs.through_guide_holes.value else 0.8
+        hole_radius = 0.77/2
+        guide_hole = utils.brep.cylinder(Point3D.create(0, 0, -guide_hole_depth), hole_radius, guide_hole_depth)
 
-    access_bodies = utils.brep.union([utils.brep.transformed(access_hole, utils.matrix.translation_matrix(Vector3D.create(p.x, p.y, 0))) for p in access_positions])
-    guide_bodies = utils.brep.union([utils.brep.transformed(guide_hole, utils.matrix.translation_matrix(Vector3D.create(p.x, p.y, 0))) for p in guide_positions])
+        access_bodies = utils.brep.union([utils.brep.transformed(access_hole, utils.matrix.translation_matrix(Vector3D.create(p.x, p.y, 0))) for p in access_positions])
+        guide_bodies = utils.brep.union([utils.brep.transformed(guide_hole, utils.matrix.translation_matrix(Vector3D.create(p.x, p.y, 0))) for p in guide_positions])
 
-    origin, x, access_y, _ = utils.brep.coordinate_system_on_face(access_face, edge)
-    guide_y = utils.brep.normal_into_face(edge, slot_face)
-    mgr.transform(access_bodies, utils.matrix.transform_from_root(origin, x, access_y))
-    mgr.transform(guide_bodies, utils.matrix.transform_from_root(origin, x, guide_y))
-    return access_bodies, guide_bodies
+        origin, x, access_y, _ = utils.brep.coordinate_system_on_face(access_face, edge)
+        guide_y = utils.brep.normal_into_face(edge, slot_face)
+        mgr.transform(access_bodies, utils.matrix.transform_from_root(origin, x, access_y))
+        mgr.transform(guide_bodies, utils.matrix.transform_from_root(origin, x, guide_y))
+        return access_bodies, guide_bodies
+    else:
+        screw_positions = cabineo_screw_hole_positions(access_positions)
+        screw_hole_depth = 0.8 if inputs.size.value == 8 else (1.2 if inputs.size.value == 12 else 1.4) 
+        hole_radius = 0.25 if inputs.size.value == 8 or inputs.size.value == 12 else 0.425
+        screw_hole = utils.brep.cylinder(Point3D.create(0, 0, -screw_hole_depth), hole_radius, screw_hole_depth)
+        screw_bodies = utils.brep.union([utils.brep.transformed(screw_hole, utils.matrix.translation_matrix(Vector3D.create(p.x, p.y, 0))) for p in screw_positions])
+
+        cabineo_cylinder_depth = 1.1
+        cylinder_radius = 0.75
+        cabineo_cylinder = utils.brep.cylinder(Point3D.create(0, 0, -cabineo_cylinder_depth), cylinder_radius, cabineo_cylinder_depth)
+        cabineo_single_bodie = utils.brep.union([utils.brep.transformed(cabineo_cylinder, utils.matrix.translation_matrix(Vector3D.create(0, y, 0))) for y in [0, 1.12, 2.24]])
+        cabineo_bodies = utils.brep.union([utils.brep.transformed(cabineo_single_bodie, utils.matrix.translation_matrix(Vector3D.create(p.x, p.y, 0))) for p in access_positions])
+
+        origin, x, access_y, _ = utils.brep.coordinate_system_on_face(access_face, edge)
+        guide_y = utils.brep.normal_into_face(edge, slot_face)
+        mgr.transform(cabineo_bodies, utils.matrix.transform_from_root(origin, x, access_y))
+        mgr.transform(screw_bodies, utils.matrix.transform_from_root(origin, x, guide_y))
+        return cabineo_bodies, screw_bodies
+
+
+    
 
 

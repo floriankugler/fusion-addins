@@ -16,16 +16,19 @@ def get_base_feature(custom_feature: adsk.fusion.CustomFeature) -> adsk.fusion.B
         if feature.objectType == adsk.fusion.BaseFeature.classType():
             return feature
 
-def traverse_occurrence_tree(occurence: adsk.fusion.Occurrence, process: Callable[[adsk.fusion.Occurrence], bool]):
+# procces takes either an occurence or the rootComponent
+def traverse_occurrence_tree(occurence: adsk.fusion.Occurrence, process: Callable[[Any], bool]):
     previous = None
     current = occurence
 
-    def search_down(occ: adsk.fusion.Occurrence) -> bool:
+    # occ is either an occurence or the rootComponent 
+    def search_down(occ) -> bool:
         # Search this component first
         if process(occ):
             return True
 
         # Recurse into children (occurrences)
+        if not occ.childOccurrences: return False
         for occ in occ.childOccurrences:
             if occ == previous:
                 continue
@@ -41,12 +44,17 @@ def traverse_occurrence_tree(occurence: adsk.fusion.Occurrence, process: Callabl
 
         # 2. Move up to parent
         occ_ctx = current.assemblyContext
+        child_occurrences = None
         if not occ_ctx:
-            break  # at root
-        parent = occ_ctx
+            root = current.component.parentDesign.rootComponent
+            child_occurrences = root.occurrences
+            parent = root
+        else:
+            parent = occ_ctx
+            child_occurrences = parent.childOccurrences       
 
         # 3. Search siblings in parent
-        for sibling_occ in parent.childOccurrences:
+        for sibling_occ in child_occurrences:
             if sibling_occ == current:
                 continue
             if search_down(sibling_occ):
