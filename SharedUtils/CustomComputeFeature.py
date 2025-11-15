@@ -321,7 +321,7 @@ class CustomComputeFeature(ABC):
             for op, _ in target.all_combines.items():
                 nonlocal base_idx
                 base = base_features[base_idx]
-                coll = adsk.core.ObjectCollection.createWithArray(utils.misc.as_list(base.bodies))
+                coll = utils.fusion.as_object_collection(base.bodies)
                 combine_input = self.component.features.combineFeatures.createInput(target.target_body, coll)
                 combine_input.operation = op
                 combine_feature = self.component.features.combineFeatures.add(combine_input)

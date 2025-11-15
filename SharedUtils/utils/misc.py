@@ -1,8 +1,5 @@
-from typing import Any, Callable
-import adsk.core, adsk.fusion
+from typing import Callable
 
-def as_list(objs):
-    return [objs.item(idx) for idx in range(len(objs))]
 
 def intersect_lists(l1: list, l2: list) -> list:
     result = []

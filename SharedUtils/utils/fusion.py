@@ -6,27 +6,34 @@ import traceback, inspect
 
 
 def as_object_collection(objs):
-    coll = adsk.core.ObjectCollection.create()
-    for body in misc.as_list(objs):
-        coll.add(body)
-    return coll
+    obj_array = []
+    for idx in range(objs.count):
+        obj_array.append(objs.item(idx))     
+    return adsk.core.ObjectCollection.createWithArray(obj_array)
 
-def get_base_feature(custom_feature: adsk.fusion.CustomFeature) -> adsk.fusion.BaseFeature:
-    for feature in custom_feature.features:
-        if feature.objectType == adsk.fusion.BaseFeature.classType():
-            return feature
+def traverse_occurrence_tree(occurence: adsk.fusion.Occurrence, process: Callable[[adsk.core.Base], bool]):
+    """
+    Traverses the occurrence tree, starting with occurrence, going depth first, then siblings, then up to parent and so on until the root is reached.
 
-def traverse_occurrence_tree(occurence: adsk.fusion.Occurrence, process: Callable[[adsk.fusion.Occurrence], bool]):
+    occurence : The occurrence to start the search from. If None, starts from the root component.
+    process : A function that takes an occurrence or the root component and returns True to stop the search, False to continue.
+    """
     previous = None
-    current = occurence
+    root_component = adsk.core.Application.get().activeProduct.rootComponent
+    current = occurence or root_component
 
-    def search_down(occ: adsk.fusion.Occurrence) -> bool:
+    def search_down(occ) -> bool:
         # Search this component first
         if process(occ):
             return True
 
         # Recurse into children (occurrences)
-        for occ in occ.childOccurrences:
+        children = []
+        if isinstance(occ, adsk.fusion.Occurrence):
+            children = occ.childOccurrences
+        else:
+             children = occ.occurrences  # Root component case
+        for occ in children:
             if occ == previous:
                 continue
             if search_down(occ):
@@ -39,14 +46,22 @@ def traverse_occurrence_tree(occurence: adsk.fusion.Occurrence, process: Callabl
         if search_down(current):
             return 
 
+        if current == root_component:
+            break
+
         # 2. Move up to parent
         occ_ctx = current.assemblyContext
+        child_occurrences = None
         if not occ_ctx:
-            break  # at root
-        parent = occ_ctx
+            root = current.component.parentDesign.rootComponent
+            child_occurrences = root.occurrences
+            parent = root
+        else:
+            parent = occ_ctx
+            child_occurrences = parent.childOccurrences       
 
         # 3. Search siblings in parent
-        for sibling_occ in parent.childOccurrences:
+        for sibling_occ in child_occurrences:
             if sibling_occ == current:
                 continue
             if search_down(sibling_occ):

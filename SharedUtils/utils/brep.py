@@ -94,7 +94,7 @@ def find_perpendicular_face_containing_edge(edge: adsk.fusion.BRepEdge, referenc
     
     result = None
 
-    def search_occurrence(o: adsk.fusion.Occurrence) -> bool:
+    def search(o: adsk.core.Base) -> bool:
         for body in o.bRepBodies:
             if body == edge.body:
                 continue
@@ -104,7 +104,7 @@ def find_perpendicular_face_containing_edge(edge: adsk.fusion.BRepEdge, referenc
                     result = face
                     return True
 
-    fusion.traverse_occurrence_tree(edge.body.assemblyContext, search_occurrence)
+    fusion.traverse_occurrence_tree(edge.body.assemblyContext, search)
     return result
 
 def longest_and_adjecent_edge_of_face(face: adsk.fusion.BRepFace) -> tuple[adsk.fusion.BRepEdge, adsk.fusion.BRepEdge]:
