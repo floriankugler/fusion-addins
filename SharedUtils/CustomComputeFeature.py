@@ -200,7 +200,8 @@ class CustomComputeFeature(ABC):
             features_inside_component, features_outside_component = self.create_features_from_combines(combines, feature)
 
             feature.timelineObject.rollTo(True)
-            feature.setStartAndEndFeatures(features_inside_component[0], features_inside_component[-1])
+            if features_inside_component:
+                feature.setStartAndEndFeatures(features_inside_component[0], features_inside_component[-1])
             if features_outside_component:
                 features_outside_component[-1].timelineObject.rollTo(False)
             else:
@@ -232,7 +233,8 @@ class CustomComputeFeature(ABC):
             features_inside_component, features_outside_component = self.create_features_from_combines(combines, self.edited_custom_feature)
 
             self.edited_custom_feature.timelineObject.rollTo(True)
-            self.edited_custom_feature.setStartAndEndFeatures(features_inside_component[0], features_inside_component[-1])
+            if features_inside_component:
+                self.edited_custom_feature.setStartAndEndFeatures(features_inside_component[0], features_inside_component[-1])
 
             restore_entity = None
             try:

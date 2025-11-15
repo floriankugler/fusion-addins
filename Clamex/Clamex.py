@@ -49,7 +49,11 @@ class ClamexFeature(CustomComputeFeature.CustomComputeFeature):
         combines: list[CustomComputeFeature.Combine] = []
         for edge in self.inputs.edge.value:
             access_face, slot_face = get_access_and_slot_faces(edge)
+            if not access_face or not slot_face:
+                continue
             guide_face = find_guide_face(edge, access_face, slot_face)
+            if not guide_face:
+                continue
             access_holes, guide_holes = create_hole_bodies(edge, access_face, slot_face, guide_face, self.inputs)
             combines.append(CustomComputeFeature.Combine(access_face.body, access_holes, adsk.fusion.FeatureOperations.CutFeatureOperation))
             combines.append(CustomComputeFeature.Combine(guide_face.body, guide_holes, adsk.fusion.FeatureOperations.CutFeatureOperation))
