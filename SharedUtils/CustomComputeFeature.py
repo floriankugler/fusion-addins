@@ -285,9 +285,6 @@ class CustomComputeFeature(ABC):
         event_args = adsk.core.SelectionEventArgs.cast(args)
         event_args.isSelectable = self.pre_select(event_args.selection.entity)
 
-    def pre_select(self, entity):
-        return True
-
     def update_features_from_combines(self, combines: list[Combine], feature: adsk.fusion.CustomFeature):
         combines_inside_component, combines_outside_component = TargetCombines.from_combines(combines, feature.parentComponent)
         base_idx = 0
@@ -393,4 +390,7 @@ class CustomComputeFeature(ABC):
     @abstractmethod
     def execute(self) -> list[Combine]:
         pass
+
+    def pre_select(self, entity) -> bool:
+        return True
 
