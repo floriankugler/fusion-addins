@@ -1,8 +1,62 @@
 import adsk.core, adsk.fusion, traceback
-from typing import Callable
+import contextlib
+from dataclasses import dataclass, field
 from abc import ABC, abstractmethod
 import Inputs
+import utils
 from utils.fusion import new_event_handler
+
+@dataclass
+class Combine:
+    target_body: adsk.fusion.BRepBody
+    tool_body: adsk.fusion.BRepBody
+    operation: adsk.fusion.FeatureOperations
+
+@dataclass
+class TargetCombines:
+    _cut_bodies: list[adsk.fusion.BRepBody] = field(default_factory=list)
+    _join_bodies: list[adsk.fusion.BRepBody] = field(default_factory=list)
+    _intersect_bodies: list[adsk.fusion.BRepBody] = field(default_factory=list)
+
+    target_body: adsk.fusion.BRepBody = None
+
+    @classmethod
+    def from_combines(cls, combines: list[Combine], base_component: adsk.fusion.Component) -> tuple[list['TargetCombines'], list['TargetCombines']]:
+        inside_component: dict[str, TargetCombines] = {}
+        outside_component: dict[str, TargetCombines] = {}
+        for comb in combines:
+            target_dict = inside_component if comb.target_body.parentComponent == base_component else outside_component
+            target_combines = target_dict.setdefault(comb.target_body.entityToken, cls())
+            target_combines.add(comb)
+        return (list(inside_component.values()), list(outside_component.values()))
+
+    def add(self, combine: Combine):
+        if self.target_body:
+            assert(self.target_body == combine.target_body)
+        else:
+            self.target_body = combine.target_body
+        match combine.operation:
+            case adsk.fusion.FeatureOperations.CutFeatureOperation:
+                self._cut_bodies.append(combine.tool_body)
+            case adsk.fusion.FeatureOperations.JoinFeatureOperation:
+                self._join_bodies.append(combine.tool_body)
+            case adsk.fusion.FeatureOperations.IntersectFeatureOperation:
+                self._intersect_bodies.append(combine.tool_body)
+
+    @property
+    def all_combines(self) -> dict[adsk.fusion.FeatureOperations: list[adsk.fusion.BRepBody]]:
+        result: dict[adsk.fusion.FeatureOperations: list[adsk.fusion.BRepBody]] = {}
+        if self._cut_bodies:
+            result[adsk.fusion.FeatureOperations.CutFeatureOperation] = self._cut_bodies
+        if self._join_bodies:
+            result[adsk.fusion.FeatureOperations.JoinFeatureOperation] = self._join_bodies
+        if self._intersect_bodies:
+            result[adsk.fusion.FeatureOperations.IntersectFeatureOperation] = self._intersect_bodies
+        return result
+
+    @property
+    def component(self) -> adsk.fusion.Component:
+        return self.target_body.parentComponent
 
 
 class CustomComputeFeature(ABC):
@@ -16,9 +70,8 @@ class CustomComputeFeature(ABC):
     custom_feature_def: adsk.fusion.CustomFeature
     edited_custom_feature: adsk.fusion.CustomFeature 
     restore_timeline_object: adsk.fusion.TimelineObject
-    is_rolled_for_edit: bool
     inputs: Inputs.Inputs
-    compute_disabled: bool
+    _compute_disabled: bool
 
     @property
     def create_command_id(self) -> str:
@@ -35,9 +88,8 @@ class CustomComputeFeature(ABC):
             self._handlers = []
             c = self.__class__
             resource_dir = 'Resources/' + c.plugin_name
-            self._initial_selection = False
             self.inputs = None
-            self.compute_disabled = False
+            self._compute_disabled = False
 
             # Create the command definition for the creation command.
             create_cmd_def = self.ui.commandDefinitions.addButtonDefinition(self.create_command_id, c.plugin_name, c.plugin_tooltip, resource_dir)        
@@ -72,7 +124,7 @@ class CustomComputeFeature(ABC):
             self._handlers.append(compute_custom_feature)
 
         except:
-            show_message('Run Failed:\n{}'.format(traceback.format_exc()))
+            utils.fusion.handleException()
 
     def __del__(self):
         try:
@@ -92,7 +144,7 @@ class CustomComputeFeature(ABC):
             if cmd_def:
                 cmd_def.deleteMe()
         except:
-            show_message('Stop Failed:\n{}'.format(traceback.format_exc()))
+            utils.fusion.handleException
 
     def _create_ui(self, args: adsk.core.EventArgs) -> None:
         command = adsk.core.CommandCreatedEventArgs.cast(args).command
@@ -133,70 +185,161 @@ class CustomComputeFeature(ABC):
 
     def _execute(self, _):
         self.update_inputs_from_ui()
-        base_feature = self.component.features.baseFeatures.add()
-        end_feature = self.execute(base_feature)
 
-        feat_input = self.component.features.customFeatures.createInput(self.custom_feature_def)
-        for sel in self.inputs.inputs:
-            sel.create_in_feature_input(feat_input)
+        with self.compute_disabled():
+            feat_input = self.component.features.customFeatures.createInput(self.custom_feature_def)
+            for sel in self.inputs.inputs:
+                sel.create_in_feature_input(feat_input)
 
-        self.compute_disabled = True
-        feat_input.setStartAndEndFeatures(base_feature, end_feature)
-        feature = self.component.features.customFeatures.add(feat_input)
-        for sel in self.inputs.inputs:
-            sel.create_named_values(feature)
-        self.compute_disabled = False
+            feature = self.component.features.customFeatures.add(feat_input)
+
+            for sel in self.inputs.inputs:
+                sel.create_named_values(feature)
+
+            combines = self.execute()
+            features_inside_component, features_outside_component = self.create_features_from_combines(combines, feature)
+
+            feature.timelineObject.rollTo(True)
+            feature.setStartAndEndFeatures(features_inside_component[0], features_inside_component[-1])
+            if features_outside_component:
+                features_outside_component[-1].timelineObject.rollTo(False)
+            else:
+                feature.timelineObject.rollTo(False)
+
         self.inputs = None
 
     def _execute_preview(self, _):
+        if self._compute_disabled:
+            return
         self.update_inputs_from_ui()
-        base_feature = self.component.features.baseFeatures.add()
-        self.execute(base_feature)
+        with self.compute_disabled():
+            combines = self.execute()
+            self.create_features_from_combines(combines)
 
     def _edit_execute(self, _):
         self.update_inputs_from_ui()
-        self.remove_all_dependencies_and_named_values()
 
-        for sel in self.inputs.inputs:
-            sel.update_in_feature(self.edited_custom_feature)
+        with self.compute_disabled():
+            self.remove_external_combine_features()
+            self.remove_all_dependencies_and_named_values()
 
-        self.compute(self.edited_custom_feature)
+            for inp in self.inputs.inputs:
+                inp.update_in_feature(self.edited_custom_feature)
 
-        if self.is_rolled_for_edit:
-            self.restore_timeline_object.rollTo(False)
-            self.is_rolled_for_edit = False
+            self.delete_all_child_features()
+
+            combines = self.execute()
+            features_inside_component, features_outside_component = self.create_features_from_combines(combines, self.edited_custom_feature)
+
+            self.edited_custom_feature.timelineObject.rollTo(True)
+            self.edited_custom_feature.setStartAndEndFeatures(features_inside_component[0], features_inside_component[-1])
+
+            restore_entity = None
+            try:
+                restore_entity = self.restore_timeline_object.entity
+            except:
+                pass                
+            if restore_entity:
+                if restore_entity == self.edited_custom_feature and features_outside_component:
+                    features_outside_component[-1].timelineObject.rollTo(False)    
+                else:
+                    self.restore_timeline_object.rollTo(False)
+            else:
+                if features_outside_component:
+                    features_outside_component[-1].timelineObject.rollTo(False)
+                else:
+                    self.edited_custom_feature.timelineObject.rollTo(False)
+
         self.edited_custom_feature = None
         self.inputs = None
 
     def _activate_edit(self, args: adsk.core.EventArgs):
         command = adsk.core.CommandEventArgs.cast(args).command
 
-        # Save the current position of the timeline.
-        des: adsk.fusion.Design = self.app.activeProduct
-        timeline = des.timeline
-        self.restore_timeline_object = timeline.item(timeline.markerPosition - 1)
-
-        # Roll the timeline to just before the custom feature being edited.
+        design: adsk.fusion.Design = self.app.activeProduct
+        self.restore_timeline_object = design.timeline.item(design.timeline.markerPosition - 1)
         self.edited_custom_feature.timelineObject.rollTo(rollBefore = True)
-        self.is_rolled_for_edit = True
 
-        # Define a transaction marker so the the roll is not aborted with each change.
         command.beginStep()
 
-        # Update selection inputs
-        self._initial_selection = True
-        for sel in self.inputs.inputs:
-            sel.update_from_feature(self.edited_custom_feature)
-        self._initial_selection = False
+        with self.compute_disabled():
+            for sel in self.inputs.inputs:
+                sel.update_from_feature(self.edited_custom_feature)
+
+        # Manually trigger the preview since we've avoided the preview being called while updating the inputs above
+        command.doExecutePreview()
 
     def _compute(self, args: adsk.core.EventArgs):
-        if self.compute_disabled:
+        if self._compute_disabled:
             return
-        feature = adsk.fusion.CustomFeatureEventArgs.cast(args).customFeature
+        feature: adsk.fusion.CustomFeature = args.customFeature
         if not self.inputs:
             self.inputs = self.create_inputs()
         self.update_inputs_from_feature(feature)
-        self.compute(feature)
+        combines = self.execute()
+        self.update_features_from_combines(combines, feature)
+
+    def _pre_select(self, args: adsk.core.EventArgs):
+        event_args = adsk.core.SelectionEventArgs.cast(args)
+        event_args.isSelectable = self.pre_select(event_args.selection.entity)
+
+    def pre_select(self, entity):
+        return True
+
+    def update_features_from_combines(self, combines: list[Combine], feature: adsk.fusion.CustomFeature):
+        combines_inside_component, combines_outside_component = TargetCombines.from_combines(combines, feature.parentComponent)
+        base_idx = 0
+        for target in combines_inside_component + combines_outside_component:
+            for _, tool_bodies in target.all_combines.items():
+                base: adsk.fusion.BaseFeature = feature.features[base_idx]
+                base.startEdit()
+                for idx, tool in enumerate(tool_bodies):
+                    base.updateBody(base.bodies[idx], tool)
+                base.finishEdit()
+                base_idx += 1
+                
+    def create_features_from_combines(self, combines: list[Combine], feature: adsk.fusion.CustomFeature = None) -> tuple[list[adsk.fusion.Feature], list[adsk.fusion.Feature]]:
+        combines_inside_component, combines_outside_component = TargetCombines.from_combines(combines, self.component)
+
+        base_features: list[adsk.fusion.BaseFeature] = []
+        for target in combines_inside_component + combines_outside_component:
+            for _, tool_bodies in target.all_combines.items():
+                base = self.component.features.baseFeatures.add()
+                base.startEdit()
+                for tool in tool_bodies:
+                    self.component.bRepBodies.add(tool, base)
+                base.finishEdit()
+                base_features.append(base)
+
+        features_inside_component: list[adsk.fusion.Feature] = base_features
+        features_outside_component: list[adsk.fusion.Feature] = []
+        
+        base_idx = 0
+
+        def create_combine_features_for_target(target: TargetCombines) -> list[adsk.fusion.Feature]:
+            result: list[adsk.fusion.Feature] = []
+            for op, _ in target.all_combines.items():
+                nonlocal base_idx
+                base = base_features[base_idx]
+                coll = adsk.core.ObjectCollection.createWithArray(utils.misc.as_list(base.bodies))
+                combine_input = self.component.features.combineFeatures.createInput(target.target_body, coll)
+                combine_input.operation = op
+                combine_feature = self.component.features.combineFeatures.add(combine_input)
+                result.append(combine_feature)
+                base_idx += 1
+            return result
+
+        for target in combines_inside_component:
+            features_inside_component += create_combine_features_for_target(target)
+        for target in combines_outside_component:
+            features_outside_component += create_combine_features_for_target(target)
+        for idx, f in enumerate(features_outside_component):
+            f.name = f"{self.plugin_id}-cut-operation"
+            if feature:
+                feature.customNamedValues.addOrSetValue(f"external-combine-{idx}", f.entityToken)
+
+        return (features_inside_component, features_outside_component)
+
 
     def update_inputs_from_ui(self):
         for input in self.inputs.inputs:
@@ -205,6 +348,13 @@ class CustomComputeFeature(ABC):
     def update_inputs_from_feature(self, feature: adsk.fusion.CustomFeature):
         for sel in self.inputs.inputs:
             sel.update_from_feature(feature)
+
+    def remove_external_combine_features(self):
+        idx = 0
+        while (token := self.edited_custom_feature.customNamedValues.value(f"external-combine-{idx}")):
+            if (feature := self.component.parentDesign.findEntityByToken(token)):
+                feature[0].deleteMe()
+            idx += 1
 
     def remove_all_dependencies_and_named_values(self):
         self.edited_custom_feature.dependencies.deleteAll()
@@ -215,38 +365,30 @@ class CustomComputeFeature(ABC):
         for id in namedValuesToDelete:
             self.edited_custom_feature.customNamedValues.remove(id)
 
-    def _pre_select(self, args: adsk.core.EventArgs):
-        event_args = adsk.core.SelectionEventArgs.cast(args)
-        if self._initial_selection:
-            event_args.isSelectable = True
-        else:
-            event_args.isSelectable = self.pre_select(event_args.selection.entity)
+    def delete_all_child_features(self):
+        feat = self.edited_custom_feature
+        features_to_delete = list(feat.features)
+        feat.setStartAndEndFeatures(None, None)
+        feat.timelineObject.rollTo(False)
+        for f in features_to_delete:
+            if f.isValid: f.deleteMe()
 
-    def pre_select(self, entity):
-        return True
+    @contextlib.contextmanager
+    def compute_disabled(self):
+        disabled = self._compute_disabled
+        self._compute_disabled = True
+        yield
+        self._compute_disabled = disabled
 
     @property
-    @abstractmethod
     def component(self) -> adsk.fusion.Component:
-        pass
-
+        return self.app.activeProduct.activeComponent
+        
     @abstractmethod
     def create_inputs(self) -> Inputs.Inputs:
         pass
 
     @abstractmethod
-    def compute(self, feature: adsk.fusion.CustomFeature) -> None:
+    def execute(self) -> list[Combine]:
         pass
 
-    @abstractmethod
-    def execute(self, base_feature: adsk.fusion.BaseFeature) -> adsk.fusion.Feature:
-        pass
-
-
-
-def show_message(message, error = False):
-    ui = adsk.core.Application.get().userInterface
-    text_palette: adsk.core.TextCommandPalette = ui.palettes.itemById('TextCommands')
-    text_palette.writeText(message)
-    if error:
-        ui.messageBox(message)

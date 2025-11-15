@@ -55,35 +55,15 @@ class TrianglePattern(CustomComputeFeature.CustomComputeFeature):
     plugin_tooltip = 'Creates patterned cutouts of various shapes.'
     inputs: TriangleInputs
 
-    @property
-    def component(self) -> adsk.fusion.Component:
-        return self.inputs.faces.value[0].body.parentComponent
-
     def create_inputs(self) -> TriangleInputs:
         return TriangleInputs(self.app.activeProduct.unitsManager)
 
-    def compute(self, feature: adsk.fusion.CustomFeature) -> None:
-        base_feature = utils.fusion.get_base_feature(feature)
-        for idx, face in enumerate(self.inputs.faces.value):
-            newBody = self.create_pattern_for_face(face, self.inputs.profiles.value)
-            base_feature.startEdit()
-            base_feature.updateBody(base_feature.bodies[idx], newBody)
-            base_feature.finishEdit()
-
-    def execute(self, base_feature: adsk.fusion.BaseFeature) -> adsk.fusion.Feature:
-        last_feature: adsk.fusion.CombineFeature = None
-
+    def execute(self) -> list[CustomComputeFeature.Combine]:
+        result: list[CustomComputeFeature.Combine] = []
         for face in self.inputs.faces.value:
-            triangles = self.create_pattern_for_face(face, self.inputs.profiles.value)
-            base_feature.startEdit()
-            self.component.bRepBodies.add(triangles, base_feature)
-            base_feature.finishEdit()
-
-            combine_input = self.component.features.combineFeatures.createInput(face.body, utils.fusion.as_object_collection(base_feature.bodies))
-            combine_input.operation = adsk.fusion.FeatureOperations.CutFeatureOperation
-            last_feature = self.component.features.combineFeatures.add(combine_input)
-
-        return last_feature 
+            shape = self.create_pattern_for_face(face, self.inputs.profiles.value)
+            result.append(CustomComputeFeature.Combine(face.body, shape, adsk.fusion.FeatureOperations.CutFeatureOperation))
+        return result
 
     def create_pattern_for_face(self, face: adsk.fusion.BRepFace, profiles: list[adsk.fusion.Profile]) -> adsk.fusion.BRepBody:
         mgr = adsk.fusion.TemporaryBRepManager.get()

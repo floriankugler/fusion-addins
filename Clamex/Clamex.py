@@ -13,7 +13,6 @@ import adsk.core, adsk.fusion
 from adsk.core import Point3D, Vector3D
 import math
 
-
 _feature: CustomComputeFeature.CustomComputeFeature = None
 
 def run(context):
@@ -43,46 +42,19 @@ class ClamexFeature(CustomComputeFeature.CustomComputeFeature):
     plugin_tooltip = 'Adds Clamex access holes and guide holes along an edge.'
     inputs: ClamexInputs
 
-    @property
-    def component(self) -> adsk.fusion.Component:
-        return self.inputs.edge.value[0].body.parentComponent
-
     def create_inputs(self) -> ClamexInputs:
         return ClamexInputs(self.app.activeProduct.unitsManager)
 
-    def compute(self, feature: adsk.fusion.CustomFeature) -> None:
-        base_feature = utils.fusion.get_base_feature(feature)
-        for idx, edge in enumerate(self.inputs.edge.value):
-            access_face, slot_face = get_access_and_slot_faces(edge)
-            guide_face = find_guide_face(edge, access_face, slot_face)
-            new_access, new_guide = create_hole_bodies(edge, access_face, slot_face, guide_face, self.inputs)
-            base_feature.startEdit()
-            base_feature.updateBody(base_feature.bodies.item(idx * 2), new_access)
-            base_feature.updateBody(base_feature.bodies.item(idx * 2 + 1), new_guide)
-            base_feature.finishEdit()
-
-    def execute(self, base_feature: adsk.fusion.BaseFeature) -> adsk.fusion.Feature:
-        last_feature: adsk.fusion.CombineFeature = base_feature
+    def execute(self) -> list[CustomComputeFeature.Combine]:
+        combines: list[CustomComputeFeature.Combine] = []
         for edge in self.inputs.edge.value:
             access_face, slot_face = get_access_and_slot_faces(edge)
             guide_face = find_guide_face(edge, access_face, slot_face)
-            
             access_holes, guide_holes = create_hole_bodies(edge, access_face, slot_face, guide_face, self.inputs)
-            base_feature.startEdit()
-            self.component.bRepBodies.add(access_holes, base_feature)
-            self.component.bRepBodies.add(guide_holes, base_feature)
-            base_feature.finishEdit()
+            combines.append(CustomComputeFeature.Combine(access_face.body, access_holes, adsk.fusion.FeatureOperations.CutFeatureOperation))
+            combines.append(CustomComputeFeature.Combine(guide_face.body, guide_holes, adsk.fusion.FeatureOperations.CutFeatureOperation))
+        return combines
 
-            cut_coll = adsk.core.ObjectCollection.createWithArray([base_feature.bodies.item(0)])
-            access_combine_input = self.component.features.combineFeatures.createInput(access_face.body, cut_coll)
-            access_combine_input.operation = adsk.fusion.FeatureOperations.CutFeatureOperation
-            self.component.features.combineFeatures.add(access_combine_input)
-
-            cut_coll = adsk.core.ObjectCollection.createWithArray([base_feature.bodies.item(0)])
-            guide_combine_input = self.component.features.combineFeatures.createInput(guide_face.body, cut_coll)
-            guide_combine_input.operation = adsk.fusion.FeatureOperations.CutFeatureOperation
-            last_feature = self.component.features.combineFeatures.add(guide_combine_input)
-        return last_feature
 
 def find_guide_face(edge: adsk.fusion.BRepEdge, access_face: adsk.fusion.BRepFace, slot_face: adsk.fusion.BRepFace) -> adsk.fusion.BRepFace:
     slot_normal = utils.brep.normal_into_face(edge, slot_face)
