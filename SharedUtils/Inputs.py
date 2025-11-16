@@ -79,6 +79,7 @@ class FloatInput(Input):
     expression: str
     input: adsk.core.ValueCommandInput
     units: str
+    minimum_value: float = None
 
     def __init__(self, id, name, default_value, tool_tip, units):
         super().__init__(id, name, tool_tip)
@@ -93,6 +94,9 @@ class FloatInput(Input):
         else:
             value_input = adsk.core.ValueInput.createByString(param_expr)
         self.input = inputs.addValueInput(self.id, self.name, self.units, value_input)
+        if self.minimum_value is not None:
+            self.input.minimumValue = self.minimum_value
+            self.input.isMinimumInclusive = True
 
     def create_in_feature_input(self, feature_input: adsk.fusion.CustomFeatureInput):
         value_input = adsk.core.ValueInput.createByString(self.expression)

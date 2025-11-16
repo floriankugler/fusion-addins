@@ -3,6 +3,7 @@ from typing import Any, Callable, Optional
 from . import fusion, misc, matrix, vector
 import adsk.core, adsk.fusion
 from adsk.core import OrientedBoundingBox3D, Point3D, Vector3D, Matrix3D
+from functools import singledispatch
 
 def normal_into_face(edge: adsk.fusion.BRepEdge, face: adsk.fusion.BRepFace) -> Vector3D:
     eval = face.evaluator
@@ -45,10 +46,23 @@ def is_perpendicular(face1: adsk.fusion.BRepFace, face2: adsk.fusion.BRepFace) -
          return False
     return face1.geometry.normal.isPerpendicularTo(face2.geometry.normal)
 
-def is_parallel(face1: adsk.fusion.BRepFace, face2: adsk.fusion.BRepFace) -> bool:
-    if not is_planar(face1) or not is_planar(face2):
+@singledispatch
+def is_parallel(a, b) -> bool:
+    raise TypeError(f"Unsupported type: {type(a)}")
+
+@is_parallel.register
+def _(a: adsk.fusion.BRepFace, b: adsk.fusion.BRepFace) -> bool:
+    if not is_planar(a) or not is_planar(b):
         return False
-    return face1.geometry.normal.isParallelTo(face2.geometry.normal)
+    return a.geometry.normal.isParallelTo(b.geometry.normal)
+
+@is_parallel.register
+def _(a: adsk.fusion.BRepEdge, b: adsk.fusion.BRepEdge) -> bool:
+    if not is_linear(a) or not is_linear(b):
+        return False
+    n1 = normal_along_edge(a)
+    n2 = normal_along_edge(b)
+    return n1.isParallelTo(n2)
 
 def get_opposite_face(face: adsk.fusion.BRepFace) -> adsk.fusion.BRepFace:
     if not is_planar(face): 
@@ -291,3 +305,36 @@ def coordinate_system_on_face(face: adsk.fusion.BRepFace, edge: adsk.fusion.BRep
         x.scaleBy(-1)
         z = x.crossProduct(y)
     return (origin, x, y, z)
+
+def project_point_onto_edge(point: Point3D, edge: adsk.fusion.BRepEdge) -> Point3D:
+    _, param = edge.evaluator.getParameterAtPoint(point)
+    _, projected_point = edge.evaluator.getPointAtParameter(param)
+    return projected_point
+
+def project_point_onto_face(point: Point3D, face: adsk.fusion.BRepFace) -> Point3D:
+    _, param = face.evaluator.getParameterAtPoint(point)
+    _, projected_point = face.evaluator.getPointAtParameter(param)
+    return projected_point
+
+def closest_parallel_edge_of_face(edge: adsk.fusion.BRepEdge, face: adsk.fusion.BRepFace) -> tuple[adsk.fusion.BRepEdge, float]:
+    face_edges = outer_edges_of_face(face)
+    parallel_edges = [e for e in face_edges if is_parallel(edge, e)]
+    face_normal = normal_into_face(parallel_edges[0], face)
+    distance = float('inf')
+    reference = edge.startVertex.geometry.asVector()
+    result: adsk.fusion.BRepEdge
+    for e in parallel_edges:
+        new_distance = abs(face_normal.dotProduct(vector.subtract(e.startVertex.geometry.asVector(), reference)))
+        if new_distance < distance:
+            distance = new_distance
+            result = e
+    return result, distance
+
+def place_body_on_face_at_positions(body: adsk.fusion.BRepBody, face: adsk.fusion.BRepFace, edge: adsk.fusion.BRepEdge, positions: list[Vector3D]) -> adsk.fusion.BRepBody:
+    origin, x, y, _ = coordinate_system_on_face(face, edge)
+    x_coords = [vector.subtract(p, origin.asVector()).dotProduct(x) for p in positions]
+    groups = [transformed(body, matrix.translation_matrix(Vector3D.create(x, 0, 0))) for x in x_coords]
+    result = union(groups)
+    return transformed(result, matrix.transform_from_root(origin, x, y))
+
+

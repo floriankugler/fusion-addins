@@ -35,3 +35,7 @@ def transform_point(point: Point3D, t: Matrix3D) -> Point3D:
     copy = point.copy()
     copy.transformBy(t)
     return copy
+
+def compute_points_along_vector(origin: Point3D, direction: Vector3D, positions: list[float]) -> list[Vector3D]:
+    normal = normalized(direction)
+    return [add(origin.asVector(), scaled_by(normal, x)) for x in positions]
