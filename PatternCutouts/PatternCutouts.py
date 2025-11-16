@@ -64,6 +64,16 @@ class TrianglePattern(CustomComputeFeature.CustomComputeFeature):
             shape = self.create_pattern_for_face(face, self.inputs.profiles.value)
             result.append(CustomComputeFeature.Combine(face.body, shape, adsk.fusion.FeatureOperations.CutFeatureOperation))
         return result
+    
+    def input_changed(self, input):
+        if input.id == self.inputs.type.id:
+            dimensions_enabled = self.inputs.type.value == TriangleInputs.types['Triangles'] or self.inputs.type.value == TriangleInputs.types['Rhombuses']
+            self.inputs.preferred_width.input.isVisible = dimensions_enabled
+            self.inputs.preferred_height.input.isVisible = dimensions_enabled
+            self.inputs.spacing.input.isVisible = dimensions_enabled
+            self.inputs.adaptive.input.isVisible = dimensions_enabled
+
+            self.inputs.compensate_fillet.input.isVisible = self.inputs.type.value == TriangleInputs.types['Triangles']
 
     def create_pattern_for_face(self, face: adsk.fusion.BRepFace, profiles: list[adsk.fusion.Profile]) -> adsk.fusion.BRepBody:
         mgr = adsk.fusion.TemporaryBRepManager.get()
