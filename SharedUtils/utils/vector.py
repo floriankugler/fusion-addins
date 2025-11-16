@@ -20,8 +20,8 @@ def normalized(v: Vector3D) -> Vector3D:
     result.normalize()
     return result
 
-def dot_product(v1: Vector3D, v2: Vector3D) -> Vector3D:
-    return v1.copy().dotProduct(v2.copy())
+def dot_product(v1: Vector3D, v2: Vector3D) -> float:
+    return v1.dotProduct(v2)
 
 def center(points: list[Point3D]) -> Point3D:
     result: Point3D = points[0]
