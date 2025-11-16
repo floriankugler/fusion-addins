@@ -12,6 +12,7 @@ import adsk.core, adsk.fusion
 
 from adsk.core import Point3D, Vector3D
 import math
+from dataclasses import dataclass
 
 
 _feature: CustomComputeFeature.CustomComputeFeature = None
@@ -30,6 +31,7 @@ class TriangleInputs(Inputs.Inputs):
         'Rhombuses': 1,
         'Cross': 2,
         'Rounded Rectangle': 3,
+        'Froli': 4,
     }
 
     def __init__(self, units_manager: adsk.core.UnitsManager):
@@ -67,13 +69,16 @@ class TrianglePattern(CustomComputeFeature.CustomComputeFeature):
     
     def input_changed(self, input):
         if input.id == self.inputs.type.id:
+            self.inputs.profiles.input.isVisible = self.inputs.type.value != TriangleInputs.types['Froli']
+
             dimensions_enabled = self.inputs.type.value == TriangleInputs.types['Triangles'] or self.inputs.type.value == TriangleInputs.types['Rhombuses']
             self.inputs.preferred_width.input.isVisible = dimensions_enabled
             self.inputs.preferred_height.input.isVisible = dimensions_enabled
-            self.inputs.spacing.input.isVisible = dimensions_enabled
             self.inputs.adaptive.input.isVisible = dimensions_enabled
 
+            self.inputs.spacing.input.isVisible = dimensions_enabled or self.inputs.type.value == TriangleInputs.types['Froli']
             self.inputs.compensate_fillet.input.isVisible = self.inputs.type.value == TriangleInputs.types['Triangles']
+            self.inputs.remainder.input.isVisible = self.inputs.type.value != TriangleInputs.types['Froli']
 
     def create_pattern_for_face(self, face: adsk.fusion.BRepFace, profiles: list[adsk.fusion.Profile]) -> adsk.fusion.BRepBody:
         mgr = adsk.fusion.TemporaryBRepManager.get()
@@ -88,11 +93,13 @@ class TrianglePattern(CustomComputeFeature.CustomComputeFeature):
         if type == TriangleInputs.types['Triangles']:
             generator = create_triangles    
         elif type == TriangleInputs.types['Rhombuses']:
-            generator = create_rhombuses
+            generator = create_rhombuses_from_inputs
         elif type == TriangleInputs.types['Cross']:
             generator = create_cross
         elif type == TriangleInputs.types['Rounded Rectangle']:
             generator = create_rounded_rect
+        elif type == TriangleInputs.types['Froli']:
+            generator = create_froli_grid
         else:
             return
 
@@ -200,17 +207,37 @@ def create_triangles(face: adsk.fusion.BRepFace, cut: Vector3D,  inputs: Triangl
     return result
 
 
-def create_rhombuses(face: adsk.fusion.BRepFace, cut: Vector3D,  inputs: TriangleInputs) -> adsk.fusion.BRepBody:
+@dataclass
+class RhombusParameters:
+    width: float
+    height: float
+    spacing: float
+    inset: float
+    fillet: float
+    adaptive: bool
+
+def create_rhombuses_from_inputs(face: adsk.fusion.BRepFace, cut: Vector3D,  inputs: TriangleInputs) -> adsk.fusion.BRepBody:
+    params = RhombusParameters(
+        width=inputs.preferred_width.value,
+        height=inputs.preferred_height.value,
+        spacing=inputs.spacing.value,
+        inset=inputs.inset.value,
+        fillet=inputs.fillet.value,
+        adaptive=inputs.adaptive.value,
+    )
+    return create_rhombuses(face, cut, params)
+
+def create_rhombuses(face: adsk.fusion.BRepFace, cut: Vector3D,  params: RhombusParameters) -> adsk.fusion.BRepBody:
     mgr = adsk.fusion.TemporaryBRepManager.get()
     long_edge, short_edge = utils.brep.longest_and_adjecent_edge_of_face(face)
     face_length = long_edge.length
     face_width = short_edge.length
-    vertical_space = face_width - 2 * inputs.inset.value
-    horizontal_space = face_length - 2 * inputs.inset.value
+    vertical_space = face_width - 2 * params.inset
+    horizontal_space = face_length - 2 * params.inset
 
     def pattern_spacing(ratio):
         angle = 2 * math.atan(ratio)
-        sx = 2 * inputs.spacing.value * math.sin(angle/2) / math.sin(angle)
+        sx = 2 * params.spacing * math.sin(angle/2) / math.sin(angle)
         sy = sx / ratio
         return (sx, sy)
 
@@ -220,14 +247,14 @@ def create_rhombuses(face: adsk.fusion.BRepFace, cut: Vector3D,  inputs: Triangl
         h = w / ratio
         return (w, h, sx, sy)
 
-    width = inputs.preferred_width.value
-    height = inputs.preferred_height.value
+    width = params.width
+    height = params.height
     initial_ratio = width / height
     sx, sy = pattern_spacing(initial_ratio)
     rows = max(1, math.floor((vertical_space + sy) / (height + sy)))
     columns = max(1, math.floor((horizontal_space + sx) / (width + sx)))
 
-    if inputs.adaptive.value:
+    if params.adaptive:
         def height_deviation(ratio):
             _, h, _, sy = pattern_dimensions(ratio)
             actual_height = h * rows + sy * (rows - 1)
@@ -238,7 +265,7 @@ def create_rhombuses(face: adsk.fusion.BRepFace, cut: Vector3D,  inputs: Triangl
         optimized_ratio = utils.misc.binary_search(ratio_lower, ratio_upper, height_deviation, 0, 0.1)
         width, height, sx, sy = pattern_dimensions(optimized_ratio)
 
-    rhombus = utils.brep.rhombus(width, height, cut.length, inputs.fillet.value)
+    rhombus = utils.brep.rhombus(width, height, cut.length, params.fillet)
     row = mgr.copy(rhombus)
     for idx in range(columns):
         x = idx * (width + sx)
@@ -269,7 +296,7 @@ def create_rhombuses(face: adsk.fusion.BRepFace, cut: Vector3D,  inputs: Triangl
         triangle_height = (height - sy) / 2
         triangle_angle = 2 * math.atan(width/height)
         triangle_width = math.tan(triangle_angle/2) * 2 * triangle_height
-        triangle = utils.brep.isosceles_triangle(triangle_width, triangle_height, cut.length, inputs.fillet.value)
+        triangle = utils.brep.isosceles_triangle(triangle_width, triangle_height, cut.length, params.fillet)
         triangle_row = mgr.copy(triangle)
         for idx in range(columns - 1):
             t = mgr.copy(triangle)
@@ -284,7 +311,7 @@ def create_rhombuses(face: adsk.fusion.BRepFace, cut: Vector3D,  inputs: Triangl
         triangle_height = (width - sx) / 2
         triangle_angle = 2 * math.atan(height/width)
         triangle_width = math.tan(triangle_angle/2) * 2 * triangle_height
-        triangle = utils.brep.isosceles_triangle(triangle_width, triangle_height, cut.length, inputs.fillet.value)
+        triangle = utils.brep.isosceles_triangle(triangle_width, triangle_height, cut.length, params.fillet)
         mgr.transform(triangle, utils.matrix.rotation_matrix(-math.pi/2, Vector3D.create(0, 0, 1), Point3D.create()))
         triangle_row = mgr.copy(triangle)
         for idx in range(rows - 1):
@@ -357,20 +384,34 @@ def create_rounded_rect(face: adsk.fusion.BRepFace, cut: Vector3D,  inputs: Tria
     return result
 
 
+def create_froli_grid(face: adsk.fusion.BRepFace, cut: Vector3D,  inputs: TriangleInputs) -> adsk.fusion.BRepBody:
+    long_edge, short_edge = utils.brep.longest_and_adjecent_edge_of_face(face)
+    face_length = long_edge.length
+    face_width = short_edge.length
+    vertical_space = face_width - 1 # Give at least 5mm spacing on each side
+    horizontal_space = face_length - 1
 
-# def froli(face: adsk.fusion.BRepFace, cut: Vector3D,  inputs: TriangleInputs) -> adsk.fusion.BRepBody:
-#     long_edge, short_edge = utils.brep.longest_and_adjecent_edge_of_face(face)
-#     face_length = long_edge.length
-#     face_width = short_edge.length
-#     vertical_space = face_width - 2 * inputs.inset.value
-#     horizontal_space = face_length - 2 * inputs.inset.value
+    def spacing(length: float) -> float:
+        available = length - 13.6 # Subtract width of one froli element
+        remainders = [((available/x % 1) * x, x) for x in [16.3, 17.5, 18.7]]
+        remainders.sort(key=lambda x: x[0])
+        return remainders[0][1]
 
-#     def spacing(length):
-#         available = length - 13.6
-#         remainders = [((available/x % 1) * x, x) for x in [16.3, 17.5, 18.7]]
-#         remainders.sort(key=lambda x: x[0])
-#         return remainders[0][1]
+    horizontal_grid = spacing(horizontal_space)
+    vertical_grid = spacing(vertical_space)
 
-#     horizontal_grid = spacing(horizontal_space)
-#     vertical_grid = spacing(vertical_space)
+    tan_alpha = horizontal_grid/vertical_grid
+    alpha = math.atan(tan_alpha)
+    x_inset = inputs.spacing.value / (2 * math.cos(alpha))
+    y_inset = x_inset / tan_alpha
+    width = horizontal_grid - 2 * x_inset
+    height = vertical_grid - 2 * y_inset
 
+    return create_rhombuses(face, cut, RhombusParameters(
+        width=width,
+        height=height,
+        spacing=inputs.spacing.value,
+        inset=inputs.inset.value,
+        fillet=inputs.fillet.value,
+        adaptive=False
+    ))
