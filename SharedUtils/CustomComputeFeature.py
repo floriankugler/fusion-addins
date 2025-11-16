@@ -187,6 +187,7 @@ class CustomComputeFeature(ABC):
             self._handlers.append(on_execute)  
 
     def _input_changed(self, args: adsk.core.InputChangedEventArgs):
+        self.update_inputs_from_ui()
         self.input_changed(args.input)
 
     def _execute(self, _):
