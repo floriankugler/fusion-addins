@@ -29,8 +29,7 @@ class ClamexInputs(Inputs.Inputs):
         self.edge = Inputs.SelectionByEntityTokenInput('edge', 'Edge', 'LinearEdges', 1, 0, 'Select edge along which access holes should be placed.')
         self.size = Inputs.DropDownInput('size', 'Size', [['Clamex P10', 10], ['Clamex P14', 14]], 10, 'Size variant of the Clamex connector.')
         self.spacing = Inputs.FloatInput('spacing', 'Spacing', 20, 'Minimum spacing between the connectors.', units)
-        self.start_offset = Inputs.FloatInput('startOffset', 'Start Offset', 6, 'Offset of the first connector from the start of the edge.', units)
-        self.end_offset = Inputs.FloatInput('endOffset', 'End Offset', 6, 'Offset of the last connector to the end of the edge.', units)
+        self.start_offset = Inputs.FloatInput('offset', 'Offset', 6, 'Distance of the first connector from the start of the edge.', units)
         self.through_guide_holes = Inputs.CheckboxInput('throughGuideHoles', 'Through Guide Holes', False, 'If checked the guide holes are punched all the way through to the opposite face.')
         super().__init__()
 
@@ -98,14 +97,14 @@ def get_access_and_slot_faces(edge: adsk.fusion.BRepEdge) -> tuple[adsk.fusion.B
             break
     return (access_face, slot_face)
 
-def access_hole_positions(edge: adsk.fusion.BRepEdge, spacing: float, start_offset: float, end_offset: float) -> list[adsk.core.Point2D]:
+def access_hole_positions(edge: adsk.fusion.BRepEdge, spacing: float, offset: float) -> list[adsk.core.Point2D]:
     distance_from_edge = 0.75
-    available_length = edge.length - start_offset - end_offset
+    available_length = edge.length - 2 * offset
     number_of_holes = max(1, math.ceil(available_length/spacing))
     start = edge.length/2
     computed_spacing = 0
     if number_of_holes > 1:
-        start = start_offset
+        start = offset
         computed_spacing = available_length/(number_of_holes-1)
     result = []
     for idx in range(number_of_holes):
@@ -120,7 +119,7 @@ def guide_hole_positions(access_positions: list[adsk.core.Point2D], thickness) -
 def create_hole_bodies(edge: adsk.fusion.BRepEdge, access_face: adsk.fusion.BRepFace, slot_face: adsk.fusion.BRepFace, guide_face: adsk.fusion.BRepFace, inputs: ClamexInputs) -> tuple[adsk.fusion.BRepBody, adsk.fusion.BRepBody]:
     mgr = adsk.fusion.TemporaryBRepManager.get()
     thickness = utils.brep.get_board_thickness(access_face)
-    access_positions = access_hole_positions(edge, inputs.spacing.value, inputs.start_offset.value, inputs.end_offset.value)
+    access_positions = access_hole_positions(edge, inputs.spacing.value, inputs.start_offset.value)
     guide_positions = guide_hole_positions(access_positions, thickness)
 
     access_hole = None
