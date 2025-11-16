@@ -166,7 +166,7 @@ class SelectionByEntityTokenInput(Input):
         self.lower_bound = lower_bound
         self.upper_bound = upper_bound
         self.tokens = []
-        self.value = None
+        self.value = []
 
     def create_input(self, inputs: adsk.core.CommandInput, params: adsk.fusion.CustomFeatureParameters, editing: bool):
         self.input = inputs.addSelectionInput(self.id, self.name, self.tool_tip)

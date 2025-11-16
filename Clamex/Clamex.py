@@ -30,7 +30,7 @@ class ClamexInputs(Inputs.Inputs):
         self.points = Inputs.SelectionByEntityTokenInput('points', 'Points', 'SketchPoints', 0, 0, 'To manually place the connectors, select sketch points.')
         self.size = Inputs.DropDownInput('size', 'Size', [['Clamex P10', 10], ['Clamex P14', 14]], 10, 'Size variant of the Clamex connector.')
         self.spacing = Inputs.FloatInput('spacing', 'Spacing', 20, 'Minimum spacing between the connectors.', units)
-        self.start_offset = Inputs.FloatInput('offset', 'Offset', 6, 'Distance of the first connector from the start of the edge.', units)
+        self.offset = Inputs.FloatInput('offset', 'Offset', 6, 'Distance of the first connector from the start of the edge.', units)
         self.through_guide_holes = Inputs.CheckboxInput('throughGuideHoles', 'Through Guide Holes', False, 'If checked the guide holes are punched all the way through to the opposite face.')
         super().__init__()
 
@@ -61,6 +61,11 @@ class ClamexFeature(CustomComputeFeature.CustomComputeFeature):
             return find_faces(entity) is not None
         else:
             return True
+        
+    def input_changed(self, _):
+        spacing_enabled = self.inputs.points.input.selectionCount == 0
+        self.inputs.spacing.input.isEnabled = spacing_enabled
+        self.inputs.offset.input.isEnabled = spacing_enabled
 
 def find_faces(edge: adsk.fusion.BRepEdge) -> tuple[adsk.fusion.BRepFace, adsk.fusion.BRepFace, adsk.fusion.BRepFace]:
     access_face, slot_face = get_access_and_slot_faces(edge)
@@ -136,7 +141,7 @@ def create_hole_bodies(edge: adsk.fusion.BRepEdge, access_face: adsk.fusion.BRep
     if len(inputs.points.value) > 0:
         access_positions = access_positions_by_points(edge, access_face, inputs.points.value)
     else:
-        access_positions = access_positions_by_spacing(edge, inputs.spacing.value, inputs.start_offset.value)
+        access_positions = access_positions_by_spacing(edge, inputs.spacing.value, inputs.offset.value)
     guide_positions = guide_hole_positions(access_positions, thickness)
 
     access_hole = None

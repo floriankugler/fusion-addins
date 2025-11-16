@@ -157,6 +157,10 @@ class CustomComputeFeature(ABC):
         for input in self.inputs.inputs:
             input.create_input(command.commandInputs, params, editing)
 
+        on_input_changed = new_event_handler(self._input_changed, adsk.core.InputChangedEventHandler)
+        command.inputChanged.add(on_input_changed)
+        self._handlers.append(on_input_changed)
+
         on_execute_preview = new_event_handler(self._execute_preview, adsk.core.CommandEventHandler)
         command.executePreview.add(on_execute_preview)
         self._handlers.append(on_execute_preview)
@@ -181,6 +185,9 @@ class CustomComputeFeature(ABC):
             on_execute = new_event_handler(self._execute, adsk.core.CommandEventHandler)
             command.execute.add(on_execute)
             self._handlers.append(on_execute)  
+
+    def _input_changed(self, args: adsk.core.InputChangedEventArgs):
+        self.input_changed(args.input)
 
     def _execute(self, _):
         self.update_inputs_from_ui()
@@ -392,4 +399,7 @@ class CustomComputeFeature(ABC):
 
     def pre_select(self, input, selection) -> bool:
         return True
+    
+    def input_changed(self, input):
+        pass
 
