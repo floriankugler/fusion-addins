@@ -157,7 +157,6 @@ class CustomComputeFeature(ABC):
         for input in self.inputs.inputs:
             input.create_input(command.commandInputs, params, editing)
 
-        # Connect to the needed command related events.
         on_execute_preview = new_event_handler(self._execute_preview, adsk.core.CommandEventHandler)
         command.executePreview.add(on_execute_preview)
         self._handlers.append(on_execute_preview)
@@ -283,7 +282,7 @@ class CustomComputeFeature(ABC):
 
     def _pre_select(self, args: adsk.core.EventArgs):
         event_args = adsk.core.SelectionEventArgs.cast(args)
-        event_args.isSelectable = self.pre_select(event_args.selection.entity)
+        event_args.isSelectable = self.pre_select(event_args.activeInput, event_args.selection.entity)
 
     def update_features_from_combines(self, combines: list[Combine], feature: adsk.fusion.CustomFeature):
         combines_inside_component, combines_outside_component = TargetCombines.from_combines(combines, feature.parentComponent)
@@ -391,6 +390,6 @@ class CustomComputeFeature(ABC):
     def execute(self) -> list[Combine]:
         pass
 
-    def pre_select(self, entity) -> bool:
+    def pre_select(self, input, selection) -> bool:
         return True
 

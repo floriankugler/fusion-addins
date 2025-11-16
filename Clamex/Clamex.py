@@ -55,9 +55,11 @@ class ClamexFeature(CustomComputeFeature.CustomComputeFeature):
             combines.append(CustomComputeFeature.Combine(guide_face.body, guide_holes, adsk.fusion.FeatureOperations.CutFeatureOperation))
         return combines
     
-    def pre_select(self, entity: adsk.fusion.BRepEdge) -> bool:
-        return find_faces(entity) is not None
-
+    def pre_select(self, input: adsk.core.SelectionCommandInput, entity: adsk.fusion.BRepEdge) -> bool:
+        if input.id == self.inputs.edge.id:
+            return find_faces(entity) is not None
+        else:
+            return True
 
 def find_faces(edge: adsk.fusion.BRepEdge) -> tuple[adsk.fusion.BRepFace, adsk.fusion.BRepFace, adsk.fusion.BRepFace]:
     access_face, slot_face = get_access_and_slot_faces(edge)
