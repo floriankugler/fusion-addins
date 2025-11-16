@@ -278,7 +278,7 @@ def union(bodies: list[adsk.fusion.BRepBody]) -> adsk.fusion.BRepBody:
         mgr.booleanOperation(result, body, adsk.fusion.BooleanTypes.UnionBooleanType)
     return result
 
-# Constructs a right handed coordinate system on the face with the z axis pointing away from the body. The origin is either at the edges start or end vertex to ensure right handedness.
+# Constructs a right handed coordinate system on the face with the z axis pointing away from the body. The origin is either at the edges start or end vertex in order for positive z and y to point into the face's boundaries.
 def coordinate_system_on_face(face: adsk.fusion.BRepFace, edge: adsk.fusion.BRepEdge) -> tuple[Point3D, Vector3D, Vector3D, Vector3D]:
     origin = edge.startVertex.geometry
     face_normal_into_body = normal_towards_face(face, get_opposite_face(face))
@@ -291,5 +291,3 @@ def coordinate_system_on_face(face: adsk.fusion.BRepFace, edge: adsk.fusion.BRep
         x.scaleBy(-1)
         z = x.crossProduct(y)
     return (origin, x, y, z)
-
-    
