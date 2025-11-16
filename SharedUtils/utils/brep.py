@@ -18,7 +18,7 @@ def normal_into_face(edge: adsk.fusion.BRepEdge, face: adsk.fusion.BRepFace) -> 
 
 def adjecent_edge(edge: adsk.fusion.BRepEdge, face: adsk.fusion.BRepFace) -> adsk.fusion.BRepEdge:
     loop = next(l for l in face.loops if l.isOuter)
-    edge_idx = misc.as_list(loop.edges).index(edge)
+    edge_idx = fusion.as_list(loop.edges).index(edge)
     return loop.edges[edge_idx + 1] if edge_idx < len(loop.edges) - 1 else loop.edges[0]
 
 def distance_along_normal_between_faces(face1: adsk.fusion.BRepFace, face2: adsk.fusion.BRepFace) -> float:
@@ -117,7 +117,7 @@ def longest_and_adjecent_edge_of_face(face: adsk.fusion.BRepFace) -> tuple[adsk.
 
 def outer_edges_of_face(face: adsk.fusion.BRepFace) -> list[adsk.fusion.BRepEdge]:
     loop = next((x for x in face.loops if x.isOuter), None)
-    return misc.as_list(loop.edges)
+    return fusion.as_list(loop.edges)
 
 def vertices_of_face(face: adsk.fusion.BRepFace) -> list[adsk.fusion.BRepVertex]:
     edges = outer_edges_of_face(face)
@@ -130,14 +130,14 @@ def vertices_of_face(face: adsk.fusion.BRepFace) -> list[adsk.fusion.BRepVertex]
     return vertices
 
 def common_face_of_edges(edges: list[adsk.fusion.BRepEdge]) -> adsk.fusion.BRepFace:
-    faces = [misc.as_list(edge.faces) for edge in edges]
+    faces = [fusion.as_list(edge.faces) for edge in edges]
     result = faces[0]
     for x in faces[1:]:
         result = misc.intersect_lists(result, x)
     return result[0]
 
 def common_face_of_vertices(vertices: list[adsk.fusion.BRepVertex]) -> adsk.fusion.BRepFace:
-    faces = [misc.as_list(v.faces) for v in vertices]
+    faces = [fusion.as_list(v.faces) for v in vertices]
     result = faces[0]
     for x in faces[1:]:
         result = misc.intersect_lists(result, x)

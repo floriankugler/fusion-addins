@@ -5,11 +5,11 @@ from . import misc
 import traceback, inspect
 
 
+def as_list(objs):
+    return [objs.item(idx) for idx in range(objs.count)]
+
 def as_object_collection(objs):
-    obj_array = []
-    for idx in range(objs.count):
-        obj_array.append(objs.item(idx))     
-    return adsk.core.ObjectCollection.createWithArray(obj_array)
+    return adsk.core.ObjectCollection.createWithArray(as_list(objs))
 
 def traverse_occurrence_tree(occurence: adsk.fusion.Occurrence, process: Callable[[adsk.core.Base], bool]):
     """
