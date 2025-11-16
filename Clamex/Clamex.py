@@ -92,7 +92,7 @@ def get_access_and_slot_faces(edge: adsk.fusion.BRepEdge) -> tuple[adsk.fusion.B
     access_face = utils.brep.largest_face_of_edge(edge)
     slot_face = None
     for f in edge.faces:
-        if f != access_face:
+        if f != access_face and utils.brep.is_planar(f):
             slot_face = f
             break
     return (access_face, slot_face)

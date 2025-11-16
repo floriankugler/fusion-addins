@@ -72,11 +72,14 @@ def get_board_thickness(face: adsk.fusion.BRepFace) -> float:
     return abs(distance_along_normal_between_faces(face, opposite_face))
 
 def largest_face_of_edge(edge: adsk.fusion.BRepEdge) -> adsk.fusion.BRepFace:
-    face: adsk.fusion.BRepFace = edge.faces.item(0)
-    for idx in range(1, edge.faces.count):
-        newFace = edge.faces.item(idx)
-        if newFace.area > face.area:
-            face = newFace
+    first_idx = next((idx for idx, face in enumerate(edge.faces) if is_planar(face)))
+    if first_idx is None:
+        return None
+    face: adsk.fusion.BRepFace = edge.faces.item(first_idx)
+    for idx in range(first_idx + 1, edge.faces.count):
+        new_face = edge.faces.item(idx)
+        if is_planar(new_face) and new_face.area > face.area:
+            face = new_face
     return face
 
 def face_contains_edge(face: adsk.fusion.BRepFace, edge: adsk.fusion.BRepEdge) -> bool:
@@ -86,7 +89,6 @@ def face_contains_edge(face: adsk.fusion.BRepFace, edge: adsk.fusion.BRepEdge) -
     return face.boundingBox.contains(edge.startVertex.geometry) and face.boundingBox.contains(edge.endVertex.geometry)
 
 def find_perpendicular_face_containing_edge(edge: adsk.fusion.BRepEdge, reference_face: adsk.fusion.BRepFace, condition: Callable[[adsk.fusion.BRepFace], bool] = lambda _: True) -> Optional[adsk.fusion.BRepFace]:
-    tol = 1e-6
     if not is_planar(reference_face):
         raise ValueError("Only works with planar reference face")
     if not is_linear(edge):
