@@ -316,7 +316,7 @@ def project_point_onto_face(point: Point3D, face: adsk.fusion.BRepFace) -> Point
     _, projected_point = face.evaluator.getPointAtParameter(param)
     return projected_point
 
-def closest_parallel_edge_of_face(edge: adsk.fusion.BRepEdge, face: adsk.fusion.BRepFace) -> tuple[adsk.fusion.BRepEdge, float]:
+def closest_parallel_edge_of_face(edge: adsk.fusion.BRepEdge, face: adsk.fusion.BRepFace) -> adsk.fusion.BRepEdge:
     face_edges = outer_edges_of_face(face)
     parallel_edges = [e for e in face_edges if is_parallel(edge, e)]
     face_normal = normal_into_face(parallel_edges[0], face)
@@ -328,7 +328,7 @@ def closest_parallel_edge_of_face(edge: adsk.fusion.BRepEdge, face: adsk.fusion.
         if new_distance < distance:
             distance = new_distance
             result = e
-    return result, distance
+    return result
 
 def place_body_on_face_at_positions(body: adsk.fusion.BRepBody, face: adsk.fusion.BRepFace, edge: adsk.fusion.BRepEdge, positions: list[Vector3D]) -> adsk.fusion.BRepBody:
     origin, x, y, _ = coordinate_system_on_face(face, edge)

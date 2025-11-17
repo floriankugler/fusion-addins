@@ -26,7 +26,8 @@ def stop(context):
 
 class ConcealedHingeInputs(Inputs.Inputs):
     types = {
-        'Blum CLIP top 110 Thin': 0,
+        'Blum CLIP top 110 Thin +0': 0,
+        'Blum CLIP top 110 Thin +3': 1,
     }
 
     def __init__(self, units_manager: adsk.core.UnitsManager):
@@ -52,13 +53,13 @@ class ConcealedHingeFeature(CustomComputeFeature.CustomComputeFeature):
         return ConcealedHingeInputs(self.app.activeProduct.unitsManager)
 
     def execute(self) -> list[CustomComputeFeature.Combine]:
-        edge: adsk.fusion.BRepEdge = self.inputs.edge.value[0]
+        carcass_edge: adsk.fusion.BRepEdge = self.inputs.edge.value[0]
         door_face: adsk.fusion.BRepFace = self.inputs.face.value[0]
-        positions = self.hinge_positions(edge, door_face)
-        carcass_geometry = self.carcass_holes(edge, door_face, positions)
-        door_geometry = self.door_holes(edge, door_face, positions)
+        positions = self.hinge_positions(carcass_edge, door_face)
+        carcass_geometry = self.carcass_holes(carcass_edge, door_face, positions)
+        door_geometry = self.door_holes(carcass_edge, door_face, positions)
         return [
-            CustomComputeFeature.Combine(edge.body, carcass_geometry, adsk.fusion.FeatureOperations.CutFeatureOperation),
+            CustomComputeFeature.Combine(carcass_edge.body, carcass_geometry, adsk.fusion.FeatureOperations.CutFeatureOperation),
             CustomComputeFeature.Combine(door_face.body, door_geometry, adsk.fusion.FeatureOperations.CutFeatureOperation),
         ]
     
@@ -66,33 +67,43 @@ class ConcealedHingeFeature(CustomComputeFeature.CustomComputeFeature):
         if self.inputs.edge.input == input and self.inputs.edge.value and not self.inputs.face.value:
             self.inputs.face.input.hasFocus = True
 
-    def hinge_positions(self, edge: adsk.fusion.BRepEdge, face: adsk.fusion.BRepFace) -> list[Vector3D]:
-        door_long_edge, _ = utils.brep.longest_and_adjecent_edge_of_face(face)
-        start_point = utils.brep.project_point_onto_edge(door_long_edge.startVertex.geometry, edge)
-        end_point = utils.brep.project_point_onto_edge(door_long_edge.endVertex.geometry, edge)
+    def hinge_positions(self, carcass_edge: adsk.fusion.BRepEdge, door_face: adsk.fusion.BRepFace) -> list[Vector3D]:
+        door_edge = utils.brep.closest_parallel_edge_of_face(carcass_edge, door_face)
+        start_point = utils.brep.project_point_onto_edge(door_edge.startVertex.geometry, carcass_edge)
+        end_point = utils.brep.project_point_onto_edge(door_edge.endVertex.geometry, carcass_edge)
         dir = utils.vector.subtract(end_point.asVector(), start_point.asVector())
         offset = self.inputs.offset.value
         return utils.vector.compute_points_along_vector(start_point, dir, [offset, dir.length - offset])
 
-    def carcass_holes(self, edge: adsk.fusion.BRepEdge, face: adsk.fusion.BRepFace, positions: list[Vector3D]) -> adsk.fusion.BRepBody:
-        point_on_face = utils.brep.project_point_onto_face(positions[0].asPoint(), face)
-        gap = utils.vector.subtract(point_on_face.asVector(), positions[0]).length
-        carcass_face = utils.brep.largest_face_of_edge(edge)
+    def carcass_holes(self, carcass_edge: adsk.fusion.BRepEdge, door_face: adsk.fusion.BRepFace, positions: list[Vector3D]) -> adsk.fusion.BRepBody:
+        point_on_face = utils.brep.project_point_onto_face(positions[0].asPoint(), door_face)
+        carcass_face = utils.brep.largest_face_of_edge(carcass_edge)
+        normal_into_carcass_face = utils.brep.normal_into_face(carcass_edge, carcass_face)
+        gap_vector = utils.vector.subtract(point_on_face.asVector(), positions[0])
+        gap = - normal_into_carcass_face.dotProduct(gap_vector)
 
         cyl = utils.brep.cylinder(Point3D.create(0, 3.7 - (gap - 0.15)), self.inputs.predrill_diameter.value/2, -self.inputs.predrill_depth.value)
         group = utils.brep.union([
             utils.brep.transformed(cyl, utils.matrix.translation_matrix(Vector3D.create(-1.6, 0, 0))),
             utils.brep.transformed(cyl, utils.matrix.translation_matrix(Vector3D.create(1.6, 0, 0)))
         ])
-        return utils.brep.place_body_on_face_at_positions(group, carcass_face, edge, positions)
+        return utils.brep.place_body_on_face_at_positions(group, carcass_face, carcass_edge, positions)
 
-    def door_holes(self, edge: adsk.fusion.BRepEdge, face: adsk.fusion.BRepFace, positions: list[Vector3D]) -> adsk.fusion.BRepBody:
-        hinge_edge, distance = utils.brep.closest_parallel_edge_of_face(edge, face)
+    def door_holes(self, carcass_edge: adsk.fusion.BRepEdge, door_face: adsk.fusion.BRepFace, positions: list[Vector3D]) -> adsk.fusion.BRepBody:
+        hinge_edge = utils.brep.closest_parallel_edge_of_face(carcass_edge, door_face)
+        normal_into_door_face = utils.brep.normal_into_face(hinge_edge, door_face)
+        distance_vector = utils.vector.subtract(hinge_edge.startVertex.geometry.asVector(), carcass_edge.startVertex.geometry.asVector())
+        distance = - normal_into_door_face.dotProduct(distance_vector) 
 
-        cyl = utils.brep.cylinder(Point3D.create(0, distance + 2.7, 0), 0.5, -0.6)
+        cyl: adsk.fusion.BRepBody
+        match self.inputs.type.value:
+            case 0:  # Blum CLIP top 110 Thin +0
+                cyl = utils.brep.cylinder(Point3D.create(0, distance + 2.7, 0), 0.5, -0.5)
+            case 1:  # Blum CLIP top 110 Thin +3
+                cyl = utils.brep.cylinder(Point3D.create(0, distance + 3, 0), 0.5, -0.5)
         group = utils.brep.union([
             utils.brep.transformed(cyl, utils.matrix.translation_matrix(Vector3D.create(-1.6, 0, 0))),
             utils.brep.transformed(cyl, utils.matrix.translation_matrix(Vector3D.create(1.6, 0, 0)))
         ])
-        return utils.brep.place_body_on_face_at_positions(group, face, hinge_edge, positions)
+        return utils.brep.place_body_on_face_at_positions(group, door_face, hinge_edge, positions)
     
