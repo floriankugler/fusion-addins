@@ -1,4 +1,4 @@
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 import adsk.core, adsk.fusion
 from adsk.core import Point3D
 from . import misc
@@ -11,7 +11,7 @@ def as_list(objs):
 def as_object_collection(objs):
     return adsk.core.ObjectCollection.createWithArray(as_list(objs))
 
-def traverse_occurrence_tree(occurence: adsk.fusion.Occurrence, process: Callable[[adsk.core.Base], bool]):
+def traverse_occurrence_tree(occurence: Optional[adsk.fusion.Occurrence], process: Callable[[adsk.fusion.Occurrence | adsk.fusion.Component], bool]):
     """
     Traverses the occurrence tree, starting with occurrence, going depth first, then siblings, then up to parent and so on until the root is reached.
 

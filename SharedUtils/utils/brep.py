@@ -102,26 +102,29 @@ def face_contains_edge(face: adsk.fusion.BRepFace, edge: adsk.fusion.BRepEdge) -
 
     return face.boundingBox.contains(edge.startVertex.geometry) and face.boundingBox.contains(edge.endVertex.geometry)
 
-def find_perpendicular_face_containing_edge(edge: adsk.fusion.BRepEdge, reference_face: adsk.fusion.BRepFace, condition: Callable[[adsk.fusion.BRepFace], bool] = lambda _: True) -> Optional[adsk.fusion.BRepFace]:
+def find_perpendicular_face(reference_face: adsk.fusion.BRepFace, condition: Callable[[adsk.fusion.BRepFace], bool] = lambda _: True) -> Optional[adsk.fusion.BRepFace]:
     if not is_planar(reference_face):
         raise ValueError("Only works with planar reference face")
-    if not is_linear(edge):
-        raise ValueError("Only works on linear edges")
     
     result = None
 
-    def search(o: adsk.core.Base) -> bool:
+    def search(o: adsk.fusion.Occurrence | adsk.fusion.Component) -> bool:
         for body in o.bRepBodies:
-            if body == edge.body:
+            if body == reference_face.body:
                 continue
             for face in body.faces:
-                if face_contains_edge(face, edge) and is_perpendicular(face, reference_face) and condition(face):
+                if is_perpendicular(face, reference_face) and condition(face):
                     nonlocal result
                     result = face
                     return True
 
-    fusion.traverse_occurrence_tree(edge.body.assemblyContext, search)
+    fusion.traverse_occurrence_tree(reference_face.body.assemblyContext, search)
     return result
+
+def find_perpendicular_face_containing_edge(edge: adsk.fusion.BRepEdge, reference_face: adsk.fusion.BRepFace, condition: Callable[[adsk.fusion.BRepFace], bool] = lambda _: True) -> Optional[adsk.fusion.BRepFace]:
+    if not is_linear(edge):
+        raise ValueError("Only works on linear edges")
+    return find_perpendicular_face(reference_face, lambda f: face_contains_edge(f, edge) and condition(f))
 
 def longest_and_adjecent_edge_of_face(face: adsk.fusion.BRepFace) -> tuple[adsk.fusion.BRepEdge, adsk.fusion.BRepEdge]:
     loop = next(l for l in face.loops if l.isOuter)

@@ -39,3 +39,15 @@ def transform_point(point: Point3D, t: Matrix3D) -> Point3D:
 def compute_points_along_vector(origin: Point3D, direction: Vector3D, positions: list[float]) -> list[Vector3D]:
     normal = normalized(direction)
     return [add(origin.asVector(), scaled_by(normal, x)) for x in positions]
+
+def is_equal_direction(v1: Vector3D, v2: Vector3D, tolerance: float = 1e-6) -> bool:
+    v1n = normalized(v1)
+    v2n = normalized(v2)
+    dot = v1n.dotProduct(v2n)
+    return abs(dot - 1.0) <= tolerance
+
+def is_opposite_direction(v1: Vector3D, v2: Vector3D, tolerance: float = 1e-6) -> bool:
+    v1n = normalized(v1)
+    v2n = normalized(v2)
+    dot = v1n.dotProduct(v2n)
+    return abs(dot + 1.0) <= tolerance
