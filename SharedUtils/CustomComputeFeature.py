@@ -96,8 +96,17 @@ class CustomComputeFeature(ABC):
 
             # Add the create button after the Emboss command in the CREATE panel of the SOLID tab.
             solidWS = self.ui.workspaces.itemById('FusionSolidEnvironment')
-            panel = solidWS.toolbarPanels.itemById('SolidCreatePanel')
-            panel.controls.addCommand(create_cmd_def, 'EmbossCmd', False)        
+            panel = solidWS.toolbarPanels.itemById('SolidModifyPanel')
+            separator_id = 'SeparatorBeforeCustomAddins'
+            for idx in range(panel.controls.count):
+                ctrl = panel.controls.item(idx)
+                if ctrl.id == separator_id:
+                    panel.controls.addCommand(create_cmd_def, separator_id, True)        
+                    break
+                if ctrl.id == 'FusionMoveCommand':
+                    panel.controls.addSeparator(separator_id, 'FusionMoveCommand', True)
+                    panel.controls.addCommand(create_cmd_def, 'FusionMoveCommand', True)        
+                    break
 
             # Create the command definition for the edit command.
             edit_cmd_def = self.ui.commandDefinitions.addButtonDefinition(self.edit_command_id, 
@@ -131,7 +140,7 @@ class CustomComputeFeature(ABC):
             c = self.__class__
             # Remove all UI elements.
             solid_ws = self.ui.workspaces.itemById('FusionSolidEnvironment')
-            panel = solid_ws.toolbarPanels.itemById('SolidCreatePanel')
+            panel = solid_ws.toolbarPanels.itemById('SolidModifyPanel')
             cntrl = panel.controls.itemById(self.create_command_id)
             if cntrl:
                 cntrl.deleteMe()
