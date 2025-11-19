@@ -114,7 +114,8 @@ class ConcealedHingeFeature(CustomComputeFeature.CustomComputeFeature):
         gap_vector = utils.vector.subtract(point_on_face.asVector(), positions[0])
         gap = - normal_into_carcass_face.dotProduct(gap_vector)
 
-        cyl = utils.brep.cylinder(Point3D.create(0, 3.7 - (gap - 0.15)), self.inputs.predrill_diameter.value/2, -self.inputs.predrill_depth.value)
+        cyl = utils.brep.cylinder(self.inputs.predrill_diameter.value/2, -self.inputs.predrill_depth.value)
+        cyl = utils.brep.transformed(cyl, utils.matrix.translation_matrix(Vector3D.create(0, 3.7 - (gap - 0.15), 0)))
         group = utils.brep.union([
             utils.brep.transformed(cyl, utils.matrix.translation_matrix(Vector3D.create(-1.6, 0, 0))),
             utils.brep.transformed(cyl, utils.matrix.translation_matrix(Vector3D.create(1.6, 0, 0)))
@@ -127,15 +128,15 @@ class ConcealedHingeFeature(CustomComputeFeature.CustomComputeFeature):
         distance_vector = utils.vector.subtract(hinge_edge.startVertex.geometry.asVector(), carcass_edge.startVertex.geometry.asVector())
         distance = - normal_into_door_face.dotProduct(distance_vector) 
 
-        cyl: adsk.fusion.BRepBody
         match self.inputs.type.value:
             case 0:  # Blum CLIP top 110 Thin +0
-                cyl = utils.brep.cylinder(Point3D.create(0, distance + 2.7, 0), 0.5, -0.5)
+                distance += 2.7
             case 1:  # Blum CLIP top 110 Thin +3
-                cyl = utils.brep.cylinder(Point3D.create(0, distance + 3, 0), 0.5, -0.5)
+                distance += 3
+        cyl = utils.brep.cylinder(0.5, -0.5)
         group = utils.brep.union([
-            utils.brep.transformed(cyl, utils.matrix.translation_matrix(Vector3D.create(-1.6, 0, 0))),
-            utils.brep.transformed(cyl, utils.matrix.translation_matrix(Vector3D.create(1.6, 0, 0)))
+            utils.brep.transformed(cyl, utils.matrix.translation_matrix(Vector3D.create(-1.6, distance, 0))),
+            utils.brep.transformed(cyl, utils.matrix.translation_matrix(Vector3D.create(1.6, distance, 0)))
         ])
         return utils.brep.place_body_on_face_at_positions(group, door_face, hinge_edge, positions)
     

@@ -102,68 +102,48 @@ def get_access_and_slot_faces(edge: adsk.fusion.BRepEdge) -> tuple[adsk.fusion.B
             break
     return (access_face, slot_face)
 
-def access_positions_by_points(edge: adsk.fusion.BRepEdge, face: adsk.fusion.BRepFace, points: list[adsk.fusion.SketchPoint]) -> list[adsk.core.Point2D]:
-    result = []
-    distance_from_edge = 0.75
-    origin, cx, _, _ = utils.brep.coordinate_system_on_face(face, edge)
-    for p in points:
-        delta = utils.vector.subtract(p.worldGeometry.asVector(), origin.asVector())
-        x = delta.dotProduct(cx)
-        result.append(adsk.core.Point2D.create(x, distance_from_edge))
-    return result
-
-def access_positions_by_spacing(edge: adsk.fusion.BRepEdge, spacing: float, offset: float) -> list[adsk.core.Point2D]:
-    distance_from_edge = 0.75
+def access_positions_by_spacing(edge: adsk.fusion.BRepEdge, spacing: float, offset: float) -> list[adsk.core.Vector3D]:
     available_length = edge.length - 2 * offset
     number_of_holes = max(1, math.ceil(available_length/spacing))
-    start = edge.length/2
-    computed_spacing = 0
-    if number_of_holes > 1:
-        start = offset
-        computed_spacing = available_length/(number_of_holes-1)
-    result = []
-    for idx in range(number_of_holes):
-        distance = idx * computed_spacing + start
-        result.append(adsk.core.Point2D.create(distance, distance_from_edge))
-    return result
-
-def guide_hole_positions(access_positions: list[adsk.core.Point2D], thickness) -> list[adsk.core.Point2D]:
-    offset = 10.1/2
-    return [y for p in access_positions for y in (adsk.core.Point2D.create(p.x-offset, thickness/2), adsk.core.Point2D.create(p.x+offset, thickness/2))]
+    edge_normal = utils.brep.normal_along_edge(edge)
+    start = utils.vector.add(edge.startVertex.geometry.asVector(), utils.vector.scaled_by(edge_normal, offset if number_of_holes > 1 else edge.length/2))
+    computed_spacing = available_length / (number_of_holes-1) if number_of_holes > 1 else 0
+    return [utils.vector.add(start, utils.vector.scaled_by(edge_normal, idx * computed_spacing)) for idx in range(number_of_holes)]
 
 def create_hole_bodies(edge: adsk.fusion.BRepEdge, access_face: adsk.fusion.BRepFace, slot_face: adsk.fusion.BRepFace, guide_face: adsk.fusion.BRepFace, inputs: ClamexInputs) -> tuple[adsk.fusion.BRepBody, adsk.fusion.BRepBody]:
     mgr = adsk.fusion.TemporaryBRepManager.get()
     thickness = utils.brep.get_board_thickness(access_face)
-    access_positions: list[adsk.core.Point2D]
+    positions: list[adsk.core.Point3D]
     if len(inputs.points.value) > 0:
-        access_positions = access_positions_by_points(edge, access_face, inputs.points.value)
+        positions = [p.worldGeometry.asVector() for p in inputs.points.value]
     else:
-        access_positions = access_positions_by_spacing(edge, inputs.spacing.value, inputs.offset.value)
-    guide_positions = guide_hole_positions(access_positions, thickness)
+        positions = access_positions_by_spacing(edge, inputs.spacing.value, inputs.offset.value)
 
     access_hole = None
     access_depth = thickness/2
-    hole_radius = 0.6/2
+    access_hole_radius = 0.6/2
+    access_edge_distance = 0.75
     if inputs.size.value == 14:
-        access_hole = utils.brep.cylinder(Point3D.create(0, 0, -access_depth), hole_radius, access_depth)
+        cyl = utils.brep.cylinder(access_hole_radius, -access_depth)
+        access_hole = utils.brep.transformed(cyl, utils.matrix.translation_matrix(Vector3D.create(0, access_edge_distance, 0)))
     else:
-        access_hole = utils.brep.slot(0.25, hole_radius, access_depth)
+        access_hole = utils.brep.slot(0.25, access_hole_radius, access_depth)
         mgr.transform(access_hole, utils.matrix.combine_transforms([
             utils.matrix.rotation_matrix(-math.pi/2, Vector3D.create(0, 0, 1), Point3D.create(0, 0, 0)),
-            utils.matrix.mirror_matrix(Point3D.create(), Vector3D.create(1, 1, -1))
+            utils.matrix.translation_matrix(Vector3D.create(0, access_edge_distance, -access_depth))
         ]))
 
     guide_hole_depth = utils.brep.get_board_thickness(guide_face) if inputs.through_guide_holes.value else 0.8
-    hole_radius = 0.77/2
-    guide_hole = utils.brep.cylinder(Point3D.create(0, 0, -guide_hole_depth), hole_radius, guide_hole_depth)
+    guide_hole_radius = 0.77/2
+    guide_hole_distance = 10.1
+    guide_hole_edge_distance = thickness/2
+    cyl = utils.brep.cylinder(guide_hole_radius, guide_hole_depth)
+    guide_hole = utils.brep.transformed(cyl, utils.matrix.translation_matrix(Vector3D.create(guide_hole_distance/2, guide_hole_edge_distance, 0)))
+    guide_holes = utils.brep.union([
+        guide_hole,
+        utils.brep.transformed(guide_hole, utils.matrix.translation_matrix(Vector3D.create(-guide_hole_distance, 0, 0)))
+    ])
 
-    access_bodies = utils.brep.union([utils.brep.transformed(access_hole, utils.matrix.translation_matrix(Vector3D.create(p.x, p.y, 0))) for p in access_positions])
-    guide_bodies = utils.brep.union([utils.brep.transformed(guide_hole, utils.matrix.translation_matrix(Vector3D.create(p.x, p.y, 0))) for p in guide_positions])
-
-    origin, x, access_y, _ = utils.brep.coordinate_system_on_face(access_face, edge)
-    guide_y = utils.brep.normal_into_face(edge, slot_face)
-    mgr.transform(access_bodies, utils.matrix.transform_from_root(origin, x, access_y))
-    mgr.transform(guide_bodies, utils.matrix.transform_from_root(origin, x, guide_y))
+    access_bodies = utils.brep.place_body_on_face_at_positions(access_hole, access_face, edge, positions)
+    guide_bodies = utils.brep.place_body_on_face_at_positions(guide_holes, slot_face, edge, positions)
     return access_bodies, guide_bodies
-
-

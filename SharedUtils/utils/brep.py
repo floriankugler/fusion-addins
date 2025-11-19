@@ -266,15 +266,16 @@ def rhombus(width, height, thickness, fillet_radius) -> adsk.fusion.BRepBody:
         mgr.booleanOperation(box, cut2, adsk.fusion.BooleanTypes.DifferenceBooleanType)
     return box
 
-# Creates a cylinder with point at the cylinder's lower circle's center, height is positive z.
-def cylinder(point: Point3D, radius: float, height: float) -> adsk.fusion.BRepBody:
+# Creates a cylinder with the cylinder's lower circle's center at origin, height is positive z.
+def cylinder(radius: float, height: float) -> adsk.fusion.BRepBody:
     mgr = adsk.fusion.TemporaryBRepManager.get()
-    return mgr.createCylinderOrCone(point, radius, Point3D.create(point.x, point.y, point.z + height), radius)
+    return mgr.createCylinderOrCone(Point3D.create(), radius, Point3D.create(0, 0, height), radius)
     
 # Creates a slot with the length along x, thickness positive in z. Origin is at the center bottom of the first cylinder.
 def slot(length: float, radius: float, thickness: float) -> adsk.fusion.BRepBody:
     mgr = adsk.fusion.TemporaryBRepManager.get()
-    cyl1 = cylinder(adsk.core.Point3D.create(-length/2, 0, -thickness/2), radius, thickness)
+    cyl1 = cylinder(radius, thickness)
+    cyl1 = transformed(cyl1, matrix.translation_matrix(Vector3D.create(-length/2, 0, -thickness/2)))
     cyl2 = transformed(cyl1, matrix.translation_matrix(Vector3D.create(length, 0, 0)))
     box = mgr.createBox(adsk.core.OrientedBoundingBox3D.create(adsk.core.Point3D.create(), adsk.core.Vector3D.create(1, 0, 0), adsk.core.Vector3D.create(0, 1, 0), length, radius * 2, thickness ))
     mgr.booleanOperation(box, cyl1, adsk.fusion.BooleanTypes.UnionBooleanType)
