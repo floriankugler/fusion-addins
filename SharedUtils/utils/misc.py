@@ -1,5 +1,12 @@
+import sys
+import importlib
 from typing import Callable
 
+def force_reload_modules(*module_names):
+    """Force reloads specified modules if they are already in memory."""
+    for name in module_names:
+        if name in sys.modules:
+            importlib.reload(sys.modules[name])
 
 def intersect_lists(l1: list, l2: list) -> list:
     result = []

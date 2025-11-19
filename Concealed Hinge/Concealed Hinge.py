@@ -1,18 +1,13 @@
 import sys, os
-
 current_dir = os.path.dirname(__file__)
 parent_dir = os.path.dirname(current_dir)
 shared_folder = os.path.join(parent_dir, "SharedUtils")
 if current_dir not in sys.path: sys.path.append(current_dir)
 if shared_folder not in sys.path: sys.path.append(shared_folder)
-import importlib, CustomComputeFeature, Inputs, utils
-importlib.reload(CustomComputeFeature)
-importlib.reload(Inputs)
-importlib.reload(utils)
+import CustomComputeFeature, Inputs, utils
 import adsk.core, adsk.fusion
 from adsk.core import Point3D, Vector3D
-from typing import Callable
-import math
+utils.misc.force_reload_modules('CustomComputeFeature', 'Inputs', 'utils')
 
 _feature: CustomComputeFeature.CustomComputeFeature = None
 
