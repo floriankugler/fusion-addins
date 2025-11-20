@@ -4,11 +4,11 @@ parent_dir = os.path.dirname(current_dir)
 shared_folder = os.path.join(parent_dir, "SharedUtils")
 if current_dir not in sys.path: sys.path.append(current_dir)
 if shared_folder not in sys.path: sys.path.append(shared_folder)
-import CustomComputeFeature, Inputs, utils
+import CustomComputeFeature, Inputs, Combine, utils
 import adsk.core, adsk.fusion
 from adsk.core import Point3D, Vector3D
 import math
-utils.misc.force_reload_modules('CustomComputeFeature', 'Inputs', 'utils')
+utils.misc.force_reload_modules('CustomComputeFeature', 'Inputs', 'Combine', 'utils')
 
 _feature: CustomComputeFeature.CustomComputeFeature = None
 
@@ -42,15 +42,15 @@ class Lamello(CustomComputeFeature.CustomComputeFeature):
     def create_inputs(self) -> LamelloInputs:
         return LamelloInputs(self.app.activeProduct.unitsManager)
 
-    def execute(self) -> list[CustomComputeFeature.Combine]:
-        combines: list[CustomComputeFeature.Combine] = []
+    def execute(self) -> list[Combine.Combine]:
+        combines: list[Combine.Combine] = []
         for edge in self.inputs.edge.value:
             access_face, slot_face, guide_face = find_faces(edge)
             if not guide_face:
                 continue
             access_holes, guide_holes = create_hole_bodies(edge, access_face, slot_face, guide_face, self.inputs)
-            combines.append(CustomComputeFeature.Combine(access_face.body, access_holes, adsk.fusion.FeatureOperations.CutFeatureOperation))
-            combines.append(CustomComputeFeature.Combine(guide_face.body, guide_holes, adsk.fusion.FeatureOperations.CutFeatureOperation))
+            combines.append(Combine.Combine(access_face.body, access_holes, Combine.Operation.CUT))
+            combines.append(Combine.Combine(guide_face.body, guide_holes, Combine.Operation.CUT))
         return combines
     
     def pre_select(self, input: adsk.core.SelectionCommandInput, entity: adsk.fusion.BRepEdge) -> bool:

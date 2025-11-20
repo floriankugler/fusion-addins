@@ -4,12 +4,12 @@ parent_dir = os.path.dirname(current_dir)
 shared_folder = os.path.join(parent_dir, "SharedUtils")
 if current_dir not in sys.path: sys.path.append(current_dir)
 if shared_folder not in sys.path: sys.path.append(shared_folder)
-import CustomComputeFeature, Inputs, utils
+import CustomComputeFeature, Inputs, utils, Combine
 import adsk.core, adsk.fusion
 from adsk.core import Point3D, Vector3D
 import math
 from dataclasses import dataclass
-utils.misc.force_reload_modules('CustomComputeFeature', 'Inputs', 'utils')
+utils.misc.force_reload_modules('CustomComputeFeature', 'Inputs', 'utils', 'Combine')
 
 
 _feature: CustomComputeFeature.CustomComputeFeature = None
@@ -57,11 +57,11 @@ class TrianglePattern(CustomComputeFeature.CustomComputeFeature):
     def create_inputs(self) -> TriangleInputs:
         return TriangleInputs(self.app.activeProduct.unitsManager)
 
-    def execute(self) -> list[CustomComputeFeature.Combine]:
-        result: list[CustomComputeFeature.Combine] = []
+    def execute(self) -> list[Combine.Combine]:
+        result: list[Combine.Combine] = []
         for face in self.inputs.faces.value:
             shape = self.create_pattern_for_face(face, self.inputs.profiles.value)
-            result.append(CustomComputeFeature.Combine(face.body, shape, adsk.fusion.FeatureOperations.CutFeatureOperation))
+            result.append(Combine.Combine(face.body, shape, Combine.Operation.CUT))
         return result
     
     def input_changed(self, input):

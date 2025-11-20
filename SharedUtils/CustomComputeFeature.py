@@ -1,62 +1,10 @@
-import adsk.core, adsk.fusion, traceback
+import adsk.core, adsk.fusion
 import contextlib
 from dataclasses import dataclass, field
 from abc import ABC, abstractmethod
-import Inputs
+import Inputs, Combine
 import utils
 from utils.fusion import new_event_handler
-
-@dataclass
-class Combine:
-    target_body: adsk.fusion.BRepBody
-    tool_body: adsk.fusion.BRepBody
-    operation: adsk.fusion.FeatureOperations
-
-@dataclass
-class TargetCombines:
-    _cut_bodies: list[adsk.fusion.BRepBody] = field(default_factory=list)
-    _join_bodies: list[adsk.fusion.BRepBody] = field(default_factory=list)
-    _intersect_bodies: list[adsk.fusion.BRepBody] = field(default_factory=list)
-
-    target_body: adsk.fusion.BRepBody = None
-
-    @classmethod
-    def from_combines(cls, combines: list[Combine], base_component: adsk.fusion.Component) -> tuple[list['TargetCombines'], list['TargetCombines']]:
-        inside_component: dict[str, TargetCombines] = {}
-        outside_component: dict[str, TargetCombines] = {}
-        for comb in combines:
-            target_dict = inside_component if comb.target_body.parentComponent == base_component else outside_component
-            target_combines = target_dict.setdefault(comb.target_body.entityToken, cls())
-            target_combines.add(comb)
-        return (list(inside_component.values()), list(outside_component.values()))
-
-    def add(self, combine: Combine):
-        if self.target_body:
-            assert(self.target_body == combine.target_body)
-        else:
-            self.target_body = combine.target_body
-        match combine.operation:
-            case adsk.fusion.FeatureOperations.CutFeatureOperation:
-                self._cut_bodies.append(combine.tool_body)
-            case adsk.fusion.FeatureOperations.JoinFeatureOperation:
-                self._join_bodies.append(combine.tool_body)
-            case adsk.fusion.FeatureOperations.IntersectFeatureOperation:
-                self._intersect_bodies.append(combine.tool_body)
-
-    @property
-    def all_combines(self) -> dict[adsk.fusion.FeatureOperations: list[adsk.fusion.BRepBody]]:
-        result: dict[adsk.fusion.FeatureOperations: list[adsk.fusion.BRepBody]] = {}
-        if self._cut_bodies:
-            result[adsk.fusion.FeatureOperations.CutFeatureOperation] = self._cut_bodies
-        if self._join_bodies:
-            result[adsk.fusion.FeatureOperations.JoinFeatureOperation] = self._join_bodies
-        if self._intersect_bodies:
-            result[adsk.fusion.FeatureOperations.IntersectFeatureOperation] = self._intersect_bodies
-        return result
-
-    @property
-    def component(self) -> adsk.fusion.Component:
-        return self.target_body.parentComponent
 
 
 class CustomComputeFeature(ABC):
@@ -213,7 +161,7 @@ class CustomComputeFeature(ABC):
                 sel.create_named_values(feature)
 
             combines = self.execute()
-            features_inside_component, features_outside_component = self.create_features_from_combines(combines, feature)
+            features_inside_component, features_outside_component = Combine.create_features_from_combines(self.component, combines, feature)
 
             feature.timelineObject.rollTo(True)
             if features_inside_component:
@@ -231,7 +179,7 @@ class CustomComputeFeature(ABC):
         self.update_inputs_from_ui()
         with self.compute_disabled():
             combines = self.execute()
-            self.create_features_from_combines(combines)
+            Combine.create_features_from_combines(self.component, combines)
 
     def _edit_execute(self, _):
         self.update_inputs_from_ui()
@@ -246,7 +194,7 @@ class CustomComputeFeature(ABC):
             self.delete_all_child_features()
 
             combines = self.execute()
-            features_inside_component, features_outside_component = self.create_features_from_combines(combines, self.edited_custom_feature)
+            features_inside_component, features_outside_component = Combine.create_features_from_combines(self.component, combines, self.edited_custom_feature)
 
             self.edited_custom_feature.timelineObject.rollTo(True)
             if features_inside_component:
@@ -295,66 +243,11 @@ class CustomComputeFeature(ABC):
             self.inputs = self.create_inputs()
         self.update_inputs_from_feature(feature)
         combines = self.execute()
-        self.update_features_from_combines(combines, feature)
+        Combine.update_features_from_combines(combines, feature)
 
     def _pre_select(self, args: adsk.core.EventArgs):
         event_args = adsk.core.SelectionEventArgs.cast(args)
         event_args.isSelectable = self.pre_select(event_args.activeInput, event_args.selection.entity)
-
-    def update_features_from_combines(self, combines: list[Combine], feature: adsk.fusion.CustomFeature):
-        combines_inside_component, combines_outside_component = TargetCombines.from_combines(combines, feature.parentComponent)
-        base_idx = 0
-        for target in combines_inside_component + combines_outside_component:
-            for _, tool_bodies in target.all_combines.items():
-                base: adsk.fusion.BaseFeature = feature.features[base_idx]
-                base.startEdit()
-                for idx, tool in enumerate(tool_bodies):
-                    base.updateBody(base.bodies[idx], tool)
-                base.finishEdit()
-                base_idx += 1
-                
-    def create_features_from_combines(self, combines: list[Combine], feature: adsk.fusion.CustomFeature = None) -> tuple[list[adsk.fusion.Feature], list[adsk.fusion.Feature]]:
-        combines_inside_component, combines_outside_component = TargetCombines.from_combines(combines, self.component)
-
-        base_features: list[adsk.fusion.BaseFeature] = []
-        for target in combines_inside_component + combines_outside_component:
-            for _, tool_bodies in target.all_combines.items():
-                base = self.component.features.baseFeatures.add()
-                base.startEdit()
-                for tool in tool_bodies:
-                    self.component.bRepBodies.add(tool, base)
-                base.finishEdit()
-                base_features.append(base)
-
-        features_inside_component: list[adsk.fusion.Feature] = base_features
-        features_outside_component: list[adsk.fusion.Feature] = []
-        
-        base_idx = 0
-
-        def create_combine_features_for_target(target: TargetCombines) -> list[adsk.fusion.Feature]:
-            result: list[adsk.fusion.Feature] = []
-            for op, _ in target.all_combines.items():
-                nonlocal base_idx
-                base = base_features[base_idx]
-                coll = utils.fusion.as_object_collection(base.bodies)
-                combine_input = self.component.features.combineFeatures.createInput(target.target_body, coll)
-                combine_input.operation = op
-                combine_feature = self.component.features.combineFeatures.add(combine_input)
-                result.append(combine_feature)
-                base_idx += 1
-            return result
-
-        for target in combines_inside_component:
-            features_inside_component += create_combine_features_for_target(target)
-        for target in combines_outside_component:
-            features_outside_component += create_combine_features_for_target(target)
-        for idx, f in enumerate(features_outside_component):
-            f.name = f"{self.plugin_id}-cut-operation"
-            if feature:
-                feature.customNamedValues.addOrSetValue(f"external-combine-{idx}", f.entityToken)
-
-        return (features_inside_component, features_outside_component)
-
 
     def update_inputs_from_ui(self):
         for input in self.inputs.inputs:
@@ -404,7 +297,7 @@ class CustomComputeFeature(ABC):
         pass
 
     @abstractmethod
-    def execute(self) -> list[Combine]:
+    def execute(self) -> list[Combine.Combine]:
         pass
 
     def pre_select(self, input, selection) -> bool:

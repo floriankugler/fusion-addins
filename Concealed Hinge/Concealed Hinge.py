@@ -4,10 +4,10 @@ parent_dir = os.path.dirname(current_dir)
 shared_folder = os.path.join(parent_dir, "SharedUtils")
 if current_dir not in sys.path: sys.path.append(current_dir)
 if shared_folder not in sys.path: sys.path.append(shared_folder)
-import CustomComputeFeature, Inputs, utils
+import CustomComputeFeature, Inputs, utils, Combine
 import adsk.core, adsk.fusion
 from adsk.core import Point3D, Vector3D
-utils.misc.force_reload_modules('CustomComputeFeature', 'Inputs', 'utils')
+utils.misc.force_reload_modules('CustomComputeFeature', 'Inputs', 'utils', 'Combine')
 
 _feature: CustomComputeFeature.CustomComputeFeature = None
 
@@ -46,8 +46,8 @@ class ConcealedHingeFeature(CustomComputeFeature.CustomComputeFeature):
     def create_inputs(self) -> ConcealedHingeInputs:
         return ConcealedHingeInputs(self.app.activeProduct.unitsManager)
 
-    def execute(self) -> list[CustomComputeFeature.Combine]:
-        result: list[CustomComputeFeature.Combine] = []
+    def execute(self) -> list[Combine.Combine]:
+        result: list[Combine.Combine] = []
         for door_edge in self.inputs.door_edges.value:
             door_face = utils.brep.largest_face_of_edge(door_edge)
             carcass_edge = utils.brep.find_carcass_edge_for_front_edge(door_edge, door_face)
@@ -56,8 +56,8 @@ class ConcealedHingeFeature(CustomComputeFeature.CustomComputeFeature):
             positions = self.hinge_positions(carcass_edge, door_face)
             carcass_geometry = self.carcass_holes(carcass_edge, door_face, positions)
             door_geometry = self.door_holes(carcass_edge, door_face, positions)
-            result.append(CustomComputeFeature.Combine(carcass_edge.body, carcass_geometry, adsk.fusion.FeatureOperations.CutFeatureOperation))
-            result.append(CustomComputeFeature.Combine(door_face.body, door_geometry, adsk.fusion.FeatureOperations.CutFeatureOperation))
+            result.append(Combine.Combine(carcass_edge.body, carcass_geometry, Combine.Operation.CUT))
+            result.append(Combine.Combine(door_face.body, door_geometry, Combine.Operation.CUT))
         return result
     
     def hinge_positions(self, carcass_edge: adsk.fusion.BRepEdge, door_face: adsk.fusion.BRepFace) -> list[Vector3D]:
