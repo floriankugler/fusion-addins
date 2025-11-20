@@ -94,7 +94,7 @@ class CustomComputeFeature(ABC):
             # Create the command definition for the creation command.
             create_cmd_def = self.ui.commandDefinitions.addButtonDefinition(self.create_command_id, c.plugin_name, c.plugin_tooltip, resource_dir)        
 
-            # Add the create button after the Emboss command in the CREATE panel of the SOLID tab.
+            # Add the create button in the Modify panel of the SOLID tab.
             solidWS = self.ui.workspaces.itemById('FusionSolidEnvironment')
             panel = solidWS.toolbarPanels.itemById('SolidModifyPanel')
             separator_id = 'SeparatorBeforeCustomAddins'
@@ -104,8 +104,8 @@ class CustomComputeFeature(ABC):
                     panel.controls.addCommand(create_cmd_def, separator_id, True)        
                     break
                 if ctrl.id == 'FusionMoveCommand':
-                    panel.controls.addSeparator(separator_id, 'FusionMoveCommand', True)
                     panel.controls.addCommand(create_cmd_def, 'FusionMoveCommand', True)        
+                    panel.controls.addSeparator(separator_id, 'FusionMoveCommand', True)
                     break
 
             # Create the command definition for the edit command.
