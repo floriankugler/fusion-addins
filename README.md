@@ -26,3 +26,9 @@ To work on the addins, make sure you have VS Code installed, right-click on the 
 GNU General Public License v3.0 or later
 
 See [COPYING](COPYING) to see the full text.
+
+## Attributions
+
+- Lock icon by karl from [Noun Project](https://thenounproject.com/browse/icons/term/lock/) (CC BY 3.0)
+- Hinage icon by Ruslan Dezign from [Noun Project](https://thenounproject.com/browse/icons/term/lock/) (CC BY 3.0)
+- Triangular pattern icon by Made x Made from [Noun Project](https://thenounproject.com/browse/icons/term/lock/) (CC BY 3.0)
