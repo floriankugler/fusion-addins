@@ -3,6 +3,20 @@
 This code is in alpha state and there are no guarantees that this will work correctly for your use case.
 Furthermore, updates to this code might break existing usages of the addins.
 
+## Addins
+
+- **Lamello**
+
+  This currently places access and guide holes for Lamello Clamex P10 and P14 connectors.
+- **Pattern Cutouts**
+
+  This is a collection of differently shaped pattern cutouts, e.g. triangles, rhombuses etc.
+		
+  There's also a "Froli" pattern, which computes the best froli grid for a given rectangular surface and places cutouts accordingly.
+- **Concealed Hinge**
+
+  This places holes for concealed hinges in the door and carcass boards. Currently there's just one type of hinge implemented (Blum cliptop 110 for thin doors).
+
 ## Installation
 
 Just place the addins you want to use in your Fusion Addin directory. On the mac this is `~/Library/Application Support/Autodesk/Autodesk Fusion 360/API/AddIns`.
