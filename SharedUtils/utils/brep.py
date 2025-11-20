@@ -126,6 +126,45 @@ def find_perpendicular_face_containing_edge(edge: adsk.fusion.BRepEdge, referenc
         raise ValueError("Only works on linear edges")
     return find_perpendicular_face(reference_face, lambda f: face_contains_edge(f, edge) and condition(f))
 
+def find_carcass_edge_for_front_edge(front_edge: adsk.fusion.BRepEdge, front_face: adsk.fusion.BRepFace) -> adsk.fusion.BRepEdge:
+    normal_into_door_face = normal_into_face(front_edge, front_face)
+    _, door_edge_center = front_edge.geometry.evaluator.getPointAtParameter(0.5)
+
+    carcass_edge: adsk.fusion.BRepEdge = None
+    def check_face(face: adsk.fusion.BRepFace) -> bool:
+        nonlocal carcass_edge
+        
+        # Check whether the face has the right orientation
+        normal_into_carcass_body = normal_towards_face(face, get_opposite_face(face))
+        if not vector.is_opposite_direction(normal_into_door_face, normal_into_carcass_body):
+            return False
+        
+        # Check whether the center point of the door edge is within the bounds of the carcass edge
+        edge = closest_parallel_edge_of_face(front_edge, face)
+        _, lower, upper = edge.geometry.evaluator.getParameterExtents()
+        _, param = edge.geometry.evaluator.getParameterAtPoint(door_edge_center)
+        if param <= lower or param >= upper:
+            return False
+
+        # Check whether the carcass edge lies within a reasonable distance from the door edge
+        normal_into_carcass_face = normal_into_face(edge, face)
+        delta = vector.subtract(front_edge.startVertex.geometry.asVector(), edge.startVertex.geometry.asVector())
+        distance_along_door = normal_into_door_face.dotProduct(delta)
+        distance_along_carcass = normal_into_carcass_face.dotProduct(delta)
+        carcass_thickness = get_board_thickness(face)
+        if distance_along_carcass < 0: # we have an overlay front
+            if distance_along_door < -carcass_thickness or distance_along_door > 0:
+                return False
+        else: # we have an inset front
+            if distance_along_door < 0 or distance_along_door > 0.6:
+                return False
+
+        carcass_edge = edge
+        return True
+
+    find_perpendicular_face(front_face, check_face)
+    return carcass_edge
+
 def longest_and_adjecent_edge_of_face(face: adsk.fusion.BRepFace) -> tuple[adsk.fusion.BRepEdge, adsk.fusion.BRepEdge]:
     loop = next(l for l in face.loops if l.isOuter)
     longest_edge = sorted(loop.edges, key=lambda e: e.length, reverse=True)[0]
