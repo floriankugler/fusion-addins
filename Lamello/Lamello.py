@@ -14,33 +14,33 @@ _feature: CustomComputeFeature.CustomComputeFeature = None
 
 def run(context):
     global _feature
-    _feature = ClamexFeature()
+    _feature = Lamello()
 
 def stop(context):
     global _feature
     del _feature
 
-class ClamexInputs(Inputs.Inputs):
+class LamelloInputs(Inputs.Inputs):
     def __init__(self, units_manager: adsk.core.UnitsManager):
         units = units_manager.defaultLengthUnits
         self.edge = Inputs.SelectionByEntityTokenInput('edge', 'Edge', 'LinearEdges', 1, 0, 'Select edge along which access holes should be placed.')
         self.points = Inputs.SelectionByEntityTokenInput('points', 'Points', 'SketchPoints', 0, 0, 'To manually place the connectors, select sketch points.')
-        self.size = Inputs.DropDownInput('size', 'Size', [['Clamex P10', 10], ['Clamex P14', 14]], 10, 'Size variant of the Clamex connector.')
+        self.size = Inputs.DropDownInput('size', 'Variant', [['Clamex P10', 10], ['Clamex P14', 14]], 10, 'Variant of the Lamello connector.')
         self.spacing = Inputs.FloatInput('spacing', 'Spacing', 20, 'Minimum spacing between the connectors.', units)
         self.offset = Inputs.FloatInput('offset', 'Offset', 6, 'Distance of the first connector from the start of the edge.', units)
         self.through_guide_holes = Inputs.CheckboxInput('throughGuideHoles', 'Through Guide Holes', False, 'If checked the guide holes are punched all the way through to the opposite face.')
         super().__init__()
 
 
-class ClamexFeature(CustomComputeFeature.CustomComputeFeature):
-    plugin_id = 'antonClamex'
-    plugin_name = 'Clamex'
-    plugin_desc = 'Clamex access/guide holes'
-    plugin_tooltip = 'Adds Clamex access holes and guide holes along an edge.'
-    inputs: ClamexInputs
+class Lamello(CustomComputeFeature.CustomComputeFeature):
+    plugin_id = 'antonLamello'
+    plugin_name = 'Lamello'
+    plugin_desc = 'Lamello connectors'
+    plugin_tooltip = 'Adds access guide holes for Lamello connectors along an edge.'
+    inputs: LamelloInputs
 
-    def create_inputs(self) -> ClamexInputs:
-        return ClamexInputs(self.app.activeProduct.unitsManager)
+    def create_inputs(self) -> LamelloInputs:
+        return LamelloInputs(self.app.activeProduct.unitsManager)
 
     def execute(self) -> list[CustomComputeFeature.Combine]:
         combines: list[CustomComputeFeature.Combine] = []
@@ -110,7 +110,7 @@ def access_positions_by_spacing(edge: adsk.fusion.BRepEdge, spacing: float, offs
     computed_spacing = available_length / (number_of_holes-1) if number_of_holes > 1 else 0
     return [utils.vector.add(start, utils.vector.scaled_by(edge_normal, idx * computed_spacing)) for idx in range(number_of_holes)]
 
-def create_hole_bodies(edge: adsk.fusion.BRepEdge, access_face: adsk.fusion.BRepFace, slot_face: adsk.fusion.BRepFace, guide_face: adsk.fusion.BRepFace, inputs: ClamexInputs) -> tuple[adsk.fusion.BRepBody, adsk.fusion.BRepBody]:
+def create_hole_bodies(edge: adsk.fusion.BRepEdge, access_face: adsk.fusion.BRepFace, slot_face: adsk.fusion.BRepFace, guide_face: adsk.fusion.BRepFace, inputs: LamelloInputs) -> tuple[adsk.fusion.BRepBody, adsk.fusion.BRepBody]:
     mgr = adsk.fusion.TemporaryBRepManager.get()
     thickness = utils.brep.get_board_thickness(access_face)
     positions: list[adsk.core.Point3D]
