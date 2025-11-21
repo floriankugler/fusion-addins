@@ -1,3 +1,4 @@
+from typing import cast
 import adsk.core, adsk.fusion
 from dataclasses import dataclass, field
 import utils
@@ -12,11 +13,11 @@ class Operation(Enum):
     def feature_operation(self) -> adsk.fusion.FeatureOperations:
         match self:
             case Operation.CUT:
-                return adsk.fusion.FeatureOperations.CutFeatureOperation
+                return adsk.fusion.FeatureOperations.CutFeatureOperation # type: ignore
             case Operation.JOIN:
-                return adsk.fusion.FeatureOperations.JoinFeatureOperation
+                return adsk.fusion.FeatureOperations.JoinFeatureOperation # type: ignore
             case Operation.INTERSECT:
-                return adsk.fusion.FeatureOperations.IntersectFeatureOperation
+                return adsk.fusion.FeatureOperations.IntersectFeatureOperation # type: ignore
 
 @dataclass
 class Combine:
@@ -30,7 +31,7 @@ class TargetCombines:
     _join_bodies: list[adsk.fusion.BRepBody] = field(default_factory=list)
     _intersect_bodies: list[adsk.fusion.BRepBody] = field(default_factory=list)
 
-    target_body: adsk.fusion.BRepBody = None
+    target_body: adsk.fusion.BRepBody | None = None
 
     @classmethod
     def from_combines(cls, combines: list[Combine], base_component: adsk.fusion.Component) -> tuple[list['TargetCombines'], list['TargetCombines']]:
@@ -68,10 +69,11 @@ class TargetCombines:
 
     @property
     def component(self) -> adsk.fusion.Component:
+        assert(self.target_body is not None)
         return self.target_body.parentComponent
 
 
-def create_features_from_combines(component: adsk.fusion.Component, combines: list[Combine], feature: adsk.fusion.CustomFeature = None) -> tuple[list[adsk.fusion.Feature], list[adsk.fusion.Feature]]:
+def create_features_from_combines(component: adsk.fusion.Component, combines: list[Combine], feature: adsk.fusion.CustomFeature | None = None) -> tuple[list[adsk.fusion.Feature], list[adsk.fusion.Feature]]:
     combines_inside_component, combines_outside_component = TargetCombines.from_combines(combines, component)
 
     base_features: list[adsk.fusion.BaseFeature] = []
@@ -84,12 +86,13 @@ def create_features_from_combines(component: adsk.fusion.Component, combines: li
             base.finishEdit()
             base_features.append(base)
 
-    features_inside_component: list[adsk.fusion.Feature] = base_features
+    features_inside_component: list[adsk.fusion.Feature] = cast(list[adsk.fusion.Feature], base_features)
     features_outside_component: list[adsk.fusion.Feature] = []
     
     base_idx = 0
 
     def create_combine_features_for_target(target: TargetCombines) -> list[adsk.fusion.Feature]:
+        assert(target.target_body is not None)
         result: list[adsk.fusion.Feature] = []
         for op, _ in target.all_combines.items():
             nonlocal base_idx

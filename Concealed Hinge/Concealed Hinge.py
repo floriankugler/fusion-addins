@@ -7,9 +7,10 @@ if shared_folder not in sys.path: sys.path.append(shared_folder)
 import CustomComputeFeature, Inputs, utils, Combine
 import adsk.core, adsk.fusion
 from adsk.core import Point3D, Vector3D
+from typing import cast
 utils.misc.force_reload_modules('CustomComputeFeature', 'Inputs', 'utils', 'Combine')
 
-_feature: CustomComputeFeature.CustomComputeFeature = None
+_feature: CustomComputeFeature.CustomComputeFeature
 
 def run(context):
     global _feature
@@ -48,8 +49,9 @@ class ConcealedHingeFeature(CustomComputeFeature.CustomComputeFeature):
 
     def execute(self) -> list[Combine.Combine]:
         result: list[Combine.Combine] = []
-        for door_edge in self.inputs.door_edges.value:
+        for door_edge in cast(list[adsk.fusion.BRepEdge], self.inputs.door_edges.value):
             door_face = utils.brep.largest_face_of_edge(door_edge)
+            assert(door_face is not None)
             carcass_edge = utils.brep.find_carcass_edge_for_front_edge(door_edge, door_face)
             if not carcass_edge:
                 continue
@@ -71,6 +73,7 @@ class ConcealedHingeFeature(CustomComputeFeature.CustomComputeFeature):
     def carcass_holes(self, carcass_edge: adsk.fusion.BRepEdge, door_face: adsk.fusion.BRepFace, positions: list[Vector3D]) -> adsk.fusion.BRepBody:
         point_on_face = utils.brep.project_point_onto_face(positions[0].asPoint(), door_face)
         carcass_face = utils.brep.largest_face_of_edge(carcass_edge)
+        assert(carcass_face is not None)
         normal_into_carcass_face = utils.brep.normal_into_face(carcass_edge, carcass_face)
         gap_vector = utils.vector.subtract(point_on_face.asVector(), positions[0])
         gap = - normal_into_carcass_face.dotProduct(gap_vector)

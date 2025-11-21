@@ -1,5 +1,6 @@
 import adsk.core, adsk.fusion
 import contextlib
+from typing import cast
 from dataclasses import dataclass, field
 from abc import ABC, abstractmethod
 import Inputs, Combine
@@ -15,10 +16,10 @@ class CustomComputeFeature(ABC):
 
     app: adsk.core.Application
     ui: adsk.core.UserInterface
-    custom_feature_def: adsk.fusion.CustomFeature
-    edited_custom_feature: adsk.fusion.CustomFeature 
+    custom_feature_def: adsk.fusion.CustomFeatureDefinition
+    edited_custom_feature: adsk.fusion.CustomFeature  | None
     restore_timeline_object: adsk.fusion.TimelineObject
-    inputs: Inputs.Inputs
+    inputs: Inputs.Inputs | None
     _compute_disabled: bool
 
     @property
@@ -106,9 +107,9 @@ class CustomComputeFeature(ABC):
     def _create_ui(self, args: adsk.core.EventArgs) -> None:
         command = adsk.core.CommandCreatedEventArgs.cast(args).command
 
-        self.edited_custom_feature = self.ui.activeSelections.item(0).entity if self.ui.activeSelections.count > 0 else None
+        self.edited_custom_feature = cast(adsk.fusion.CustomFeature, self.ui.activeSelections.item(0).entity) if self.ui.activeSelections.count > 0 else None
         editing = self.edited_custom_feature != None
-        params = self.edited_custom_feature.parameters if editing else None
+        params = self.edited_custom_feature.parameters if self.edited_custom_feature else None
 
         self.inputs = self.create_inputs()
         for input in self.inputs.inputs:
@@ -148,6 +149,7 @@ class CustomComputeFeature(ABC):
         self.input_changed(args.input)
 
     def _execute(self, _):
+        assert(self.inputs is not None)
         self.update_inputs_from_ui()
 
         with self.compute_disabled():
@@ -182,6 +184,8 @@ class CustomComputeFeature(ABC):
             Combine.create_features_from_combines(self.component, combines)
 
     def _edit_execute(self, _):
+        assert(self.inputs is not None)
+        assert(self.edited_custom_feature is not None)
         self.update_inputs_from_ui()
 
         with self.compute_disabled():
@@ -220,9 +224,10 @@ class CustomComputeFeature(ABC):
         self.inputs = None
 
     def _activate_edit(self, args: adsk.core.EventArgs):
+        assert(self.edited_custom_feature is not None)
+        assert(self.inputs is not None)
         command = adsk.core.CommandEventArgs.cast(args).command
-
-        design: adsk.fusion.Design = self.app.activeProduct
+        design: adsk.fusion.Design = cast(adsk.fusion.Design, self.app.activeProduct)
         self.restore_timeline_object = design.timeline.item(design.timeline.markerPosition - 1)
         self.edited_custom_feature.timelineObject.rollTo(rollBefore = True)
 
@@ -235,7 +240,7 @@ class CustomComputeFeature(ABC):
         # Manually trigger the preview since we've avoided the preview being called while updating the inputs above
         command.doExecutePreview()
 
-    def _compute(self, args: adsk.core.EventArgs):
+    def _compute(self, args: adsk.fusion.CustomFeatureEventArgs):
         if self._compute_disabled:
             return
         feature: adsk.fusion.CustomFeature = args.customFeature
@@ -250,21 +255,25 @@ class CustomComputeFeature(ABC):
         event_args.isSelectable = self.pre_select(event_args.activeInput, event_args.selection.entity)
 
     def update_inputs_from_ui(self):
+        assert(self.inputs is not None)
         for input in self.inputs.inputs:
             input.update_from_input()
 
     def update_inputs_from_feature(self, feature: adsk.fusion.CustomFeature):
+        assert(self.inputs is not None)
         for sel in self.inputs.inputs:
             sel.update_from_feature(feature)
 
     def remove_external_combine_features(self):
+        assert(self.edited_custom_feature is not None)
         idx = 0
         while (token := self.edited_custom_feature.customNamedValues.value(f"external-combine-{idx}")):
             if (feature := self.component.parentDesign.findEntityByToken(token)):
-                feature[0].deleteMe()
+                cast(adsk.fusion.Feature, feature[0]).deleteMe()
             idx += 1
 
     def remove_all_dependencies_and_named_values(self):
+        assert(self.edited_custom_feature is not None)
         self.edited_custom_feature.dependencies.deleteAll()
         namedValuesToDelete = []
         for idx in range(self.edited_custom_feature.customNamedValues.count):
@@ -274,11 +283,12 @@ class CustomComputeFeature(ABC):
             self.edited_custom_feature.customNamedValues.remove(id)
 
     def delete_all_child_features(self):
-        feat = self.edited_custom_feature
-        features_to_delete = list(feat.features)
-        feat.setStartAndEndFeatures(None, None)
-        feat.timelineObject.rollTo(False)
-        for f in features_to_delete:
+        assert(self.edited_custom_feature is not None)
+        features_to_delete = list(self.edited_custom_feature.features)
+        self.edited_custom_feature.setStartAndEndFeatures(None, None) # type: ignore
+        self.edited_custom_feature.timelineObject.rollTo(False)
+        for feature in features_to_delete:
+            f = cast(adsk.fusion.Feature, feature)
             if f.isValid: f.deleteMe()
 
     @contextlib.contextmanager
@@ -290,7 +300,7 @@ class CustomComputeFeature(ABC):
 
     @property
     def component(self) -> adsk.fusion.Component:
-        return self.app.activeProduct.activeComponent
+        return cast(adsk.fusion.Design, self.app.activeProduct).activeComponent
         
     @abstractmethod
     def create_inputs(self) -> Inputs.Inputs:

@@ -9,10 +9,11 @@ import adsk.core, adsk.fusion
 from adsk.core import Point3D, Vector3D
 import math
 from dataclasses import dataclass
+from typing import cast
 utils.misc.force_reload_modules('CustomComputeFeature', 'Inputs', 'utils', 'Combine')
 
 
-_feature: CustomComputeFeature.CustomComputeFeature = None
+_feature: CustomComputeFeature.CustomComputeFeature
 
 def run(context):
     global _feature
@@ -59,8 +60,8 @@ class TrianglePattern(CustomComputeFeature.CustomComputeFeature):
 
     def execute(self) -> list[Combine.Combine]:
         result: list[Combine.Combine] = []
-        for face in self.inputs.faces.value:
-            shape = self.create_pattern_for_face(face, self.inputs.profiles.value)
+        for face in cast(list[adsk.fusion.BRepFace], self.inputs.faces.value):
+            shape = self.create_pattern_for_face(face, cast(list[adsk.fusion.Profile], self.inputs.profiles.value))
             result.append(Combine.Combine(face.body, shape, Combine.Operation.CUT))
         return result
     
@@ -98,10 +99,10 @@ class TrianglePattern(CustomComputeFeature.CustomComputeFeature):
         elif type == TriangleInputs.types['Froli']:
             generator = create_froli_grid
         else:
-            return
+            raise ValueError(f'Unknown pattern type: {type}')
 
         if len(profiles) > 0:
-            result = None
+            result: adsk.fusion.BRepBody | None = None
             for profile in profiles:
                 sketch = profile.parentSketch
                 profile_body = mgr.copy(profile.face.body)
@@ -110,9 +111,10 @@ class TrianglePattern(CustomComputeFeature.CustomComputeFeature):
                 next_triangles = generator(profile_face, cut, self.inputs)
                 mgr.transform(next_triangles, utils.matrix.transform_into_face(profile_face, cut))
                 if result:
-                    mgr.booleanOperation(result, next_triangles, adsk.fusion.BooleanTypes.UnionBooleanType)
+                    mgr.booleanOperation(result, next_triangles, adsk.fusion.BooleanTypes.UnionBooleanType) # type: ignore
                 else:
                     result = next_triangles
+            assert(result is not None)
             return result
         else:
             result = generator(face, cut, self.inputs)
@@ -185,7 +187,7 @@ def create_triangles(face: adsk.fusion.BRepFace, cut: Vector3D,  inputs: Triangl
         x = idx * (width + spacing) / 2
         t = mgr.copy(triangle if idx % 2 == 0 else upside_down_triangle)
         mgr.transform(t, utils.matrix.translation_matrix(Vector3D.create(x, 0, 0)))
-        mgr.booleanOperation(row, t, adsk.fusion.BooleanTypes.UnionBooleanType)
+        mgr.booleanOperation(row, t, adsk.fusion.BooleanTypes.UnionBooleanType) # type: ignore
 
     inverted_row = mgr.copy(row)
     mgr.transform(inverted_row, flip_transform)
@@ -195,7 +197,7 @@ def create_triangles(face: adsk.fusion.BRepFace, cut: Vector3D,  inputs: Triangl
         y = idx * (triangle_height + vertical_spacing)
         r = mgr.copy(row if idx % 2 == 0 else inverted_row)
         mgr.transform(r, utils.matrix.translation_matrix(Vector3D.create(0, y, 0)))
-        mgr.booleanOperation(result, r, adsk.fusion.BooleanTypes.UnionBooleanType)
+        mgr.booleanOperation(result, r, adsk.fusion.BooleanTypes.UnionBooleanType) # type: ignore
 
     result_bb = result.preciseBoundingBox
     offset_x = face_length/2 - (result_bb.maxPoint.x + result_bb.minPoint.x)/2
@@ -232,14 +234,14 @@ def create_rhombuses(face: adsk.fusion.BRepFace, cut: Vector3D,  params: Rhombus
     vertical_space = face_width - 2 * params.inset
     horizontal_space = face_length - 2 * params.inset
 
-    def pattern_spacing(ratio):
+    def pattern_spacing(ratio: float) -> tuple[float, float]:
         angle = 2 * math.atan(ratio)
         sx = 2 * params.spacing * math.sin(angle/2) / math.sin(angle)
         sy = sx / ratio
         return (sx, sy)
 
-    def pattern_dimensions(ratio):
-        sx, sy, pattern_spacing(ratio)
+    def pattern_dimensions(ratio: float) -> tuple[float, float, float, float]:
+        sx, sy = pattern_spacing(ratio)
         w = (horizontal_space - (columns - 1) * sx) / columns
         h = w / ratio
         return (w, h, sx, sy)
@@ -268,26 +270,26 @@ def create_rhombuses(face: adsk.fusion.BRepFace, cut: Vector3D,  params: Rhombus
         x = idx * (width + sx)
         t = mgr.copy(rhombus)
         mgr.transform(t, utils.matrix.translation_matrix(Vector3D.create(x, 0, 0)))
-        mgr.booleanOperation(row, t, adsk.fusion.BooleanTypes.UnionBooleanType)
+        mgr.booleanOperation(row, t, adsk.fusion.BooleanTypes.UnionBooleanType) # type: ignore
 
     result = mgr.copy(row)
     for idx in range(1, rows):
         y = idx * (height + sy)
         r = mgr.copy(row)
         mgr.transform(r, utils.matrix.translation_matrix(Vector3D.create(0, y, 0)))
-        mgr.booleanOperation(result, r, adsk.fusion.BooleanTypes.UnionBooleanType)
+        mgr.booleanOperation(result, r, adsk.fusion.BooleanTypes.UnionBooleanType) # type: ignore
 
     intermediate_row = mgr.copy(rhombus)
     for idx in range(columns - 1):
         t = mgr.copy(rhombus)
         mgr.transform(t, utils.matrix.translation_matrix(Vector3D.create(idx * (width + sx), 0, 0)))
-        mgr.booleanOperation(intermediate_row, t, adsk.fusion.BooleanTypes.UnionBooleanType)
+        mgr.booleanOperation(intermediate_row, t, adsk.fusion.BooleanTypes.UnionBooleanType) # type: ignore
     mgr.transform(intermediate_row, utils.matrix.translation_matrix(Vector3D.create((width + sx)/2, 0, 0)))
 
     for idx in range(rows - 1):
         r = mgr.copy(intermediate_row)
         mgr.transform(r, utils.matrix.translation_matrix(Vector3D.create(0, (height + sy)/2 + idx * (height + sy)))) 
-        mgr.booleanOperation(result, r, adsk.fusion.BooleanTypes.UnionBooleanType)
+        mgr.booleanOperation(result, r, adsk.fusion.BooleanTypes.UnionBooleanType) # type: ignore
 
     if columns > 1:
         triangle_height = (height - sy) / 2
@@ -298,11 +300,11 @@ def create_rhombuses(face: adsk.fusion.BRepFace, cut: Vector3D,  params: Rhombus
         for idx in range(columns - 1):
             t = mgr.copy(triangle)
             mgr.transform(t, utils.matrix.translation_matrix(Vector3D.create(idx * (width + sx), 0, 0)))
-            mgr.booleanOperation(triangle_row, t, adsk.fusion.BooleanTypes.UnionBooleanType)
+            mgr.booleanOperation(triangle_row, t, adsk.fusion.BooleanTypes.UnionBooleanType) # type: ignore
         mgr.transform(triangle_row, utils.matrix.translation_matrix(Vector3D.create((width + sx)/2, -height/2, -cut.length/2)))
-        mgr.booleanOperation(result, triangle_row, adsk.fusion.BooleanTypes.UnionBooleanType)
+        mgr.booleanOperation(result, triangle_row, adsk.fusion.BooleanTypes.UnionBooleanType) # type: ignore
         mgr.transform(triangle_row, utils.matrix.mirror_matrix(Point3D.create(0, (rows - 1) * (height + sy)/2, 0), Vector3D.create(1, -1, 1)))
-        mgr.booleanOperation(result, triangle_row, adsk.fusion.BooleanTypes.UnionBooleanType)
+        mgr.booleanOperation(result, triangle_row, adsk.fusion.BooleanTypes.UnionBooleanType) # type: ignore
 
     if rows > 1:
         triangle_height = (width - sx) / 2
@@ -314,11 +316,11 @@ def create_rhombuses(face: adsk.fusion.BRepFace, cut: Vector3D,  params: Rhombus
         for idx in range(rows - 1):
             t = mgr.copy(triangle)
             mgr.transform(t, utils.matrix.translation_matrix(Vector3D.create(0, idx * (height + sy), 0)))
-            mgr.booleanOperation(triangle_row, t, adsk.fusion.BooleanTypes.UnionBooleanType)
+            mgr.booleanOperation(triangle_row, t, adsk.fusion.BooleanTypes.UnionBooleanType) # type: ignore
         mgr.transform(triangle_row, utils.matrix.translation_matrix(Vector3D.create(-width/2, (height + sy)/2, -cut.length/2)))
-        mgr.booleanOperation(result, triangle_row, adsk.fusion.BooleanTypes.UnionBooleanType)
+        mgr.booleanOperation(result, triangle_row, adsk.fusion.BooleanTypes.UnionBooleanType) # type: ignore
         mgr.transform(triangle_row, utils.matrix.mirror_matrix(Point3D.create((columns - 1) * (width + sx)/2, 0, 0), Vector3D.create(-1, 1, 1)))
-        mgr.booleanOperation(result, triangle_row, adsk.fusion.BooleanTypes.UnionBooleanType)
+        mgr.booleanOperation(result, triangle_row, adsk.fusion.BooleanTypes.UnionBooleanType) # type: ignore
 
     result_bb = result.preciseBoundingBox
     offset_x = face_length/2 - (result_bb.maxPoint.x + result_bb.minPoint.x)/2
@@ -353,10 +355,10 @@ def create_cross(face: adsk.fusion.BRepFace, cut: Vector3D,  inputs: TriangleInp
     ]))
     result = mgr.copy(long_triangle)
     mgr.transform(long_triangle, utils.matrix.mirror_matrix(Point3D.create(), Vector3D.create(1, -1, 1)))
-    mgr.booleanOperation(result, long_triangle, adsk.fusion.BooleanTypes.UnionBooleanType)
-    mgr.booleanOperation(result, short_triangle, adsk.fusion.BooleanTypes.UnionBooleanType)
+    mgr.booleanOperation(result, long_triangle, adsk.fusion.BooleanTypes.UnionBooleanType) # type: ignore
+    mgr.booleanOperation(result, short_triangle, adsk.fusion.BooleanTypes.UnionBooleanType) # type: ignore
     mgr.transform(short_triangle, utils.matrix.mirror_matrix(Point3D.create(), Vector3D.create(-1, 1, 1)))
-    mgr.booleanOperation(result, short_triangle, adsk.fusion.BooleanTypes.UnionBooleanType)
+    mgr.booleanOperation(result, short_triangle, adsk.fusion.BooleanTypes.UnionBooleanType) # type: ignore
 
     result_bb = result.preciseBoundingBox
     offset_x = face_length/2 - (result_bb.maxPoint.x + result_bb.minPoint.x)/2
