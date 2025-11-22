@@ -16,6 +16,9 @@ Furthermore, updates to this code might break existing usages of the addins.
 - **Concealed Hinge**
 
   This places holes for concealed hinges in the door and carcass boards. Currently there's just one type of hinge implemented (Blum cliptop 110 for thin doors).
+- **Door Latch**
+
+  Places the holes for door latches in the door and carcass boards. Currently this only has one option for Everlocks.
 
 ## Installation
 
