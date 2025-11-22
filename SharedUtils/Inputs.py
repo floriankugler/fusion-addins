@@ -118,6 +118,41 @@ class FloatInput(Input):
             self.value = val
             self.expression = self.input.expression
 
+class IntegerInput(Input):
+    default_value: int
+    value: int
+    input: adsk.core.IntegerSpinnerCommandInput
+    minimum_value: int
+    maximum_value: int
+
+    def __init__(self, id, name, default_value: int, minimum: int, maximum: int, tool_tip):
+        super().__init__(id, name, tool_tip)
+        self.default_value = default_value
+        self.minimum_value = minimum
+        self.maximum_value = maximum
+
+    def create_input(self, inputs: adsk.core.CommandInputs, params: adsk.fusion.CustomFeatureParameters | None, editing: bool):
+        val = int(params.itemById(self.id).value if params else self.default_value)
+        self.input = inputs.addIntegerSpinnerCommandInput(self.id, self.name, self.minimum_value, self.maximum_value, 1, val)
+
+    def create_in_feature_input(self, feature_input: adsk.fusion.CustomFeatureInput):
+        value_input = adsk.core.ValueInput.createByReal(self.value)
+        feature_input.addCustomParameter(self.id, self.name, value_input, '', True)
+
+    def update_in_feature(self, feature: adsk.fusion.CustomFeature):
+        feature.parameters.itemById(self.id).value = self.value
+
+    def update_from_feature(self, feature: adsk.fusion.CustomFeature):
+        param = feature.parameters.itemById(self.id)
+        if param is not None:
+            self.value = int(param.value)
+            if self.input: self.input.value = self.value
+
+    def update_from_input(self):
+        val = self.input.value
+        if val is not None:
+            self.value = val
+
 class DropDownInput(Input):
     default_value: str
     value: int

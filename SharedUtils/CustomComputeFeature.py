@@ -114,6 +114,9 @@ class CustomComputeFeature(ABC):
         self.inputs = self.create_inputs()
         for input in self.inputs.inputs:
             input.create_input(command.commandInputs, params, editing)
+        self.update_inputs_from_ui()
+        for input in self.inputs.inputs:
+            self.input_changed(input.input)
 
         on_input_changed = new_event_handler(self._input_changed, adsk.core.InputChangedEventHandler)
         command.inputChanged.add(on_input_changed)
