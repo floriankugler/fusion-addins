@@ -22,11 +22,15 @@ def stop(context):
     del _feature
 
 class LamelloInputs(Inputs.Inputs):
+    class Types:
+        CLAMEX_P10 = Inputs.DropDownInput.Item('Clamex P10', 10)
+        CLAMEX_P14 = Inputs.DropDownInput.Item('Clamex P14', 14)
+
     def __init__(self, units_manager: adsk.core.UnitsManager):
         units = units_manager.defaultLengthUnits
         self.edge = Inputs.SelectionByEntityTokenInput('edge', 'Edge', 'LinearEdges', 1, 0, 'Select edge along which access holes should be placed.')
         self.points = Inputs.SelectionByEntityTokenInput('points', 'Points', 'SketchPoints', 0, 0, 'To manually place the connectors, select sketch points.')
-        self.size = Inputs.DropDownInput('size', 'Variant', [['Clamex P10', 10], ['Clamex P14', 14]], 10, 'Variant of the Lamello connector.')
+        self.size = Inputs.DropDownInput('size', 'Variant', utils.misc.class_property_values(LamelloInputs.Types), LamelloInputs.Types.CLAMEX_P10.value, 'Variant of the Lamello connector.')
         self.spacing = Inputs.FloatInput('spacing', 'Spacing', 20, 'Minimum spacing between the connectors.', units)
         self.offset = Inputs.FloatInput('offset', 'Offset', 6, 'Distance of the first connector from the start of the edge.', units)
         self.through_guide_holes = Inputs.CheckboxInput('throughGuideHoles', 'Through Guide Holes', False, 'If checked the guide holes are punched all the way through to the opposite face.')
@@ -125,15 +129,17 @@ def create_hole_bodies(edge: adsk.fusion.BRepEdge, access_face: adsk.fusion.BRep
     access_depth = thickness/2
     access_hole_radius = 0.6/2
     access_edge_distance = 0.75
-    if inputs.size.value == 14:
+    if inputs.size.value == LamelloInputs.Types.CLAMEX_P14.value:
         cyl = utils.brep.cylinder(access_hole_radius, -access_depth)
         access_hole = utils.brep.transformed(cyl, utils.matrix.translation_matrix(Vector3D.create(0, access_edge_distance, 0)))
-    else:
+    elif inputs.size.value == LamelloInputs.Types.CLAMEX_P10.value:
         access_hole = utils.brep.slot(0.25, access_hole_radius, access_depth)
         mgr.transform(access_hole, utils.matrix.combine_transforms([
             utils.matrix.rotation_matrix(-math.pi/2, Vector3D.create(0, 0, 1), Point3D.create(0, 0, 0)),
             utils.matrix.translation_matrix(Vector3D.create(0, access_edge_distance, -access_depth))
         ]))
+    else:
+        raise ValueError(f"Invalid Lamello Type: {inputs.size.value}")
 
     guide_hole_depth = utils.brep.get_board_thickness(guide_face) if inputs.through_guide_holes.value else 0.8
     guide_hole_radius = 0.77/2

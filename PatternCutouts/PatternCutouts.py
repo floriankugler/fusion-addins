@@ -17,26 +17,25 @@ _feature: CustomComputeFeature.CustomComputeFeature
 
 def run(context):
     global _feature
-    _feature = TrianglePattern()
+    _feature = PatternCutout()
 
 def stop(context):
     global _feature
     del _feature
 
-class TriangleInputs(Inputs.Inputs):
-    types = {
-        'Triangles': 0,
-        'Rhombuses': 1,
-        'Cross': 2,
-        'Rounded Rectangle': 3,
-        'Froli': 4,
-    }
+class PatternInputs(Inputs.Inputs):
+    class Types:
+        TRIANGLES = Inputs.DropDownInput.Item('Triangles', 0)
+        RHOMBUSES = Inputs.DropDownInput.Item('Rhombuses', 1)
+        CROSS = Inputs.DropDownInput.Item('Cross', 2)
+        ROUNDED_RECTANGLE = Inputs.DropDownInput.Item('Rounded Rectangle', 3)
+        FROLI = Inputs.DropDownInput.Item('Froli', 4)
 
     def __init__(self, units_manager: adsk.core.UnitsManager):
         units = units_manager.defaultLengthUnits
         self.faces = Inputs.SelectionByEntityTokenInput('faces', 'Faces', 'PlanarFaces', 1, 0, 'Select faces to create triangle pockets on.')
         self.profiles = Inputs.SelectionByEntityTokenInput('profiles', 'Profiles', 'Profiles', 0, 0, 'Select profiles on a single face to restrict the pattern to these profiles. Only makes sense if a single face is selected.')
-        self.type = Inputs.DropDownInput('type', 'Type', TriangleInputs.types.items(), TriangleInputs.types['Triangles'], 'The type of pattern to use.')
+        self.type = Inputs.DropDownInput('type', 'Type', utils.misc.class_property_values(PatternInputs.Types), PatternInputs.Types.TRIANGLES.value, 'The type of pattern to use.')
         self.preferred_width = Inputs.FloatInput('preferred_width', 'Preferred Width', 10, 'Indicates the preferred width of the shape.', units)
         self.preferred_height = Inputs.FloatInput('preferred_height', 'Preferred Height', 15, 'Indicates the preferred height of the shape.', units)
         self.spacing = Inputs.FloatInput('spacing', 'Spacing', 2, 'Spacing between the shapes.', units)
@@ -48,15 +47,15 @@ class TriangleInputs(Inputs.Inputs):
         super().__init__()
 
 
-class TrianglePattern(CustomComputeFeature.CustomComputeFeature):
+class PatternCutout(CustomComputeFeature.CustomComputeFeature):
     plugin_id = 'antonPatternCutouts'
     plugin_name = 'PatternCutouts'
     plugin_desc = 'Pattern Cutouts'
     plugin_tooltip = 'Creates patterned cutouts of various shapes.'
-    inputs: TriangleInputs
+    inputs: PatternInputs
 
-    def create_inputs(self) -> TriangleInputs:
-        return TriangleInputs(self.app.activeProduct.unitsManager)
+    def create_inputs(self) -> PatternInputs:
+        return PatternInputs(self.app.activeProduct.unitsManager)
 
     def execute(self) -> list[Combine.Combine]:
         result: list[Combine.Combine] = []
@@ -67,16 +66,16 @@ class TrianglePattern(CustomComputeFeature.CustomComputeFeature):
     
     def input_changed(self, input):
         if input.id == self.inputs.type.id:
-            self.inputs.profiles.input.isVisible = self.inputs.type.value != TriangleInputs.types['Froli']
+            self.inputs.profiles.input.isVisible = self.inputs.type.value != PatternInputs.Types.FROLI.value
 
-            dimensions_enabled = self.inputs.type.value == TriangleInputs.types['Triangles'] or self.inputs.type.value == TriangleInputs.types['Rhombuses']
+            dimensions_enabled = self.inputs.type.value == PatternInputs.Types.TRIANGLES.value or self.inputs.type.value == PatternInputs.Types.RHOMBUSES.value
             self.inputs.preferred_width.input.isVisible = dimensions_enabled
             self.inputs.preferred_height.input.isVisible = dimensions_enabled
             self.inputs.adaptive.input.isVisible = dimensions_enabled
 
-            self.inputs.spacing.input.isVisible = dimensions_enabled or self.inputs.type.value == TriangleInputs.types['Froli']
-            self.inputs.compensate_fillet.input.isVisible = self.inputs.type.value == TriangleInputs.types['Triangles']
-            self.inputs.remainder.input.isVisible = self.inputs.type.value != TriangleInputs.types['Froli']
+            self.inputs.spacing.input.isVisible = dimensions_enabled or self.inputs.type.value == PatternInputs.Types.FROLI.value
+            self.inputs.compensate_fillet.input.isVisible = self.inputs.type.value == PatternInputs.Types.TRIANGLES.value
+            self.inputs.remainder.input.isVisible = self.inputs.type.value != PatternInputs.Types.FROLI.value
 
     def create_pattern_for_face(self, face: adsk.fusion.BRepFace, profiles: list[adsk.fusion.Profile]) -> adsk.fusion.BRepBody:
         mgr = adsk.fusion.TemporaryBRepManager.get()
@@ -88,15 +87,15 @@ class TrianglePattern(CustomComputeFeature.CustomComputeFeature):
 
         type = self.inputs.type.value
         generator = None
-        if type == TriangleInputs.types['Triangles']:
+        if type == PatternInputs.Types.TRIANGLES.value:
             generator = create_triangles    
-        elif type == TriangleInputs.types['Rhombuses']:
+        elif type == PatternInputs.Types.RHOMBUSES.value:
             generator = create_rhombuses_from_inputs
-        elif type == TriangleInputs.types['Cross']:
+        elif type == PatternInputs.Types.CROSS.value:
             generator = create_cross
-        elif type == TriangleInputs.types['Rounded Rectangle']:
+        elif type == PatternInputs.Types.ROUNDED_RECTANGLE.value:
             generator = create_rounded_rect
-        elif type == TriangleInputs.types['Froli']:
+        elif type == PatternInputs.Types.FROLI.value:
             generator = create_froli_grid
         else:
             raise ValueError(f'Unknown pattern type: {type}')
@@ -122,7 +121,7 @@ class TrianglePattern(CustomComputeFeature.CustomComputeFeature):
             return result
 
 
-def create_triangles(face: adsk.fusion.BRepFace, cut: Vector3D,  inputs: TriangleInputs) -> adsk.fusion.BRepBody:
+def create_triangles(face: adsk.fusion.BRepFace, cut: Vector3D,  inputs: PatternInputs) -> adsk.fusion.BRepBody:
     mgr = adsk.fusion.TemporaryBRepManager.get()
     spacing = inputs.spacing.value * 2
     fillet = inputs.fillet.value
@@ -215,7 +214,7 @@ class RhombusParameters:
     fillet: float
     adaptive: bool
 
-def create_rhombuses_from_inputs(face: adsk.fusion.BRepFace, cut: Vector3D,  inputs: TriangleInputs) -> adsk.fusion.BRepBody:
+def create_rhombuses_from_inputs(face: adsk.fusion.BRepFace, cut: Vector3D,  inputs: PatternInputs) -> adsk.fusion.BRepBody:
     params = RhombusParameters(
         width=inputs.preferred_width.value,
         height=inputs.preferred_height.value,
@@ -330,7 +329,7 @@ def create_rhombuses(face: adsk.fusion.BRepFace, cut: Vector3D,  params: Rhombus
     return result
 
 
-def create_cross(face: adsk.fusion.BRepFace, cut: Vector3D,  inputs: TriangleInputs) -> adsk.fusion.BRepBody:
+def create_cross(face: adsk.fusion.BRepFace, cut: Vector3D,  inputs: PatternInputs) -> adsk.fusion.BRepBody:
     mgr = adsk.fusion.TemporaryBRepManager.get()
     long_edge, short_edge = utils.brep.longest_and_adjecent_edge_of_face(face)
     face_length = long_edge.length
@@ -367,7 +366,7 @@ def create_cross(face: adsk.fusion.BRepFace, cut: Vector3D,  inputs: TriangleInp
     return result
     
 
-def create_rounded_rect(face: adsk.fusion.BRepFace, cut: Vector3D,  inputs: TriangleInputs) -> adsk.fusion.BRepBody:
+def create_rounded_rect(face: adsk.fusion.BRepFace, cut: Vector3D,  inputs: PatternInputs) -> adsk.fusion.BRepBody:
     mgr = adsk.fusion.TemporaryBRepManager.get()
     long_edge, short_edge = utils.brep.longest_and_adjecent_edge_of_face(face)
     face_length = long_edge.length
@@ -383,7 +382,7 @@ def create_rounded_rect(face: adsk.fusion.BRepFace, cut: Vector3D,  inputs: Tria
     return result
 
 
-def create_froli_grid(face: adsk.fusion.BRepFace, cut: Vector3D,  inputs: TriangleInputs) -> adsk.fusion.BRepBody:
+def create_froli_grid(face: adsk.fusion.BRepFace, cut: Vector3D,  inputs: PatternInputs) -> adsk.fusion.BRepBody:
     long_edge, short_edge = utils.brep.longest_and_adjecent_edge_of_face(face)
     face_length = long_edge.length
     face_width = short_edge.length

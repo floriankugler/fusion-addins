@@ -143,6 +143,8 @@ def find_carcass_edge_for_front_edge(front_edge: adsk.fusion.BRepEdge, front_fac
         
         # Check whether the center point of the door edge is within the bounds of the carcass edge
         edge = closest_parallel_edge_of_face(front_edge, face)
+        if not edge:
+            return False
         _, lower, upper = edge.geometry.evaluator.getParameterExtents()
         _, param = edge.geometry.evaluator.getParameterAtPoint(door_edge_center)
         if param <= lower or param >= upper:
@@ -362,9 +364,11 @@ def project_point_onto_face(point: Point3D, face: adsk.fusion.BRepFace) -> Point
     _, projected_point = face.evaluator.getPointAtParameter(param)
     return projected_point
 
-def closest_parallel_edge_of_face(edge: adsk.fusion.BRepEdge, face: adsk.fusion.BRepFace) -> adsk.fusion.BRepEdge:
+def closest_parallel_edge_of_face(edge: adsk.fusion.BRepEdge, face: adsk.fusion.BRepFace) -> adsk.fusion.BRepEdge | None:
     face_edges = outer_edges_of_face(face)
     parallel_edges = [e for e in face_edges if is_parallel(edge, e)]
+    if not parallel_edges:
+        return None
     face_normal = normal_into_face(parallel_edges[0], face)
     distance = float('inf')
     reference = edge.startVertex.geometry.asVector()

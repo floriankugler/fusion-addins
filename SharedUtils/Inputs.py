@@ -1,6 +1,7 @@
 import adsk.core, adsk.fusion
 from typing import Any
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 import utils
 
 
@@ -116,7 +117,10 @@ class FloatInput(Input):
         val = self.input.value
         if val is not None:
             self.value = val
-            self.expression = self.input.expression
+            try:
+                self.expression = self.input.expression
+            except:
+                pass
 
 class IntegerInput(Input):
     default_value: int
@@ -154,12 +158,17 @@ class IntegerInput(Input):
             self.value = val
 
 class DropDownInput(Input):
-    default_value: str
+    @dataclass
+    class Item:
+        name: str
+        value: int
+
+    default_value: int
     value: int
-    options: list[tuple[str, int]]
+    options: list[Item]
     input: adsk.core.DropDownCommandInput
 
-    def __init__(self, id, name, options, default_value, tool_tip):
+    def __init__(self, id, name, options: list[Item], default_value: int, tool_tip):
         super().__init__(id, name, tool_tip)
         self.options = options
         self.default_value = default_value
@@ -169,8 +178,8 @@ class DropDownInput(Input):
         items = self.input.listItems
         val = params.itemById(self.id).value if params else self.default_value
         for option in self.options:
-            selected = val == option[1]
-            items.add(option[0], selected)
+            selected = val == option.value
+            items.add(option.name, selected)
 
     def create_in_feature_input(self, feature_input: adsk.fusion.CustomFeatureInput):
         value_input = adsk.core.ValueInput.createByReal(self.value)
@@ -184,14 +193,14 @@ class DropDownInput(Input):
         if param is None: 
             return
         self.value = int(param.value)
-        name = next(key for key, value in self.options if value == self.value)
+        name = next(item.name for item in self.options if item.value == self.value)
         if self.input:
             for item in self.input.listItems:
                 item.isSelected = item.name == name
 
     def update_from_input(self):
         name = self.input.selectedItem.name
-        val = next(value for key, value in self.options if key == name)
+        val = next(item.value for item in self.options if item.name == name)
         self.value = val
 
 

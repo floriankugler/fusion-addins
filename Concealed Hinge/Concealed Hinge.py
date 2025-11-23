@@ -21,15 +21,14 @@ def stop(context):
     del _feature
 
 class ConcealedHingeInputs(Inputs.Inputs):
-    types = {
-        'Blum CLIP top 110 Thin +0': 0,
-        'Blum CLIP top 110 Thin +3': 1,
-    }
+    class Types:
+        BLUM_CLIP_TOP_THIN_0 = Inputs.DropDownInput.Item('Blum CLIP top 110 Thin +0', 0)
+        BLUM_CLIP_TOP_THIN_3 = Inputs.DropDownInput.Item('Blum CLIP top 110 Thin +3', 1)
 
     def __init__(self, units_manager: adsk.core.UnitsManager):
         units = units_manager.defaultLengthUnits
         self.door_edges = Inputs.SelectionByEntityTokenInput('edges', 'Door hinge edges', 'LinearEdges', 1, 0, 'Select the hinged edge of the doors.')
-        self.type = Inputs.DropDownInput('type', 'Hinge type', self.types.items(), 0, 'The type of pattern to use.')
+        self.type = Inputs.DropDownInput('type', 'Hinge type', utils.misc.class_property_values(ConcealedHingeInputs.Types), ConcealedHingeInputs.Types.BLUM_CLIP_TOP_THIN_0.value, 'The type of pattern to use.')
         self.offset = Inputs.FloatInput('offset', 'Offset', 6, 'Distance of the first connector from the start of the edge.', units) 
         self.offset.minimum_value = 2.7
         self.predrill_diameter = Inputs.FloatInput('predrillDiameter', 'Predrill Diameter', 2.54/8, 'Predrill diameter used for screw holes.', units) 
@@ -55,15 +54,14 @@ class ConcealedHingeFeature(CustomComputeFeature.CustomComputeFeature):
             carcass_edge = utils.brep.find_carcass_edge_for_front_edge(door_edge, door_face)
             if not carcass_edge:
                 continue
-            positions = self.hinge_positions(carcass_edge, door_face)
+            positions = self.hinge_positions(carcass_edge, door_edge)
             carcass_geometry = self.carcass_holes(carcass_edge, door_face, positions)
-            door_geometry = self.door_holes(carcass_edge, door_face, positions)
+            door_geometry = self.door_holes(carcass_edge, door_edge, door_face, positions)
             result.append(Combine.Combine(carcass_edge.body, carcass_geometry, Combine.Operation.CUT))
             result.append(Combine.Combine(door_face.body, door_geometry, Combine.Operation.CUT))
         return result
     
-    def hinge_positions(self, carcass_edge: adsk.fusion.BRepEdge, door_face: adsk.fusion.BRepFace) -> list[Vector3D]:
-        door_edge = utils.brep.closest_parallel_edge_of_face(carcass_edge, door_face)
+    def hinge_positions(self, carcass_edge: adsk.fusion.BRepEdge, door_edge: adsk.fusion.BRepEdge) -> list[Vector3D]:
         start_point = utils.brep.project_point_onto_edge(door_edge.startVertex.geometry, carcass_edge)
         end_point = utils.brep.project_point_onto_edge(door_edge.endVertex.geometry, carcass_edge)
         dir = utils.vector.subtract(end_point.asVector(), start_point.asVector())
@@ -86,16 +84,15 @@ class ConcealedHingeFeature(CustomComputeFeature.CustomComputeFeature):
         ])
         return utils.brep.place_body_on_face_at_positions(group, carcass_face, carcass_edge, positions)
 
-    def door_holes(self, carcass_edge: adsk.fusion.BRepEdge, door_face: adsk.fusion.BRepFace, positions: list[Vector3D]) -> adsk.fusion.BRepBody:
-        hinge_edge = utils.brep.closest_parallel_edge_of_face(carcass_edge, door_face)
+    def door_holes(self, carcass_edge: adsk.fusion.BRepEdge, hinge_edge: adsk.fusion.BRepEdge, door_face: adsk.fusion.BRepFace, positions: list[Vector3D]) -> adsk.fusion.BRepBody:
         normal_into_door_face = utils.brep.normal_into_face(hinge_edge, door_face)
         distance_vector = utils.vector.subtract(hinge_edge.startVertex.geometry.asVector(), carcass_edge.startVertex.geometry.asVector())
         distance = - normal_into_door_face.dotProduct(distance_vector) 
 
         match self.inputs.type.value:
-            case 0:  # Blum CLIP top 110 Thin +0
+            case ConcealedHingeInputs.Types.BLUM_CLIP_TOP_THIN_0.value:
                 distance += 2.7
-            case 1:  # Blum CLIP top 110 Thin +3
+            case ConcealedHingeInputs.Types.BLUM_CLIP_TOP_THIN_3.value:
                 distance += 3
         cyl = utils.brep.cylinder(0.5, -0.5)
         group = utils.brep.union([
