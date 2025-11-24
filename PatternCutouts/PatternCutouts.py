@@ -30,6 +30,7 @@ class PatternInputs(Inputs.Inputs):
         CROSS = Inputs.DropDownInput.Item('Cross', 2)
         ROUNDED_RECTANGLE = Inputs.DropDownInput.Item('Rounded Rectangle', 3)
         FROLI = Inputs.DropDownInput.Item('Froli', 4)
+        ADAPTIVE = Inputs.DropDownInput.Item('Adaptive', 5)
 
     def __init__(self, units_manager: adsk.core.UnitsManager):
         units = units_manager.defaultLengthUnits
@@ -40,6 +41,7 @@ class PatternInputs(Inputs.Inputs):
         self.preferred_height = Inputs.FloatInput('preferred_height', 'Preferred Height', 15, 'Indicates the preferred height of the shape.', units)
         self.spacing = Inputs.FloatInput('spacing', 'Spacing', 2, 'Spacing between the shapes.', units)
         self.inset = Inputs.FloatInput('inset', 'Inset', 2, 'Inset of the pattern from the face\'s edges', units)
+        self.inner_loop_offset = Inputs.FloatInput('inner_loop_offset', 'Inner Loop Offset', 2, 'Material to keep around the inner loop of the face', units)
         self.fillet = Inputs.FloatInput('fillet', 'Fillet', 0.8, 'Fillet radius', units)
         self.compensate_fillet = Inputs.CheckboxInput('compensate_fillet', 'Compensate Fillet', False, 'Makes all triangles in one row appear to be bottom and top aligned, irrespective of the fillet applied to the corners')
         self.adaptive = Inputs.CheckboxInput('adaptive', 'Adaptive', True, 'Prioritzes filling up the available space with the pattern over adhering to the width/height values, treating them more a starting point.')
@@ -77,6 +79,8 @@ class PatternCutout(CustomComputeFeature.CustomComputeFeature):
             self.inputs.compensate_fillet.input.isVisible = self.inputs.type.value == PatternInputs.Types.TRIANGLES.value
             self.inputs.remainder.input.isVisible = self.inputs.type.value != PatternInputs.Types.FROLI.value
 
+            self.inputs.inner_loop_offset.input.isVisible = self.inputs.type.value == PatternInputs.Types.ADAPTIVE.value
+
     def create_pattern_for_face(self, face: adsk.fusion.BRepFace, profiles: list[adsk.fusion.Profile]) -> adsk.fusion.BRepBody:
         mgr = adsk.fusion.TemporaryBRepManager.get()
         opposite_face = utils.brep.get_opposite_face(face)
@@ -85,30 +89,19 @@ class PatternCutout(CustomComputeFeature.CustomComputeFeature):
         cut_normal = utils.brep.normal_towards_face(face, opposite_face)
         cut = utils.vector.scaled_by(cut_normal, depth)
 
-        type = self.inputs.type.value
-        generator = None
-        if type == PatternInputs.Types.TRIANGLES.value:
-            generator = create_triangles    
-        elif type == PatternInputs.Types.RHOMBUSES.value:
-            generator = create_rhombuses_from_inputs
-        elif type == PatternInputs.Types.CROSS.value:
-            generator = create_cross
-        elif type == PatternInputs.Types.ROUNDED_RECTANGLE.value:
-            generator = create_rounded_rect
-        elif type == PatternInputs.Types.FROLI.value:
-            generator = create_froli_grid
-        else:
-            raise ValueError(f'Unknown pattern type: {type}')
-
         if len(profiles) > 0:
             result: adsk.fusion.BRepBody | None = None
             for profile in profiles:
                 sketch = profile.parentSketch
                 profile_body = mgr.copy(profile.face.body)
                 mgr.transform(profile_body, utils.matrix.transform_from_root(sketch.origin, sketch.xDirection, sketch.yDirection))
+                mgr.booleanOperation(profile_body, face.body, adsk.fusion.BooleanTypes.IntersectionBooleanType) # type: ignore
                 profile_face = profile_body.faces[0]
-                next_triangles = generator(profile_face, cut, self.inputs)
-                mgr.transform(next_triangles, utils.matrix.transform_into_face(profile_face, cut))
+                coords = utils.brep.coordinate_system_into_face(profile_face, z=cut)
+                origin_on_face = utils.brep.project_point_onto_face(coords[0], face)
+                coords_on_face = (origin_on_face,) + coords[1:]
+                next_triangles = self.call_generator(profile_face, cut, coords_on_face)
+                mgr.transform(next_triangles, utils.matrix.transform_from_root(*coords_on_face[:3]))
                 if result:
                     mgr.booleanOperation(result, next_triangles, adsk.fusion.BooleanTypes.UnionBooleanType) # type: ignore
                 else:
@@ -116,9 +109,27 @@ class PatternCutout(CustomComputeFeature.CustomComputeFeature):
             assert(result is not None)
             return result
         else:
-            result = generator(face, cut, self.inputs)
-            mgr.transform(result, utils.matrix.transform_into_face(face, cut))
+            coords = utils.brep.coordinate_system_into_face(face, z=cut)
+            result = self.call_generator(face, cut, coords)
+            mgr.transform(result, utils.matrix.transform_from_root(*coords[:3]))
             return result
+        
+    def call_generator(self, face: adsk.fusion.BRepFace, cut: Vector3D, coords: tuple[Point3D, Vector3D, Vector3D, Vector3D]):
+        type = self.inputs.type.value
+        if type == PatternInputs.Types.TRIANGLES.value:
+            return create_triangles(face, cut, self.inputs)
+        elif type == PatternInputs.Types.RHOMBUSES.value:
+            return create_rhombuses_from_inputs(face, cut, self.inputs)
+        elif type == PatternInputs.Types.CROSS.value:
+            return create_cross(face, cut, self.inputs)
+        elif type == PatternInputs.Types.ROUNDED_RECTANGLE.value:
+            return create_rounded_rect(face, cut, self.inputs)
+        elif type == PatternInputs.Types.FROLI.value:
+            return create_froli_grid(face, cut, self.inputs)
+        elif type == PatternInputs.Types.ADAPTIVE.value:
+            return create_adaptive(face, cut, coords, self.inputs)
+        else:
+            raise ValueError(f'Unknown pattern type: {type}')
 
 
 def create_triangles(face: adsk.fusion.BRepFace, cut: Vector3D,  inputs: PatternInputs) -> adsk.fusion.BRepBody:
@@ -367,7 +378,6 @@ def create_cross(face: adsk.fusion.BRepFace, cut: Vector3D,  inputs: PatternInpu
     
 
 def create_rounded_rect(face: adsk.fusion.BRepFace, cut: Vector3D,  inputs: PatternInputs) -> adsk.fusion.BRepBody:
-    mgr = adsk.fusion.TemporaryBRepManager.get()
     long_edge, short_edge = utils.brep.longest_and_adjecent_edge_of_face(face)
     face_length = long_edge.length
     face_width = short_edge.length
@@ -378,8 +388,7 @@ def create_rounded_rect(face: adsk.fusion.BRepFace, cut: Vector3D,  inputs: Patt
     result_bb = result.preciseBoundingBox
     offset_x = face_length/2 - (result_bb.maxPoint.x + result_bb.minPoint.x)/2
     offset_y = face_width/2 - (result_bb.maxPoint.y + result_bb.minPoint.y)/2
-    mgr.transform(result, utils.matrix.translation_matrix(Vector3D.create(offset_x, offset_y, 0)))
-    return result
+    return utils.brep.transformed(result, utils.matrix.translation_matrix(Vector3D.create(offset_x, offset_y, 0)))
 
 
 def create_froli_grid(face: adsk.fusion.BRepFace, cut: Vector3D,  inputs: PatternInputs) -> adsk.fusion.BRepBody:
@@ -413,3 +422,78 @@ def create_froli_grid(face: adsk.fusion.BRepFace, cut: Vector3D,  inputs: Patter
         fillet=inputs.fillet.value,
         adaptive=False
     ))
+
+def create_adaptive(face: adsk.fusion.BRepFace, cut: Vector3D, coords: tuple[Point3D, Vector3D, Vector3D, Vector3D], inputs: PatternInputs) -> adsk.fusion.BRepBody:
+    long_edge, short_edge = utils.brep.longest_and_adjecent_edge_of_face(face)
+    origin, xn, yn, _ = coords
+    origin = origin.asVector()
+
+    # Create base box
+    face_length = long_edge.length
+    face_width = short_edge.length
+    inset = inputs.inset.value
+    height = face_width - 2*inset
+    width = face_length - 2*inset
+    cut_body = utils.brep.transformed(utils.brep.rectangle(width, height, cut.length), utils.matrix.translation_matrix(Vector3D.create(face_length/2, face_width/2, 0)))
+
+    # Create cutouts for inner loops
+    offset = inputs.inner_loop_offset.value
+    measure = adsk.core.Application.get().measureManager
+    inner_loops = [l for l in face.loops if not l.isOuter]
+    bbs: list[adsk.core.OrientedBoundingBox3D] = []
+    for l in inner_loops:
+        loop_bb = measure.getOrientedBoundingBox(l, xn, yn)
+        loop_bb.length += 2*offset
+        loop_bb.width += 2*offset
+        center = utils.vector.subtract(loop_bb.centerPoint.asVector(), origin)
+        loop_bb.centerPoint = Point3D.create(center.dotProduct(xn), center.dotProduct(yn), 0)
+        bbs.append(loop_bb)
+
+    # Expand cutouts to edges if there's no material remaining
+    if inputs.remainder.value == 0:
+        for bb in bbs:
+            xl = bb.centerPoint.x - bb.length/2 - inset
+            xr = (face_length - inset) - (bb.centerPoint.x + bb.length/2)
+            yb = bb.centerPoint.y - bb.width/2 - inset
+            yt = (face_width - inset) - (bb.centerPoint.y + bb.width/2)
+            distances = [
+                (xl, Vector3D.create(-xl/2, 0, 0)),
+                (xr, Vector3D.create(xr/2, 0, 0)),
+                (yb, Vector3D.create(0, -yb/2, 0)),
+                (yt, Vector3D.create(0, yt/2, 0))
+            ]
+            distances.sort(key=lambda x: x[0])
+            for idx, d in enumerate(distances):
+                if d[0] > 0 and (idx == 0 or d[0] < inputs.fillet.value*2):
+                    bb.length += abs(d[1].x)*2
+                    bb.width += abs(d[1].y)*2
+                    bb.centerPoint = utils.vector.add(bb.centerPoint.asVector(), d[1]).asPoint()
+            
+    for bb in bbs:
+        loop_body = utils.brep.transformed(utils.brep.rectangle(bb.length, bb.width, cut.length), utils.matrix.translation_matrix(Vector3D.create(bb.centerPoint.x, bb.centerPoint.y, 0)))
+        cut_body = utils.brep.subtract(cut_body, loop_body)
+
+    # Apply fillets to outer corners of the cut body
+    fillet = inputs.fillet.value
+    if fillet > 0:
+        faces = utils.fusion.as_list(cut_body.faces)
+        faces.sort(key=lambda f: f.area, reverse=True)
+        box_face = next((f for f in faces if f.centroid.z == 0))
+        box_edges = utils.brep.outer_edges_of_face(box_face)
+        for edge1, edge2 in zip(box_edges, box_edges[1:] + [box_edges[0]]):
+            point = edge1.endVertex.geometry.asVector()
+            leg1 = utils.vector.subtract(edge1.startVertex.geometry.asVector(), point)
+            leg2 = utils.vector.subtract(edge2.endVertex.geometry.asVector(), point)
+            fillet_cut_body = utils.brep.fillet_cut_body(point.asPoint(), leg1, leg2, inputs.fillet.value, Vector3D.create(0, 0, cut.length))
+            corner_test = utils.vector.add(
+                point,
+                utils.vector.scaled_by(utils.vector.normalized(utils.vector.add(leg1, leg2)), 0.1)
+            ).asPoint()
+            _, test_param = box_face.evaluator.getParameterAtPoint(corner_test)
+            is_inner_corner = box_face.evaluator.isParameterOnFace(test_param)
+            if is_inner_corner:
+                cut_body = utils.brep.subtract(cut_body, fillet_cut_body)
+            else:            
+                cut_body = utils.brep.union([cut_body, fillet_cut_body])
+
+    return cut_body

@@ -210,10 +210,10 @@ def normal_along_edge(edge: adsk.fusion.BRepEdge) -> Vector3D:
     result.normalize()
     return result
 
-def fillet_cut_body(point: Point3D, leg1: Vector3D, leg2: Vector3D, fillet_radius: float, thickness) -> adsk.fusion.BRepBody:
+def fillet_cut_body(point: Point3D, leg1: Vector3D, leg2: Vector3D, fillet_radius: float, cut: Vector3D) -> adsk.fusion.BRepBody:
     mgr = adsk.fusion.TemporaryBRepManager.get()
-    leg1.normalize()
-    leg2.normalize()
+    leg1 = vector.normalized(leg1)
+    leg2 = vector.normalized(leg2)
     angle = math.acos(leg1.dotProduct(leg2))
     cylinder_mid_distance = fillet_radius/math.sin(angle/2)
     cylinder_leg_distance = fillet_radius/math.tan(angle/2)
@@ -224,11 +224,11 @@ def fillet_cut_body(point: Point3D, leg1: Vector3D, leg2: Vector3D, fillet_radiu
     cyl1.scaleBy(cylinder_mid_distance)
     cyl1.add(point.asVector())
     cyl2 = cyl1.copy()
-    cyl2.add(Vector3D.create(0, 0, thickness))
+    cyl2.add(cut)
     cyl = mgr.createCylinderOrCone(cyl1.asPoint(), fillet_radius, cyl2.asPoint(), fillet_radius)
     cut_cyl1 = point.copy()
     cut_cyl2 = point.copy()
-    cut_cyl2.translateBy(Vector3D.create(0, 0, thickness))
+    cut_cyl2.translateBy(cut)
     cut_cyl = mgr.createCylinderOrCone(cut_cyl1, cylinder_leg_distance, cut_cyl2, cylinder_leg_distance)
     mgr.booleanOperation(cut_cyl, cyl, adsk.fusion.BooleanTypes.DifferenceBooleanType) # type: ignore
     return cut_cyl
@@ -250,9 +250,9 @@ def isosceles_triangle(width: float, height: float, thickness: float, fillet_rad
     mgr.transform(box, matrix.translation_matrix(Vector3D.create(0, height, 0)))
 
     if fillet_radius > 0:
-        fillet1 = fillet_cut_body(Point3D.create(width/2, 0, 0), Vector3D.create(-width/2, 0, 0), Vector3D.create(-width/2, height, 0), fillet_radius, thickness)
+        fillet1 = fillet_cut_body(Point3D.create(width/2, 0, 0), Vector3D.create(-width/2, 0, 0), Vector3D.create(-width/2, height, 0), fillet_radius, Vector3D.create(0, 0, thickness))
         mgr.booleanOperation(box, fillet1, adsk.fusion.BooleanTypes.DifferenceBooleanType) # type: ignore
-        fillet2 = fillet_cut_body(Point3D.create(0, height, 0), Vector3D.create(-width/2, -height, 0), Vector3D.create(width/2, -height, 0), fillet_radius, thickness)
+        fillet2 = fillet_cut_body(Point3D.create(0, height, 0), Vector3D.create(-width/2, -height, 0), Vector3D.create(width/2, -height, 0), fillet_radius, Vector3D.create(0, 0, thickness))
         mgr.booleanOperation(box, fillet2, adsk.fusion.BooleanTypes.DifferenceBooleanType) # type: ignore
 
     mgr.booleanOperation(box, trim_body, adsk.fusion.BooleanTypes.IntersectionBooleanType) # type: ignore
@@ -261,19 +261,22 @@ def isosceles_triangle(width: float, height: float, thickness: float, fillet_rad
     mgr.booleanOperation(box, box2, adsk.fusion.BooleanTypes.UnionBooleanType) # type: ignore
     return box
 
+def rectangle(width: float, height: float, thickness: float) -> adsk.fusion.BRepBody:
+    x = Vector3D.create(1, 0, 0)
+    y = Vector3D.create(0, 1, 0)
+    bb = OrientedBoundingBox3D.create(Point3D.create(0, 0, thickness/2), x, y, width, height, thickness)
+    mgr = adsk.fusion.TemporaryBRepManager.get()
+    return mgr.createBox(bb)
+
 # Creates a rounded rectangle in the xy plane. Width is along x, height along y, origin is at the center. Thickness is in positive z.
 def rounded_rectangle(width: float, height: float, thickness: float, fillet_radius: float = 0) -> adsk.fusion.BRepBody:
     mgr = adsk.fusion.TemporaryBRepManager.get()
-    x = Vector3D.create(1, 0, 0)
-    y = Vector3D.create(0, 1, 0)
-    bb1 = OrientedBoundingBox3D.create(Point3D.create(), x, y, width - 2*fillet_radius, height, thickness)
-    bb2 = OrientedBoundingBox3D.create(Point3D.create(), x, y, width, height - 2*fillet_radius, thickness)
-    box = mgr.createBox(bb1)
-    box2 = mgr.createBox(bb2)
-    mgr.booleanOperation(box, box2, adsk.fusion.BooleanTypes.UnionBooleanType) # type: ignore
-    mgr.transform(box, matrix.translation_matrix(Vector3D.create(0, 0, thickness/2)))
+    box = union([
+        rectangle(width - 2*fillet_radius, height, thickness),
+        rectangle(width, height - 2*fillet_radius, thickness)
+    ])
     if fillet_radius > 0:
-        cyl = mgr.createCylinderOrCone(Point3D.create(), fillet_radius, Point3D.create(0, 0, thickness), fillet_radius)
+        cyl = cylinder(fillet_radius, thickness)
         fillet_points = [
             Vector3D.create(-width/2+fillet_radius, height/2-fillet_radius, 0),
             Vector3D.create(width/2-fillet_radius, height/2-fillet_radius, 0),
@@ -281,9 +284,7 @@ def rounded_rectangle(width: float, height: float, thickness: float, fillet_radi
             Vector3D.create(-width/2+fillet_radius, -height/2+fillet_radius, 0),
         ]
         for p in fillet_points:
-            c = mgr.copy(cyl)
-            mgr.transform(c, matrix.translation_matrix(p))
-            mgr.booleanOperation(box, c, adsk.fusion.BooleanTypes.UnionBooleanType) # type: ignore
+            mgr.booleanOperation(box, transformed(cyl, matrix.translation_matrix(p)), adsk.fusion.BooleanTypes.UnionBooleanType) # type: ignore
     return box
 
 # Creates a rhombus, origin as at its center, width is along x, height along y. 
@@ -300,11 +301,11 @@ def rhombus(width: float, height: float, thickness: float, fillet_radius: float 
     mgr.transform(box2, matrix.rotation_matrix(-small_angle/2, Vector3D.create(0, 0, 1), Point3D.create(0, 0, 0)))
     mgr.booleanOperation(box, box2, adsk.fusion.BooleanTypes.IntersectionBooleanType) # type: ignore
     if fillet_radius > 0:
-        cut1 = fillet_cut_body(Point3D.create(0, height/2, -thickness/2), Vector3D.create(-width/2, -height/2, 0), Vector3D.create(width/2, -height/2, 0), fillet_radius, thickness)    
+        cut1 = fillet_cut_body(Point3D.create(0, height/2, -thickness/2), Vector3D.create(-width/2, -height/2, 0), Vector3D.create(width/2, -height/2, 0), fillet_radius, Vector3D.create(0, 0, thickness))    
         mgr.booleanOperation(box, cut1, adsk.fusion.BooleanTypes.DifferenceBooleanType) # type: ignore
         mgr.transform(cut1, matrix.mirror_matrix(Point3D.create(), Vector3D.create(1, -1, 1)))
         mgr.booleanOperation(box, cut1, adsk.fusion.BooleanTypes.DifferenceBooleanType) # type: ignore
-        cut2 = fillet_cut_body(Point3D.create(-width/2, 0, -thickness/2), Vector3D.create(width/2, height/2, 0), Vector3D.create(width/2, -height/2, 0), fillet_radius, thickness)
+        cut2 = fillet_cut_body(Point3D.create(-width/2, 0, -thickness/2), Vector3D.create(width/2, height/2, 0), Vector3D.create(width/2, -height/2, 0), fillet_radius, Vector3D.create(0, 0, thickness))
         mgr.booleanOperation(box, cut2, adsk.fusion.BooleanTypes.DifferenceBooleanType) # type: ignore
         mgr.transform(cut2, matrix.mirror_matrix(Point3D.create(), Vector3D.create(-1, 1, 1)))
         mgr.booleanOperation(box, cut2, adsk.fusion.BooleanTypes.DifferenceBooleanType) # type: ignore
@@ -340,6 +341,12 @@ def union(bodies: list[adsk.fusion.BRepBody]) -> adsk.fusion.BRepBody:
         mgr.booleanOperation(result, body, adsk.fusion.BooleanTypes.UnionBooleanType) # type: ignore
     return result
 
+def subtract(b1: adsk.fusion.BRepBody, b2: adsk.fusion.BRepBody) -> adsk.fusion.BRepBody:
+    mgr = adsk.fusion.TemporaryBRepManager.get()
+    result = mgr.copy(b1)
+    mgr.booleanOperation(result, b2, adsk.fusion.BooleanTypes.DifferenceBooleanType) # type: ignore
+    return result
+
 # Constructs a right handed coordinate system on the face with the z axis pointing away from the body. The origin is either at the edges start or end vertex in order for positive z and y to point into the face's boundaries.
 def coordinate_system_on_face(face: adsk.fusion.BRepFace, edge: adsk.fusion.BRepEdge) -> tuple[Point3D, Vector3D, Vector3D, Vector3D]:
     origin = edge.startVertex.geometry
@@ -354,6 +361,22 @@ def coordinate_system_on_face(face: adsk.fusion.BRepFace, edge: adsk.fusion.BRep
         z = x.crossProduct(y)
     return (origin, x, y, z)
 
+def coordinate_system_into_face(face: adsk.fusion.BRepFace, z: Vector3D) -> tuple[Point3D, Vector3D, Vector3D, Vector3D]:
+    """
+    Creates a right-handed coordinate system on the face, so that x is along the long edge, y points towards the center of the face, z points along cut
+    """
+    long_edge, _ = longest_and_adjecent_edge_of_face(face)
+    # y is from the longest_edge into the face
+    y = normal_into_face(long_edge, face)
+    # z points down into the body
+    z = vector.normalized(z)
+    x = y.crossProduct(z)
+    origin = long_edge.startVertex.geometry
+    # if x, computed by y and z, doesn't lign up with the long_edge normal (which is derived from the edge's start to end points), we have to set the origin to the end point
+    if vector.dot_product(x, normal_along_edge(long_edge)) < 0:
+        origin = long_edge.endVertex.geometry
+    return origin , x, y, z
+    
 def project_point_onto_edge(point: Point3D, edge: adsk.fusion.BRepEdge) -> Point3D:
     _, param = edge.evaluator.getParameterAtPoint(point)
     _, projected_point = edge.evaluator.getPointAtParameter(param)
