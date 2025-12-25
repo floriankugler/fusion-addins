@@ -1,5 +1,4 @@
-import sys
-import importlib
+import sys, importlib
 from typing import Callable, Any
 
 def force_reload_modules(*module_names):
@@ -38,5 +37,5 @@ def binary_search(lower_bound: float, upper_bound: float, compute: Callable[[flo
         value = new_value
     return mid
         
-def class_property_values(cls) -> list[Any]:
-    return [value for key, value in cls.__dict__.items() if not key.startswith('__')]
+def class_property_values(cls, type) -> list[Any]:
+    return [value for key, value in cls.__dict__.items() if not key.startswith('__') and (type is None or isinstance(value, type))]

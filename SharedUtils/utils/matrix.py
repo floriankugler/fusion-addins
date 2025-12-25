@@ -44,7 +44,7 @@ def transform_from_root(origin: Point3D, axis1: Vector3D, axis2: Vector3D) -> Ma
     z = Vector3D.create(0, 0, 1)
     t.setToAlignCoordinateSystems(
         zero, x, y, z,
-        origin, axis1, axis2, axis3,
+        origin, vector.normalized(axis1), vector.normalized(axis2), axis3,
     )
     return t
 
@@ -57,7 +57,7 @@ def transform_to_root(origin: Point3D, axis1: Vector3D, axis2: Vector3D) -> Matr
     y = Vector3D.create(0, 1, 0)
     z = Vector3D.create(0, 0, 1)
     t.setToAlignCoordinateSystems(
-        origin, axis1, axis2, axis3,
+        origin, vector.normalized(axis1), vector.normalized(axis2), axis3,
         zero, x, y, z,
     )
     return t

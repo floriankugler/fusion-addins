@@ -1,5 +1,5 @@
 import math
-from typing import Callable, Optional, cast
+from typing import Callable
 from . import fusion, misc, matrix, vector
 import adsk.core, adsk.fusion
 from adsk.core import OrientedBoundingBox3D, Point3D, Vector3D, Matrix3D
@@ -42,28 +42,40 @@ def is_planar(face: adsk.fusion.BRepFace) -> bool:
 def is_linear(edge: adsk.fusion.BRepEdge) -> bool:
     return edge.geometry.curveType == adsk.core.Curve3DTypes.Line3DCurveType
 
-def is_perpendicular(face1: adsk.fusion.BRepFace, face2: adsk.fusion.BRepFace) -> bool:
-    if not isinstance(face1.geometry, adsk.core.Plane) or not isinstance(face2.geometry, adsk.core.Plane):
-        return False
-    return face1.geometry.normal.isPerpendicularTo(face2.geometry.normal)
+def is_perpendicular(a: adsk.fusion.BRepFace | adsk.fusion.BRepEdge, b: adsk.fusion.BRepFace | adsk.fusion.BRepEdge) -> bool:
+    match (a,b):
+        case (adsk.fusion.BRepFace(), adsk.fusion.BRepFace()):
+            if not isinstance(a.geometry, adsk.core.Plane) or not isinstance(b.geometry, adsk.core.Plane):
+                return False
+            return a.geometry.normal.isPerpendicularTo(b.geometry.normal)
+        case (adsk.fusion.BRepEdge(), adsk.fusion.BRepEdge()):
+            if not is_linear(a) or not is_linear(b):
+                return False
+            return normal_along_edge(a).isPerpendicularTo(normal_along_edge(b))
+        case _:
+            raise TypeError(f"Unsupported type: {type(a)}, {type(b)}")
 
-@singledispatch
-def is_parallel(a, b) -> bool:
-    raise TypeError(f"Unsupported type: {type(a)}")
-
-@is_parallel.register
-def _(a: adsk.fusion.BRepFace, b: adsk.fusion.BRepFace) -> bool:
-    if not isinstance(a.geometry, adsk.core.Plane) or not isinstance(b.geometry, adsk.core.Plane):
-        return False
-    return a.geometry.normal.isParallelTo(b.geometry.normal)
-
-@is_parallel.register
-def _(a: adsk.fusion.BRepEdge, b: adsk.fusion.BRepEdge) -> bool:
-    if not is_linear(a) or not is_linear(b):
-        return False
-    n1 = normal_along_edge(a)
-    n2 = normal_along_edge(b)
-    return n1.isParallelTo(n2)
+def is_parallel(a: adsk.fusion.BRepFace | adsk.fusion.BRepEdge | Vector3D, b: adsk.fusion.BRepFace | adsk.fusion.BRepEdge | Vector3D) -> bool:
+    match (a, b):
+        case (adsk.fusion.BRepFace(), adsk.fusion.BRepFace()):
+            if not isinstance(a.geometry, adsk.core.Plane) or not isinstance(b.geometry, adsk.core.Plane):
+                return False
+            return a.geometry.normal.isParallelTo(b.geometry.normal)
+        case (adsk.fusion.BRepEdge(), Vector3D()):
+            if not is_linear(a):
+                return False
+            v1 = vector.subtract(a.endVertex.geometry.asVector(), a.startVertex.geometry.asVector())
+            return v1.isParallelTo(b)
+        case (Vector3D(), adsk.fusion.BRepEdge()):
+            return is_parallel(b, a)
+        case (adsk.fusion.BRepEdge(), adsk.fusion.BRepEdge()):
+            if not is_linear(a) or not is_linear(b):
+                return False
+            v1 = vector.subtract(a.endVertex.geometry.asVector(), a.startVertex.geometry.asVector())
+            v2 = vector.subtract(b.endVertex.geometry.asVector(), b.startVertex.geometry.asVector())
+            return v1.isParallelTo(v2)
+        case _:
+            raise TypeError(f"Unsupported type: {type(a)}, {type(b)}")
 
 def get_opposite_face(face: adsk.fusion.BRepFace) -> adsk.fusion.BRepFace:
     if not is_planar(face): 
@@ -103,7 +115,7 @@ def face_contains_edge(face: adsk.fusion.BRepFace, edge: adsk.fusion.BRepEdge) -
 
     return face.boundingBox.contains(edge.startVertex.geometry) and face.boundingBox.contains(edge.endVertex.geometry)
 
-def find_perpendicular_face(reference_face: adsk.fusion.BRepFace, condition: Callable[[adsk.fusion.BRepFace], bool] = lambda _: True) -> Optional[adsk.fusion.BRepFace]:
+def find_perpendicular_face(reference_face: adsk.fusion.BRepFace, condition: Callable[[adsk.fusion.BRepFace], bool] = lambda _: True) -> adsk.fusion.BRepFace | None:
     if not is_planar(reference_face):
         raise ValueError("Only works with planar reference face")
     
@@ -411,4 +423,135 @@ def place_body_on_face_at_positions(body: adsk.fusion.BRepBody, face: adsk.fusio
     result = union(groups)
     return transformed(result, matrix.transform_from_root(origin, x, y))
 
+def body_definition(body: adsk.fusion.BRepBody, include_lump: Callable[[adsk.fusion.BRepLump], bool] = lambda _: True) -> adsk.fusion.BRepBodyDefinition:
+    """
+    Given a `body` create a `BRepBodyDefinition` for it.
+    The body definition can be used to create a similar body with modifications.
+    Source: https://github.com/EvilHacker/BoxJoint/blob/main/fusion_brep_util.py
+    """
+    bodyDefinition = adsk.fusion.BRepBodyDefinition.create()
+    bodyDefinition.doFullHealing = False
+    for lump in body.lumps:
+        if not include_lump(lump):
+            continue
+        lumpDefinition = bodyDefinition.lumpDefinitions.add()
+        for shell in lump.shells:
+            shellDefinition = lumpDefinition.shellDefinitions.add()
+            for face in shell.faces:
+                faceDefinition = shellDefinition.faceDefinitions.add(
+                    face.geometry, face.isParamReversed)
+                for loop in face.loops:
+                    loopDefinition = faceDefinition.loopDefinitions.add()
+                    for coEdge in loop.coEdges:
+                        edge = coEdge.edge
+                        loopDefinition.bRepCoEdgeDefinitions.add(
+                            bodyDefinition.createEdgeDefinitionByCurve(
+                                bodyDefinition.createVertexDefinition(edge.startVertex.geometry),
+                                bodyDefinition.createVertexDefinition(edge.endVertex.geometry),
+                                edge.geometry),
+                            coEdge.isParamReversed)
+            wire = shell.wire
+            if wire:
+                wireDefinition = shellDefinition.wireDefinition
+                for coEdge in wire.coEdges:
+                    edge = coEdge.edge
+                    wireDefinition.wireEdgeDefinitions.add(
+                        bodyDefinition.createVertexDefinition(edge.startVertex.geometry),
+                        bodyDefinition.createVertexDefinition(edge.endVertex.geometry),
+                        edge.geometry)
+    return bodyDefinition
 
+def create_body_from_curves(curves: list[adsk.core.Curve3D], extrude: Vector3D) -> adsk.fusion.BRepBody:
+    mgr = adsk.fusion.TemporaryBRepManager.get()
+    start_wires, _ = mgr.createWireFromCurves(curves, False)
+    end_wires = transformed(start_wires, matrix.translation_matrix(extrude))
+    ruled_surface = mgr.createRuledSurface(start_wires.wires[0], end_wires.wires[0])
+    for idx in range(1, start_wires.wires.count):
+        ruled = mgr.createRuledSurface(start_wires.wires[idx], end_wires.wires[idx])
+        mgr.booleanOperation(ruled_surface, ruled, adsk.fusion.BooleanTypes.UnionBooleanType) # type: ignore
+    start_face_body = mgr.createFaceFromPlanarWires([start_wires])
+    end_face_body = mgr.createFaceFromPlanarWires([end_wires])
+    body = union([ruled_surface, start_face_body, end_face_body])
+    return body_definition(body).createBody()
+
+def create_body_from_face(face: adsk.fusion.BRepFace, extrude: Vector3D) -> adsk.fusion.BRepBody:
+    curves = [e.geometry for l in face.loops for e in l.edges]
+    return create_body_from_curves(curves, extrude)
+
+def are_sketch_curves_right_handed(curves: list[adsk.fusion.SketchCurve], face: adsk.fusion.BRepFace) -> bool:
+    if len(curves) == 1:
+        return False
+    curve = curves[0]
+    eval: adsk.core.CurveEvaluator3D = curve.worldGeometry.evaluator # type: ignore
+    _, min, max = eval.getParameterExtents()
+    middle = min + 0.5 * (max - min)
+    point = eval.getPointAtParameter(middle)[1]
+    tangent = eval.getTangent(middle)[1]
+    sketch = curve.parentSketch
+    normal = sketch.xDirection.crossProduct(sketch.yDirection)
+    across = vector.normalized(tangent.crossProduct(normal))
+    test_point = vector.add(point.asVector(), vector.scaled_by(across, 0.01)).asPoint()
+    is_on_face = face.isPointOnFace(test_point)
+    return not is_on_face
+
+def is_smooth_edge(edge: adsk.fusion.BRepEdge) -> bool:
+    """
+    Determines whether the given edge is smooth between its two adjacent faces.
+    This only works for edges where the adjacent faces have a uniform normal vector along the edge's extent.
+    """
+    p = edge.startVertex.geometry
+    _, n1 = edge.faces[0].evaluator.getNormalAtPoint(p)
+    _, n2 = edge.faces[1].evaluator.getNormalAtPoint(p)
+    return n1.isParallelTo(n2)
+
+def coordinate_system_around_face(face: adsk.fusion.BRepFace, z: Vector3D, x: Vector3D | None = None) -> tuple[Point3D, Vector3D, Vector3D, Vector3D]:
+    """
+    Creates a right-handed coordinate system on the face, so that the entire face, no matter the shape, lies in the positive x-y quadrant of the coordinate system.
+    The x axis is along the longest dimension of the face's bounding box if not specified. The z axis is returned as passed in.
+    """
+    origin: Point3D
+    xv: Vector3D
+    yv: Vector3D
+    if x:
+        measure = adsk.core.Application.get().measureManager
+        y = x.crossProduct(z)
+        bb = measure.getOrientedBoundingBox(face, x, y)
+        center = bb.centerPoint.asVector()
+        center.subtract(vector.scaled_by(bb.lengthDirection, bb.length/2))
+        center.subtract(vector.scaled_by(bb.widthDirection, bb.width/2))
+        origin = center.asPoint()
+        xv = vector.scaled_by(bb.lengthDirection, bb.length)
+        yv = vector.scaled_by(bb.widthDirection, bb.width)
+    else:
+        eval = face.evaluator
+        param_range = eval.parametricRange()
+        _, origin = eval.getPointAtParameter(param_range.minPoint)
+        _, max_x_point = eval.getPointAtParameter(adsk.core.Point2D.create(param_range.maxPoint.x, param_range.minPoint.y))
+        _, max_y_point = eval.getPointAtParameter(adsk.core.Point2D.create(param_range.minPoint.x, param_range.maxPoint.y))
+        xv = vector.subtract(max_x_point.asVector(), origin.asVector())
+        yv = vector.subtract(max_y_point.asVector(), origin.asVector())
+        if xv.length < yv.length:
+            xv, yv = yv, xv
+    zv = xv.crossProduct(yv)
+    if zv.dotProduct(z) < 0:
+        origin = vector.add(origin.asVector(), xv).asPoint()
+        xv = vector.scaled_by(xv, -1)
+    return origin, xv, yv, z
+
+def create_body_from_profile(profile: adsk.fusion.Profile) -> adsk.fusion.BRepBody:
+    sketch = profile.parentSketch
+    return transformed(profile.face.body, matrix.transform_from_root(sketch.origin, sketch.xDirection, sketch.yDirection))
+
+def is_rectangular_face(face: adsk.fusion.BRepFace) -> bool:
+    if not is_planar(face) or face.loops.count != 1 or face.edges.count != 4:
+        return False
+    edges = [co.edge for co in face.loops[0].coEdges]
+    return all(is_perpendicular(e1, e2) for e1, e2 in zip(edges[:1], edges[1:]))
+
+def is_co_planar(face1: adsk.fusion.BRepFace, face2: adsk.fusion.BRepFace) -> bool:
+    if not is_parallel(face1, face2):
+        return False
+    _, normal = face1.evaluator.getNormalAtParameter(face1.evaluator.parametricRange().minPoint)
+    face1_point_projection = face1.centroid.asVector().dotProduct(normal)
+    face2_point_projection = face2.centroid.asVector().dotProduct(normal)
+    return abs(face1_point_projection - face2_point_projection) < 1e-6

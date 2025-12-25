@@ -2,7 +2,7 @@ import adsk.core, adsk.fusion
 from typing import Any
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-import utils
+import Errors
 
 
 class Input(ABC):
@@ -245,7 +245,10 @@ class SelectionByEntityTokenInput(Input):
         for idx in range(len(deps)):
             dep = deps[idx]
             token = feature.customNamedValues.value(dep.id) or self.tokens[idx]
-            entity = feature.parentComponent.parentDesign.findEntityByToken(token)[0]
+            entities = feature.parentComponent.parentDesign.findEntityByToken(token)
+            if not entities:
+                raise Errors.ReferenceLostError()
+            entity = entities[0]
             result.append(entity)
             if self.input: self.input.addSelection(entity)
         self.value = result

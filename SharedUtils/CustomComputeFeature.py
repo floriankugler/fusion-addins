@@ -1,9 +1,8 @@
 import adsk.core, adsk.fusion
 import contextlib
 from typing import cast
-from dataclasses import dataclass, field
 from abc import ABC, abstractmethod
-import Inputs, Combine
+import Inputs, Combine, Errors
 import utils
 from utils.fusion import new_event_handler
 
@@ -130,7 +129,7 @@ class CustomComputeFeature(ABC):
         command.preSelect.add(on_pre_select)
         self._handlers.append(on_pre_select)
 
-        on_validate = new_event_handler(lambda _: _, adsk.core.ValidateInputsEventHandler)
+        on_validate = new_event_handler(self._validate, adsk.core.ValidateInputsEventHandler)
         command.validateInputs.add(on_validate)
         self._handlers.append(on_validate)
 
@@ -146,6 +145,9 @@ class CustomComputeFeature(ABC):
             on_execute = new_event_handler(self._execute, adsk.core.CommandEventHandler)
             command.execute.add(on_execute)
             self._handlers.append(on_execute)  
+
+    def _validate(self, args: adsk.core.ValidateInputsEventArgs):
+        pass
 
     def _input_changed(self, args: adsk.core.InputChangedEventArgs):
         self.update_inputs_from_ui()
@@ -176,7 +178,7 @@ class CustomComputeFeature(ABC):
             else:
                 feature.timelineObject.rollTo(False)
 
-        self.inputs = None
+            self.inputs = None
 
     def _execute_preview(self, _):
         if self._compute_disabled:
@@ -223,8 +225,8 @@ class CustomComputeFeature(ABC):
                 else:
                     self.edited_custom_feature.timelineObject.rollTo(False)
 
-        self.edited_custom_feature = None
-        self.inputs = None
+            self.edited_custom_feature = None
+            self.inputs = None
 
     def _activate_edit(self, args: adsk.core.EventArgs):
         assert(self.edited_custom_feature is not None)
@@ -246,12 +248,17 @@ class CustomComputeFeature(ABC):
     def _compute(self, args: adsk.fusion.CustomFeatureEventArgs):
         if self._compute_disabled:
             return
-        feature: adsk.fusion.CustomFeature = args.customFeature
-        if not self.inputs:
-            self.inputs = self.create_inputs()
-        self.update_inputs_from_feature(feature)
-        combines = self.execute()
-        Combine.update_features_from_combines(combines, feature)
+        try:
+            feature: adsk.fusion.CustomFeature = args.customFeature
+            if not self.inputs:
+                self.inputs = self.create_inputs()
+            self.update_inputs_from_feature(feature)
+            combines = self.execute()
+            Combine.update_features_from_combines(combines, feature)
+        except Errors.CustomComputeError as e:
+            e.update_status(args.computeStatus)
+        except Exception:
+            args.computeStatus.statusMessages.addError()
 
     def _pre_select(self, args: adsk.core.EventArgs):
         event_args = adsk.core.SelectionEventArgs.cast(args)
