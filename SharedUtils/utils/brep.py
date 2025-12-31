@@ -5,17 +5,28 @@ import adsk.core, adsk.fusion
 from adsk.core import OrientedBoundingBox3D, Point3D, Vector3D, Matrix3D
 from functools import singledispatch
 
+def edge_middle_point(edge: adsk.fusion.BRepEdge) -> Point3D:
+    return vector.scaled_by(vector.add(edge.startVertex.geometry.asVector(), edge.endVertex.geometry.asVector()), 0.5).asPoint()
+
 def normal_into_face(edge: adsk.fusion.BRepEdge, face: adsk.fusion.BRepFace) -> Vector3D:
     eval = face.evaluator
     _, face_normal = eval.getNormalAtParameter(eval.parametricRange().minPoint)
     edge_normal = normal_along_edge(edge)
     result = edge_normal.crossProduct(face_normal)
-    edge_mid = vector.add(edge.startVertex.geometry.asVector(), vector.scaled_by(edge_normal, edge.length/2))
+    edge_mid = edge_middle_point(edge).asVector()
     test_point = vector.add(edge_mid, vector.scaled_by(result, 0.1)).asPoint()
     _, test_param = eval.getParameterAtPoint(test_point)
     if not eval.isParameterOnFace(test_param):
         result.scaleBy(-1)
     return result
+
+def normal_away_from_body(face: adsk.fusion.BRepFace) -> Vector3D:
+    centroid = face.centroid
+    _, normal = face.evaluator.getNormalAtPoint(centroid)
+    test_point = vector.add(centroid.asVector(), vector.scaled_by(normal, 0.01)).asPoint()
+    if face.body.pointContainment(test_point) == adsk.fusion.PointContainment.PointInsidePointContainment:
+        normal.scaleBy(-1)
+    return normal
 
 def adjecent_edge(edge: adsk.fusion.BRepEdge, face: adsk.fusion.BRepFace) -> adsk.fusion.BRepEdge:
     loop = next(l for l in face.loops if l.isOuter)
@@ -52,6 +63,14 @@ def is_perpendicular(a: adsk.fusion.BRepFace | adsk.fusion.BRepEdge, b: adsk.fus
             if not is_linear(a) or not is_linear(b):
                 return False
             return normal_along_edge(a).isPerpendicularTo(normal_along_edge(b))
+        case (adsk.fusion.BRepFace(), adsk.fusion.BRepEdge()):
+            if not is_planar(a) or not is_linear(b):
+                return False
+            return normal_away_from_body(a).isParallelTo(normal_along_edge(b))
+        case (adsk.fusion.BRepEdge(), adsk.fusion.BRepFace()):
+            if not is_linear(a) or not is_planar(b):
+                return False
+            return normal_away_from_body(b).isParallelTo(normal_along_edge(a))
         case _:
             raise TypeError(f"Unsupported type: {type(a)}, {type(b)}")
 

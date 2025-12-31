@@ -10,18 +10,18 @@ Furthermore, updates to this code might break existing usages of the addins.
   This currently places access and guide holes for Lamello Clamex P10 and P14 connectors.
 - **Pattern Cutouts**
 
-  This is a collection of differently shaped pattern cutouts, e.g. triangles, rhombuses etc.
+  This is a collection of differently shaped pattern cutouts, e.g. triangles, rhombuses etc. The cutouts take existing inner features of the selected faces into account.
 
   The Froli pattern computes the best froli grid for a given rectangular surface and places cutouts accordingly.
-
-  The adaptive cutout takes out all the material, but takes features within the face into account and leaves material around them.
-  If the cutout goes all the way through the board, it will attach the material for inner features to the outer rim of the board.
 - **Concealed Hinge**
 
   This places holes for concealed hinges in the door and carcass boards. Currently there's just one type of hinge implemented (Blum cliptop 110 for thin doors).
 - **Door Latch**
 
   Places holes for door latches in the door and carcass boards. Currently this supports Everlocks and the small 44mm pull locks.
+- **Dog Bones**
+
+  Creates dog bones for inner corners based on the tool diameter. Specific edges or faces can be selected.
 
 ## Installation
 
@@ -52,3 +52,4 @@ See [COPYING](COPYING) to see the full text.
 - Lock icon by karl from [Noun Project](https://thenounproject.com/browse/icons/term/lock/) (CC BY 3.0)
 - Hinage icon by Ruslan Dezign from [Noun Project](https://thenounproject.com/browse/icons/term/lock/) (CC BY 3.0)
 - Triangular pattern icon by Made x Made from [Noun Project](https://thenounproject.com/browse/icons/term/lock/) (CC BY 3.0)
+- Dog bone icon by shashank singh from <a href="https://thenounproject.com/browse/icons/term/dog-bone/">Noun Project</a> (CC BY 3.0)
