@@ -574,3 +574,27 @@ def is_co_planar(face1: adsk.fusion.BRepFace, face2: adsk.fusion.BRepFace) -> bo
     face1_point_projection = face1.centroid.asVector().dotProduct(normal)
     face2_point_projection = face2.centroid.asVector().dotProduct(normal)
     return abs(face1_point_projection - face2_point_projection) < 1e-6
+
+def create_dogbone_for_edge(edge: adsk.fusion.BRepEdge, tool_diameter: float, offset: float) -> adsk.fusion.BRepBody | None:
+    if not is_linear(edge) or edge.faces.count != 2:
+        return None
+    dogbone_radius = tool_diameter/2
+    edge_normal = normal_along_edge(edge)
+    f1 = edge.faces[0]
+    f2 = edge.faces[1]
+    n1 = normal_into_face(edge, f1)
+    n2 = normal_into_face(edge, f2)
+    center_dir = vector.normalized(vector.add(n1, n2))
+    test_dir = vector.scaled_by(center_dir, 0.001)
+    edge_middle = edge_middle_point(edge).asVector()
+    test_point = vector.add(edge_middle, test_dir).asPoint()
+    if edge.body.pointContainment(test_point) == adsk.fusion.PointContainment.PointOutsidePointContainment:
+        cos_angle = n1.dotProduct(n2)
+        if cos_angle > -1 and cos_angle < 1:
+            angle = math.acos(cos_angle)
+            min_radius = dogbone_radius / (math.sin(angle)) # Compute the minimum radius necessary to ensure the tool with the specified diameter can reach the corner
+            radius = max(dogbone_radius, min_radius) 
+            radius_extended = radius + offset
+            cyl = transformed(cylinder(radius_extended, edge.length), matrix.translation_matrix(Vector3D.create(0, 0, -edge.length/2)))
+            dogbone_center = vector.add(edge_middle, vector.scaled_by(center_dir, radius)).asPoint()
+            return transformed(cyl, matrix.transform_from_root(dogbone_center, center_dir, edge_normal.crossProduct(center_dir)))
