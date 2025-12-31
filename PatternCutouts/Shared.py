@@ -15,10 +15,10 @@ class PatternInputs(Inputs.Inputs):
 
     def __init__(self, units_manager: adsk.core.UnitsManager):
         units = units_manager.defaultLengthUnits
-        self.faces = Inputs.SelectionByEntityTokenInput('faces', 'Faces', 'PlanarFaces', 1, 0, 'Select faces to create triangle pockets on.')
-        self.profiles = Inputs.SelectionByEntityTokenInput('profiles', 'Profiles', 'Profiles', 0, 0, 'Restrict the extent of the pattern to the selected profiles.')
-        self.scope = Inputs.SelectionByEntityTokenInput('scope', 'Scope', 'Edges', 0, 0, 'Restrict the extent of the pattern to area enclosing the selected edges.')
-        self.axis = Inputs.SelectionByEntityTokenInput('axis', 'Axis', 'LinearEdges', 0, 1, 'Select the axis for the pattern (optional).')
+        self.faces = Inputs.SelectionByEntityTokenInput('faces', 'Faces', ['PlanarFaces'], 1, 0, 'Select faces to create triangle pockets on.')
+        self.profiles = Inputs.SelectionByEntityTokenInput('profiles', 'Profiles', ['Profiles'], 0, 0, 'Restrict the extent of the pattern to the selected profiles.')
+        self.scope = Inputs.SelectionByEntityTokenInput('scope', 'Scope', ['Edges'], 0, 0, 'Restrict the extent of the pattern to area enclosing the selected edges.')
+        self.axis = Inputs.SelectionByEntityTokenInput('axis', 'Axis', ['LinearEdges'], 0, 1, 'Select the axis for the pattern (optional).')
         self.type = Inputs.DropDownInput('type', 'Type', utils.misc.class_property_values(PatternInputs, Inputs.DropDownInput.Item), PatternInputs.TRIANGLES.value, 'The type of pattern to use.')
         self.preferred_width = Inputs.FloatInput('preferred_width', 'Preferred Width', 10, 'Indicates the preferred width of the shape.', units)
         self.preferred_height = Inputs.FloatInput('preferred_height', 'Preferred Height', 15, 'Indicates the preferred height of the shape.', units)

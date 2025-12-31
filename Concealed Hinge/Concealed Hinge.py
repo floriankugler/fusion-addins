@@ -27,7 +27,7 @@ class ConcealedHingeInputs(Inputs.Inputs):
 
     def __init__(self, units_manager: adsk.core.UnitsManager):
         units = units_manager.defaultLengthUnits
-        self.door_edges = Inputs.SelectionByEntityTokenInput('edges', 'Door hinge edges', 'LinearEdges', 1, 0, 'Select the hinged edge of the doors.')
+        self.door_edges = Inputs.SelectionByEntityTokenInput('edges', 'Door hinge edges', ['LinearEdges'], 1, 0, 'Select the hinged edge of the doors.')
         self.type = Inputs.DropDownInput('type', 'Hinge type', utils.misc.class_property_values(ConcealedHingeInputs.Types), ConcealedHingeInputs.Types.BLUM_CLIP_TOP_THIN_0.value, 'The type of pattern to use.')
         self.offset = Inputs.FloatInput('offset', 'Offset', 6, 'Distance of the first connector from the start of the edge.', units) 
         self.offset.minimum_value = 2.7

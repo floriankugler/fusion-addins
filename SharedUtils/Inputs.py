@@ -208,7 +208,7 @@ class SelectionByEntityTokenInput(Input):
     input: adsk.core.SelectionCommandInput
     value: list[adsk.fusion.BRepEdge | adsk.fusion.SketchPoint | adsk.fusion.BRepFace]
 
-    def __init__(self, id, name, filter, lower_bound, upper_bound, tool_tip):
+    def __init__(self, id, name, filter: list[str], lower_bound: int, upper_bound: int, tool_tip: str):
         super().__init__(id, name, tool_tip)
         self.filter = filter
         self.lower_bound = lower_bound
@@ -218,7 +218,8 @@ class SelectionByEntityTokenInput(Input):
 
     def create_input(self, inputs: adsk.core.CommandInputs, params: adsk.fusion.CustomFeatureParameters | None):
         self.input = inputs.addSelectionInput(self.id, self.name, self.tool_tip)
-        self.input.addSelectionFilter(self.filter)
+        for filter in self.filter:
+            self.input.addSelectionFilter(filter)
         self.input.setSelectionLimits(self.lower_bound, self.upper_bound)
 
     def create_in_feature_input(self, feature_input: adsk.fusion.CustomFeatureInput):

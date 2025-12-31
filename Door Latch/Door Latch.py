@@ -28,7 +28,7 @@ class DoorLadgeInputs(Inputs.Inputs):
 
     def __init__(self, units_manager: adsk.core.UnitsManager):
         units = units_manager.defaultLengthUnits
-        self.door_edges = Inputs.SelectionByEntityTokenInput('edges', 'Door latch edges', 'LinearEdges', 1, 0, 'Select the (inner) edges of the doors at which the latch should be placed.')
+        self.door_edges = Inputs.SelectionByEntityTokenInput('edges', 'Door latch edges', ['LinearEdges'], 1, 0, 'Select the (inner) edges of the doors at which the latch should be placed.')
         self.type = Inputs.DropDownInput('type', 'Latch type', utils.misc.class_property_values(DoorLadgeInputs.Types), DoorLadgeInputs.Types.EVERLOCK.value, 'The type of latch to use.')
         self.number = Inputs.IntegerInput('number', 'Number of latches', 1, 1, 10, 'The number of latches to place in the door')
         self.offset = Inputs.FloatInput('offset', 'Offset', 10, 'Offset of the first and last latch from the door\'s edge', units)
