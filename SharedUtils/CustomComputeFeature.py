@@ -112,7 +112,7 @@ class CustomComputeFeature(ABC):
 
         self.inputs = self.create_inputs()
         for input in self.inputs.inputs:
-            input.create_input(command.commandInputs, params, editing)
+            input.create_input(command.commandInputs, params)
         self.update_inputs_from_ui()
         for input in self.inputs.inputs:
             self.input_changed(input.input)

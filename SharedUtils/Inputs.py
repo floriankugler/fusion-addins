@@ -19,7 +19,7 @@ class Input(ABC):
         self.input = None
 
     @abstractmethod
-    def create_input(self, inputs: adsk.core.CommandInputs, params: adsk.fusion.CustomFeatureParameters | None, editing: bool):
+    def create_input(self, inputs: adsk.core.CommandInputs, params: adsk.fusion.CustomFeatureParameters | None):
         pass
 
     @abstractmethod
@@ -51,7 +51,7 @@ class CheckboxInput(Input):
         super().__init__(id, name, tool_tip)
         self.default_value = default_value
 
-    def create_input(self, inputs: adsk.core.CommandInputs, params: adsk.fusion.CustomFeatureParameters | None, editing: bool):
+    def create_input(self, inputs: adsk.core.CommandInputs, params: adsk.fusion.CustomFeatureParameters | None):
         val = params.itemById(self.id).value if params else self.default_value
         self.input = inputs.addBoolValueInput(self.id, self.name, True, '', bool(val))
 
@@ -87,7 +87,7 @@ class FloatInput(Input):
         self.default_value = default_value
         self.units = units
 
-    def create_input(self, inputs: adsk.core.CommandInputs, params: adsk.fusion.CustomFeatureParameters | None, editing: bool):
+    def create_input(self, inputs: adsk.core.CommandInputs, params: adsk.fusion.CustomFeatureParameters | None):
         param_expr = params.itemById(self.id).expression if params else None 
         value_input = None
         if param_expr is None:
@@ -135,7 +135,7 @@ class IntegerInput(Input):
         self.minimum_value = minimum
         self.maximum_value = maximum
 
-    def create_input(self, inputs: adsk.core.CommandInputs, params: adsk.fusion.CustomFeatureParameters | None, editing: bool):
+    def create_input(self, inputs: adsk.core.CommandInputs, params: adsk.fusion.CustomFeatureParameters | None):
         val = int(params.itemById(self.id).value if params else self.default_value)
         self.input = inputs.addIntegerSpinnerCommandInput(self.id, self.name, self.minimum_value, self.maximum_value, 1, val)
 
@@ -173,7 +173,7 @@ class DropDownInput(Input):
         self.options = options
         self.default_value = default_value
 
-    def create_input(self, inputs: adsk.core.CommandInputs, params: adsk.fusion.CustomFeatureParameters | None, editing: bool):
+    def create_input(self, inputs: adsk.core.CommandInputs, params: adsk.fusion.CustomFeatureParameters | None):
         self.input = inputs.addDropDownCommandInput(self.id, self.name, adsk.core.DropDownStyles.TextListDropDownStyle) # type: ignore
         items = self.input.listItems
         val = params.itemById(self.id).value if params else self.default_value
@@ -216,7 +216,7 @@ class SelectionByEntityTokenInput(Input):
         self.tokens = []
         self.value = []
 
-    def create_input(self, inputs: adsk.core.CommandInputs, params: adsk.fusion.CustomFeatureParameters | None, editing: bool):
+    def create_input(self, inputs: adsk.core.CommandInputs, params: adsk.fusion.CustomFeatureParameters | None):
         self.input = inputs.addSelectionInput(self.id, self.name, self.tool_tip)
         self.input.addSelectionFilter(self.filter)
         self.input.setSelectionLimits(self.lower_bound, self.upper_bound)
