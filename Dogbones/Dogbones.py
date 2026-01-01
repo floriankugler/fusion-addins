@@ -54,9 +54,14 @@ class Dogbones(CustomComputeFeature.CustomComputeFeature):
         
     def create_dogbones_for_face(self, face: adsk.fusion.BRepFace) -> adsk.fusion.BRepBody | None:
         result: list[adsk.fusion.BRepBody] = []
+        largest_face = utils.brep.largest_face_of_body(face.body)
+        edges_considered: list[adsk.fusion.BRepEdge] = []
         for vertex in utils.brep.vertices_of_face(face):
             for edge in vertex.edges:
-                if utils.brep.is_perpendicular(edge, face):
+                if edge in edges_considered:
+                    continue
+                edges_considered.append(edge)
+                if utils.brep.is_perpendicular(edge, largest_face):
                     bone = utils.brep.create_dogbone_for_edge(edge, self.inputs.diameter.value, self.inputs.offset.value)
                     if bone:
                         result.append(bone)

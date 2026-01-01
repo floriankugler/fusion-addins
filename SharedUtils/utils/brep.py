@@ -128,6 +128,12 @@ def largest_face_of_edge(edge: adsk.fusion.BRepEdge) -> adsk.fusion.BRepFace | N
             face = new_face
     return face
 
+def largest_face_of_body(body: adsk.fusion.BRepBody) -> adsk.fusion.BRepFace:
+    planar_faces = [f for f in body.faces if is_planar(f)]
+    assert(planar_faces is not None)
+    planar_faces.sort(key=lambda f: f.area, reverse=True)
+    return planar_faces[0]
+
 def face_contains_edge(face: adsk.fusion.BRepFace, edge: adsk.fusion.BRepEdge) -> bool:
     if not is_planar(face):
         return False
