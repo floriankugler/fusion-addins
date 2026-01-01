@@ -22,7 +22,7 @@ def stop(context):
 class DogbonesInputs(Inputs.Inputs):
     def __init__(self, units_manager: adsk.core.UnitsManager):
         units = units_manager.defaultLengthUnits
-        self.entities = Inputs.SelectionByEntityTokenInput('entities', 'Edges/Faces', ['LinearEdges', 'PlanarFaces'], 1, 0, 'Select edge along which access holes should be placed.')
+        self.entities = Inputs.SelectionByEntityTokenInput('entities', 'Edges/Faces', ['LinearEdges', 'PlanarFaces'], 1, 0, 'Select edges or faces to add dogbones to.')
         self.diameter = Inputs.FloatInput('diameter', 'Tool diameter', 0.6, 'Diameter of the tool used to machine the contour', units)
         self.offset = Inputs.FloatInput('offset', 'Offset', 0.01, 'Additional clearing offset', units)
         super().__init__()
