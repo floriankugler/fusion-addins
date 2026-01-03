@@ -72,7 +72,7 @@ class CustomComputeFeature(ABC):
             self._handlers.append(edit_command_created)
 
             # Create the custom feature definition.
-            self.custom_feature_def = adsk.fusion.CustomFeatureDefinition.create(c.plugin_id, c.plugin_desc, resource_dir)
+            self.custom_feature_def = adsk.fusion.CustomFeatureDefinition.create(c.plugin_id, c.plugin_name, resource_dir)
             self.custom_feature_def.editCommandId = self.edit_command_id
 
             # Connect to the compute event for the custom feature.

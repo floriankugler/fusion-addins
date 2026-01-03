@@ -165,6 +165,38 @@ def find_perpendicular_face_containing_edge(edge: adsk.fusion.BRepEdge, referenc
         raise ValueError("Only works on linear edges")
     return find_perpendicular_face(reference_face, lambda f: face_contains_edge(f, edge) and condition(f))
 
+def surface_and_rim_faces_for_edge(edge: adsk.fusion.BRepEdge) -> tuple[adsk.fusion.BRepFace, adsk.fusion.BRepFace] | None:
+    surface_face = largest_face_of_edge(edge)
+    if not surface_face: return None
+    for f in edge.faces:
+        if f != surface_face and is_planar(f):
+            return surface_face, f
+    return None
+
+def find_mating_faces_at_edge(edge: adsk.fusion.BRepEdge) -> tuple[adsk.fusion.BRepFace, adsk.fusion.BRepFace, adsk.fusion.BRepFace] | None:
+    surface_and_rim = surface_and_rim_faces_for_edge(edge)
+    if not surface_and_rim:
+        return None
+    surface, rim = surface_and_rim[0:2]
+
+    rim_normal = normal_into_face(edge, rim)
+    edge_normal = normal_along_edge(edge)
+    step = vector.scaled_by(edge_normal, 5)
+    start = vector.add(edge.startVertex.geometry.asVector(), vector.scaled_by(rim_normal, 0.1))
+    test_points = [vector.add(start, vector.scaled_by(step, x)).asPoint() for x in misc.float_range(0, math.floor(edge.length), edge.length / 10)]
+
+    def check_face(face: adsk.fusion.BRepFace):
+        for t in test_points:
+            _, param = face.evaluator.getParameterAtPoint(t)
+            if face.evaluator.isParameterOnFace(param):
+                return True
+        return False
+
+    other_face = find_perpendicular_face_containing_edge(edge, surface, check_face)
+    if not other_face:
+        return None
+    return surface, rim, other_face
+
 def find_carcass_edge_for_front_edge(front_edge: adsk.fusion.BRepEdge, front_face: adsk.fusion.BRepFace) -> adsk.fusion.BRepEdge | None:
     normal_into_door_face = normal_into_face(front_edge, front_face)
     _, door_edge_center = front_edge.geometry.evaluator.getPointAtParameter(0.5)

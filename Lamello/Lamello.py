@@ -30,7 +30,7 @@ class LamelloInputs(Inputs.Inputs):
         units = units_manager.defaultLengthUnits
         self.edge = Inputs.SelectionByEntityTokenInput('edge', 'Edge', ['LinearEdges'], 1, 0, 'Select edge along which access holes should be placed.')
         self.points = Inputs.SelectionByEntityTokenInput('points', 'Points', ['SketchPoints'], 0, 0, 'To manually place the connectors, select sketch points.')
-        self.size = Inputs.DropDownInput('size', 'Variant', utils.misc.class_property_values(LamelloInputs.Types), LamelloInputs.Types.CLAMEX_P10.value, 'Variant of the Lamello connector.')
+        self.size = Inputs.DropDownInput('size', 'Variant', utils.misc.class_property_values(LamelloInputs.Types, Inputs.DropDownInput.Item), LamelloInputs.Types.CLAMEX_P10.value, 'Variant of the Lamello connector.')
         self.spacing = Inputs.FloatInput('spacing', 'Spacing', 20, 'Minimum spacing between the connectors.', units)
         self.offset = Inputs.FloatInput('offset', 'Offset', 6, 'Distance of the first connector from the start of the edge.', units)
         self.through_guide_holes = Inputs.CheckboxInput('throughGuideHoles', 'Through Guide Holes', False, 'If checked the guide holes are punched all the way through to the opposite face.')
@@ -50,7 +50,7 @@ class Lamello(CustomComputeFeature.CustomComputeFeature):
     def execute(self) -> list[Combine.Combine]:
         combines: list[Combine.Combine] = []
         for edge in cast(list[adsk.fusion.BRepEdge], self.inputs.edge.value):
-            faces = find_faces(edge)
+            faces = utils.brep.find_mating_faces_at_edge(edge)
             if not faces:
                 continue
             access_face, slot_face, guide_face = faces[0:3]
@@ -61,7 +61,7 @@ class Lamello(CustomComputeFeature.CustomComputeFeature):
     
     def pre_select(self, input: adsk.core.SelectionCommandInput, selection: adsk.fusion.BRepEdge) -> bool:
         if input.id == self.inputs.edge.id:
-            return find_faces(selection) is not None
+            return utils.brep.find_mating_faces_at_edge(selection) is not None
         else:
             return True
         
@@ -69,44 +69,6 @@ class Lamello(CustomComputeFeature.CustomComputeFeature):
         spacing_enabled = self.inputs.points.input.selectionCount == 0
         self.inputs.spacing.input.isEnabled = spacing_enabled
         self.inputs.offset.input.isEnabled = spacing_enabled
-
-def find_faces(edge: adsk.fusion.BRepEdge) -> Optional[tuple[adsk.fusion.BRepFace, adsk.fusion.BRepFace, adsk.fusion.BRepFace]]:
-    access_and_slot = get_access_and_slot_faces(edge)
-    if not access_and_slot:
-        return None
-    access_face, slot_face = access_and_slot[0:2]
-    guide_face = find_guide_face(edge, access_face, slot_face)
-    if not guide_face:
-        return None
-    return access_face, slot_face, guide_face
-
-def find_guide_face(edge: adsk.fusion.BRepEdge, access_face: adsk.fusion.BRepFace, slot_face: adsk.fusion.BRepFace) -> Optional[adsk.fusion.BRepFace]:
-    slot_normal = utils.brep.normal_into_face(edge, slot_face)
-    slot_dir = utils.vector.scaled_by(slot_normal, 0.5)
-    edge_normal = utils.brep.normal_along_edge(edge)
-    step = utils.vector.scaled_by(edge_normal, 5)
-    start = utils.vector.add(edge.startVertex.geometry.asVector(), slot_dir)
-    test_points = []
-    for x in range(0, math.floor(edge.length/5)):
-        test_points.append(utils.vector.add(start, utils.vector.scaled_by(step, x)).asPoint())
-
-    def check_face(face: adsk.fusion.BRepFace):
-        for t in test_points:
-            _, param = face.evaluator.getParameterAtPoint(t)
-            if face.evaluator.isParameterOnFace(param):
-                return True
-        return False
-
-    return utils.brep.find_perpendicular_face_containing_edge(edge, access_face, check_face)
-
-
-def get_access_and_slot_faces(edge: adsk.fusion.BRepEdge) -> Optional[tuple[adsk.fusion.BRepFace, adsk.fusion.BRepFace]]:
-    access_face = utils.brep.largest_face_of_edge(edge)
-    if not access_face: return None
-    for f in edge.faces:
-        if f != access_face and utils.brep.is_planar(f):
-            return access_face, f
-    return None
 
 def access_positions_by_spacing(edge: adsk.fusion.BRepEdge, spacing: float, offset: float) -> list[adsk.core.Vector3D]:
     available_length = edge.length - 2 * offset
