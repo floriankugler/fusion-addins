@@ -331,6 +331,9 @@ def isosceles_triangle(width: float, height: float, thickness: float, fillet_rad
     return box
 
 def rectangle(width: float, height: float, thickness: float) -> adsk.fusion.BRepBody:
+    """
+    Creates a rectangle in the xy plane. Width is along x, height along y, origin is at the center. Thickness is in positive z.
+    """
     x = Vector3D.create(1, 0, 0)
     y = Vector3D.create(0, 1, 0)
     bb = OrientedBoundingBox3D.create(Point3D.create(0, 0, thickness/2), x, y, width, height, thickness)
