@@ -23,8 +23,9 @@ class Type(Enum):
 
 @unique
 class Insert(Enum):
-    M6x123 = 123
-    M6x153 = 153
+    M6x123 = 1
+    M6x153 = 2
+    HAEFELE_EINDREHMUFFE_10x8 = 3
 
 def create_clamex_access_hole(type: Type, thickness: float) -> adsk.fusion.BRepBody:
     access_depth = thickness/2
@@ -77,7 +78,7 @@ def create_cabineo_connector_hole(flush: bool) -> adsk.fusion.BRepBody:
         )
     ])
 
-def create_cabineo_screw_hole(type: Type, guide_thickness: float, flush: bool, through: bool) -> adsk.fusion.BRepBody:
+def create_cabineo_screw_hole(type: Type, insert: Insert | None, guide_thickness: float, flush: bool, through: bool) -> adsk.fusion.BRepBody:
     edge_distance = (0.5+0.08) if flush else 0.5
     depth: float
     diameter = 0.5
@@ -87,10 +88,12 @@ def create_cabineo_screw_hole(type: Type, guide_thickness: float, flush: bool, t
         depth = 1.2
     else:
         diameter = 0.8
-        if type == Insert.M6x123:
+        if insert == Insert.M6x123:
             depth = 1.35
-        else:
+        elif insert == Insert.M6x153:
             depth = 1.65
+        elif insert == Insert.HAEFELE_EINDREHMUFFE_10x8:
+            depth = 0.85
     if through:
         depth = guide_thickness
     return utils.brep.transformed(
@@ -101,9 +104,9 @@ def create_cabineo_screw_hole(type: Type, guide_thickness: float, flush: bool, t
 @dataclass
 class Params:
     type: Type
-    insert: Insert | None
-    flush: bool
-    through: bool
+    insert: Insert | None = None
+    flush: bool = True
+    through: bool = False
 
 def create_hole_bodies(points: list[Vector3D], edge: adsk.fusion.BRepEdge, access_face: adsk.fusion.BRepFace, slot_face: adsk.fusion.BRepFace, guide_face: adsk.fusion.BRepFace, params: Params) -> tuple[adsk.fusion.BRepBody, adsk.fusion.BRepBody]:
     access_thickness = utils.brep.get_board_thickness(access_face)
@@ -117,7 +120,7 @@ def create_hole_bodies(points: list[Vector3D], edge: adsk.fusion.BRepEdge, acces
         guide_shape = create_clamex_guide_holes(access_thickness, guide_thickness, params.through)
     else:
         access_shape = create_cabineo_connector_hole(params.flush)
-        guide_shape = create_cabineo_screw_hole(params.type, guide_thickness, params.flush, params.through)
+        guide_shape = create_cabineo_screw_hole(params.type, params.insert, guide_thickness, params.flush, params.through)
 
     access_bodies = utils.brep.place_body_on_face_at_positions(access_shape, access_face, edge, points)
     guide_bodies = utils.brep.place_body_on_face_at_positions(guide_shape, slot_face, edge, points)

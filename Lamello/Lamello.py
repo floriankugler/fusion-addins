@@ -30,6 +30,7 @@ class LamelloInputs(Inputs.Inputs):
     class InsertTypes:
         M6x123 = Inputs.DropDownInput.Item('M6x12.3', lamello.Insert.M6x123.value)
         M6x153 = Inputs.DropDownInput.Item('M6x15.3', lamello.Insert.M6x153.value)
+        HAEFELE_MUFFE_10x8 = Inputs.DropDownInput.Item('Haefele Muffe 10x8', lamello.Insert.HAEFELE_EINDREHMUFFE_10x8.value)
 
     def __init__(self, units_manager: adsk.core.UnitsManager):
         units = units_manager.defaultLengthUnits
