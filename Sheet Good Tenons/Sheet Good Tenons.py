@@ -112,8 +112,6 @@ class SheetGoodTenons(CustomComputeFeature.CustomComputeFeature):
         tenon_width = self.inputs.width.value
         offset = self.inputs.distance_from_edge.value
         positions: list[adsk.core.Vector3D] = []
-        first_distance: float = 0
-        last_distance: float = 0
         
         if self.inputs.distance_type.value == SheetGoodTenonsInputs.DistanceType.POINTS.value:
             positions = [
@@ -121,9 +119,6 @@ class SheetGoodTenons(CustomComputeFeature.CustomComputeFeature):
                 for p in self.inputs.points.value
             ]
             positions.sort(key=lambda v: utils.vector.subtract(v, edge.startVertex.geometry.asVector()).length)
-            if positions:
-                first_distance = utils.vector.subtract(positions[0], edge.startVertex.geometry.asVector()).length - tenon_width/2
-                last_distance = utils.vector.subtract(edge.endVertex.geometry.asVector(), positions[-1]).length - tenon_width/2
 
         else:
             number_of_tenons: int
@@ -144,17 +139,16 @@ class SheetGoodTenons(CustomComputeFeature.CustomComputeFeature):
                 distance_between_tenons = (edge.length - 2*offset - tenon_width) / (number_of_tenons - 1) if number_of_tenons > 1 else 0
                 start = utils.vector.add(edge.startVertex.geometry.asVector(), utils.vector.scaled_by(normal, offset + tenon_width/2))
                 positions = [utils.vector.add(start, utils.vector.scaled_by(normal, ix * distance_between_tenons)) for ix in range(number_of_tenons)]
-                first_distance = offset - tenon_width/2
-                last_distance = first_distance
             else:
                 positions = [utils.brep.edge_middle_point(edge).asVector()]
-                first_distance = (edge.length - tenon_width) / 2
-                last_distance = first_distance
 
         min_distance = 12.0 if self.inputs.connector.value == SheetGoodTenonsInputs.ConnectorType.CLAMEX.value else 4.0
         if self.inputs.connector.value in [SheetGoodTenonsInputs.ConnectorType.CLAMEX.value, SheetGoodTenonsInputs.ConnectorType.CABINEO.value]:
-            if first_distance < min_distance or last_distance < min_distance:
-                raise Errors.InvalidInputError(f"Distance from edge must be at least {min_distance} mm to fit the selected connector")
+            if positions:
+                first_distance = utils.vector.subtract(positions[0], edge.startVertex.geometry.asVector()).length - tenon_width/2
+                last_distance = utils.vector.subtract(edge.endVertex.geometry.asVector(), positions[-1]).length - tenon_width/2
+                if first_distance < min_distance or last_distance < min_distance:
+                    raise Errors.InvalidInputError(f"Distance from edge must be at least {min_distance} mm to fit the selected connector")
             if len(positions) > 1:
                 distances = [
                     utils.vector.subtract(v2, v1).length - tenon_width
