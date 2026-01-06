@@ -39,3 +39,8 @@ def binary_search(lower_bound: float, upper_bound: float, compute: Callable[[flo
         
 def class_property_values(cls, type) -> list[Any]:
     return [value for key, value in cls.__dict__.items() if not key.startswith('__') and (type is None or isinstance(value, type))]
+
+def float_range(start, stop, step):
+    while start < stop:
+        yield round(start, 10) # Rounding prevents floating point drift
+        start += step

@@ -19,6 +19,7 @@ class CustomComputeFeature(ABC):
     edited_custom_feature: adsk.fusion.CustomFeature  | None
     restore_timeline_object: adsk.fusion.TimelineObject
     inputs: Inputs.Inputs | None
+    _error_field: adsk.core.TextBoxCommandInput | None
     _compute_disabled: bool
 
     @property
@@ -113,7 +114,10 @@ class CustomComputeFeature(ABC):
         self.inputs = self.create_inputs()
         for input in self.inputs.inputs:
             input.create_input(command.commandInputs, params)
+        self._error_field = command.commandInputs.addTextBoxCommandInput('errorMessage', 'Error', '', 3, True)
+        self._error_field.isVisible = False
         self.update_inputs_from_ui()
+        self.inputs.update_visibilities()
         for input in self.inputs.inputs:
             self.input_changed(input.input)
 
@@ -151,9 +155,11 @@ class CustomComputeFeature(ABC):
 
     def _input_changed(self, args: adsk.core.InputChangedEventArgs):
         self.update_inputs_from_ui()
+        if self.inputs:
+            self.inputs.update_visibilities()
         self.input_changed(args.input)
 
-    def _execute(self, _):
+    def _execute(self, args: adsk.core.CommandEventArgs):
         assert(self.inputs is not None)
         self.update_inputs_from_ui()
 
@@ -167,28 +173,44 @@ class CustomComputeFeature(ABC):
             for sel in self.inputs.inputs:
                 sel.create_named_values(feature)
 
-            combines = self.execute()
-            features_inside_component, features_outside_component = Combine.create_features_from_combines(self.component, combines, feature)
+            try:
+                combines = self.execute()
+                features_inside_component, features_outside_component = Combine.create_features_from_combines(self.component, combines, feature)
+            except Errors.InvalidInputError as e:
+                args.executeFailed = True
+                args.executeFailedMessage = e.message
+            except:
+                args.executeFailed = True
+                args.executeFailedMessage = "An error occurred during execution."
+            finally:
+                feature.timelineObject.rollTo(True)
+                if features_inside_component:
+                    feature.setStartAndEndFeatures(features_inside_component[0], features_inside_component[-1])
+                if features_outside_component:
+                    features_outside_component[-1].timelineObject.rollTo(False)
+                else:
+                    feature.timelineObject.rollTo(False)
 
-            feature.timelineObject.rollTo(True)
-            if features_inside_component:
-                feature.setStartAndEndFeatures(features_inside_component[0], features_inside_component[-1])
-            if features_outside_component:
-                features_outside_component[-1].timelineObject.rollTo(False)
-            else:
-                feature.timelineObject.rollTo(False)
+                self.inputs = None
 
-            self.inputs = None
-
-    def _execute_preview(self, _):
+    def _execute_preview(self, args: adsk.core.CommandEventArgs):
         if self._compute_disabled:
             return
         self.update_inputs_from_ui()
         with self.compute_disabled():
-            combines = self.execute()
-            Combine.create_features_from_combines(self.component, combines)
+            try:
+                combines = self.execute()
+                Combine.create_features_from_combines(self.component, combines)
+            except Errors.InvalidInputError as e:
+                self.showError(e.message)
+                args.isValidResult = False
+            except:
+                self.showError("An error occurred during execution.")
+                args.isValidResult = False
+            else:
+                self.showError(None)
 
-    def _edit_execute(self, _):
+    def _edit_execute(self, args: adsk.core.CommandEventArgs):
         assert(self.inputs is not None)
         assert(self.edited_custom_feature is not None)
         self.update_inputs_from_ui()
@@ -202,31 +224,39 @@ class CustomComputeFeature(ABC):
 
             self.delete_all_child_features()
 
-            combines = self.execute()
-            features_inside_component, features_outside_component = Combine.create_features_from_combines(self.component, combines, self.edited_custom_feature)
-
-            self.edited_custom_feature.timelineObject.rollTo(True)
-            if features_inside_component:
-                self.edited_custom_feature.setStartAndEndFeatures(features_inside_component[0], features_inside_component[-1])
-
-            restore_entity = None
             try:
-                restore_entity = self.restore_timeline_object.entity
+                combines = self.execute()
+            except Errors.InvalidInputError as e:
+                args.executeFailed = True
+                args.executeFailedMessage = e.message
             except:
-                pass                
-            if restore_entity:
-                if restore_entity == self.edited_custom_feature and features_outside_component:
-                    features_outside_component[-1].timelineObject.rollTo(False)    
-                else:
-                    self.restore_timeline_object.rollTo(False)
+                args.executeFailed = True
+                args.executeFailedMessage = "An error occurred during execution."
             else:
-                if features_outside_component:
-                    features_outside_component[-1].timelineObject.rollTo(False)
-                else:
-                    self.edited_custom_feature.timelineObject.rollTo(False)
+                features_inside_component, features_outside_component = Combine.create_features_from_combines(self.component, combines, self.edited_custom_feature)
 
-            self.edited_custom_feature = None
-            self.inputs = None
+                self.edited_custom_feature.timelineObject.rollTo(True)
+                if features_inside_component:
+                    self.edited_custom_feature.setStartAndEndFeatures(features_inside_component[0], features_inside_component[-1])
+            finally:
+                restore_entity = None
+                try:
+                    restore_entity = self.restore_timeline_object.entity
+                except:
+                    pass                
+                if restore_entity:
+                    if restore_entity == self.edited_custom_feature and features_outside_component:
+                        features_outside_component[-1].timelineObject.rollTo(False)    
+                    else:
+                        self.restore_timeline_object.rollTo(False)
+                else:
+                    if features_outside_component:
+                        features_outside_component[-1].timelineObject.rollTo(False)
+                    else:
+                        self.edited_custom_feature.timelineObject.rollTo(False)
+
+                self.edited_custom_feature = None
+                self.inputs = None
 
     def _activate_edit(self, args: adsk.core.EventArgs):
         assert(self.edited_custom_feature is not None)
@@ -311,6 +341,16 @@ class CustomComputeFeature(ABC):
     @property
     def component(self) -> adsk.fusion.Component:
         return cast(adsk.fusion.Design, self.app.activeProduct).activeComponent
+    
+    def showError(self, message: str | None):
+        if not self._error_field:
+            return
+        if message:
+            self._error_field.isVisible = True
+            self._error_field.formattedText = f"<font color=\"red\">{message}</font><br>"
+        else:
+            self._error_field.isVisible = False
+            self._error_field.formattedText = ''
         
     @abstractmethod
     def create_inputs(self) -> Inputs.Inputs:

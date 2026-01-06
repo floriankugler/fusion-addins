@@ -59,10 +59,10 @@ class TargetCombines:
     @property
     def all_combines(self) -> dict[Operation, list[adsk.fusion.BRepBody]]:
         result: dict[Operation, list[adsk.fusion.BRepBody]] = {}
-        if self._cut_bodies:
-            result[Operation.CUT] = self._cut_bodies
         if self._join_bodies:
             result[Operation.JOIN] = self._join_bodies
+        if self._cut_bodies:
+            result[Operation.CUT] = self._cut_bodies
         if self._intersect_bodies:
             result[Operation.INTERSECT] = self._intersect_bodies
         return result

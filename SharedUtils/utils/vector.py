@@ -51,3 +51,11 @@ def is_opposite_direction(v1: Vector3D, v2: Vector3D, tolerance: float = 1e-6) -
     v2n = normalized(v2)
     dot = v1n.dotProduct(v2n)
     return abs(dot + 1.0) <= tolerance
+
+def inverted(v: Vector3D) -> Vector3D:
+    result = v.copy()
+    result.scaleBy(-1)
+    return result
+
+def average(v1: Vector3D, v2: Vector3D) -> Vector3D:
+    return scaled_by(add(v1, v2), 0.5)

@@ -1,5 +1,5 @@
 import adsk.core, adsk.fusion
-from typing import Any
+from typing import Any, Callable
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 import Errors
@@ -11,12 +11,14 @@ class Input(ABC):
     tool_tip: str
     value: Any
     input: adsk.core.CommandInput | None
+    update_visibility: Callable[[], bool]
 
-    def __init__(self, id, name, tool_tip):
+    def __init__(self, id, name, tool_tip, update_visibility: Callable[[], bool]):
         self.id = id
         self.name = name
         self.tool_tip = tool_tip
         self.input = None
+        self.update_visibility = update_visibility
 
     @abstractmethod
     def create_input(self, inputs: adsk.core.CommandInputs, params: adsk.fusion.CustomFeatureParameters | None):
@@ -41,16 +43,20 @@ class Input(ABC):
     def create_named_values(self, feature: adsk.fusion.CustomFeature):
         pass
 
+    def _update_visibility(self):
+        if self.input:
+            self.input.isVisible = self.update_visibility()
+
 
 class CheckboxInput(Input):
     default_value: bool
     value: bool
     input: adsk.core.BoolValueCommandInput
 
-    def __init__(self, id, name, default_value, tool_tip):
-        super().__init__(id, name, tool_tip)
+    def __init__(self, id, name, default_value, tool_tip, update_visibility: Callable[[], bool] = lambda: True):
+        super().__init__(id, name, tool_tip, update_visibility)
         self.default_value = default_value
-
+        
     def create_input(self, inputs: adsk.core.CommandInputs, params: adsk.fusion.CustomFeatureParameters | None):
         val = params.itemById(self.id).value if params else self.default_value
         self.input = inputs.addBoolValueInput(self.id, self.name, True, '', bool(val))
@@ -82,8 +88,8 @@ class FloatInput(Input):
     units: str
     minimum_value: float | None = None
 
-    def __init__(self, id, name, default_value, tool_tip, units):
-        super().__init__(id, name, tool_tip)
+    def __init__(self, id, name, default_value, tool_tip, units, update_visibility: Callable[[], bool] = lambda: True):
+        super().__init__(id, name, tool_tip, update_visibility)
         self.default_value = default_value
         self.units = units
 
@@ -129,8 +135,8 @@ class IntegerInput(Input):
     minimum_value: int
     maximum_value: int
 
-    def __init__(self, id, name, default_value: int, minimum: int, maximum: int, tool_tip):
-        super().__init__(id, name, tool_tip)
+    def __init__(self, id, name, default_value: int, minimum: int, maximum: int, tool_tip, update_visibility: Callable[[], bool] = lambda: True):
+        super().__init__(id, name, tool_tip, update_visibility)
         self.default_value = default_value
         self.minimum_value = minimum
         self.maximum_value = maximum
@@ -168,8 +174,8 @@ class DropDownInput(Input):
     options: list[Item]
     input: adsk.core.DropDownCommandInput
 
-    def __init__(self, id, name, options: list[Item], default_value: int, tool_tip):
-        super().__init__(id, name, tool_tip)
+    def __init__(self, id, name, options: list[Item], default_value: int, tool_tip, update_visibility: Callable[[], bool] = lambda: True):
+        super().__init__(id, name, tool_tip, update_visibility)
         self.options = options
         self.default_value = default_value
 
@@ -208,8 +214,8 @@ class SelectionByEntityTokenInput(Input):
     input: adsk.core.SelectionCommandInput
     value: list[adsk.fusion.BRepEdge | adsk.fusion.SketchPoint | adsk.fusion.BRepFace]
 
-    def __init__(self, id, name, filter: list[str], lower_bound: int, upper_bound: int, tool_tip: str):
-        super().__init__(id, name, tool_tip)
+    def __init__(self, id, name, filter: list[str], lower_bound: int, upper_bound: int, tool_tip: str, update_visibility: Callable[[], bool] = lambda: True):
+        super().__init__(id, name, tool_tip, update_visibility)
         self.filter = filter
         self.lower_bound = lower_bound
         self.upper_bound = upper_bound
@@ -278,3 +284,7 @@ class Inputs(ABC):
         for _, value in vars(self).items():
             if isinstance(value, Input):
                 self.inputs.append(value)
+
+    def update_visibilities(self):
+        for input in self.inputs:
+            input._update_visibility()

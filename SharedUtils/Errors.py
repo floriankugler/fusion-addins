@@ -19,3 +19,8 @@ class ReferenceLostError(CustomComputeError):
     @property
     def error_id(self) -> str:
         return "FEATURE_REFERENCE_LOST"
+    
+class InvalidInputError(Exception):
+    message: str
+    def __init__(self, message: str):
+        self.message = message
