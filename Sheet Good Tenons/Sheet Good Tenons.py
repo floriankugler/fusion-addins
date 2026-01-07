@@ -265,7 +265,8 @@ class SheetGoodTenons(CustomComputeFeature.CustomComputeFeature):
         tenon_dog_bone_axis = utils.brep.normal_away_from_body(tenon_board_face)
         tenon_dog_bones = utils.brep.union([
             cast(adsk.fusion.BRepBody, utils.brep.create_dogbone_for_edge(e, self.inputs.tool_diameter.value, self.inputs.dog_bone_offset.value, negative=False))
-            for e in tenon_board.edges if utils.brep.normal_along_edge(e).isParallelTo(tenon_dog_bone_axis) and 
+            for e in tenon_board.edges if utils.brep.is_linear(e) and
+            utils.brep.normal_along_edge(e).isParallelTo(tenon_dog_bone_axis) and 
             tenons.pointContainment(e.startVertex.geometry) == adsk.fusion.PointContainment.PointOnPointContainment and 
             tenon_face.isPointOnFace(e.startVertex.geometry, 1e-6)
         ])
