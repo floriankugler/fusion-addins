@@ -73,7 +73,7 @@ class TargetCombines:
         return self.target_body.parentComponent
 
 
-def create_features_from_combines(component: adsk.fusion.Component, combines: list[Combine], feature: adsk.fusion.CustomFeature | None = None) -> tuple[list[adsk.fusion.Feature], list[adsk.fusion.Feature]]:
+def create_features_from_combines(component: adsk.fusion.Component, combines: list[Combine], feature: adsk.fusion.CustomFeature | None = None) -> tuple[list[adsk.fusion.Feature], list[adsk.fusion.Feature], list[adsk.fusion.BRepBody]]:
     combines_inside_component, combines_outside_component = TargetCombines.from_combines(combines, component)
 
     base_features: list[adsk.fusion.BaseFeature] = []
@@ -105,17 +105,22 @@ def create_features_from_combines(component: adsk.fusion.Component, combines: li
             base_idx += 1
         return result
 
+    dependencies: list[adsk.fusion.BRepBody] = []
     for target in combines_inside_component:
         features_inside_component += create_combine_features_for_target(target)
+        if target.target_body:
+            dependencies.append(target.target_body)
     for target in combines_outside_component:
         features_outside_component += create_combine_features_for_target(target)
+        if target.target_body:
+            dependencies.append(target.target_body)
     for idx, f in enumerate(features_outside_component):
         id = feature.name if feature else "<unknown>"
         f.name = f"custom-feature<{id}>-combine"
         if feature:
             feature.customNamedValues.addOrSetValue(f"external-combine-{idx}", f.entityToken)
 
-    return (features_inside_component, features_outside_component)
+    return features_inside_component, features_outside_component, dependencies
 
 
 def update_features_from_combines(combines: list[Combine], feature: adsk.fusion.CustomFeature):
@@ -123,7 +128,7 @@ def update_features_from_combines(combines: list[Combine], feature: adsk.fusion.
     base_idx = 0
     for target in combines_inside_component + combines_outside_component:
         for _, tool_bodies in target.all_combines.items():
-            base: adsk.fusion.BaseFeature = feature.features[base_idx]
+            base = cast(adsk.fusion.BaseFeature, feature.features[base_idx])
             base.startEdit()
             for idx, tool in enumerate(tool_bodies):
                 base.updateBody(base.bodies[idx], tool)

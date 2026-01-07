@@ -173,9 +173,13 @@ class CustomComputeFeature(ABC):
             for sel in self.inputs.inputs:
                 sel.create_named_values(feature)
 
+            features_inside_component: list[adsk.fusion.Feature] = []
+            features_outside_component: list[adsk.fusion.Feature] = []
+            dependencies: list[adsk.fusion.BRepBody] = []
             try:
                 combines = self.execute()
-                features_inside_component, features_outside_component = Combine.create_features_from_combines(self.component, combines, feature)
+                features_inside_component, features_outside_component, dependencies = Combine.create_features_from_combines(self.component, combines, feature)
+                
             except Errors.InvalidInputError as e:
                 args.executeFailed = True
                 args.executeFailedMessage = e.message
@@ -184,6 +188,8 @@ class CustomComputeFeature(ABC):
                 args.executeFailedMessage = "An error occurred during execution."
             finally:
                 feature.timelineObject.rollTo(True)
+                for dep in dependencies:
+                    feature.dependencies.add(dep.revisionId, dep)
                 if features_inside_component:
                     feature.setStartAndEndFeatures(features_inside_component[0], features_inside_component[-1])
                 if features_outside_component:
@@ -204,8 +210,8 @@ class CustomComputeFeature(ABC):
             except Errors.InvalidInputError as e:
                 self.showError(e.message)
                 args.isValidResult = False
-            except:
-                self.showError("An error occurred during execution.")
+            except Exception as e:
+                self.showError(f"An error occurred: {e}")
                 args.isValidResult = False
             else:
                 self.showError(None)
@@ -233,9 +239,11 @@ class CustomComputeFeature(ABC):
                 args.executeFailed = True
                 args.executeFailedMessage = "An error occurred during execution."
             else:
-                features_inside_component, features_outside_component = Combine.create_features_from_combines(self.component, combines, self.edited_custom_feature)
+                features_inside_component, features_outside_component, dependencies = Combine.create_features_from_combines(self.component, combines, self.edited_custom_feature)
 
                 self.edited_custom_feature.timelineObject.rollTo(True)
+                for dep in dependencies:
+                    self.edited_custom_feature.dependencies.add(dep.revisionId, dep)
                 if features_inside_component:
                     self.edited_custom_feature.setStartAndEndFeatures(features_inside_component[0], features_inside_component[-1])
             finally:
@@ -287,8 +295,8 @@ class CustomComputeFeature(ABC):
             Combine.update_features_from_combines(combines, feature)
         except Errors.CustomComputeError as e:
             e.update_status(args.computeStatus)
-        except Exception:
-            args.computeStatus.statusMessages.addError()
+        except Exception as e:
+            args.computeStatus.statusMessages.addError(str(e))
 
     def _pre_select(self, args: adsk.core.EventArgs):
         event_args = adsk.core.SelectionEventArgs.cast(args)
