@@ -136,3 +136,12 @@ def oriented_boundig_box_union(b1: adsk.core.OrientedBoundingBox3D, b2: adsk.cor
     center.add(vector.scaled_by(hv, (h_min + h_max) / 2))
 
     return adsk.core.OrientedBoundingBox3D.create(center.asPoint(), lv, wv, l_max - l_min, w_max - w_min, h_max - h_min)
+
+def debug_show_body(body: adsk.fusion.BRepBody):
+    doc = adsk.core.Application.get().documents.add(adsk.core.DocumentTypes.FusionDesignDocumentType) # type: ignore
+    doc_design = cast(adsk.fusion.Design, doc.products.itemByProductType('DesignProductType'))
+    doc_root = doc_design.rootComponent
+    base = doc_root.features.baseFeatures.add()
+    base.startEdit()
+    base.parentComponent.bRepBodies.add(body, base)
+    base.finishEdit()
