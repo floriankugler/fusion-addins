@@ -228,10 +228,10 @@ class SheetGoodTenons(CustomComputeFeature.CustomComputeFeature):
                 through=self.inputs.lamello_through_hole.value
             )
             access, guide = lamello.create_hole_bodies(positions, edge, tenon_board_face, tenon_face, mortise_face, params)
-            result.extend([
+            result = [
                 Combine.Combine(tenon_board_face.body, access, Combine.Operation.CUT),
                 Combine.Combine(mortise_face.body, guide, Combine.Operation.CUT)
-            ])
+            ]
         else:
             pass
         return result
@@ -260,16 +260,18 @@ class SheetGoodTenons(CustomComputeFeature.CustomComputeFeature):
         
         tenons = utils.brep.place_body_on_face_at_positions(tenon, tenon_board_face, edge, positions)
         mortises = utils.brep.place_body_on_face_at_positions(mortise, tenon_board_face, edge, positions)
+        if not tenons:
+            return []
 
         tenon_board = utils.brep.union([tenon_board_face.body, tenons])
         tenon_dog_bone_axis = utils.brep.normal_away_from_body(tenon_board_face)
-        tenon_dog_bones = utils.brep.union([
+        tenon_dog_bones = [
             cast(adsk.fusion.BRepBody, utils.brep.create_dogbone_for_edge(e, self.inputs.tool_diameter.value, self.inputs.dog_bone_offset.value, negative=False))
             for e in tenon_board.edges if utils.brep.is_linear(e) and
             utils.brep.normal_along_edge(e).isParallelTo(tenon_dog_bone_axis) and 
             tenons.pointContainment(e.startVertex.geometry) == adsk.fusion.PointContainment.PointOnPointContainment and 
             tenon_face.isPointOnFace(e.startVertex.geometry, 1e-6)
-        ])
+        ]
 
         mortise_dog_bone_axis = utils.brep.normal_away_from_body(mortise_face)
         mortise_dog_bones = [
@@ -278,13 +280,13 @@ class SheetGoodTenons(CustomComputeFeature.CustomComputeFeature):
             and mortise_face.body.pointContainment(utils.brep.edge_middle_point(e)) == adsk.fusion.PointContainment.PointInsidePointContainment
         ]
         mortises = utils.brep.union([mortises] + mortise_dog_bones)
-
-        return [
-            Combine.Combine(tenon_board_face.body, tenons, Combine.Operation.JOIN),
-            Combine.Combine(tenon_board_face.body, tenon_dog_bones, Combine.Operation.CUT),
-            Combine.Combine(mortise_face.body, mortises, Combine.Operation.CUT)
-        ] + self.create_connectors(edge, mating_faces, positions, tenon_width)
-            
-    def pre_select(self, input: adsk.core.SelectionCommandInput, selection: adsk.fusion.BRepEdge | adsk.fusion.BRepFace) -> bool:
-        return True
         
+        result = [
+            Combine.Combine(tenon_board_face.body, tenons, Combine.Operation.JOIN),
+            Combine.Combine(mortise_face.body, mortises, Combine.Operation.CUT)
+        ]
+        if tenon_dog_bones:
+            result.append(Combine.Combine(tenon_board_face.body, utils.brep.union(tenon_dog_bones), Combine.Operation.CUT))
+        result += self.create_connectors(edge, mating_faces, positions, tenon_width)
+        return result
+            

@@ -108,6 +108,8 @@ class CustomComputeFeature(ABC):
         command = adsk.core.CommandCreatedEventArgs.cast(args).command
 
         self.edited_custom_feature = cast(adsk.fusion.CustomFeature, self.ui.activeSelections.item(0).entity) if self.ui.activeSelections.count > 0 else None
+        if self.edited_custom_feature and self.edited_custom_feature.nativeObject:
+            self.edited_custom_feature = self.edited_custom_feature.nativeObject
         editing = self.edited_custom_feature != None
         params = self.edited_custom_feature.parameters if self.edited_custom_feature else None
 
@@ -178,8 +180,7 @@ class CustomComputeFeature(ABC):
             dependencies: list[adsk.fusion.BRepBody] = []
             try:
                 combines = self.execute()
-                features_inside_component, features_outside_component, dependencies = Combine.create_features_from_combines(self.component, combines, feature)
-                
+                features_inside_component, features_outside_component, dependencies = Combine.create_features_from_combines(self.component, combines, feature, False)
             except Errors.InvalidInputError as e:
                 args.executeFailed = True
                 args.executeFailedMessage = e.message
@@ -206,7 +207,7 @@ class CustomComputeFeature(ABC):
         with self.compute_disabled():
             try:
                 combines = self.execute()
-                Combine.create_features_from_combines(self.component, combines)
+                Combine.create_features_from_combines(self.component, combines, None, False)
             except Errors.InvalidInputError as e:
                 self.showError(e.message)
                 args.isValidResult = False
@@ -220,15 +221,14 @@ class CustomComputeFeature(ABC):
         assert(self.inputs is not None)
         assert(self.edited_custom_feature is not None)
         self.update_inputs_from_ui()
+        features_inside_component: list[adsk.fusion.Feature] = []
+        features_outside_component: list[adsk.fusion.Feature] = []
 
         with self.compute_disabled():
-            self.remove_external_combine_features()
-            self.remove_all_dependencies_and_named_values()
-
+            self.edited_custom_feature.timelineObject.rollTo(True)
+            self.edited_custom_feature.dependencies.deleteAll()
             for inp in self.inputs.inputs:
                 inp.update_in_feature(self.edited_custom_feature)
-
-            self.delete_all_child_features()
 
             try:
                 combines = self.execute()
@@ -239,7 +239,8 @@ class CustomComputeFeature(ABC):
                 args.executeFailed = True
                 args.executeFailedMessage = "An error occurred during execution."
             else:
-                features_inside_component, features_outside_component, dependencies = Combine.create_features_from_combines(self.component, combines, self.edited_custom_feature)
+                self.edited_custom_feature.timelineObject.rollTo(True)
+                features_inside_component, features_outside_component, dependencies = Combine.create_features_from_combines(self.edited_custom_feature.parentComponent, combines, self.edited_custom_feature, False)
 
                 self.edited_custom_feature.timelineObject.rollTo(True)
                 for dep in dependencies:
@@ -253,7 +254,7 @@ class CustomComputeFeature(ABC):
                 except:
                     pass                
                 if restore_entity:
-                    if restore_entity == self.edited_custom_feature and features_outside_component:
+                    if restore_entity in [self.edited_custom_feature, *features_outside_component]:
                         features_outside_component[-1].timelineObject.rollTo(False)    
                     else:
                         self.restore_timeline_object.rollTo(False)
@@ -288,16 +289,17 @@ class CustomComputeFeature(ABC):
             return
         try:
             feature: adsk.fusion.CustomFeature = args.customFeature
-            if not self.inputs:
-                self.inputs = self.create_inputs()
+            self.inputs = self.create_inputs()
             self.update_inputs_from_feature(feature)
             combines = self.execute()
-            Combine.update_features_from_combines(combines, feature)
+            Combine.create_features_from_combines(self.component, combines, feature, True)
         except Errors.CustomComputeError as e:
             e.update_status(args.computeStatus)
         except Exception as e:
             args.computeStatus.statusMessages.addError(str(e))
-
+        finally:
+            self.inputs = None
+    
     def _pre_select(self, args: adsk.core.EventArgs):
         event_args = adsk.core.SelectionEventArgs.cast(args)
         event_args.isSelectable = self.pre_select(event_args.activeInput, event_args.selection.entity)
@@ -311,33 +313,6 @@ class CustomComputeFeature(ABC):
         assert(self.inputs is not None)
         for sel in self.inputs.inputs:
             sel.update_from_feature(feature)
-
-    def remove_external_combine_features(self):
-        assert(self.edited_custom_feature is not None)
-        idx = 0
-        while (token := self.edited_custom_feature.customNamedValues.value(f"external-combine-{idx}")):
-            if (feature := self.component.parentDesign.findEntityByToken(token)):
-                cast(adsk.fusion.Feature, feature[0]).deleteMe()
-            idx += 1
-
-    def remove_all_dependencies_and_named_values(self):
-        assert(self.edited_custom_feature is not None)
-        self.edited_custom_feature.dependencies.deleteAll()
-        namedValuesToDelete = []
-        for idx in range(self.edited_custom_feature.customNamedValues.count):
-            id = self.edited_custom_feature.customNamedValues.idByIndex(idx)
-            namedValuesToDelete.append(id)
-        for id in namedValuesToDelete:
-            self.edited_custom_feature.customNamedValues.remove(id)
-
-    def delete_all_child_features(self):
-        assert(self.edited_custom_feature is not None)
-        features_to_delete = list(self.edited_custom_feature.features)
-        self.edited_custom_feature.setStartAndEndFeatures(None, None) # type: ignore
-        self.edited_custom_feature.timelineObject.rollTo(False)
-        for feature in features_to_delete:
-            f = cast(adsk.fusion.Feature, feature)
-            if f.isValid: f.deleteMe()
 
     @contextlib.contextmanager
     def compute_disabled(self):

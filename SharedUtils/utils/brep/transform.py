@@ -23,6 +23,12 @@ def subtract(b1: adsk.fusion.BRepBody, b2: adsk.fusion.BRepBody) -> adsk.fusion.
     mgr.booleanOperation(result, b2, adsk.fusion.BooleanTypes.DifferenceBooleanType) # type: ignore
     return result
 
+def intersect(b1: adsk.fusion.BRepBody, b2: adsk.fusion.BRepBody) -> adsk.fusion.BRepBody:
+    mgr = adsk.fusion.TemporaryBRepManager.get()
+    result = mgr.copy(b1)
+    mgr.booleanOperation(result, b2, adsk.fusion.BooleanTypes.IntersectionBooleanType) # type: ignore
+    return result
+
 def place_body_on_face_at_positions(body: adsk.fusion.BRepBody, face: adsk.fusion.BRepFace, edge: adsk.fusion.BRepEdge, positions: list[Vector3D]) -> adsk.fusion.BRepBody:
     origin, x, y, _ = coordinates.coordinate_system_on_face(face, edge)
     x_coords = [vector.subtract(p, origin.asVector()).dotProduct(x) for p in positions]

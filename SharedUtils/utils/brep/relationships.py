@@ -1,4 +1,5 @@
 from .. import vector
+from .. import misc
 from . import normals as norm
 import adsk.core, adsk.fusion
 from adsk.core import Vector3D
@@ -61,8 +62,13 @@ def is_parallel(a: adsk.fusion.BRepFace | adsk.fusion.BRepEdge | Vector3D, b: ad
 def face_contains_edge(face: adsk.fusion.BRepFace, edge: adsk.fusion.BRepEdge) -> bool:
     if not is_planar(face):
         return False
-
-    return face.boundingBox.contains(edge.startVertex.geometry) and face.boundingBox.contains(edge.endVertex.geometry)
+    edge_normal = norm.normal_along_edge(edge)
+    test_points = [
+        vector.add(edge.startVertex.geometry.asVector(), vector.scaled_by(edge_normal, x)).asPoint()
+        for x in misc.float_range(0, edge.length, edge.length / 10)
+    ]
+    evaluated = [1 if face.isPointOnFace(p, 1e-6) else 0 for p in test_points]
+    return sum(evaluated) > 5
 
 def are_sketch_curves_right_handed(curves: list[adsk.fusion.SketchCurve], face: adsk.fusion.BRepFace) -> bool:
     if len(curves) == 1:
