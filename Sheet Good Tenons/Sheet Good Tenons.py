@@ -76,8 +76,8 @@ class SheetGoodTenonsInputs(Inputs.Inputs):
         is_screw_connector = lambda: self.connector.value == self.ConnectorType.SCREW.value
         self.screw_diameter = Inputs.FloatInput('screwDiameter', 'Screw diameter', 0.4, 'Diameter of the connector screw', units, is_screw_connector)
         self.mortise_screw = Inputs.DropDownInput('mortiseScrew', 'Mortise screw', utils.misc.class_property_values(self.ScrewType, Inputs.DropDownInput.Item), self.ScrewType.CENTERED.value, 'Type of screw placement in the mortise board', is_screw_connector)
-        self.tenon_screw = Inputs.DropDownInput('tenonScrew', 'Tenon screw', utils.misc.class_property_values(self.ScrewType, Inputs.DropDownInput.Item), self.ScrewType.CENTERED.value, 'Type of screw placement in the tenon board', is_screw_connector)
-        self.screw_offset = Inputs.FloatInput('screwOffset', 'Screw offset', 1.2, 'Offset of the connector screw to the tenon', units,is_screw_connector)
+        self.tenon_screw = Inputs.DropDownInput('tenonScrew', 'Tenon screw', utils.misc.class_property_values(self.ScrewType, Inputs.DropDownInput.Item), self.ScrewType.NONE.value, 'Type of screw placement in the tenon board', is_screw_connector)
+        self.screw_offset = Inputs.FloatInput('screwOffset', 'Screw offset', 1.2, 'Offset of the connector screw to the tenon', units, lambda: is_screw_connector() and (self.mortise_screw.value == self.ScrewType.TWO_SIDES.value or self.tenon_screw.value == self.ScrewType.TWO_SIDES.value))
 
         is_clamex_connector = lambda: self.connector.value == self.ConnectorType.CLAMEX.value
         self.clamex = Inputs.DropDownInput('clamex', 'Clamex type', utils.misc.class_property_values(self.ClamexType, Inputs.DropDownInput.Item), self.ClamexType.CLAMEX_P10.value, 'Type of Clamex connector', is_clamex_connector)    
@@ -182,8 +182,10 @@ class SheetGoodTenons(CustomComputeFeature.CustomComputeFeature):
                     ])
                 else:
                     edge_normal = utils.brep.normal_along_edge(edge)
-                    start_screw_position = utils.vector.add(edge.startVertex.geometry.asVector(), utils.vector.scaled_by(edge_normal, self.inputs.screw_offset.value))
-                    end_screw_position = utils.vector.add(edge.endVertex.geometry.asVector(), utils.vector.scaled_by(edge_normal, -self.inputs.screw_offset.value))
+                    start_offset = (utils.vector.subtract(tenon_positions[0], edge.startVertex.geometry.asVector()).length - tenon_width/2)/2
+                    end_offset = (utils.vector.subtract(edge.endVertex.geometry.asVector(), tenon_positions[-1]).length - tenon_width/2)/2
+                    start_screw_position = utils.vector.add(edge.startVertex.geometry.asVector(), utils.vector.scaled_by(edge_normal, start_offset))
+                    end_screw_position = utils.vector.add(edge.endVertex.geometry.asVector(), utils.vector.scaled_by(edge_normal, -end_offset))
                     positions = [start_screw_position] + [
                         utils.vector.average(pair[0], pair[1])
                         for pair in zip(tenon_positions, tenon_positions[1:])
@@ -242,7 +244,9 @@ class SheetGoodTenons(CustomComputeFeature.CustomComputeFeature):
             return []
         tenon_board_face, tenon_face, mortise_face = mating_faces[0:3]
         positions, tenon_width = self.tenon_positions_along_edge(edge)
-
+        if not positions:
+            return []
+        
         tenon_thickness = utils.brep.get_board_thickness(tenon_board_face)
         tenon_length = utils.brep.get_board_thickness(mortise_face) - self.inputs.remaining_material.value
         tenon = utils.brep.transformed(
@@ -260,8 +264,6 @@ class SheetGoodTenons(CustomComputeFeature.CustomComputeFeature):
         
         tenons = utils.brep.place_body_on_face_at_positions(tenon, tenon_board_face, edge, positions)
         mortises = utils.brep.place_body_on_face_at_positions(mortise, tenon_board_face, edge, positions)
-        if not tenons:
-            return []
 
         tenon_board = utils.brep.union([tenon_board_face.body, tenons])
         tenon_dog_bone_axis = utils.brep.normal_away_from_body(tenon_board_face)
