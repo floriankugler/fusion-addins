@@ -7,7 +7,10 @@ Furthermore, updates to this code might break existing usages of the addins.
 
 - **Lamello**
 
-  This currently places access and guide holes for Lamello Clamex P10 and P14 connectors.
+  This places the holes for Lamello Clamex and Cabineo connectors.
+- **Sheet Good Tenons**
+
+  Creates mortise and tenon connections between sheet good boards and also (optionally) places the holes for screw, Clamex or Cabineo connectors in one go.
 - **Pattern Cutouts**
 
   This is a collection of differently shaped pattern cutouts, e.g. triangles, rhombuses etc. The cutouts take existing inner features of the selected faces into account.
@@ -22,6 +25,9 @@ Furthermore, updates to this code might break existing usages of the addins.
 - **Dog Bones**
 
   Creates dog bones for inner corners based on the tool diameter. Specific edges or faces can be selected.
+- **Heal Sketch Lines**
+
+  Connects sketch curves that should be connected but are not quite. This often happens when projecting or intersecting complex geometry from e.g. a vehicle model, so that the projected curves do not form a closed profile. This addin automatically heals these curves by placing coincident constraints for end points within a tolerance.
 
 ## Installation
 
