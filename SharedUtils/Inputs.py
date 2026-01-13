@@ -88,7 +88,7 @@ class FloatInput(Input):
     units: str
     minimum_value: float | None = None
 
-    def __init__(self, id, name, default_value, tool_tip, units, update_visibility: Callable[[], bool] = lambda: True):
+    def __init__(self, id: str, name: str, default_value: float, tool_tip: str, units: str, update_visibility: Callable[[], bool] = lambda: True):
         super().__init__(id, name, tool_tip, update_visibility)
         self.default_value = default_value
         self.units = units
