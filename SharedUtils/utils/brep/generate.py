@@ -82,7 +82,7 @@ def rounded_rectangle(width: float, height: float, thickness: float, fillet_radi
             Vector3D.create(-width/2+fillet_radius, -height/2+fillet_radius, 0),
         ]
         for p in fillet_points:
-            mgr.booleanOperation(box, transformed(cyl, matrix.translation_matrix(p)), adsk.fusion.BooleanTypes.UnionBooleanType) # type: ignore
+            mgr.booleanOperation(box, trans.transformed(cyl, matrix.translation_matrix(p)), adsk.fusion.BooleanTypes.UnionBooleanType) # type: ignore
     return box
 
 # Creates a rhombus, origin as at its center, width is along x, height along y. 

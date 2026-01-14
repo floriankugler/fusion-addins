@@ -205,17 +205,17 @@ class CustomComputeFeature(ABC):
             return
         self.update_inputs_from_ui()
         with self.compute_disabled():
-            try:
-                combines = self.execute()
-                Combine.create_features_from_combines(self.component, combines, None, False)
-            except Errors.InvalidInputError as e:
-                self.showError(e.message)
-                args.isValidResult = False
-            except Exception as e:
-                self.showError(f"An error occurred: {e}")
-                args.isValidResult = False
-            else:
-                self.showError(None)
+            # try:
+            combines = self.execute()
+            Combine.create_features_from_combines(self.component, combines, None, False)
+            # except Errors.InvalidInputError as e:
+            #     self.showError(e.message)
+            #     args.isValidResult = False
+            # except Exception as e:
+            #     self.showError(f"An error occurred: {e}")
+            #     args.isValidResult = False
+            # else:
+            #     self.showError(None)
 
     def _edit_execute(self, args: adsk.core.CommandEventArgs):
         assert(self.inputs is not None)

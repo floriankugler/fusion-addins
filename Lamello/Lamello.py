@@ -77,22 +77,22 @@ class LamelloFeature(CustomComputeFeature.CustomComputeFeature):
                 continue
             access_face, slot_face, guide_face = faces[0:3]
 
-        positions: list[adsk.core.Vector3D]
-        if len(self.inputs.points.value) > 0:
-            positions = [cast(adsk.fusion.SketchPoint, p).worldGeometry.asVector() for p in self.inputs.points.value]
-        else:
-            positions = self.access_positions(edge)
+            positions: list[adsk.core.Vector3D]
+            if len(self.inputs.points.value) > 0:
+                positions = [cast(adsk.fusion.SketchPoint, p).worldGeometry.asVector() for p in self.inputs.points.value]
+            else:
+                positions = self.access_positions(edge)
 
-        type = lamello.Type(self.inputs.size.value)
-        params = lamello.Params(
-            type=type,
-            insert=lamello.Insert(self.inputs.cabineo_insert_type.value) if self.inputs.size.value == lamello.Type.CABINEO_8_M6.value else None,
-            flush=self.inputs.cabineo_flush.value,
-            through=self.inputs.cabineo_through_hole.value if type.is_cabineo else self.inputs.through_guide_holes.value
-        )
-        access_holes, guide_holes = lamello.create_hole_bodies(positions, edge, access_face, slot_face, guide_face, params)
-        combines.append(Combine.Combine(access_face.body, access_holes, Combine.Operation.CUT))
-        combines.append(Combine.Combine(guide_face.body, guide_holes, Combine.Operation.CUT))
+            type = lamello.Type(self.inputs.size.value)
+            params = lamello.Params(
+                type=type,
+                insert=lamello.Insert(self.inputs.cabineo_insert_type.value) if self.inputs.size.value == lamello.Type.CABINEO_8_M6.value else None,
+                flush=self.inputs.cabineo_flush.value,
+                through=self.inputs.cabineo_through_hole.value if type.is_cabineo else self.inputs.through_guide_holes.value
+            )
+            access_holes, guide_holes = lamello.create_hole_bodies(positions, edge, access_face, slot_face, guide_face, params)
+            combines.append(Combine.Combine(access_face.body, access_holes, Combine.Operation.CUT))
+            combines.append(Combine.Combine(guide_face.body, guide_holes, Combine.Operation.CUT))
         return combines
     
     def access_positions(self, edge: adsk.fusion.BRepEdge) -> list[adsk.core.Vector3D]:
