@@ -4,10 +4,10 @@ parent_dir = os.path.dirname(current_dir)
 shared_folder = os.path.join(parent_dir, "SharedUtils")
 if current_dir not in sys.path: sys.path.append(current_dir)
 if shared_folder not in sys.path: sys.path.append(shared_folder)
-import Addin, Inputs, Combine, utils
+import Addin, Inputs, utils
 import adsk.core, adsk.fusion
 from typing import cast
-utils.misc.force_reload_modules('Addin', 'Inputs', 'Combine', 'utils')
+utils.misc.force_reload_modules('Addin', 'Inputs', 'utils')
 
 _addin: Addin.Addin | None = None
 
@@ -32,6 +32,8 @@ class HealSketchLines(Addin.Addin):
     plugin_name = 'Heal Sketch Lines'
     plugin_desc = 'Heals missing connections between sketch curves'
     plugin_tooltip = 'Heals missing connections between sketch curves.'
+    plugin_ui_panel = 'SketchModifyPanel'
+    plugin_ui_command = 'Offset'
     inputs: HealingInputs
 
     def create_inputs(self) -> HealingInputs:

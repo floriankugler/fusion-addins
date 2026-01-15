@@ -11,6 +11,8 @@ class Addin(ABC):
     plugin_name = '<<plugin name>>>'
     plugin_desc = '<<plugin description>>'
     plugin_tooltip = '<<plugin tooltip>>'
+    plugin_ui_panel = '<<plugin tooltip>>'
+    plugin_ui_command = '<<plugin tooltip>>'
 
     app: adsk.core.Application
     ui: adsk.core.UserInterface
@@ -34,14 +36,14 @@ class Addin(ABC):
             create_cmd_def = self.ui.commandDefinitions.addButtonDefinition(self.create_command_id, c.plugin_name, c.plugin_tooltip, resource_dir)        
 
             # Add the create button in the Modify panel of the SOLID tab.
-            panel = self.ui.allToolbarPanels.itemById('SketchModifyPanel')
+            panel = self.ui.allToolbarPanels.itemById(self.__class__.plugin_ui_panel)
             for control in panel.controls:
                 if control.id == self.create_command_id:
                     control.deleteMe()
                     break
             for ctrl in panel.controls:
-                if ctrl.id == 'Offset':
-                    panel.controls.addCommand(create_cmd_def, 'Offset', False)        
+                if ctrl.id == self.__class__.plugin_ui_command:
+                    panel.controls.addCommand(create_cmd_def, self.__class__.plugin_ui_command, False)        
 
             # Connect to the command created event for the create command.
             create_command_created = new_event_handler(self._create_ui, adsk.core.CommandCreatedEventHandler)
