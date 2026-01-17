@@ -58,7 +58,7 @@ def vendor_addin(addin_name):
     is_breaking = ask_breaking_change(addin_name)
 
     dst_addin_name = addin_name
-    dst_addin_name += f"_v{SEMANTIC_VERSION}"
+    dst_addin_name += f"_v{SEMANTIC_VERSION.replace('.', '_')}"
     dst_addin = os.path.join(BUILD_DIR, dst_addin_name)
     src_addin = os.path.join(ADDINS_SRC_DIR, addin_name)
 
@@ -66,6 +66,8 @@ def vendor_addin(addin_name):
 
     # Copy add-in files
     copy_tree(src_addin, dst_addin)
+    shutil.move(os.path.join(dst_addin, f"{addin_name}.manifest"), os.path.join(dst_addin, f"{dst_addin_name}.manifest"))
+    shutil.move(os.path.join(dst_addin, f"{addin_name}.py"), os.path.join(dst_addin, f"{dst_addin_name}.py"))
 
     # Copy shared lib
     lib_dst = os.path.join(dst_addin, "lib")
