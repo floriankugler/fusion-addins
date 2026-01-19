@@ -1,0 +1,25 @@
+# PocketSelection.error Property
+
+Parent Object: [PocketSelection](PocketSelection.md)  
+
+## Description
+
+Gets the last warning string encountered after the selection was applied to a parent.
+
+## Syntax
+
+"pocketSelection_var" is a variable referencing a PocketSelection object.  
+
+```python
+# Get the value of the property.
+propertyValue = pocketSelection_var.error
+```
+
+## Property Value
+
+This is a read only property whose value is a string.
+
+## Version
+
+Introduced in version July 2023  
+

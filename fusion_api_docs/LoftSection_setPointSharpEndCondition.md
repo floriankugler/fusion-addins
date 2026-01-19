@@ -1,0 +1,28 @@
+# LoftSection.setPointSharpEndCondition Method
+
+Parent Object: [LoftSection](LoftSection.md)  
+
+## Description
+
+Sets the end condition to be sharp where the section is a point. This is the default condition for a point section.  
+
+If this LoftSection object is associated with a created feature, you need to position the timeline marker to immediately before this feature. This can be accomplished using the following code: thisFeature.timelineObject.rollTo(True)
+
+## Syntax
+
+"loftSection_var" is a variable referencing a [LoftSection](LoftSection.md) object.
+
+```python
+returnValue = loftSection_var.setPointSharpEndCondition()
+```
+
+## Return Value
+
+| Type    | Description                                   |
+|---------|-----------------------------------------------|
+| boolean | Returns true if the operation was successful. |
+
+## Version
+
+Introduced in version August 2016  
+

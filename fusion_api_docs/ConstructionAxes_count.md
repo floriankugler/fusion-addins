@@ -1,0 +1,31 @@
+# ConstructionAxes.count Property
+
+Parent Object: [ConstructionAxes](ConstructionAxes.md)  
+
+## Description
+
+The number of construction axes in the collection.
+
+## Syntax
+
+"constructionAxes_var" is a variable referencing a ConstructionAxes object.  
+
+```python
+# Get the value of the property.
+propertyValue = constructionAxes_var.count
+```
+
+## Property Value
+
+This is a read only property whose value is a uinteger.
+
+## Samples
+
+| Name | Description |
+|----|----|
+| [Delete Empty Components](DeleteEmptyComponents_Sample.md) | Deletes empty components from the active design. |
+
+## Version
+
+Introduced in version August 2014  
+

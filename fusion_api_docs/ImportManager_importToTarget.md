@@ -1,0 +1,43 @@
+# ImportManager.importToTarget Method
+
+Parent Object: [ImportManager](ImportManager.md)  
+
+## Description
+
+Executes the import operation to import a file (of the format specified by the input ImportOptions object) into an existing component in an existing design.
+
+## Remarks
+
+There is currently a limitation with this method where it cannot be used within any of the Command related events.
+
+## Syntax
+
+"importManager_var" is a variable referencing an [ImportManager](ImportManager.md) object.
+
+```python
+returnValue = importManager_var.importToTarget(importOptions, target)
+```
+
+## Return Value
+
+| Type    | Description                                |
+|---------|--------------------------------------------|
+| boolean | Returns true if the import was successful. |
+
+## Parameters
+
+| Name | Type | Description |
+|----|----|----|
+| importOptions | [ImportOptions](ImportOptions.md) | An ImportOptions object that is created using one of the create methods on the ImportManager object. This defines the type of file and any available options supported for that file type. Supplying a DXF2DImportOptions object will result in the creation of one or more sketches (depending on the layers in the DXF file) in the target component. |
+| target | [Base](Base.md) | For most import types this will be a Component. For SVGImportOptions this is the sketch you want to import the SVG data into. |
+
+## Samples
+
+| Name | Description |
+|----|----|
+| [Import Manager API Sample](ImportManager_Sample.md) | Demonstrates how to import different formats to Fusion document |
+
+## Version
+
+Introduced in version September 2015  
+

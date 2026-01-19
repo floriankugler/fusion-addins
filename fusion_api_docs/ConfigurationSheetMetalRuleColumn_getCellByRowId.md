@@ -1,0 +1,32 @@
+# ConfigurationSheetMetalRuleColumn.getCellByRowId Method
+
+Parent Object: [ConfigurationSheetMetalRuleColumn](ConfigurationSheetMetalRuleColumn.md)  
+
+## Description
+
+Gets the cell in this column at the row specified by its ID.
+
+## Syntax
+
+"configurationSheetMetalRuleColumn_var" is a variable referencing a [ConfigurationSheetMetalRuleColumn](ConfigurationSheetMetalRuleColumn.md) object.
+
+```python
+returnValue = configurationSheetMetalRuleColumn_var.getCellByRowId(rowId)
+```
+
+## Return Value
+
+| Type | Description |
+|----|----|
+| [ConfigurationSheetMetalRuleCell](ConfigurationSheetMetalRuleCell.md) | Returns the specified cell if successful and null if the id is not found. |
+
+## Parameters
+
+| Name  | Type   | Description                               |
+|-------|--------|-------------------------------------------|
+| rowId | string | The ID of the row to return the cell for. |
+
+## Version
+
+Introduced in version January 2024  
+

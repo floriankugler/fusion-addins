@@ -1,0 +1,25 @@
+# ConstructionPoint.isDeletable Property
+
+Parent Object: [ConstructionPoint](ConstructionPoint.md)  
+
+## Description
+
+Indicates if this construction point can be deleted. The base construction point cannot be deleted.
+
+## Syntax
+
+"constructionPoint_var" is a variable referencing a ConstructionPoint object.  
+
+```python
+# Get the value of the property.
+propertyValue = constructionPoint_var.isDeletable
+```
+
+## Property Value
+
+This is a read only property whose value is a boolean.
+
+## Version
+
+Introduced in version August 2014  
+

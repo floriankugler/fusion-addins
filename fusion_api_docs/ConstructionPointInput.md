@@ -1,0 +1,42 @@
+# ConstructionPointInput Object
+
+Derived from: [Base](Base.md) Object  
+
+## Description
+
+A ConstructionPointInput is a throwaway object used to create a ConstructionPoint The usage pattern is a. create a ConstructionPointInput (ConstructionPoints.CreateInput) b. call one of the member functions to specify how the ConstructionPoint is created c. create the ConstructionPoint (call ConstructionPoints.Add) d. stop referencing the ConstructionPointInput (so it gets deleted).
+
+## Methods
+
+| Name | Description |
+| --- | --- |
+| [classType](ConstructionPointInput_classType.md) | Static function that all classes support that returns the type of the class as a string. The returned string matches the string returned by the objectType property. For example if you have a reference to an object and you want to check if it's a SketchLine you can use myObject.objectType == fusion.SketchLine.classType(). |
+| [setByCenter](ConstructionPointInput_setByCenter.md) | This input method is for creating a construction point at the center of a spherical face (sphere or torus), circular edge or sketch arc/circle This can result in a parametric or non-parametric construction point depending on whether the parent component is parametric or is a direct edit component. |
+| [setByEdgePlane](ConstructionPointInput_setByEdgePlane.md) | This input method is for creating a construction point at the intersection of a construction plane, planar face or sketch profile and a linear edge, construction axis or sketch line. This can result in a parametric or non-parametric construction point depending on whether the parent component is parametric or is a direct edit component. |
+| [setByPoint](ConstructionPointInput_setByPoint.md) | This input method is for creating a construction point on the specified point or vertex. The point can be either a B-Rep vertex, SketchPoint, or a Point3D object. Providing a Point3D object is only valid when working in the direct edit modeling mode. This is not valid when working in the parametric modeling mode and will fail. Even when providing a B-Rep vertex, or SketchPoint the result will be non-parametric if the parent component is a direct edit component. |
+| [setByThreePlanes](ConstructionPointInput_setByThreePlanes.md) | This input method is for creating a construction point at the intersection of the three planes or planar faces. This can result in a parametric or non-parametric construction point depending on whether the parent component is parametric or is a direct edit component. |
+| [setByTwoEdges](ConstructionPointInput_setByTwoEdges.md) | This input method is for creating a construction point at the intersection of the two linear edges or sketch lines. The edges can be B-Rep edges or sketch lines. This can result in a parametric or non-parametric construction point depending on whether the parent component is parametric or is a direct edit component. |
+
+## Properties
+
+| Name | Description |
+| --- | --- |
+| [creationOccurrence](ConstructionPointInput_creationOccurrence.md) | In order for geometry to be transformed correctly, an occurrence for creation needs to be specified when the ConstructionPoint is created based on geometry (e.g. a sketch point) in another component AND (the ConstructionPoint) is not in the root component. The CreationOccurrence is analogous to the active occurrence in the UI |
+| [isValid](ConstructionPointInput_isValid.md) | Indicates if this object is still valid, i.e. hasn't been deleted or some other action done to invalidate the reference. |
+| [objectType](ConstructionPointInput_objectType.md) | This property is supported by all objects in the API and returns a string that contains the full name (namespace::objecttype) describing the type of the object. It's often useful to use this in combination with the classType method to see if an object is a certain type. For example: if obj.objectType == adsk.core.Point3D.classType(): |
+| [targetBaseOrFormFeature](ConstructionPointInput_targetBaseOrFormFeature.md) | When creating a construction point that is owned by a base or form feature, set this property to the base or form feature you want to associate the new construction point with. By default, this is null, meaning it will not be associated with a base or form feature. Because of a current limitation, if you want to create a construction point associated with a base or form feature, you must set this property AND call the startEdit method of the base or form feature, create the feature, and then call the finishEdit method of the base or form feature. The base or form feature must be in an "edit" state to be able to add any additional items to it. |
+
+## Accessed From
+
+[ConstructionPoints.createInput](ConstructionPoints_createInput.md)
+
+## Samples
+
+| Name | Description |
+|----|----|
+| [Construction Point API Sample](ConstructionPointSample_Sample.md) | Demonstrates creating construction point by different ways |
+
+## Version
+
+Introduced in version August 2014  
+

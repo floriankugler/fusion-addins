@@ -7,6 +7,7 @@
 - `_build/` holds versioned, self-contained add-in builds produced for distribution.
 - `tools/` includes helper scripts for symlinking and vendoring builds.
 - `img/` contains documentation screenshots referenced in `README.md`.
+- `fusion_api_docs/` stores the Fusion 360 API reference. Start with `fusion_api_docs/INDEX.md`, then open the per-type or per-member Markdown files as needed.
 
 ## Build, Test, and Development Commands
 
@@ -40,3 +41,4 @@
 
 - Fusion 360 AddIns folder (macOS): `~/Library/Application Support/Autodesk/Autodesk Fusion 360/API/AddIns`.
 - Use `addins-src/` for development; use `_build/` for distribution-ready artifacts.
+- Use `fusion_api_docs/INDEX.md` to find API types and members, then reference the specific Markdown file for details.

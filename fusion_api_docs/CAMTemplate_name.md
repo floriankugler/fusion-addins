@@ -1,0 +1,28 @@
+# CAMTemplate.name Property
+
+Parent Object: [CAMTemplate](CAMTemplate.md)  
+
+## Description
+
+Gets and sets the name of the template.
+
+## Syntax
+
+"cAMTemplate_var" is a variable referencing a CAMTemplate object.  
+
+```python
+# Get the value of the property.
+propertyValue = cAMTemplate_var.name
+
+# Set the value of the property.
+cAMTemplate_var.name = propertyValue
+```
+
+## Property Value
+
+This is a read/write property whose value is a string.
+
+## Version
+
+Introduced in version April 2023  
+

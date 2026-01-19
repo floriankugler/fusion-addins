@@ -1,0 +1,35 @@
+# ArrangeDefinition Object
+
+Derived from: [Base](Base.md) Object  
+
+## Description
+
+The ArrangeDefinition object is the base class for the ArrangeDefinition2D and ArrangeDefinition3D objects. It provides access to the information that defines an existing Arrange feature.
+
+## Methods
+
+| Name | Description |
+|----|----|
+| [classType](ArrangeDefinition_classType.md) | Static function that all classes support that returns the type of the class as a string. The returned string matches the string returned by the objectType property. For example if you have a reference to an object and you want to check if it's a SketchLine you can use myObject.objectType == fusion.SketchLine.classType(). |
+
+## Properties
+
+| Name | Description |
+| --- | --- |
+| [isCreateCopies](ArrangeDefinition_isCreateCopies.md) | Gets if the original components were moved to create the arrangement or copied were created. This value can only be set when creating a new arrangement. |
+| [isValid](ArrangeDefinition_isValid.md) | Indicates if this object is still valid, i.e. hasn't been deleted or some other action done to invalidate the reference. |
+| [objectType](ArrangeDefinition_objectType.md) | This property is supported by all objects in the API and returns a string that contains the full name (namespace::objecttype) describing the type of the object. It's often useful to use this in combination with the classType method to see if an object is a certain type. For example: if obj.objectType == adsk.core.Point3D.classType(): |
+| [solverType](ArrangeDefinition_solverType.md) | Gets the type of arrange feature defined by this definition. |
+
+## Accessed From
+
+[ArrangeFeature.definition](ArrangeFeature_definition.md)
+
+## Derived Classes
+
+[Arrange2DDefinition](Arrange2DDefinition.md), [Arrange3DDefinition](Arrange3DDefinition.md)
+
+## Version
+
+Introduced in version January 2025  
+

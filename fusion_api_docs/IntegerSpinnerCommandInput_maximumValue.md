@@ -1,0 +1,25 @@
+# IntegerSpinnerCommandInput.maximumValue Property
+
+Parent Object: [IntegerSpinnerCommandInput](IntegerSpinnerCommandInput.md)  
+
+## Description
+
+Gets the maximum allowed value of the spinner.
+
+## Syntax
+
+"integerSpinnerCommandInput_var" is a variable referencing an IntegerSpinnerCommandInput object.  
+
+```python
+# Get the value of the property.
+propertyValue = integerSpinnerCommandInput_var.maximumValue
+```
+
+## Property Value
+
+This is a read only property whose value is an integer.
+
+## Version
+
+Introduced in version July 2015  
+
