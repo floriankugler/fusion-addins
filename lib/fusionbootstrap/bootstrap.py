@@ -1,4 +1,5 @@
 import importlib
+import importlib.util
 import json
 import sys, os
 from . import runtime
@@ -11,15 +12,33 @@ def run(context):
     if runtime.DEV_MODE:
         _reload_lib_modules()
 
-    main = importlib.import_module('main')
-    if runtime.DEV_MODE:
-        importlib.reload(main)
+    main = _load_main_module(force_reload=runtime.DEV_MODE)
     main.run(context)
 
 def stop(context):
     print(f"[INFO] Stopping add-in. DEV_MODE={runtime.DEV_MODE}, VERSION={runtime.VERSION}")
-    main = importlib.import_module('main')
+    main = _load_main_module()
     main.stop(context)
+
+def _load_main_module(force_reload: bool = False):
+    bootstrap_dir = os.path.dirname(os.path.abspath(__file__))
+    addin_dir = os.path.abspath(os.path.join(bootstrap_dir, "../.."))
+    addin_name = os.path.basename(addin_dir)
+    main_path = os.path.join(addin_dir, "main.py")
+    module_name = f"fusion_addin_{addin_name}_main"
+
+    module = sys.modules.get(module_name)
+    if module and not force_reload and getattr(module, "__spec__", None):
+        return module
+
+    spec = importlib.util.spec_from_file_location(module_name, main_path)
+    if not spec or not spec.loader:
+        raise RuntimeError(f"Failed to load add-in main module at {main_path}")
+
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
 
 def _load_id() -> str:
     bootstrap_dir = os.path.dirname(os.path.abspath(__file__))
