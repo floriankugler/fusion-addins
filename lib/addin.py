@@ -2,10 +2,9 @@ import adsk.core, adsk.fusion
 from typing import cast
 from abc import ABC, abstractmethod
 from . import inputs as inp
-from . import utils
+from . import utils, ui_placement as plc
 from .utils.fusion import new_event_handler
 from .fusionbootstrap import runtime
-from .ui_placement import UIPlacement, add_command_to_ui, remove_command_from_ui
 
 
 class Addin(ABC):
@@ -25,7 +24,7 @@ class Addin(ABC):
         return self.plugin_id + '_create'
 
     @abstractmethod
-    def get_ui_placement(self) -> UIPlacement:
+    def get_ui_placement(self) -> plc.UIPlacement:
         pass
 
     def __init__(self):
@@ -43,7 +42,7 @@ class Addin(ABC):
 
             # Add the create button in the Modify panel of the SOLID tab.
             placement = self.get_ui_placement()
-            add_command_to_ui(self.ui, placement, create_cmd_def, self.create_command_id)
+            plc.add_command_to_ui(self.ui, placement, create_cmd_def, self.create_command_id)
 
             # Connect to the command created event for the create command.
             create_command_created = new_event_handler(self._create_ui, adsk.core.CommandCreatedEventHandler)
@@ -56,7 +55,7 @@ class Addin(ABC):
     def __del__(self):
         try:
             placement = self.get_ui_placement()
-            remove_command_from_ui(self.ui, placement, self.create_command_id)
+            plc.remove_command_from_ui(self.ui, placement, self.create_command_id)
                 
             cmd_def = self.ui.commandDefinitions.itemById(self.create_command_id)
             if cmd_def:
