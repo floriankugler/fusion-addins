@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 from . import inputs as inp
 from . import utils
 from .utils.fusion import new_event_handler
+from .fusionbootstrap import runtime
 from .ui_placement import UIPlacement, add_command_to_ui, remove_command_from_ui
 
 
@@ -13,6 +14,7 @@ class Addin(ABC):
     plugin_desc = '<<plugin description>>'
     plugin_tooltip = '<<plugin tooltip>>'
 
+    plugin_id: str
     app: adsk.core.Application
     ui: adsk.core.UserInterface
     inputs: inp.Inputs | None
@@ -20,7 +22,7 @@ class Addin(ABC):
 
     @property
     def create_command_id(self) -> str:
-        return self.__class__.plugin_id + 'Create'
+        return self.plugin_id + '_create'
 
     @abstractmethod
     def get_ui_placement(self) -> UIPlacement:
@@ -28,11 +30,12 @@ class Addin(ABC):
 
     def __init__(self):
         try:
+            self.plugin_id = runtime.ID
             self.app = adsk.core.Application.get()
             self.ui  = self.app.userInterface
             self._handlers = []
             c = self.__class__
-            resource_dir = 'Resources/' + c.plugin_name
+            resource_dir = 'Resources'
             self.inputs = None
 
             # Create the command definition for the creation command.
