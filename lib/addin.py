@@ -22,6 +22,10 @@ class Addin(ABC):
     @property
     def create_command_id(self) -> str:
         return self.plugin_id + '_create'
+    
+    @property
+    def resource_dir(self) -> str:
+        return 'Resources'
 
     @abstractmethod
     def get_ui_placement(self) -> plc.UIPlacement:
@@ -34,11 +38,10 @@ class Addin(ABC):
             self.ui  = self.app.userInterface
             self._handlers = []
             c = self.__class__
-            resource_dir = 'Resources'
             self.inputs = None
 
             # Create the command definition for the creation command.
-            create_cmd_def = self.ui.commandDefinitions.addButtonDefinition(self.create_command_id, c.plugin_name, c.plugin_tooltip, resource_dir)        
+            create_cmd_def = self.ui.commandDefinitions.addButtonDefinition(self.create_command_id, c.plugin_name, c.plugin_tooltip, self.resource_dir)        
 
             # Add the create button in the Modify panel of the SOLID tab.
             placement = self.get_ui_placement()
@@ -65,31 +68,8 @@ class Addin(ABC):
 
     def _create_ui(self, args: adsk.core.EventArgs) -> None:
         command = adsk.core.CommandCreatedEventArgs.cast(args).command
-        self.inputs = self.create_inputs()
-        for input in self.inputs.inputs:
-            input.create_input(command.commandInputs, None)
-        self._error_field = command.commandInputs.addTextBoxCommandInput('errorMessage', 'Error', '', 3, True)
-        self._error_field.isVisible = False
-        self.update_inputs_from_ui()
-        self.inputs.update_visibilities()
-        for input in self.inputs.inputs:
-            self.input_changed(input.input)
-
-        on_input_changed = new_event_handler(self._input_changed, adsk.core.InputChangedEventHandler)
-        command.inputChanged.add(on_input_changed)
-        self._handlers.append(on_input_changed)
-
-        on_execute_preview = new_event_handler(self._execute_preview, adsk.core.CommandEventHandler)
-        command.executePreview.add(on_execute_preview)
-        self._handlers.append(on_execute_preview)
-
-        on_pre_select = new_event_handler(self._pre_select, adsk.core.SelectionEventHandler)
-        command.preSelect.add(on_pre_select)
-        self._handlers.append(on_pre_select)
-
-        on_validate = new_event_handler(self._validate, adsk.core.ValidateInputsEventHandler)
-        command.validateInputs.add(on_validate)
-        self._handlers.append(on_validate)
+        self._initialize_inputs(command, None)
+        self._attach_common_handlers(command)
 
         on_execute = new_event_handler(self._execute, adsk.core.CommandEventHandler)
         command.execute.add(on_execute)
@@ -116,6 +96,34 @@ class Addin(ABC):
     def _pre_select(self, args: adsk.core.EventArgs):
         event_args = adsk.core.SelectionEventArgs.cast(args)
         event_args.isSelectable = self.pre_select(event_args.activeInput, event_args.selection.entity)
+
+    def _initialize_inputs(self, command: adsk.core.Command, params: adsk.fusion.CustomFeatureParameters | None) -> None:
+        self.inputs = self.create_inputs()
+        for input in self.inputs.inputs:
+            input.create_input(command.commandInputs, params)
+        self._error_field = command.commandInputs.addTextBoxCommandInput('errorMessage', 'Error', '', 3, True)
+        self._error_field.isVisible = False
+        self.update_inputs_from_ui()
+        self.inputs.update_visibilities()
+        for input in self.inputs.inputs:
+            self.input_changed(input.input)
+
+    def _attach_common_handlers(self, command: adsk.core.Command) -> None:
+        on_input_changed = new_event_handler(self._input_changed, adsk.core.InputChangedEventHandler)
+        command.inputChanged.add(on_input_changed)
+        self._handlers.append(on_input_changed)
+
+        on_execute_preview = new_event_handler(self._execute_preview, adsk.core.CommandEventHandler)
+        command.executePreview.add(on_execute_preview)
+        self._handlers.append(on_execute_preview)
+
+        on_pre_select = new_event_handler(self._pre_select, adsk.core.SelectionEventHandler)
+        command.preSelect.add(on_pre_select)
+        self._handlers.append(on_pre_select)
+
+        on_validate = new_event_handler(self._validate, adsk.core.ValidateInputsEventHandler)
+        command.validateInputs.add(on_validate)
+        self._handlers.append(on_validate)
 
     def update_inputs_from_ui(self):
         assert(self.inputs is not None)
