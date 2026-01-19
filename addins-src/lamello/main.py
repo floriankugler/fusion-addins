@@ -1,4 +1,4 @@
-from lib import inputs, combine, custom_compute_feature, utils, lamello
+from lib import inputs, combine, custom_compute_feature, utils, lamello, ui_placement
 import adsk.core, adsk.fusion
 import math
 from typing import cast
@@ -57,6 +57,19 @@ class LamelloFeature(custom_compute_feature.CustomComputeFeature):
     plugin_desc = 'Lamello connectors'
     plugin_tooltip = 'Adds access guide holes for Lamello connectors along an edge.'
     inputs: LamelloInputs
+    
+    def get_ui_placement(self) -> ui_placement.UIPlacement:
+        section = ui_placement.PlacementSpec(
+            id='SeparatorBeforeCustomAddins',
+            anchor_id='FusionMoveCommand',
+            insert_before=True,
+        )
+        command = ui_placement.PlacementSpec(
+            id=self.create_command_id,
+            anchor_id=section.id,
+            insert_before=True,
+        )
+        return ui_placement.UIPlacement(panel_id='SolidModifyPanel', command=command, section=section)
 
     def create_inputs(self) -> LamelloInputs:
         return LamelloInputs(self.app.activeProduct.unitsManager)

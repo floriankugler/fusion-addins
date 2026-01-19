@@ -1,9 +1,10 @@
 import adsk.core, adsk.fusion
 from typing import cast
 from abc import ABC, abstractmethod
-import Inputs
-import utils
-from utils.fusion import new_event_handler
+from . import inputs as inp
+from . import utils
+from .utils.fusion import new_event_handler
+from .ui_placement import UIPlacement, add_command_to_ui, remove_command_from_ui
 
 
 class Addin(ABC):
@@ -11,17 +12,19 @@ class Addin(ABC):
     plugin_name = '<<plugin name>>>'
     plugin_desc = '<<plugin description>>'
     plugin_tooltip = '<<plugin tooltip>>'
-    plugin_ui_panel = '<<plugin tooltip>>'
-    plugin_ui_command = '<<plugin tooltip>>'
 
     app: adsk.core.Application
     ui: adsk.core.UserInterface
-    inputs: Inputs.Inputs | None
+    inputs: inp.Inputs | None
     _error_field: adsk.core.TextBoxCommandInput | None
 
     @property
     def create_command_id(self) -> str:
         return self.__class__.plugin_id + 'Create'
+
+    @abstractmethod
+    def get_ui_placement(self) -> UIPlacement:
+        pass
 
     def __init__(self):
         try:
@@ -36,14 +39,8 @@ class Addin(ABC):
             create_cmd_def = self.ui.commandDefinitions.addButtonDefinition(self.create_command_id, c.plugin_name, c.plugin_tooltip, resource_dir)        
 
             # Add the create button in the Modify panel of the SOLID tab.
-            panel = self.ui.allToolbarPanels.itemById(self.__class__.plugin_ui_panel)
-            for control in panel.controls:
-                if control.id == self.create_command_id:
-                    control.deleteMe()
-                    break
-            for ctrl in panel.controls:
-                if ctrl.id == self.__class__.plugin_ui_command:
-                    panel.controls.addCommand(create_cmd_def, self.__class__.plugin_ui_command, False)        
+            placement = self.get_ui_placement()
+            add_command_to_ui(self.ui, placement, create_cmd_def, self.create_command_id)
 
             # Connect to the command created event for the create command.
             create_command_created = new_event_handler(self._create_ui, adsk.core.CommandCreatedEventHandler)
@@ -55,13 +52,8 @@ class Addin(ABC):
 
     def __del__(self):
         try:
-            c = self.__class__
-            # Remove all UI elements.
-            solid_ws = self.ui.workspaces.itemById('FusionSolidEnvironment')
-            panel = solid_ws.toolbarPanels.itemById('SolidModifyPanel')
-            cntrl = panel.controls.itemById(self.create_command_id)
-            if cntrl:
-                cntrl.deleteMe()
+            placement = self.get_ui_placement()
+            remove_command_from_ui(self.ui, placement, self.create_command_id)
                 
             cmd_def = self.ui.commandDefinitions.itemById(self.create_command_id)
             if cmd_def:
@@ -143,7 +135,7 @@ class Addin(ABC):
             self._error_field.formattedText = ''
         
     @abstractmethod
-    def create_inputs(self) -> Inputs.Inputs:
+    def create_inputs(self) -> inp.Inputs:
         pass
 
     @abstractmethod
@@ -155,4 +147,3 @@ class Addin(ABC):
     
     def input_changed(self, input):
         pass
-

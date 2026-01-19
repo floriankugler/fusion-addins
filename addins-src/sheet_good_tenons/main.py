@@ -1,4 +1,4 @@
-from lib import custom_compute_feature, inputs, combine, utils, lamello, errors
+from lib import custom_compute_feature, inputs, combine, utils, lamello, errors, ui_placement
 import adsk.core, adsk.fusion
 from typing import cast
 import math
@@ -87,6 +87,19 @@ class SheetGoodTenons(custom_compute_feature.CustomComputeFeature):
     plugin_desc = 'Creates tenons and mortises suitable for sheet good construction.'
     plugin_tooltip = 'Creates tenons and mortises suitable for sheet good construction.'
     inputs: SheetGoodTenonsInputs
+    
+    def get_ui_placement(self) -> ui_placement.UIPlacement:
+        section = ui_placement.PlacementSpec(
+            id='SeparatorBeforeCustomAddins',
+            anchor_id='FusionMoveCommand',
+            insert_before=True,
+        )
+        command = ui_placement.PlacementSpec(
+            id=self.create_command_id,
+            anchor_id=section.id,
+            insert_before=True,
+        )
+        return ui_placement.UIPlacement(panel_id='SolidModifyPanel', command=command, section=section)
 
     def create_inputs(self) -> SheetGoodTenonsInputs:
         return SheetGoodTenonsInputs(self.app.activeProduct.unitsManager)

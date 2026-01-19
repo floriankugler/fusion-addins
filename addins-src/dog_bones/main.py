@@ -1,4 +1,4 @@
-from lib import custom_compute_feature, inputs, combine, utils
+from lib import custom_compute_feature, inputs, combine, utils, ui_placement
 import adsk.core, adsk.fusion
 from typing import cast
 
@@ -25,6 +25,19 @@ class Dogbones(custom_compute_feature.CustomComputeFeature):
     plugin_desc = 'Creates dog bone cutouts for corners'
     plugin_tooltip = 'Creates dog bone cutouts for corners.'
     inputs: DogbonesInputs
+    
+    def get_ui_placement(self) -> ui_placement.UIPlacement:
+        section = ui_placement.PlacementSpec(
+            id='SeparatorBeforeCustomAddins',
+            anchor_id='FusionMoveCommand',
+            insert_before=True,
+        )
+        command = ui_placement.PlacementSpec(
+            id=self.create_command_id,
+            anchor_id=section.id,
+            insert_before=True,
+        )
+        return ui_placement.UIPlacement(panel_id='SolidModifyPanel', command=command, section=section)
 
     def create_inputs(self) -> DogbonesInputs:
         return DogbonesInputs(self.app.activeProduct.unitsManager)

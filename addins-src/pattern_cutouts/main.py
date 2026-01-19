@@ -1,7 +1,7 @@
 import functools, math
 import adsk.core, adsk.fusion
 from typing import cast
-from lib import custom_compute_feature, utils, combine
+from lib import custom_compute_feature, utils, combine, ui_placement
 from Shared import CoordinateSystem, PatternInputs
 import Triangles, Rhombuses, Cross, RoundedRectangle, Froli
 
@@ -25,6 +25,19 @@ class PatternCutout(custom_compute_feature.CustomComputeFeature):
     plugin_desc = 'Pattern Cutouts'
     plugin_tooltip = 'Creates patterned cutouts of various shapes.'
     inputs: PatternInputs
+    
+    def get_ui_placement(self) -> ui_placement.UIPlacement:
+        section = ui_placement.PlacementSpec(
+            id='SeparatorBeforeCustomAddins',
+            anchor_id='FusionMoveCommand',
+            insert_before=True,
+        )
+        command = ui_placement.PlacementSpec(
+            id=self.create_command_id,
+            anchor_id=section.id,
+            insert_before=True,
+        )
+        return ui_placement.UIPlacement(panel_id='SolidModifyPanel', command=command, section=section)
 
     def create_inputs(self) -> PatternInputs:
         return PatternInputs(self.app.activeProduct.unitsManager)
@@ -216,4 +229,3 @@ class PatternCutout(custom_compute_feature.CustomComputeFeature):
     def input_changed(self, input):
         if input.id == self.inputs.type.id:
             self.inputs.update_visibilities()
-

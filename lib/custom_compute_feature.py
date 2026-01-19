@@ -6,6 +6,7 @@ from . import inputs as inp
 from . import combine, errors, utils
 from .fusionbootstrap import runtime
 from .utils.fusion import new_event_handler
+from .ui_placement import UIPlacement, add_command_to_ui, remove_command_from_ui
 
 
 class CustomComputeFeature(ABC):
@@ -30,6 +31,10 @@ class CustomComputeFeature(ABC):
     @property
     def edit_command_id(self) -> str:
         return self.plugin_id + '_edit'
+
+    @abstractmethod
+    def get_ui_placement(self) -> UIPlacement:
+        pass
     
     def __init__(self):
         try:
@@ -45,19 +50,8 @@ class CustomComputeFeature(ABC):
             # Create the command definition for the creation command.
             create_cmd_def = self.ui.commandDefinitions.addButtonDefinition(self.create_command_id, c.plugin_name, c.plugin_tooltip, resource_dir)        
 
-            # Add the create button in the Modify panel of the SOLID tab.
-            solidWS = self.ui.workspaces.itemById('FusionSolidEnvironment')
-            panel = solidWS.toolbarPanels.itemById('SolidModifyPanel')
-            separator_id = 'SeparatorBeforeCustomAddins'
-            for idx in range(panel.controls.count):
-                ctrl = panel.controls.item(idx)
-                if ctrl.id == separator_id:
-                    panel.controls.addCommand(create_cmd_def, separator_id, True)        
-                    break
-                if ctrl.id == 'FusionMoveCommand':
-                    panel.controls.addCommand(create_cmd_def, 'FusionMoveCommand', True)        
-                    panel.controls.addSeparator(separator_id, 'FusionMoveCommand', True)
-                    break
+            placement = self.get_ui_placement()
+            add_command_to_ui(self.ui, placement, create_cmd_def, self.create_command_id)
 
             # Create the command definition for the edit command.
             edit_cmd_def = self.ui.commandDefinitions.addButtonDefinition(self.edit_command_id, 
@@ -90,11 +84,8 @@ class CustomComputeFeature(ABC):
         try:
             c = self.__class__
             # Remove all UI elements.
-            solid_ws = self.ui.workspaces.itemById('FusionSolidEnvironment')
-            panel = solid_ws.toolbarPanels.itemById('SolidModifyPanel')
-            cntrl = panel.controls.itemById(self.create_command_id)
-            if cntrl:
-                cntrl.deleteMe()
+            placement = self.get_ui_placement()
+            remove_command_from_ui(self.ui, placement, self.create_command_id)
                 
             cmd_def = self.ui.commandDefinitions.itemById(self.create_command_id)
             if cmd_def:
@@ -350,4 +341,3 @@ class CustomComputeFeature(ABC):
     
     def input_changed(self, input):
         pass
-

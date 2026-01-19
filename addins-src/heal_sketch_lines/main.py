@@ -1,4 +1,4 @@
-from .lib import addin, inputs, utils
+from lib import addin, inputs, utils, ui_placement
 import adsk.core, adsk.fusion
 from typing import cast
 
@@ -24,9 +24,11 @@ class HealSketchLines(addin.Addin):
     plugin_name = 'Heal Sketch Lines'
     plugin_desc = 'Heals missing connections between sketch curves'
     plugin_tooltip = 'Heals missing connections between sketch curves.'
-    plugin_ui_panel = 'SketchModifyPanel'
-    plugin_ui_command = 'Offset'
     inputs: HealingInputs
+
+    def get_ui_placement(self) -> ui_placement.UIPlacement:
+        command = ui_placement.PlacementSpec(id=self.create_command_id, anchor_id='Offset')
+        return ui_placement.UIPlacement(panel_id='SketchModifyPanel', command=command)
 
     def create_inputs(self) -> HealingInputs:
         return HealingInputs(self.app.activeProduct.unitsManager)

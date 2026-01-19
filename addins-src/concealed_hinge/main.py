@@ -1,4 +1,4 @@
-from lib import custom_compute_feature, inputs, utils, combine
+from lib import custom_compute_feature, inputs, utils, combine, ui_placement
 import adsk.core, adsk.fusion
 from adsk.core import Point3D, Vector3D
 from typing import cast
@@ -34,6 +34,19 @@ class ConcealedHingeFeature(custom_compute_feature.CustomComputeFeature):
     plugin_desc = 'Holes for concealed hinges'
     plugin_tooltip = 'Positions holes for concealed hinges'
     inputs: ConcealedHingeInputs
+    
+    def get_ui_placement(self) -> ui_placement.UIPlacement:
+        section = ui_placement.PlacementSpec(
+            id='SeparatorBeforeCustomAddins',
+            anchor_id='FusionMoveCommand',
+            insert_before=True,
+        )
+        command = ui_placement.PlacementSpec(
+            id=self.create_command_id,
+            anchor_id=section.id,
+            insert_before=True,
+        )
+        return ui_placement.UIPlacement(panel_id='SolidModifyPanel', command=command, section=section)
 
     def create_inputs(self) -> ConcealedHingeInputs:
         return ConcealedHingeInputs(self.app.activeProduct.unitsManager)
