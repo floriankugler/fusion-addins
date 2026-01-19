@@ -37,7 +37,11 @@ class Dogbones(custom_compute_feature.CustomComputeFeature):
             anchor_id=section.id,
             insert_before=True,
         )
-        return ui_placement.UIPlacement(panel_id='SolidModifyPanel', command=command, section=section)
+        return ui_placement.UIPlacement(
+            panel_id='SolidModifyPanel',
+            command=command,
+            section=section,
+        )
 
     def create_inputs(self) -> DogbonesInputs:
         return DogbonesInputs(self.app.activeProduct.unitsManager)

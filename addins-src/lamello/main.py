@@ -69,7 +69,11 @@ class LamelloFeature(custom_compute_feature.CustomComputeFeature):
             anchor_id=section.id,
             insert_before=True,
         )
-        return ui_placement.UIPlacement(panel_id='SolidModifyPanel', command=command, section=section)
+        return ui_placement.UIPlacement(
+            panel_id='SolidModifyPanel',
+            command=command,
+            section=section,
+        )
 
     def create_inputs(self) -> LamelloInputs:
         return LamelloInputs(self.app.activeProduct.unitsManager)

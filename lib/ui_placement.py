@@ -14,7 +14,6 @@ class UIPlacement:
     panel_id: str
     command: PlacementSpec
     section: PlacementSpec | None = None
-    toolbar: PlacementSpec | None = None
 
 
 def add_command_to_ui(
@@ -46,22 +45,6 @@ def add_command_to_ui(
         placement.command.insert_before,
     )
 
-    toolbar_spec = placement.toolbar
-    if toolbar_spec:
-        toolbar = ui.toolbars.itemById(toolbar_spec.id)
-        if not toolbar:
-            raise RuntimeError(f"UI toolbar not found: {toolbar_spec.id}")
-
-        toolbar_ctrl = toolbar.controls.itemById(command_id)
-        if toolbar_ctrl:
-            toolbar_ctrl.deleteMe()
-
-        toolbar.controls.addCommand(
-            command_def,
-            toolbar_spec.anchor_id,
-            toolbar_spec.insert_before,
-        )
-
 
 def remove_command_from_ui(
     ui: adsk.core.UserInterface,
@@ -74,10 +57,3 @@ def remove_command_from_ui(
         if panel_ctrl:
             panel_ctrl.deleteMe()
 
-    toolbar_spec = placement.toolbar
-    if toolbar_spec:
-        toolbar = ui.toolbars.itemById(toolbar_spec.id)
-        if toolbar:
-            toolbar_ctrl = toolbar.controls.itemById(command_id)
-            if toolbar_ctrl:
-                toolbar_ctrl.deleteMe()

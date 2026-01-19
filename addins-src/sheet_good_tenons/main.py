@@ -99,7 +99,11 @@ class SheetGoodTenons(custom_compute_feature.CustomComputeFeature):
             anchor_id=section.id,
             insert_before=True,
         )
-        return ui_placement.UIPlacement(panel_id='SolidModifyPanel', command=command, section=section)
+        return ui_placement.UIPlacement(
+            panel_id='SolidModifyPanel',
+            command=command,
+            section=section,
+        )
 
     def create_inputs(self) -> SheetGoodTenonsInputs:
         return SheetGoodTenonsInputs(self.app.activeProduct.unitsManager)

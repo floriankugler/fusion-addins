@@ -46,7 +46,11 @@ class ConcealedHingeFeature(custom_compute_feature.CustomComputeFeature):
             anchor_id=section.id,
             insert_before=True,
         )
-        return ui_placement.UIPlacement(panel_id='SolidModifyPanel', command=command, section=section)
+        return ui_placement.UIPlacement(
+            panel_id='SolidModifyPanel',
+            command=command,
+            section=section,
+        )
 
     def create_inputs(self) -> ConcealedHingeInputs:
         return ConcealedHingeInputs(self.app.activeProduct.unitsManager)
