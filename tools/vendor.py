@@ -13,7 +13,7 @@ ADDINS_SRC_DIR = os.path.join(REPO_ROOT, "addins-src")
 LIB_SRC_DIR = os.path.join(REPO_ROOT, "lib")
 BUILD_DIR = os.path.join(REPO_ROOT, "_build")
 
-SEMANTIC_VERSION = "1.0.0"
+SEMANTIC_VERSION = "1.0.1"
 
 # ============================
 # Parse command line options
