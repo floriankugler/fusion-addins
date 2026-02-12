@@ -18,13 +18,15 @@ SEMANTIC_VERSION = "1.0.1"
 # ============================
 # Parse command line options
 # ============================
-FORCE_ALL_BREAKING = False
+FORCE_ALL_BREAKING = None
 if "--all" in sys.argv:
     FORCE_ALL_BREAKING = True
     print("[INFO] --all specified: all add-ins will be considered breaking changes")
 elif "--none" in sys.argv:
     FORCE_ALL_BREAKING = False
     print("[INFO] --none specified: no add-ins will be considered breaking changes")
+else:
+    print("[INFO] No breaking mode flag specified: prompting per add-in")
 
 # ============================
 # Helper functions
@@ -41,9 +43,9 @@ def write_version_file(lib_dst, version_string):
     print(f"  Wrote {version_file}")
 
 def ask_breaking_change(addin_name):
-    if FORCE_ALL_BREAKING == False:
+    if FORCE_ALL_BREAKING is False:
         return False
-    elif FORCE_ALL_BREAKING == True:
+    elif FORCE_ALL_BREAKING is True:
         return True
     while True:
         resp = input(f"Add-in '{addin_name}': breaking change? [y/N]: ").strip().lower()
@@ -77,7 +79,7 @@ def vendor_addin(addin_name):
     write_version_file(lib_dst, SEMANTIC_VERSION)
 
     # Update manifest
-    manifest_path = os.path.join(dst_addin, f"{addin_name}.manifest")
+    manifest_path = os.path.join(dst_addin, f"{dst_addin_name}.manifest")
     if os.path.exists(manifest_path):
         with open(manifest_path, "r", encoding="utf-8") as f:
             manifest = json.load(f)
@@ -87,7 +89,7 @@ def vendor_addin(addin_name):
 
         # Update ID if breaking change
         if is_breaking:
-            manifest["id"] = f"com.floriankugler.{addin_name}_v{SEMANTIC_VERSION}"
+            manifest["id"] = f"{manifest['id']}_v{SEMANTIC_VERSION}"
 
         with open(manifest_path, "w", encoding="utf-8") as f:
             json.dump(manifest, f, indent=2)

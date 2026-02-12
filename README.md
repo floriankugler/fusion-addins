@@ -31,7 +31,7 @@ Furthermore, updates to this code might break existing usages of the addins.
 
 ## Installation
 
-Just place the addins you want to use in your Fusion Addin directory. On the mac this is `~/Library/Application Support/Autodesk/Autodesk Fusion 360/API/AddIns`.
+To install release builds, either copy add-in folders from `_build` manually into the Fusion Addin directory, or symlink the contents of `_build` into that directory. On macOS the AddIns folder is `~/Library/Application Support/Autodesk/Autodesk Fusion 360/API/AddIns`.
 
 Then go Fusion's Addin panel:
 
@@ -43,9 +43,56 @@ In there you can run the addin by switching on the run toggle. Optionally, you c
 
 ## Development
 
+For live development from source:
+
+```bash
+tools/symlink_lib.sh
+tools/symlink_addins.sh --dev
+```
+
+This links `addins-src/*` directly into Fusion and links each add-in's `lib/` to the shared repo `lib/`.
+
 To work on the addins, make sure you have VS Code installed, right-click on the plugin's name in Fusion's addin panel and choose "Edit in code editor".
 
 ![](img/doc3.png)
+
+## Build System
+
+Release artifacts are produced by `tools/vendor.py`.
+
+What `vendor.py` does:
+
+- Recreates `_build/` from scratch on each run.
+- Copies each add-in from `addins-src/<addin>/` into `_build/<addin>_v<version_with_underscores>/`.
+- Renames `<addin>.manifest` and `<addin>.py` to include the same `_v...` suffix.
+- Vendors the shared `lib/` folder into each built add-in.
+- Writes `lib/__version__.py` inside each built add-in.
+- Updates each built manifest's `version`.
+
+### Versioning
+
+- The build version is defined in `tools/vendor.py` as `SEMANTIC_VERSION`.
+- Build folder/file suffixes replace `.` with `_`, for example:
+  `1.0.1` -> `_v1_0_1`.
+- The same semantic version is written to each vendored add-in's `lib/__version__.py` and manifest `version`.
+
+### Breaking Changes and Add-in IDs
+
+Fusion uses the manifest `id` to identify an add-in. For breaking changes, the build system can version the manifest IDs so old and new lines can coexist.
+
+`tools/vendor.py` supports three modes:
+
+- `python3 tools/vendor.py --none`
+  Treat all add-ins as non-breaking. Manifest IDs stay unchanged.
+- `python3 tools/vendor.py --all`
+  Treat all add-ins as breaking. Manifest IDs get `_v<SEMANTIC_VERSION>` appended.
+- `python3 tools/vendor.py`
+  Prompt per add-in: `breaking change? [y/N]`.
+
+Recommended release flow:
+
+- Non-breaking release: bump `SEMANTIC_VERSION`, run `python3 tools/vendor.py --none`.
+- Breaking release: bump `SEMANTIC_VERSION`, run `python3 tools/vendor.py` and mark only the changed add-ins as breaking (or use `--all` if all are breaking).
 
 ## License
 

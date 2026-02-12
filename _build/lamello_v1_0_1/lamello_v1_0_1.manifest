@@ -1,13 +1,13 @@
 {
-	"autodeskProduct":	"Fusion360",
-	"type":	"addin",
-	"id":	"com.floriankugler.lamello",
-	"author":	"",
-	"description":	{
-		"":	""
-	},
-	"version":	"",
-	"runOnStartup":	false,
-	"supportedOS":	"windows|mac",
-	"editEnabled":	true
+  "autodeskProduct": "Fusion360",
+  "type": "addin",
+  "id": "com.floriankugler.lamello_v1.0.1",
+  "author": "",
+  "description": {
+    "": ""
+  },
+  "version": "1.0.1",
+  "runOnStartup": false,
+  "supportedOS": "windows|mac",
+  "editEnabled": true
 }
