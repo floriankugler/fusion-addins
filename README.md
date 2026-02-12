@@ -28,6 +28,9 @@ Furthermore, updates to this code might break existing usages of the addins.
 - **Heal Sketch Lines**
 
   Connects sketch curves that should be connected but are not quite. This often happens when projecting or intersecting complex geometry from e.g. a vehicle model, so that the projected curves do not form a closed profile. This addin automatically heals these curves by placing coincident constraints for end points within a tolerance.
+- **Flatten Design**
+
+  Flattens a design hierarchy into the root component and deletes root-level bodies below a configurable size threshold.
 
 ## Installation
 
