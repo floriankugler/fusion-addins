@@ -33,6 +33,12 @@ Furthermore, updates to this code might break existing usages of the addins.
 
 To install release builds, either copy add-in folders from `_build` manually into the Fusion Addin directory, or symlink the contents of `_build` into that directory. On macOS the AddIns folder is `~/Library/Application Support/Autodesk/Autodesk Fusion 360/API/AddIns`.
 
+Before installing, refresh `_build`:
+
+```bash
+python3 tools/vendor.py
+```
+
 Then go Fusion's Addin panel:
 
 ![](img/doc1.png)
@@ -63,36 +69,47 @@ Release artifacts are produced by `tools/vendor.py`.
 What `vendor.py` does:
 
 - Recreates `_build/` from scratch on each run.
-- Copies each add-in from `addins-src/<addin>/` into `_build/<addin>_v<version_with_underscores>/`.
+- Copies each add-in from `addins-src/<addin>/` into `_build/<addin>_v<combined_version_sanitized>/`.
 - Renames `<addin>.manifest` and `<addin>.py` to include the same `_v...` suffix.
 - Vendors the shared `lib/` folder into each built add-in.
 - Writes `lib/__version__.py` inside each built add-in.
 - Updates each built manifest's `version`.
+- Updates each built manifest's `id`.
 
 ### Versioning
 
-- The build version is defined in `tools/vendor.py` as `SEMANTIC_VERSION`.
-- Build folder/file suffixes replace `.` with `_`, for example:
-  `1.0.1` -> `_v1_0_1`.
-- The same semantic version is written to each vendored add-in's `lib/__version__.py` and manifest `version`.
+- Shared library version metadata lives in `lib/version.json`:
+  - `lib_version`: semantic version of shared library code.
+  - `lib_api_epoch`: breaking-change counter of the shared library interface.
+- Each add-in has its own version metadata in `addins-src/<addin>/version.json`:
+  - `addin_version`: semantic version of that add-in.
+  - `interface_epoch`: breaking-change counter of that add-in's interface.
+  - `requires_lib_api_epoch`: required shared library API epoch.
+- Build folder/file suffixes are derived from the combined version and sanitized to alphanumeric/underscore, for example:
+  `1.4.0+lib0.9.3` -> `_v1_4_0_lib0_9_3`.
+- Built manifest `version` and vendored `lib/__version__.py` use:
+  `<addin_version>+lib<lib_version>`, for example `1.4.0+lib0.9.3`.
 
 ### Breaking Changes and Add-in IDs
 
-Fusion uses the manifest `id` to identify an add-in. For breaking changes, the build system can version the manifest IDs so old and new lines can coexist.
+Fusion uses the manifest `id` to identify add-ins. The build system generates deterministic IDs that are strictly coupled to add-in and shared-lib interface epochs:
 
-`tools/vendor.py` supports three modes:
+- Built ID format:
+  `<base_manifest_id>_i<interface_epoch>_l<lib_api_epoch>`
+- Example:
+  `com.floriankugler.dogbones_i2_l1`
 
-- `python3 tools/vendor.py --none`
-  Treat all add-ins as non-breaking. Manifest IDs stay unchanged.
-- `python3 tools/vendor.py --all`
-  Treat all add-ins as breaking. Manifest IDs get `_v<SEMANTIC_VERSION>` appended.
-- `python3 tools/vendor.py`
-  Prompt per add-in: `breaking change? [y/N]`.
+Operational rules:
 
-Recommended release flow:
+- Breaking add-in interface change: increment that add-in's `interface_epoch`.
+- Breaking shared-lib interface change: increment `lib_api_epoch`.
+- `tools/vendor.py` validates `requires_lib_api_epoch == lib_api_epoch` and fails early if they differ.
 
-- Non-breaking release: bump `SEMANTIC_VERSION`, run `python3 tools/vendor.py --none`.
-- Breaking release: bump `SEMANTIC_VERSION`, run `python3 tools/vendor.py` and mark only the changed add-ins as breaking (or use `--all` if all are breaking).
+Build command:
+
+```bash
+python3 tools/vendor.py
+```
 
 ## License
 

@@ -2,6 +2,7 @@
 import os, sys
 import shutil
 import json
+import re
 
 # ============================
 # Determine repo root relative to this script
@@ -12,21 +13,7 @@ REPO_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, ".."))
 ADDINS_SRC_DIR = os.path.join(REPO_ROOT, "addins-src")
 LIB_SRC_DIR = os.path.join(REPO_ROOT, "lib")
 BUILD_DIR = os.path.join(REPO_ROOT, "_build")
-
-SEMANTIC_VERSION = "1.0.1"
-
-# ============================
-# Parse command line options
-# ============================
-FORCE_ALL_BREAKING = None
-if "--all" in sys.argv:
-    FORCE_ALL_BREAKING = True
-    print("[INFO] --all specified: all add-ins will be considered breaking changes")
-elif "--none" in sys.argv:
-    FORCE_ALL_BREAKING = False
-    print("[INFO] --none specified: no add-ins will be considered breaking changes")
-else:
-    print("[INFO] No breaking mode flag specified: prompting per add-in")
+LIB_VERSION_FILE = os.path.join(LIB_SRC_DIR, "version.json")
 
 # ============================
 # Helper functions
@@ -42,27 +29,38 @@ def write_version_file(lib_dst, version_string):
         f.write(f'VERSION = "{version_string}"\n')
     print(f"  Wrote {version_file}")
 
-def ask_breaking_change(addin_name):
-    if FORCE_ALL_BREAKING is False:
-        return False
-    elif FORCE_ALL_BREAKING is True:
-        return True
-    while True:
-        resp = input(f"Add-in '{addin_name}': breaking change? [y/N]: ").strip().lower()
-        if resp == "":
-            return False
-        if resp in ("y", "n"):
-            return resp == "y"
-        print("Please type 'y' or 'n' (or Enter for no).")
+def load_json_file(path):
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
 
-def vendor_addin(addin_name):
-    # Ask user if this is a breaking change
-    is_breaking = ask_breaking_change(addin_name)
+def version_suffix(version_string):
+    # Keep artifact names filesystem-friendly and deterministic.
+    return re.sub(r"[^A-Za-z0-9]+", "_", version_string).strip("_")
 
-    dst_addin_name = addin_name
-    dst_addin_name += f"_v{SEMANTIC_VERSION.replace('.', '_')}"
-    dst_addin = os.path.join(BUILD_DIR, dst_addin_name)
+def strip_id_suffix(manifest_id):
+    return re.sub(r"_i\d+_l\d+$", "", manifest_id)
+
+def vendor_addin(addin_name, lib_version, lib_api_epoch):
     src_addin = os.path.join(ADDINS_SRC_DIR, addin_name)
+    addin_version_path = os.path.join(src_addin, "version.json")
+    if not os.path.exists(addin_version_path):
+        raise FileNotFoundError(f"Missing add-in version file: {addin_version_path}")
+
+    addin_version_meta = load_json_file(addin_version_path)
+    addin_version = addin_version_meta["addin_version"]
+    interface_epoch = int(addin_version_meta["interface_epoch"])
+    requires_lib_api_epoch = int(addin_version_meta["requires_lib_api_epoch"])
+
+    if requires_lib_api_epoch != lib_api_epoch:
+        raise RuntimeError(
+            f"Add-in '{addin_name}' requires lib API epoch {requires_lib_api_epoch}, "
+            f"but lib/version.json declares {lib_api_epoch}."
+        )
+
+    combined_version = f"{addin_version}+lib{lib_version}"
+    dst_addin_name = addin_name
+    dst_addin_name += f"_v{version_suffix(combined_version)}"
+    dst_addin = os.path.join(BUILD_DIR, dst_addin_name)
 
     print(f"\nVendoring {addin_name} → {dst_addin_name}")
 
@@ -76,7 +74,7 @@ def vendor_addin(addin_name):
     copy_tree(LIB_SRC_DIR, lib_dst)
 
     # Write version file in lib
-    write_version_file(lib_dst, SEMANTIC_VERSION)
+    write_version_file(lib_dst, combined_version)
 
     # Update manifest
     manifest_path = os.path.join(dst_addin, f"{dst_addin_name}.manifest")
@@ -84,31 +82,39 @@ def vendor_addin(addin_name):
         with open(manifest_path, "r", encoding="utf-8") as f:
             manifest = json.load(f)
 
-        # Update version
-        manifest["version"] = SEMANTIC_VERSION
-
-        # Update ID if breaking change
-        if is_breaking:
-            manifest["id"] = f"{manifest['id']}_v{SEMANTIC_VERSION}"
+        # Set deterministic, strictly coupled ID and version metadata.
+        base_id = strip_id_suffix(manifest["id"])
+        manifest["id"] = f"{base_id}_i{interface_epoch}_l{lib_api_epoch}"
+        manifest["version"] = combined_version
 
         with open(manifest_path, "w", encoding="utf-8") as f:
             json.dump(manifest, f, indent=2)
 
-        print(f"  Updated manifest version: {SEMANTIC_VERSION}")
-        if is_breaking:
-            print(f"  Updated manifest ID for breaking change: {manifest['id']}")
+        print(f"  Updated manifest version: {manifest['version']}")
+        print(f"  Updated manifest id: {manifest['id']}")
 
 # ============================
 # Main
 # ============================
 if __name__ == "__main__":
+    if len(sys.argv) > 1:
+        print("Usage: python3 tools/vendor.py")
+        print("Versioning is configured through addins-src/*/version.json and lib/version.json.")
+        sys.exit(2)
+
+    if not os.path.exists(LIB_VERSION_FILE):
+        raise FileNotFoundError(f"Missing lib version file: {LIB_VERSION_FILE}")
+    lib_version_meta = load_json_file(LIB_VERSION_FILE)
+    lib_version = lib_version_meta["lib_version"]
+    lib_api_epoch = int(lib_version_meta["lib_api_epoch"])
+
     if os.path.exists(BUILD_DIR):
         shutil.rmtree(BUILD_DIR)
     os.makedirs(BUILD_DIR, exist_ok=True)
 
-    for addin_name in os.listdir(ADDINS_SRC_DIR):
+    for addin_name in sorted(os.listdir(ADDINS_SRC_DIR)):
         addin_path = os.path.join(ADDINS_SRC_DIR, addin_name)
         if os.path.isdir(addin_path):
-            vendor_addin(addin_name)
+            vendor_addin(addin_name, lib_version, lib_api_epoch)
 
     print("\nVendoring complete.")
