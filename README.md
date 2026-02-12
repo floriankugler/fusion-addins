@@ -82,16 +82,16 @@ What `vendor.py` does:
 ### Versioning
 
 - Shared library version metadata lives in `lib/version.json`:
-  - `lib_version`: semantic version of shared library code.
+  - `lib_version`: release version of shared library code (single number is fine).
   - `lib_api_epoch`: breaking-change counter of the shared library interface.
 - Each add-in has its own version metadata in `addins-src/<addin>/version.json`:
-  - `addin_version`: semantic version of that add-in.
+  - `addin_version`: release version of that add-in (single number is fine).
   - `interface_epoch`: breaking-change counter of that add-in's interface.
   - `requires_lib_api_epoch`: required shared library API epoch.
 - Build folder/file suffixes are derived from the combined version and sanitized to alphanumeric/underscore, for example:
-  `1.4.0+lib0.9.3` -> `_v1_4_0_lib0_9_3`.
+  `7+lib3` -> `_v7_lib3`.
 - Built manifest `version` and vendored `lib/__version__.py` use:
-  `<addin_version>+lib<lib_version>`, for example `1.4.0+lib0.9.3`.
+  `<addin_version>+lib<lib_version>`, for example `7+lib3`.
 
 ### Breaking Changes and Add-in IDs
 
