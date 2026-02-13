@@ -277,7 +277,7 @@ class SheetGoodTenons(custom_compute_feature.CustomComputeFeature):
         mortise_depth = tenon_length + self.inputs.mortise_depth_offset.value
         mortise = utils.brep.transformed(
             utils.brep.rectangle(mortise_length, mortise_depth, mortise_width), 
-            utils.matrix.translation_matrix(adsk.core.Vector3D.create(0, -mortise_depth/2, -(mortise_width-self.inputs.mortise_width_offset.value)))
+            utils.matrix.translation_matrix(adsk.core.Vector3D.create(0, -mortise_depth/2, -(mortise_width-self.inputs.mortise_width_offset.value/2)))
         )
         
         tenons = utils.brep.place_body_on_face_at_positions(tenon, tenon_board_face, edge, positions)
