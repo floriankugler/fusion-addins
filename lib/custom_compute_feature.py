@@ -180,8 +180,10 @@ class CustomComputeFeature(Addin):
                 except:
                     pass                
                 if restore_entity:
-                    if restore_entity in [self._edited_custom_feature, *features_outside_component]:
+                    if restore_entity in features_outside_component:
                         features_outside_component[-1].timelineObject.rollTo(False)    
+                    elif restore_entity == self._edited_custom_feature:
+                        self._edited_custom_feature.timelineObject.rollTo(False)    
                     else:
                         self._restore_timeline_object.rollTo(False)
                 else:
