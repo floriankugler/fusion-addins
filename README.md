@@ -82,10 +82,10 @@ What `vendor.py` does:
 ### Versioning
 
 - Shared library version metadata lives in `lib/version.json`:
-  - `lib_version`: release version of shared library code (single number is fine).
+  - `lib_version`: release version of shared library code (use an integer).
   - `lib_api_epoch`: breaking-change counter of the shared library interface.
 - Each add-in has its own version metadata in `addins-src/<addin>/version.json`:
-  - `addin_version`: release version of that add-in (single number is fine).
+  - `addin_version`: release version of that add-in (use an integer).
   - `interface_epoch`: breaking-change counter of that add-in's interface.
   - `requires_lib_api_epoch`: required shared library API epoch.
 - Build folder/file suffixes are derived from the combined version and sanitized to alphanumeric/underscore, for example:
