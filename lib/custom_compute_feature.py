@@ -110,9 +110,10 @@ class CustomComputeFeature(Addin):
             except errors.InvalidInputError as e:
                 args.executeFailed = True
                 args.executeFailedMessage = e.message
-            except:
+            except Exception as e:
                 args.executeFailed = True
                 args.executeFailedMessage = "An error occurred during execution."
+                if self.runtime_info.dev_mode: raise e
             finally:
                 feature.timelineObject.rollTo(True)
                 for dep in dependencies:
@@ -140,6 +141,7 @@ class CustomComputeFeature(Addin):
             except Exception as e:
                 self.showError(f"An error occurred: {e}")
                 args.isValidResult = False
+                if self.runtime_info.dev_mode: raise e
             else:
                 self.showError(None)
 
@@ -161,9 +163,10 @@ class CustomComputeFeature(Addin):
             except errors.InvalidInputError as e:
                 args.executeFailed = True
                 args.executeFailedMessage = e.message
-            except:
+            except Exception as e:
                 args.executeFailed = True
                 args.executeFailedMessage = "An error occurred during execution."
+                if self.runtime_info.dev_mode: raise e
             else:
                 self._edited_custom_feature.timelineObject.rollTo(True)
                 features_inside_component, features_outside_component, dependencies = combine.create_features_from_combines(self._edited_custom_feature.parentComponent, combines, self._edited_custom_feature, False)
@@ -225,6 +228,7 @@ class CustomComputeFeature(Addin):
             e.update_status(args.computeStatus)
         except Exception as e:
             args.computeStatus.statusMessages.addError(str(e))
+            if self.runtime_info.dev_mode: raise e
         finally:
             self.inputs = None
     
