@@ -40,22 +40,15 @@ def version_suffix(version_string):
 def strip_id_suffix(manifest_id):
     return re.sub(r"_i\d+_l\d+$", "", manifest_id)
 
-def vendor_addin(addin_name, lib_version, lib_api_epoch):
+def vendor_addin(addin_name, lib_version, lib_interface_id):
     src_addin = os.path.join(ADDINS_SRC_DIR, addin_name)
     addin_version_path = os.path.join(src_addin, "version.json")
     if not os.path.exists(addin_version_path):
         raise FileNotFoundError(f"Missing add-in version file: {addin_version_path}")
 
     addin_version_meta = load_json_file(addin_version_path)
-    addin_version = addin_version_meta["addin_version"]
-    interface_epoch = int(addin_version_meta["interface_epoch"])
-    requires_lib_api_epoch = int(addin_version_meta["requires_lib_api_epoch"])
-
-    if requires_lib_api_epoch != lib_api_epoch:
-        raise RuntimeError(
-            f"Add-in '{addin_name}' requires lib API epoch {requires_lib_api_epoch}, "
-            f"but lib/version.json declares {lib_api_epoch}."
-        )
+    addin_version = addin_version_meta["version"]
+    addin_interface_id = int(addin_version_meta["interface_id"])
 
     combined_version = f"{addin_version}+lib{lib_version}"
     dst_addin_name = addin_name
@@ -84,7 +77,7 @@ def vendor_addin(addin_name, lib_version, lib_api_epoch):
 
         # Set deterministic, strictly coupled ID and version metadata.
         base_id = strip_id_suffix(manifest["id"])
-        manifest["id"] = f"{base_id}_i{interface_epoch}_l{lib_api_epoch}"
+        manifest["id"] = f"{base_id}_i{addin_interface_id}_l{lib_interface_id}"
         manifest["version"] = combined_version
 
         with open(manifest_path, "w", encoding="utf-8") as f:
@@ -105,8 +98,8 @@ if __name__ == "__main__":
     if not os.path.exists(LIB_VERSION_FILE):
         raise FileNotFoundError(f"Missing lib version file: {LIB_VERSION_FILE}")
     lib_version_meta = load_json_file(LIB_VERSION_FILE)
-    lib_version = lib_version_meta["lib_version"]
-    lib_api_epoch = int(lib_version_meta["lib_api_epoch"])
+    lib_version = lib_version_meta["version"]
+    lib_interface_id = int(lib_version_meta["interface_id"])
 
     if os.path.exists(BUILD_DIR):
         shutil.rmtree(BUILD_DIR)
@@ -115,6 +108,6 @@ if __name__ == "__main__":
     for addin_name in sorted(os.listdir(ADDINS_SRC_DIR)):
         addin_path = os.path.join(ADDINS_SRC_DIR, addin_name)
         if os.path.isdir(addin_path):
-            vendor_addin(addin_name, lib_version, lib_api_epoch)
+            vendor_addin(addin_name, lib_version, lib_interface_id)
 
     print("\nVendoring complete.")

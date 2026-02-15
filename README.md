@@ -82,31 +82,29 @@ What `vendor.py` does:
 ### Versioning
 
 - Shared library version metadata lives in `lib/version.json`:
-  - `lib_version`: release version of shared library code (use an integer).
-  - `lib_api_epoch`: breaking-change counter of the shared library interface.
+  - `version`: release version of shared library code (use an integer).
+  - `interface_id`: breaking-change counter of the shared library interface.
 - Each add-in has its own version metadata in `addins-src/<addin>/version.json`:
-  - `addin_version`: release version of that add-in (use an integer).
-  - `interface_epoch`: breaking-change counter of that add-in's interface.
-  - `requires_lib_api_epoch`: required shared library API epoch.
+  - `version`: release version of that add-in (use an integer).
+  - `interface_id`: breaking-change counter of that add-in's interface.
 - Build folder/file suffixes are derived from the combined version and sanitized to alphanumeric/underscore, for example:
   `7+lib3` -> `_v7_lib3`.
 - Built manifest `version` and vendored `lib/__version__.py` use:
-  `<addin_version>+lib<lib_version>`, for example `7+lib3`.
+  `<addin version>+lib<lib version>`, for example `7+lib3`.
 
 ### Breaking Changes and Add-in IDs
 
 Fusion uses the manifest `id` to identify add-ins. The build system generates deterministic IDs that are strictly coupled to add-in and shared-lib interface epochs:
 
 - Built ID format:
-  `<base_manifest_id>_i<interface_epoch>_l<lib_api_epoch>`
+  `<base_manifest_id>_i<addin_interface_id>_l<lib_interface_id>`
 - Example:
   `com.floriankugler.dogbones_i2_l1`
 
 Operational rules:
 
-- Breaking add-in interface change: increment that add-in's `interface_epoch`.
-- Breaking shared-lib interface change: increment `lib_api_epoch`.
-- `tools/vendor.py` validates `requires_lib_api_epoch == lib_api_epoch` and fails early if they differ.
+- Breaking add-in interface change: increment that add-in's `interface_id`.
+- Breaking shared-lib interface change: increment `lib/interface_id`.
 
 Build command:
 

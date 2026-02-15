@@ -1,5 +1,4 @@
 {
-  "addin_version": 1,
-  "interface_epoch": 1,
-  "requires_lib_api_epoch": 1
+  "version": 1,
+  "interface_id": 1
 }
