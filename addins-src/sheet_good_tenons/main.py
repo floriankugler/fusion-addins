@@ -281,7 +281,7 @@ class SheetGoodTenons(custom_compute_feature.CustomComputeFeature):
         )
         
         tenons = utils.brep.place_body_on_face_at_positions(tenon, tenon_board_face, edge, positions)
-        mortises = utils.brep.place_body_on_face_at_positions(mortise, tenon_board_face, edge, positions)
+        mortises = [utils.brep.place_body_on_face_at_position(mortise, tenon_board_face, edge, p) for p in positions]
 
         tenon_board = utils.brep.union([tenon_board_face.body, tenons])
         tenon_dog_bone_axis = utils.brep.normal_away_from_body(tenon_board_face)
@@ -294,12 +294,20 @@ class SheetGoodTenons(custom_compute_feature.CustomComputeFeature):
         ]
 
         mortise_dog_bone_axis = utils.brep.normal_away_from_body(mortise_face)
-        mortise_dog_bones = [
-            cast(adsk.fusion.BRepBody, utils.brep.create_dogbone_for_edge(e, self.inputs.tool_diameter.value, self.inputs.dog_bone_offset.value, negative=True))
-            for e in mortises.edges if utils.brep.normal_along_edge(e).isParallelTo(mortise_dog_bone_axis) 
-            and mortise_face.body.pointContainment(utils.brep.edge_middle_point(e)) == adsk.fusion.PointContainment.PointInsidePointContainment
-        ]
-        mortises = utils.brep.union([mortises] + mortise_dog_bones)
+        mortise_dog_bones: list[adsk.fusion.BRepBody] = []
+        for m in mortises:
+            center = m.physicalProperties.centerOfMass.asVector()
+            for e in m.edges:
+                if not utils.brep.normal_along_edge(e).isParallelTo(mortise_dog_bone_axis):
+                    continue
+                test_point = utils.brep.edge_middle_point(e).asVector()
+                test_point.add(utils.vector.scaled_by(utils.vector.normalized(utils.vector.subtract(test_point, center)), 0.1))
+                if mortise_face.body.pointContainment(test_point.asPoint()) != adsk.fusion.PointContainment.PointInsidePointContainment:
+                    continue
+                dog_bone = cast(adsk.fusion.BRepBody, utils.brep.create_dogbone_for_edge(e, self.inputs.tool_diameter.value, self.inputs.dog_bone_offset.value, negative=True))
+                mortise_dog_bones.append(dog_bone)
+
+        mortises = utils.brep.union(mortises + mortise_dog_bones)
         
         result = [
             combine.Combine(tenon_board_face.body, tenons, combine.Operation.JOIN),

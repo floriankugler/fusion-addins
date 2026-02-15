@@ -36,3 +36,8 @@ def place_body_on_face_at_positions(body: adsk.fusion.BRepBody, face: adsk.fusio
     result = union(groups)
     return transformed(result, matrix.transform_from_root(origin, x, y))
 
+def place_body_on_face_at_position(body: adsk.fusion.BRepBody, face: adsk.fusion.BRepFace, edge: adsk.fusion.BRepEdge, position: Vector3D) -> adsk.fusion.BRepBody:
+    origin, x, y, _ = coordinates.coordinate_system_on_face(face, edge)
+    x_coord = vector.subtract(position, origin.asVector()).dotProduct(x)
+    result = transformed(body, matrix.translation_matrix(Vector3D.create(x_coord, 0, 0)))
+    return transformed(result, matrix.transform_from_root(origin, x, y))
