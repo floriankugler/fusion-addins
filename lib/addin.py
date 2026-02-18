@@ -1,7 +1,9 @@
 import adsk.core, adsk.fusion
+from typing import Any
 from typing import cast
 from abc import ABC, abstractmethod
 from . import inputs as inp
+from . import defaults_store
 from . import utils, ui_placement as plc
 from .utils.fusion import new_event_handler
 from .fusionbootstrap.runtime import RuntimeInfo
@@ -12,6 +14,7 @@ class Addin(ABC):
     ui: adsk.core.UserInterface
     inputs: inp.Inputs | None
     _error_field: adsk.core.TextBoxCommandInput | None
+    _save_defaults_input: adsk.core.BoolValueCommandInput | None
 
     @property
     def create_command_id(self) -> str:
@@ -47,6 +50,7 @@ class Addin(ABC):
             self.ui  = self.app.userInterface
             self._handlers = []
             self.inputs = None
+            self._save_defaults_input = None
 
             # Create the command definition for the creation command.
             create_cmd_def = self.ui.commandDefinitions.addButtonDefinition(
@@ -101,6 +105,7 @@ class Addin(ABC):
         assert(self.inputs is not None)
         self.update_inputs_from_ui()
         self.execute()
+        self._save_defaults_if_requested()
         self.inputs = None
 
     def _execute_preview(self, args: adsk.core.CommandEventArgs):
@@ -112,8 +117,17 @@ class Addin(ABC):
 
     def _initialize_inputs(self, command: adsk.core.Command, params: adsk.fusion.CustomFeatureParameters | None) -> None:
         self.inputs = self.create_inputs()
+        if params is None:
+            self._apply_defaults_from_file()
         for input in self.inputs.inputs:
             input.create_input(command.commandInputs, params)
+        self._save_defaults_input = command.commandInputs.addBoolValueInput('saveDefaults', 'Save as defaults', True, '', False)
+        defaults_path = self.defaults_file
+        try:
+            self._save_defaults_input.tooltip = f"Store current values in {defaults_path}"
+            self._save_defaults_input.tooltipDescription = f"Store current values in {defaults_path}"
+        except Exception:
+            pass
         self._error_field = command.commandInputs.addTextBoxCommandInput('errorMessage', 'Error', '', 3, True)
         self._error_field.isVisible = False
         self.update_inputs_from_ui()
@@ -170,3 +184,64 @@ class Addin(ABC):
     
     def input_changed(self, input):
         pass
+
+    @property
+    def defaults_file(self) -> str:
+        return defaults_store.defaults_path(self.__class__.__module__, self.runtime_info.id)
+
+    def _apply_defaults_from_file(self):
+        assert(self.inputs is not None)
+        values = defaults_store.load(self.defaults_file)
+        for input in self.inputs.inputs:
+            if input.id not in values:
+                continue
+            value = values[input.id]
+            try:
+                if isinstance(input, inp.FloatInput):
+                    if isinstance(value, str):
+                        input.default_expression = value
+                    elif isinstance(value, (int, float)):
+                        input.default_value = float(value)
+                elif isinstance(input, inp.IntegerInput):
+                    if isinstance(value, int) and not isinstance(value, bool):
+                        input.default_value = value
+                elif isinstance(input, inp.CheckboxInput):
+                    if isinstance(value, bool):
+                        input.default_value = value
+                elif isinstance(input, inp.DropDownInput):
+                    if isinstance(value, int) and not isinstance(value, bool):
+                        options = [option.value for option in input.options]
+                        if value in options:
+                            input.default_value = value
+            except Exception:
+                continue
+
+    def _save_defaults_if_requested(self):
+        if not self.inputs:
+            return
+        if not self._save_defaults_input or not self._save_defaults_input.value:
+            return
+
+        values: dict[str, Any] = {}
+        comment: dict[str, Any] = {}
+        for input in self.inputs.inputs:
+            if isinstance(input, inp.FloatInput):
+                expression = None
+                try:
+                    expression = input.expression
+                except Exception:
+                    pass
+                if isinstance(expression, str) and expression:
+                    values[input.id] = expression
+            elif isinstance(input, inp.IntegerInput):
+                values[input.id] = input.value
+            elif isinstance(input, inp.CheckboxInput):
+                values[input.id] = input.value
+            elif isinstance(input, inp.DropDownInput):
+                values[input.id] = input.value
+                comment[input.id] = {
+                    "type": "dropdown",
+                    "options": [{"name": option.name, "value": option.value} for option in input.options],
+                }
+
+        defaults_store.save(self.defaults_file, values, comment)

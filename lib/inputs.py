@@ -82,6 +82,7 @@ class CheckboxInput(Input):
 
 class FloatInput(Input):
     default_value: float
+    default_expression: str | None
     value: float
     expression: str
     input: adsk.core.ValueCommandInput
@@ -91,13 +92,17 @@ class FloatInput(Input):
     def __init__(self, id: str, name: str, default_value: float, tool_tip: str, units: str, update_visibility: Callable[[], bool] = lambda: True):
         super().__init__(id, name, tool_tip, update_visibility)
         self.default_value = default_value
+        self.default_expression = None
         self.units = units
 
     def create_input(self, inputs: adsk.core.CommandInputs, params: adsk.fusion.CustomFeatureParameters | None):
         param_expr = params.itemById(self.id).expression if params else None 
         value_input = None
         if param_expr is None:
-            value_input = adsk.core.ValueInput.createByReal(self.default_value)
+            if self.default_expression is not None:
+                value_input = adsk.core.ValueInput.createByString(self.default_expression)
+            else:
+                value_input = adsk.core.ValueInput.createByReal(self.default_value)
         else:
             value_input = adsk.core.ValueInput.createByString(param_expr)
         self.input = inputs.addValueInput(self.id, self.name, self.units, value_input)
