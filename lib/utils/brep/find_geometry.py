@@ -23,7 +23,7 @@ def get_opposite_face(face: adsk.fusion.BRepFace) -> adsk.fusion.BRepFace:
     return faces[-1]
 
 def largest_face_of_edge(edge: adsk.fusion.BRepEdge) -> adsk.fusion.BRepFace | None:
-    first_idx = next((idx for idx, face in enumerate(edge.faces) if rel.is_planar(face)))
+    first_idx = next((idx for idx, face in enumerate(edge.faces) if rel.is_planar(face)), None)
     if first_idx is None:
         return None
     face: adsk.fusion.BRepFace = edge.faces.item(first_idx)
