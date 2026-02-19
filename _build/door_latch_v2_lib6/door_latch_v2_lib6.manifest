@@ -1,0 +1,13 @@
+{
+  "autodeskProduct": "Fusion360",
+  "type": "addin",
+  "id": "com.floriankugler.door-latch_i1_l1",
+  "author": "",
+  "description": {
+    "": ""
+  },
+  "version": "2+lib6",
+  "runOnStartup": false,
+  "supportedOS": "windows|mac",
+  "editEnabled": true
+}
