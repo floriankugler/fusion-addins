@@ -50,6 +50,24 @@ In there you can run the addin by switching on the run toggle. Optionally, you c
 
 ![](img/doc2.png)
 
+## Defaults
+
+Each add-in command provides two tabs:
+
+- **Values**: normal command inputs.
+- **Defaults**: configure persistent default values for that add-in.
+
+On the **Defaults** tab, you can save defaults per input. Defaults can be either:
+
+- Literal values (for example `20`, `true`, or a dropdown value id).
+- Expressions (for example `thickness * 0.5`).
+
+For dropdown inputs, hover over the **New default** field to see a tooltip with the available option names and their underlying value ids.
+
+Expression defaults are evaluated by Fusion, so they can reference parameters from the active design. This makes it possible to define project-specific defaults driven by your model parameters.
+
+Defaults are stored in one JSON file per add-in, in the parent folder of the add-in directories (typically the Fusion AddIns folder). The file name is the add-in id, e.g. `com_floriankugler_lamello.json`.
+
 ## Development
 
 For live development from source:

@@ -114,8 +114,6 @@ class CustomComputeFeature(Addin):
                 args.executeFailed = True
                 args.executeFailedMessage = "An error occurred during execution."
                 if self.runtime_info.dev_mode: raise e
-            else:
-                self._save_defaults_if_requested()
             finally:
                 feature.timelineObject.rollTo(True)
                 for dep in dependencies:
@@ -170,7 +168,6 @@ class CustomComputeFeature(Addin):
                 args.executeFailedMessage = "An error occurred during execution."
                 if self.runtime_info.dev_mode: raise e
             else:
-                self._save_defaults_if_requested()
                 self._edited_custom_feature.timelineObject.rollTo(True)
                 features_inside_component, features_outside_component, dependencies = combine.create_features_from_combines(self._edited_custom_feature.parentComponent, combines, self._edited_custom_feature, False)
 
