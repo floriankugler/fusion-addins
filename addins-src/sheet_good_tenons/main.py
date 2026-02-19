@@ -56,37 +56,184 @@ class SheetGoodTenonsInputs(inputs.Inputs):
 
     def __init__(self, units_manager: adsk.core.UnitsManager):
         units = units_manager.defaultLengthUnits
-        self.edges = inputs.SelectionByEntityTokenInput('edges', 'Edges', ['LinearEdges'], 1, 0, 'Select edges along which tenons should be placed.')
+        self.edges = inputs.SelectionByEntityTokenInput(
+            id='edges',
+            name='Edges',
+            filter=['LinearEdges'],
+            lower_bound=1,
+            upper_bound=0,
+            tool_tip='Select edges along which tenons should be placed.',
+        )
         
-        self.distance_type = inputs.DropDownInput('distanceType', 'Distance', utils.misc.class_property_values(SheetGoodTenonsInputs.DistanceType, inputs.DropDownInput.Item), SheetGoodTenonsInputs.DistanceType.MINIMUM.value, 'Method for determining tenon placement along the edge.')
-        self.points = inputs.SelectionByEntityTokenInput('points', 'Points', ['SketchPoints'], 0, 0, 'Select points at which tenons should be placed', lambda: self.distance_type.value == self.DistanceType.POINTS.value)
-        self.width = inputs.FloatInput('width', 'Tenon width', 5.0, 'Width of the tenons', units)
-        self.spacing = inputs.FloatInput('spacing', 'Spacing', 20.0, 'Maximum spacing between tenons', units, lambda: self.distance_type.value in [self.DistanceType.MINIMUM.value, self.DistanceType.MAXIMUM.value])
-        self.number_of_tenons = inputs.IntegerInput('numberOfTenons', 'Number of tenons', 3, 1, 100, 'Number of tenons to create along the edge', lambda: self.distance_type.value == self.DistanceType.NUMBER_OF_TENONS.value)
-        self.relative_width = inputs.FloatInput('relativeWidth', 'Relative width', 1, 'Relation between the tenon width and the spacing between the tenons', '', lambda: self.distance_type.value == self.DistanceType.RELATIVE.value)
-        self.distance_from_edge = inputs.FloatInput('distanceFromEdge', 'Distance from edge', 3.0, 'Distance of the first tenon from the edge', units, lambda: self.distance_type.value != self.DistanceType.POINTS.value)
+        self.distance_type = inputs.DropDownInput(
+            id='distanceType',
+            name='Distance',
+            options=utils.misc.class_property_values(SheetGoodTenonsInputs.DistanceType, inputs.DropDownInput.Item),
+            default_value=SheetGoodTenonsInputs.DistanceType.MINIMUM.value,
+            tool_tip='Method for determining tenon placement along the edge.',
+        )
+        self.points = inputs.SelectionByEntityTokenInput(
+            id='points',
+            name='Points',
+            filter=['SketchPoints'],
+            lower_bound=0,
+            upper_bound=0,
+            tool_tip='Select points at which tenons should be placed',
+            update_visibility=lambda: self.distance_type.value == self.DistanceType.POINTS.value,
+        )
+        self.width = inputs.FloatInput(
+            id='width',
+            name='Tenon width',
+            default_value=5.0,
+            tool_tip='Width of the tenons',
+            units=units,
+        )
+        self.spacing = inputs.FloatInput(
+            id='spacing',
+            name='Spacing',
+            default_value=20.0,
+            tool_tip='Maximum spacing between tenons',
+            units=units,
+            update_visibility=lambda: self.distance_type.value in [self.DistanceType.MINIMUM.value, self.DistanceType.MAXIMUM.value],
+        )
+        self.number_of_tenons = inputs.IntegerInput(
+            id='numberOfTenons',
+            name='Number of tenons',
+            default_value=3,
+            minimum=1,
+            maximum=100,
+            tool_tip='Number of tenons to create along the edge',
+            update_visibility=lambda: self.distance_type.value == self.DistanceType.NUMBER_OF_TENONS.value,
+        )
+        self.relative_width = inputs.FloatInput(
+            id='relativeWidth',
+            name='Relative width',
+            default_value=1,
+            tool_tip='Relation between the tenon width and the spacing between the tenons',
+            units='',
+            update_visibility=lambda: self.distance_type.value == self.DistanceType.RELATIVE.value,
+        )
+        self.distance_from_edge = inputs.FloatInput(
+            id='distanceFromEdge',
+            name='Distance from edge',
+            default_value=3.0,
+            tool_tip='Distance of the first tenon from the edge',
+            units=units,
+            update_visibility=lambda: self.distance_type.value != self.DistanceType.POINTS.value,
+        )
         
-        self.remaining_material = inputs.FloatInput('remainingMaterial', 'Remaining material', 0, 'Amount of material to keep on the mortise side', units)
-        self.mortise_length_offset = inputs.FloatInput('mortiseLengthOffset', 'Mortise length offset', 0.01, 'Extension of the length of the mortise relative to the width of the tenon', units)
-        self.mortise_width_offset = inputs.FloatInput('mortiseWidthOffset', 'Mortise width offset', 0.01, 'Extension of the width of the mortise relative to the thickness of the tenon', units)
-        self.mortise_depth_offset = inputs.FloatInput('mortiseDepthOffset', 'Mortise depth offset', 0.05, 'Extension of the depth of the mortise relative to the length of the tenon', units)
-        self.tool_diameter = inputs.FloatInput('toolDiameter', 'Tool diameter', 0.6, 'Diameter of the tool used to cut the mortise and tenon', units)   
-        self.dog_bone_offset = inputs.FloatInput('dogBoneOffset', 'Dog bone offset', 0.01, 'Extra clearance to apply to dog bones', units)
+        self.remaining_material = inputs.FloatInput(
+            id='remainingMaterial',
+            name='Remaining material',
+            default_value=0,
+            tool_tip='Amount of material to keep on the mortise side',
+            units=units,
+        )
+        self.mortise_length_offset = inputs.FloatInput(
+            id='mortiseLengthOffset',
+            name='Mortise length offset',
+            default_value=0.01,
+            tool_tip='Extension of the length of the mortise relative to the width of the tenon',
+            units=units,
+        )
+        self.mortise_width_offset = inputs.FloatInput(
+            id='mortiseWidthOffset',
+            name='Mortise width offset',
+            default_value=0.01,
+            tool_tip='Extension of the width of the mortise relative to the thickness of the tenon',
+            units=units,
+        )
+        self.mortise_depth_offset = inputs.FloatInput(
+            id='mortiseDepthOffset',
+            name='Mortise depth offset',
+            default_value=0.05,
+            tool_tip='Extension of the depth of the mortise relative to the length of the tenon',
+            units=units,
+        )
+        self.tool_diameter = inputs.FloatInput(
+            id='toolDiameter',
+            name='Tool diameter',
+            default_value=0.6,
+            tool_tip='Diameter of the tool used to cut the mortise and tenon',
+            units=units,
+        )
+        self.dog_bone_offset = inputs.FloatInput(
+            id='dogBoneOffset',
+            name='Dog bone offset',
+            default_value=0.01,
+            tool_tip='Extra clearance to apply to dog bones',
+            units=units,
+        )
         
-        self.connector = inputs.DropDownInput('connector', 'Connector', utils.misc.class_property_values(self.ConnectorType, inputs.DropDownInput.Item), self.ConnectorType.NONE.value, 'Connectors used to fix the two boards')
+        self.connector = inputs.DropDownInput(
+            id='connector',
+            name='Connector',
+            options=utils.misc.class_property_values(self.ConnectorType, inputs.DropDownInput.Item),
+            default_value=self.ConnectorType.NONE.value,
+            tool_tip='Connectors used to fix the two boards',
+        )
         
         is_screw_connector = lambda: self.connector.value == self.ConnectorType.SCREW.value
-        self.screw_diameter = inputs.FloatInput('screwDiameter', 'Screw diameter', 0.4, 'Diameter of the connector screw', units, is_screw_connector)
-        self.mortise_screw = inputs.DropDownInput('mortiseScrew', 'Mortise screw', utils.misc.class_property_values(self.ScrewType, inputs.DropDownInput.Item), self.ScrewType.CENTERED.value, 'Type of screw placement in the mortise board', is_screw_connector)
-        self.tenon_screw = inputs.DropDownInput('tenonScrew', 'Tenon screw', utils.misc.class_property_values(self.ScrewType, inputs.DropDownInput.Item), self.ScrewType.NONE.value, 'Type of screw placement in the tenon board', is_screw_connector)
-        self.screw_offset = inputs.FloatInput('screwOffset', 'Screw offset', 1.2, 'Offset of the connector screw to the tenon', units, lambda: is_screw_connector() and (self.mortise_screw.value == self.ScrewType.TWO_SIDES.value or self.tenon_screw.value == self.ScrewType.TWO_SIDES.value))
+        self.screw_diameter = inputs.FloatInput(
+            id='screwDiameter',
+            name='Screw diameter',
+            default_value=0.4,
+            tool_tip='Diameter of the connector screw',
+            units=units,
+            update_visibility=is_screw_connector,
+        )
+        self.mortise_screw = inputs.DropDownInput(
+            id='mortiseScrew',
+            name='Mortise screw',
+            options=utils.misc.class_property_values(self.ScrewType, inputs.DropDownInput.Item),
+            default_value=self.ScrewType.CENTERED.value,
+            tool_tip='Type of screw placement in the mortise board',
+            update_visibility=is_screw_connector,
+        )
+        self.tenon_screw = inputs.DropDownInput(
+            id='tenonScrew',
+            name='Tenon screw',
+            options=utils.misc.class_property_values(self.ScrewType, inputs.DropDownInput.Item),
+            default_value=self.ScrewType.NONE.value,
+            tool_tip='Type of screw placement in the tenon board',
+            update_visibility=is_screw_connector,
+        )
+        self.screw_offset = inputs.FloatInput(
+            id='screwOffset',
+            name='Screw offset',
+            default_value=1.2,
+            tool_tip='Offset of the connector screw to the tenon',
+            units=units,
+            update_visibility=lambda: is_screw_connector() and (self.mortise_screw.value == self.ScrewType.TWO_SIDES.value or self.tenon_screw.value == self.ScrewType.TWO_SIDES.value),
+        )
 
         is_clamex_connector = lambda: self.connector.value == self.ConnectorType.CLAMEX.value
-        self.clamex = inputs.DropDownInput('clamex', 'Clamex type', utils.misc.class_property_values(self.ClamexType, inputs.DropDownInput.Item), self.ClamexType.CLAMEX_P10.value, 'Type of Clamex connector', is_clamex_connector)    
+        self.clamex = inputs.DropDownInput(
+            id='clamex',
+            name='Clamex type',
+            options=utils.misc.class_property_values(self.ClamexType, inputs.DropDownInput.Item),
+            default_value=self.ClamexType.CLAMEX_P10.value,
+            tool_tip='Type of Clamex connector',
+            update_visibility=is_clamex_connector,
+        )
 
         is_cabineo_connector = lambda: self.connector.value == self.ConnectorType.CABINEO.value
-        self.cabineo = inputs.DropDownInput('cabineo', 'Cabineo type', utils.misc.class_property_values(self.CabineoType, inputs.DropDownInput.Item), self.CabineoType.CABINEO_8.value, 'Type of Cabineo connector', is_cabineo_connector)    
-        self.cabineo_surface = inputs.DropDownInput('cabineoSurface', 'Surface', utils.misc.class_property_values(self.CabineoSurfaceTypes, inputs.DropDownInput.Item), self.CabineoSurfaceTypes.NONE.value, 'Surface variant of the cabineo connector', is_cabineo_connector)
+        self.cabineo = inputs.DropDownInput(
+            id='cabineo',
+            name='Cabineo type',
+            options=utils.misc.class_property_values(self.CabineoType, inputs.DropDownInput.Item),
+            default_value=self.CabineoType.CABINEO_8.value,
+            tool_tip='Type of Cabineo connector',
+            update_visibility=is_cabineo_connector,
+        )
+        self.cabineo_surface = inputs.DropDownInput(
+            id='cabineoSurface',
+            name='Surface',
+            options=utils.misc.class_property_values(self.CabineoSurfaceTypes, inputs.DropDownInput.Item),
+            default_value=self.CabineoSurfaceTypes.NONE.value,
+            tool_tip='Surface variant of the cabineo connector',
+            update_visibility=is_cabineo_connector,
+        )
         self.cabineo_anti_break_depth = inputs.FloatInput(
             'cabineoAntiBreakDepth',
             'Anti break depth',
@@ -103,14 +250,55 @@ class SheetGoodTenonsInputs(inputs.Inputs):
             units,
             lambda: is_cabineo_connector() and self.cabineo_surface.value == self.CabineoSurfaceTypes.ANTI_BREAK.value,
         )
-        self.lamello_through_hole = inputs.CheckboxInput('lamelloThroughHole', 'Through hole', False, 'Whether to cut through holes for clamex guide holes or cabineo screw holes', lambda: is_clamex_connector() or is_cabineo_connector())
-        self.cabineo_insert = inputs.DropDownInput('cabineoInsert', 'Cabineo insert', utils.misc.class_property_values(self.CabineoInsertType, inputs.DropDownInput.Item), self.CabineoInsertType.M6x123.value, 'Type of Cabineo insert', lambda: is_cabineo_connector() and self.cabineo.value == self.CabineoType.CABINEO_8_M6.value)
+        self.lamello_through_hole = inputs.CheckboxInput(
+            id='lamelloThroughHole',
+            name='Through hole',
+            default_value=False,
+            tool_tip='Whether to cut through holes for clamex guide holes or cabineo screw holes',
+            update_visibility=lambda: is_clamex_connector() or is_cabineo_connector(),
+        )
+        self.cabineo_insert = inputs.DropDownInput(
+            id='cabineoInsert',
+            name='Cabineo insert',
+            options=utils.misc.class_property_values(self.CabineoInsertType, inputs.DropDownInput.Item),
+            default_value=self.CabineoInsertType.M6x123.value,
+            tool_tip='Type of Cabineo insert',
+            update_visibility=lambda: is_cabineo_connector() and self.cabineo.value == self.CabineoType.CABINEO_8_M6.value,
+        )
 
         is_threaded_insert = lambda: is_cabineo_connector() and self.cabineo_insert.value == self.CabineoInsertType.THREADED_INSERT.value
-        self.threaded_insert_core_diameter = inputs.FloatInput('threaded_insert_core_diameter', 'Core diameter', 0.79, 'Core diameter of the threaded insert', units, is_threaded_insert)
-        self.threaded_insert_core_depth = inputs.FloatInput('threaded_insert_core_depth', 'Core depth', 1.27+0.08, 'Depth of the threaded insert from the surface', units, is_threaded_insert)
-        self.threaded_insert_collar_diameter = inputs.FloatInput('threaded_insert_collar_diameter', 'Collar diameter', 1.27, 'Collar diameter of the threaded insert', units, is_threaded_insert)
-        self.threaded_insert_collar_depth = inputs.FloatInput('threaded_insert_collar_depth', 'Collar depth', 0.08, 'Collar depth of the threaded insert', units, is_threaded_insert)        
+        self.threaded_insert_core_diameter = inputs.FloatInput(
+            id='threaded_insert_core_diameter',
+            name='Core diameter',
+            default_value=0.79,
+            tool_tip='Core diameter of the threaded insert',
+            units=units,
+            update_visibility=is_threaded_insert,
+        )
+        self.threaded_insert_core_depth = inputs.FloatInput(
+            id='threaded_insert_core_depth',
+            name='Core depth',
+            default_value=1.27 + 0.08,
+            tool_tip='Depth of the threaded insert from the surface',
+            units=units,
+            update_visibility=is_threaded_insert,
+        )
+        self.threaded_insert_collar_diameter = inputs.FloatInput(
+            id='threaded_insert_collar_diameter',
+            name='Collar diameter',
+            default_value=1.27,
+            tool_tip='Collar diameter of the threaded insert',
+            units=units,
+            update_visibility=is_threaded_insert,
+        )
+        self.threaded_insert_collar_depth = inputs.FloatInput(
+            id='threaded_insert_collar_depth',
+            name='Collar depth',
+            default_value=0.08,
+            tool_tip='Collar depth of the threaded insert',
+            units=units,
+            update_visibility=is_threaded_insert,
+        )        
 
         super().__init__()
 

@@ -23,12 +23,43 @@ class ConcealedHingeInputs(inputs.Inputs):
 
     def __init__(self, units_manager: adsk.core.UnitsManager):
         units = units_manager.defaultLengthUnits
-        self.door_edges = inputs.SelectionByEntityTokenInput('edges', 'Door hinge edges', ['LinearEdges'], 1, 0, 'Select the hinged edge of the doors.')
-        self.type = inputs.DropDownInput('type', 'Hinge type', utils.misc.class_property_values(ConcealedHingeInputs.Types, inputs.DropDownInput.Item), ConcealedHingeInputs.Types.BLUM_CLIP_TOP_THIN_0.value, 'The type of pattern to use.')
-        self.offset = inputs.FloatInput('offset', 'Offset', 6, 'Distance of the first connector from the start of the edge.', units) 
+        self.door_edges = inputs.SelectionByEntityTokenInput(
+            id='edges',
+            name='Door hinge edges',
+            filter=['LinearEdges'],
+            lower_bound=1,
+            upper_bound=0,
+            tool_tip='Select the hinged edge of the doors.',
+        )
+        self.type = inputs.DropDownInput(
+            id='type',
+            name='Hinge type',
+            options=utils.misc.class_property_values(ConcealedHingeInputs.Types, inputs.DropDownInput.Item),
+            default_value=ConcealedHingeInputs.Types.BLUM_CLIP_TOP_THIN_0.value,
+            tool_tip='The type of pattern to use.',
+        )
+        self.offset = inputs.FloatInput(
+            id='offset',
+            name='Offset',
+            default_value=6,
+            tool_tip='Distance of the first connector from the start of the edge.',
+            units=units,
+        )
         self.offset.minimum_value = 2.7
-        self.predrill_diameter = inputs.FloatInput('predrillDiameter', 'Predrill Diameter', 2.54/8, 'Predrill diameter used for screw holes.', units) 
-        self.predrill_depth = inputs.FloatInput('predrillDepth', 'Predrill Depth', 0.3, 'Predrill depth used for screw holes.', units) 
+        self.predrill_diameter = inputs.FloatInput(
+            id='predrillDiameter',
+            name='Predrill Diameter',
+            default_value=2.54 / 8,
+            tool_tip='Predrill diameter used for screw holes.',
+            units=units,
+        )
+        self.predrill_depth = inputs.FloatInput(
+            id='predrillDepth',
+            name='Predrill Depth',
+            default_value=0.3,
+            tool_tip='Predrill depth used for screw holes.',
+            units=units,
+        )
         super().__init__()
 
 

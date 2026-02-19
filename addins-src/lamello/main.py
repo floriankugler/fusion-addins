@@ -43,19 +43,81 @@ class LamelloInputs(inputs.Inputs):
 
     def __init__(self, units_manager: adsk.core.UnitsManager):
         units = units_manager.defaultLengthUnits
-        self.edge = inputs.SelectionByEntityTokenInput('edge', 'Edge', ['LinearEdges'], 1, 0, 'Select edge along which access holes should be placed.')
-        self.size = inputs.DropDownInput('size', 'Variant', utils.misc.class_property_values(LamelloInputs.Types, inputs.DropDownInput.Item), LamelloInputs.Types.CLAMEX_P10.value, 'Variant of the Lamello connector.')
+        self.edge = inputs.SelectionByEntityTokenInput(
+            id='edge',
+            name='Edge',
+            filter=['LinearEdges'],
+            lower_bound=1,
+            upper_bound=0,
+            tool_tip='Select edge along which access holes should be placed.',
+        )
+        self.size = inputs.DropDownInput(
+            id='size',
+            name='Variant',
+            options=utils.misc.class_property_values(LamelloInputs.Types, inputs.DropDownInput.Item),
+            default_value=LamelloInputs.Types.CLAMEX_P10.value,
+            tool_tip='Variant of the Lamello connector.',
+        )
         
-        self.distance_type = inputs.DropDownInput('distanceType', 'Distance', utils.misc.class_property_values(LamelloInputs.DistanceType, inputs.DropDownInput.Item), LamelloInputs.DistanceType.MINIMUM.value, 'Method for determining lamello placement along the edge.')
-        self.points = inputs.SelectionByEntityTokenInput('points', 'Points', ['SketchPoints'], 0, 0, 'Select points at which connectors should be placed', lambda: self.distance_type.value == LamelloInputs.DistanceType.POINTS.value)
-        self.spacing = inputs.FloatInput('spacing', 'Spacing', 20, 'Minimum spacing between the connectors.', units, lambda: self.distance_type.value not in [LamelloInputs.DistanceType.POINTS.value, LamelloInputs.DistanceType.NUMBER_OF_CONNECTORS.value])
-        self.number_of_connectors = inputs.IntegerInput('numberOfConnectors', 'Number of connectors', 3, 1, 100, 'Number of connectors to place along the edge', lambda: self.distance_type.value == LamelloInputs.DistanceType.NUMBER_OF_CONNECTORS.value)
-        self.offset = inputs.FloatInput('offset', 'Offset', 6, 'Distance of the first connector from the start of the edge.', units, lambda: self.distance_type.value != LamelloInputs.DistanceType.POINTS.value)
+        self.distance_type = inputs.DropDownInput(
+            id='distanceType',
+            name='Distance',
+            options=utils.misc.class_property_values(LamelloInputs.DistanceType, inputs.DropDownInput.Item),
+            default_value=LamelloInputs.DistanceType.MINIMUM.value,
+            tool_tip='Method for determining lamello placement along the edge.',
+        )
+        self.points = inputs.SelectionByEntityTokenInput(
+            id='points',
+            name='Points',
+            filter=['SketchPoints'],
+            lower_bound=0,
+            upper_bound=0,
+            tool_tip='Select points at which connectors should be placed',
+            update_visibility=lambda: self.distance_type.value == LamelloInputs.DistanceType.POINTS.value,
+        )
+        self.spacing = inputs.FloatInput(
+            id='spacing',
+            name='Spacing',
+            default_value=20,
+            tool_tip='Minimum spacing between the connectors.',
+            units=units,
+            update_visibility=lambda: self.distance_type.value not in [LamelloInputs.DistanceType.POINTS.value, LamelloInputs.DistanceType.NUMBER_OF_CONNECTORS.value],
+        )
+        self.number_of_connectors = inputs.IntegerInput(
+            id='numberOfConnectors',
+            name='Number of connectors',
+            default_value=3,
+            minimum=1,
+            maximum=100,
+            tool_tip='Number of connectors to place along the edge',
+            update_visibility=lambda: self.distance_type.value == LamelloInputs.DistanceType.NUMBER_OF_CONNECTORS.value,
+        )
+        self.offset = inputs.FloatInput(
+            id='offset',
+            name='Offset',
+            default_value=6,
+            tool_tip='Distance of the first connector from the start of the edge.',
+            units=units,
+            update_visibility=lambda: self.distance_type.value != LamelloInputs.DistanceType.POINTS.value,
+        )
 
         is_cabineo = lambda: self.size.value in [LamelloInputs.Types.CABINEO_8.value, LamelloInputs.Types.CABINEO_12.value, LamelloInputs.Types.CABINEO_8_M6.value]
-        self.through_guide_holes = inputs.CheckboxInput('throughGuideHoles', 'Through Holes', False, 'If checked the guide holes ae punched all the way through the board', lambda: not is_cabineo())
+        self.through_guide_holes = inputs.CheckboxInput(
+            id='throughGuideHoles',
+            name='Through Holes',
+            default_value=False,
+            tool_tip='If checked the guide holes ae punched all the way through the board',
+            update_visibility=lambda: not is_cabineo(),
+        )
         
-        self.cabineo_surface = inputs.DropDownInput('cabineoSurface', 'Surface', utils.misc.class_property_values(LamelloInputs.SurfaceTypes, inputs.DropDownInput.Item), LamelloInputs.SurfaceTypes.NONE.value, 'Surface variant of the cabineo connector', is_cabineo)
+        self.cabineo_surface = inputs.DropDownInput(
+            id='cabineoSurface',
+            name='Surface',
+            options=utils.misc.class_property_values(LamelloInputs.SurfaceTypes, inputs.DropDownInput.Item),
+            default_value=LamelloInputs.SurfaceTypes.NONE.value,
+            tool_tip='Surface variant of the cabineo connector',
+            update_visibility=is_cabineo,
+        )
         self.cabineo_anti_break_depth = inputs.FloatInput(
             'cabineoAntiBreakDepth',
             'Anti break depth',
@@ -72,13 +134,54 @@ class LamelloInputs(inputs.Inputs):
             units,
             lambda: is_cabineo() and self.cabineo_surface.value == LamelloInputs.SurfaceTypes.ANTI_BREAK.value,
         )
-        self.cabineo_through_hole = inputs.CheckboxInput('cabineoThroughHole', 'Through Hole', False, 'If checked the Cabineo hole is punched all the way through to the opposite face.', is_cabineo)
-        self.cabineo_insert_type = inputs.DropDownInput('insertType', 'Insert Type', utils.misc.class_property_values(LamelloInputs.InsertTypes, inputs.DropDownInput.Item), LamelloInputs.InsertTypes.THREADED_INSERT.value, 'Variant of the Cabineo insert.', lambda: self.size.value == lamello.Type.CABINEO_8_M6.value)
+        self.cabineo_through_hole = inputs.CheckboxInput(
+            id='cabineoThroughHole',
+            name='Through Hole',
+            default_value=False,
+            tool_tip='If checked the Cabineo hole is punched all the way through to the opposite face.',
+            update_visibility=is_cabineo,
+        )
+        self.cabineo_insert_type = inputs.DropDownInput(
+            id='insertType',
+            name='Insert Type',
+            options=utils.misc.class_property_values(LamelloInputs.InsertTypes, inputs.DropDownInput.Item),
+            default_value=LamelloInputs.InsertTypes.THREADED_INSERT.value,
+            tool_tip='Variant of the Cabineo insert.',
+            update_visibility=lambda: self.size.value == lamello.Type.CABINEO_8_M6.value,
+        )
         is_threaded_insert = lambda: is_cabineo() and self.cabineo_insert_type.value == LamelloInputs.InsertTypes.THREADED_INSERT.value
-        self.threaded_insert_core_diameter = inputs.FloatInput('threaded_insert_core_diameter', 'Core diameter', 0.79, 'Core diameter of the threaded insert', units, is_threaded_insert)
-        self.threaded_insert_core_depth = inputs.FloatInput('threaded_insert_core_depth', 'Core depth', 1.27+0.08, 'Depth of the threaded insert from the surface', units, is_threaded_insert)
-        self.threaded_insert_collar_diameter = inputs.FloatInput('threaded_insert_collar_diameter', 'Collar diameter', 1.27, 'Collar diameter of the threaded insert', units, is_threaded_insert)
-        self.threaded_insert_collar_depth = inputs.FloatInput('threaded_insert_collar_depth', 'Collar depth', 0.08, 'Collar depth of the threaded insert', units, is_threaded_insert)
+        self.threaded_insert_core_diameter = inputs.FloatInput(
+            id='threaded_insert_core_diameter',
+            name='Core diameter',
+            default_value=0.79,
+            tool_tip='Core diameter of the threaded insert',
+            units=units,
+            update_visibility=is_threaded_insert,
+        )
+        self.threaded_insert_core_depth = inputs.FloatInput(
+            id='threaded_insert_core_depth',
+            name='Core depth',
+            default_value=1.27 + 0.08,
+            tool_tip='Depth of the threaded insert from the surface',
+            units=units,
+            update_visibility=is_threaded_insert,
+        )
+        self.threaded_insert_collar_diameter = inputs.FloatInput(
+            id='threaded_insert_collar_diameter',
+            name='Collar diameter',
+            default_value=1.27,
+            tool_tip='Collar diameter of the threaded insert',
+            units=units,
+            update_visibility=is_threaded_insert,
+        )
+        self.threaded_insert_collar_depth = inputs.FloatInput(
+            id='threaded_insert_collar_depth',
+            name='Collar depth',
+            default_value=0.08,
+            tool_tip='Collar depth of the threaded insert',
+            units=units,
+            update_visibility=is_threaded_insert,
+        )
         super().__init__()
 
 

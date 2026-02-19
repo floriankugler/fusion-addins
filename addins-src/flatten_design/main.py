@@ -23,11 +23,11 @@ class FlattenInputs(inputs.Inputs):
     def __init__(self, units_manager: adsk.core.UnitsManager):
         units = units_manager.defaultLengthUnits
         self.minimum_extent = inputs.FloatInput(
-            "minimumExtent",
-            "Minimum Extent",
-            5,
-            "Minimum extent of bodies to keep.",
-            units,
+            id="minimumExtent",
+            name="Minimum Extent",
+            default_value=5,
+            tool_tip="Minimum extent of bodies to keep.",
+            units=units,
         )
         super().__init__()
 

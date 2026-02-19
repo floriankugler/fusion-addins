@@ -17,9 +17,28 @@ def stop(context):
 class DogbonesInputs(inputs.Inputs):
     def __init__(self, units_manager: adsk.core.UnitsManager):
         units = units_manager.defaultLengthUnits
-        self.entities = inputs.SelectionByEntityTokenInput('entities', 'Edges/Faces', ['LinearEdges', 'PlanarFaces'], 1, 0, 'Select edges or faces to add dogbones to.')
-        self.diameter = inputs.FloatInput('diameter', 'Tool diameter', 0.6, 'Diameter of the tool used to machine the contour', units)
-        self.offset = inputs.FloatInput('offset', 'Offset', 0.01, 'Additional clearing offset', units)
+        self.entities = inputs.SelectionByEntityTokenInput(
+            id='entities',
+            name='Edges/Faces',
+            filter=['LinearEdges', 'PlanarFaces'],
+            lower_bound=1,
+            upper_bound=0,
+            tool_tip='Select edges or faces to add dogbones to.',
+        )
+        self.diameter = inputs.FloatInput(
+            id='diameter',
+            name='Tool diameter',
+            default_value=0.6,
+            tool_tip='Diameter of the tool used to machine the contour',
+            units=units,
+        )
+        self.offset = inputs.FloatInput(
+            id='offset',
+            name='Offset',
+            default_value=0.01,
+            tool_tip='Additional clearing offset',
+            units=units,
+        )
         super().__init__()
 
 

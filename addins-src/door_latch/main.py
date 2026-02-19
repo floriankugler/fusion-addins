@@ -23,12 +23,50 @@ class DoorLadgeInputs(inputs.Inputs):
 
     def __init__(self, units_manager: adsk.core.UnitsManager):
         units = units_manager.defaultLengthUnits
-        self.door_edges = inputs.SelectionByEntityTokenInput('edges', 'Door latch edges', ['LinearEdges'], 1, 0, 'Select the (inner) edges of the doors at which the latch should be placed.')
-        self.type = inputs.DropDownInput('type', 'Latch type', utils.misc.class_property_values(DoorLadgeInputs.Types, inputs.DropDownInput.Item), DoorLadgeInputs.Types.EVERLOCK.value, 'The type of latch to use.')
-        self.number = inputs.IntegerInput('number', 'Number of latches', 1, 1, 10, 'The number of latches to place in the door')
-        self.offset = inputs.FloatInput('offset', 'Offset', 10, 'Offset of the first and last latch from the door\'s edge', units)
-        self.predrill_diameter = inputs.FloatInput('predrillDiameter', 'Predrill Diameter', 2.54/8, 'Predrill diameter used for screw holes.', units) 
-        self.predrill_depth = inputs.FloatInput('predrillDepth', 'Predrill Depth', 0.3, 'Predrill depth used for screw holes.', units) 
+        self.door_edges = inputs.SelectionByEntityTokenInput(
+            id='edges',
+            name='Door latch edges',
+            filter=['LinearEdges'],
+            lower_bound=1,
+            upper_bound=0,
+            tool_tip='Select the (inner) edges of the doors at which the latch should be placed.',
+        )
+        self.type = inputs.DropDownInput(
+            id='type',
+            name='Latch type',
+            options=utils.misc.class_property_values(DoorLadgeInputs.Types, inputs.DropDownInput.Item),
+            default_value=DoorLadgeInputs.Types.EVERLOCK.value,
+            tool_tip='The type of latch to use.',
+        )
+        self.number = inputs.IntegerInput(
+            id='number',
+            name='Number of latches',
+            default_value=1,
+            minimum=1,
+            maximum=10,
+            tool_tip='The number of latches to place in the door',
+        )
+        self.offset = inputs.FloatInput(
+            id='offset',
+            name='Offset',
+            default_value=10,
+            tool_tip='Offset of the first and last latch from the door\'s edge',
+            units=units,
+        )
+        self.predrill_diameter = inputs.FloatInput(
+            id='predrillDiameter',
+            name='Predrill Diameter',
+            default_value=2.54 / 8,
+            tool_tip='Predrill diameter used for screw holes.',
+            units=units,
+        )
+        self.predrill_depth = inputs.FloatInput(
+            id='predrillDepth',
+            name='Predrill Depth',
+            default_value=0.3,
+            tool_tip='Predrill depth used for screw holes.',
+            units=units,
+        )
         super().__init__()
 
 

@@ -18,8 +18,21 @@ def stop(context):
 class HealingInputs(inputs.Inputs):
     def __init__(self, units_manager: adsk.core.UnitsManager):
         units = units_manager.defaultLengthUnits
-        self.edges = inputs.SelectionByEntityTokenInput('edges', 'Edges', [adsk.core.SelectionCommandInput.SketchCurves], 1, 0, 'Select sketch curves to heal')
-        self.tolerance = inputs.FloatInput('tolerance', 'Tolerance', 0.1, 'Maximum distance between points to consider them for healing', units)
+        self.edges = inputs.SelectionByEntityTokenInput(
+            id='edges',
+            name='Edges',
+            filter=[adsk.core.SelectionCommandInput.SketchCurves],
+            lower_bound=1,
+            upper_bound=0,
+            tool_tip='Select sketch curves to heal',
+        )
+        self.tolerance = inputs.FloatInput(
+            id='tolerance',
+            name='Tolerance',
+            default_value=0.1,
+            tool_tip='Maximum distance between points to consider them for healing',
+            units=units,
+        )
         super().__init__()
 
 
