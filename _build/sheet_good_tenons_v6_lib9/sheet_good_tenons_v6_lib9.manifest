@@ -1,0 +1,13 @@
+{
+  "autodeskProduct": "Fusion360",
+  "type": "addin",
+  "id": "com.floriankugler.sheet-good-tenons_i3_l1",
+  "author": "",
+  "description": {
+    "": ""
+  },
+  "version": "6+lib9",
+  "runOnStartup": false,
+  "supportedOS": "windows|mac",
+  "editEnabled": true
+}
