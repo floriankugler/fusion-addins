@@ -127,7 +127,6 @@ def create_features_from_combines(component: adsk.fusion.Component, combines: li
             join.deleteMe()
             base.deleteMe()
 
-    # last_existing_base_feature = existing_base_features[-1] if existing_base_features else feature
     if last_existing_base_feature := last_in_lists(feature, existing_base_features):
         last_existing_base_feature.timelineObject.rollTo(False)
     new_base_features: list[adsk.fusion.BaseFeature] = []
@@ -135,18 +134,16 @@ def create_features_from_combines(component: adsk.fusion.Component, combines: li
         base = component.features.baseFeatures.add()
         base.startEdit()
         component.bRepBodies.add(combine.new_body, base)
-        foo = base.attributes.add(token_group_name, token_value_name, combine.target_body.entityToken)
+        base.attributes.add(token_group_name, token_value_name, combine.target_body.entityToken)
         base.finishEdit()
         new_base_features.append(base)
 
-    # last_existing_inside_combine = existing_inside_combine_features[-1] if existing_inside_combine_features else new_base_features[-1] if new_base_features else last_existing_base_feature
     if last_existing_inside_combine := last_in_lists(last_existing_base_feature, existing_inside_combine_features, new_base_features):
         last_existing_inside_combine.timelineObject.rollTo(False)
     new_inside_combine_features: list[adsk.fusion.Feature] = []
     for combine, base in zip(new_combines_inside_component, new_base_features):
         new_inside_combine_features.extend(create_combine_features(combine, base, component))
 
-    # last_existing_outside_combine = existing_outside_combine_features[-1] if existing_outside_combine_features else new_inside_combine_features[-1] if new_inside_combine_features else last_existing_inside_combine
     if last_existing_outside_combine := last_in_lists(last_existing_inside_combine, existing_outside_combine_features, new_inside_combine_features):
         last_existing_outside_combine.timelineObject.rollTo(False)
     new_outside_combine_features: list[adsk.fusion.Feature] = []
