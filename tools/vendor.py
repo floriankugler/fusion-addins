@@ -33,12 +33,10 @@ def load_json_file(path):
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
 
-def version_suffix(version_string):
-    # Keep artifact names filesystem-friendly and deterministic.
-    return re.sub(r"[^A-Za-z0-9]+", "_", version_string).strip("_")
-
 def strip_id_suffix(manifest_id):
-    return re.sub(r"_i\d+_l\d+$", "", manifest_id)
+    manifest_id = re.sub(r"_i\d+_l\d+$", "", manifest_id)
+    manifest_id = re.sub(r"_i\d+\.\d+$", "", manifest_id)
+    return re.sub(r"_\d+\.\d+$", "", manifest_id)
 
 def vendor_addin(addin_name, lib_version, lib_interface_id):
     src_addin = os.path.join(ADDINS_SRC_DIR, addin_name)
@@ -50,9 +48,9 @@ def vendor_addin(addin_name, lib_version, lib_interface_id):
     addin_version = addin_version_meta["version"]
     addin_interface_id = int(addin_version_meta["interface_id"])
 
-    combined_version = f"{addin_version}+lib{lib_version}"
+    combined_version = f"{addin_version}.{lib_version}"
     dst_addin_name = addin_name
-    dst_addin_name += f"_v{version_suffix(combined_version)}"
+    dst_addin_name += f"_{combined_version}"
     dst_addin = os.path.join(BUILD_DIR, dst_addin_name)
 
     print(f"\nVendoring {addin_name} → {dst_addin_name}")
@@ -77,7 +75,7 @@ def vendor_addin(addin_name, lib_version, lib_interface_id):
 
         # Set deterministic, strictly coupled ID and version metadata.
         base_id = strip_id_suffix(manifest["id"])
-        manifest["id"] = f"{base_id}_i{addin_interface_id}_l{lib_interface_id}"
+        manifest["id"] = f"{base_id}_{addin_interface_id}.{lib_interface_id}"
         manifest["version"] = combined_version
 
         with open(manifest_path, "w", encoding="utf-8") as f:

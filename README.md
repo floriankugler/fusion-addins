@@ -90,8 +90,8 @@ Release artifacts are produced by `tools/vendor.py`.
 What `vendor.py` does:
 
 - Recreates `_build/` from scratch on each run.
-- Copies each add-in from `addins-src/<addin>/` into `_build/<addin>_v<combined_version_sanitized>/`.
-- Renames `<addin>.manifest` and `<addin>.py` to include the same `_v...` suffix.
+- Copies each add-in from `addins-src/<addin>/` into `_build/<addin>_<addin_version>.<lib_version>/`.
+- Renames `<addin>.manifest` and `<addin>.py` to include the same version suffix.
 - Vendors the shared `lib/` folder into each built add-in.
 - Writes `lib/__version__.py` inside each built add-in.
 - Updates each built manifest's `version`.
@@ -105,19 +105,19 @@ What `vendor.py` does:
 - Each add-in has its own version metadata in `addins-src/<addin>/version.json`:
   - `version`: release version of that add-in (use an integer).
   - `interface_id`: breaking-change counter of that add-in's interface.
-- Build folder/file suffixes are derived from the combined version and sanitized to alphanumeric/underscore, for example:
-  `7+lib3` -> `_v7_lib3`.
+- Build folder/file suffixes use:
+  `<addin version>.<lib version>`, for example `_7.3`.
 - Built manifest `version` and vendored `lib/__version__.py` use:
-  `<addin version>+lib<lib version>`, for example `7+lib3`.
+  `<addin version>.<lib version>`, for example `7.3`.
 
 ### Breaking Changes and Add-in IDs
 
 Fusion uses the manifest `id` to identify add-ins. The build system generates deterministic IDs that are strictly coupled to add-in and shared-lib interface epochs:
 
 - Built ID format:
-  `<base_manifest_id>_i<addin_interface_id>_l<lib_interface_id>`
+  `<base_manifest_id>_<addin_interface_id>.<lib_interface_id>`
 - Example:
-  `com.floriankugler.dogbones_i2_l1`
+  `com.floriankugler.dogbones_2.1`
 
 Operational rules:
 

@@ -45,9 +45,45 @@ def _load_main_module(addin_path: str, force_reload: bool = False):
 
 def _load_id(addin_path: str) -> str:
     addin_dir = os.path.abspath(os.path.dirname(addin_path))
-    addin_name = os.path.basename(addin_dir)
-    addin_name = re.sub(r"_i\\d+_l\\d+$", "", addin_name)
-    return f"com_floriankugler_{addin_name}"
+    manifest_path = _find_manifest_path(addin_dir)
+    try:
+        with open(manifest_path, "r", encoding="utf-8") as f:
+            manifest = json.load(f)
+    except Exception as e:
+        raise RuntimeError(f"Failed to read manifest '{manifest_path}': {e}")
+
+    addin_id = manifest.get("id")
+    if not isinstance(addin_id, str) or not addin_id.strip():
+        raise RuntimeError(
+            f"Manifest '{manifest_path}' is missing a valid non-empty 'id' field."
+        )
+    return _normalize_runtime_id(addin_id)
+
+
+def _normalize_runtime_id(manifest_id: str) -> str:
+    normalized = re.sub(r"[^A-Za-z0-9_]", "_", manifest_id)
+    normalized = re.sub(r"_+", "_", normalized).strip("_")
+    if not normalized:
+        raise RuntimeError(
+            f"Manifest id '{manifest_id}' cannot be normalized to a valid runtime id."
+        )
+    return normalized
+
+
+def _find_manifest_path(addin_dir: str) -> str:
+    manifests = sorted(
+        file_name
+        for file_name in os.listdir(addin_dir)
+        if file_name.lower().endswith(".manifest")
+    )
+    if len(manifests) == 0:
+        raise RuntimeError(f"No manifest file found in add-in folder '{addin_dir}'.")
+    if len(manifests) > 1:
+        listed = ", ".join(manifests)
+        raise RuntimeError(
+            f"Expected exactly one manifest in '{addin_dir}', found: {listed}"
+        )
+    return os.path.join(addin_dir, manifests[0])
 
 def _load_version() -> str:
     """
