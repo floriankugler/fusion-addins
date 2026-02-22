@@ -31,6 +31,11 @@ Furthermore, updates to this code might break existing usages of the addins.
 - **Flatten Design**
 
   Flattens a design hierarchy into the root component and deletes root-level bodies below a configurable size threshold.
+- **Garbage Collect**
+
+  Cleans up orphaned external combine/base/intersect features tracked by the shared combine module.
+	
+  If a custom feature is created in one component, but modifies bodies from other components, we have to create features external to the custom feature. If you then delete the custom feature, these external features will stay around. This addin can be used to garbage collect them.
 
 ## Installation
 

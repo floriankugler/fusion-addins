@@ -1,0 +1,325 @@
+import adsk.core, adsk.fusion
+from typing import Any, Callable
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from . import errors
+
+
+class Input(ABC):
+    id: str
+    name: str
+    tool_tip: str
+    value: Any
+    input: adsk.core.CommandInput | None
+    update_visibility: Callable[[], bool]
+
+    def __init__(self, id, name, tool_tip, update_visibility: Callable[[], bool]):
+        self.id = id
+        self.name = name
+        self.tool_tip = tool_tip
+        self.input = None
+        self.update_visibility = update_visibility
+
+    @abstractmethod
+    def create_input(self, inputs: adsk.core.CommandInputs, params: adsk.fusion.CustomFeatureParameters | None):
+        pass
+
+    @abstractmethod
+    def create_in_feature_input(self, feature_input: adsk.fusion.CustomFeatureInput):
+        pass
+
+    @abstractmethod
+    def update_in_feature(self, feature: adsk.fusion.CustomFeature):
+        pass
+
+    @abstractmethod
+    def update_from_feature(self, feature: adsk.fusion.CustomFeature):
+        pass
+
+    @abstractmethod
+    def update_from_input(self):
+        pass
+
+    def create_named_values(self, feature: adsk.fusion.CustomFeature):
+        pass
+
+    def _update_visibility(self):
+        if self.input:
+            self.input.isVisible = self.update_visibility()
+
+    def _required_param(self, params: adsk.fusion.CustomFeatureParameters) -> adsk.fusion.CustomFeatureParameter:
+        param = params.itemById(self.id)
+        if param is None:
+            raise errors.InvalidInputError(
+                f"Missing custom feature parameter '{self.id}' for input '{self.name}'."
+            )
+        return param
+
+    def _required_feature_param(self, feature: adsk.fusion.CustomFeature) -> adsk.fusion.CustomFeatureParameter:
+        param = feature.parameters.itemById(self.id)
+        if param is None:
+            raise errors.InvalidInputError(
+                f"Missing custom feature parameter '{self.id}' for input '{self.name}'."
+            )
+        return param
+
+
+class CheckboxInput(Input):
+    default_value: bool
+    value: bool
+    input: adsk.core.BoolValueCommandInput
+
+    def __init__(self, id, name, default_value, tool_tip, update_visibility: Callable[[], bool] = lambda: True):
+        super().__init__(id, name, tool_tip, update_visibility)
+        self.default_value = default_value
+        
+    def create_input(self, inputs: adsk.core.CommandInputs, params: adsk.fusion.CustomFeatureParameters | None):
+        val = self._required_param(params).value if params else self.default_value
+        self.input = inputs.addBoolValueInput(self.id, self.name, True, '', bool(val))
+
+    def create_in_feature_input(self, feature_input: adsk.fusion.CustomFeatureInput):
+        value_input = adsk.core.ValueInput.createByReal(self.value)
+        feature_input.addCustomParameter(self.id, self.name, value_input, '', True)
+
+    def update_in_feature(self, feature: adsk.fusion.CustomFeature):
+        self._required_feature_param(feature).value = self.value
+
+    def update_from_feature(self, feature: adsk.fusion.CustomFeature):
+        val = self._required_feature_param(feature).value
+        if val is not None:
+            self.value = bool(val)
+            if self.input: self.input.value = self.value
+
+    def update_from_input(self):
+        val = self.input.value
+        if val is not None:
+            self.value = val
+
+
+class FloatInput(Input):
+    default_value: float
+    default_expression: str | None
+    value: float
+    expression: str
+    input: adsk.core.ValueCommandInput
+    units: str
+    minimum_value: float | None = None
+
+    def __init__(self, id: str, name: str, default_value: float, tool_tip: str, units: str, update_visibility: Callable[[], bool] = lambda: True):
+        super().__init__(id, name, tool_tip, update_visibility)
+        self.default_value = default_value
+        self.default_expression = None
+        self.units = units
+
+    def create_input(self, inputs: adsk.core.CommandInputs, params: adsk.fusion.CustomFeatureParameters | None):
+        param_expr = self._required_param(params).expression if params else None
+        value_input = None
+        if param_expr is None:
+            if self.default_expression is not None:
+                value_input = adsk.core.ValueInput.createByString(self.default_expression)
+            else:
+                value_input = adsk.core.ValueInput.createByReal(self.default_value)
+        else:
+            value_input = adsk.core.ValueInput.createByString(param_expr)
+        self.input = inputs.addValueInput(self.id, self.name, self.units, value_input)
+        if self.minimum_value is not None:
+            self.input.minimumValue = self.minimum_value
+            self.input.isMinimumInclusive = True
+
+    def create_in_feature_input(self, feature_input: adsk.fusion.CustomFeatureInput):
+        value_input = adsk.core.ValueInput.createByString(self.expression)
+        feature_input.addCustomParameter(self.id, self.name, value_input, self.units, True)
+
+    def update_in_feature(self, feature: adsk.fusion.CustomFeature):
+        self._required_feature_param(feature).expression = self.expression
+
+    def update_from_feature(self, feature: adsk.fusion.CustomFeature):
+        param = self._required_feature_param(feature)
+        self.value = param.value
+        self.expression = param.expression
+        if self.input: self.input.expression = param.expression
+
+    def update_from_input(self):
+        val = self.input.value
+        if val is not None:
+            self.value = val
+            try:
+                self.expression = self.input.expression
+            except:
+                pass
+
+class IntegerInput(Input):
+    default_value: int
+    value: int
+    input: adsk.core.IntegerSpinnerCommandInput
+    minimum_value: int
+    maximum_value: int
+
+    def __init__(self, id, name, default_value: int, minimum: int, maximum: int, tool_tip, update_visibility: Callable[[], bool] = lambda: True):
+        super().__init__(id, name, tool_tip, update_visibility)
+        self.default_value = default_value
+        self.minimum_value = minimum
+        self.maximum_value = maximum
+
+    def create_input(self, inputs: adsk.core.CommandInputs, params: adsk.fusion.CustomFeatureParameters | None):
+        val = int(self._required_param(params).value if params else self.default_value)
+        self.input = inputs.addIntegerSpinnerCommandInput(self.id, self.name, self.minimum_value, self.maximum_value, 1, val)
+
+    def create_in_feature_input(self, feature_input: adsk.fusion.CustomFeatureInput):
+        value_input = adsk.core.ValueInput.createByReal(self.value)
+        feature_input.addCustomParameter(self.id, self.name, value_input, '', True)
+
+    def update_in_feature(self, feature: adsk.fusion.CustomFeature):
+        self._required_feature_param(feature).value = self.value
+
+    def update_from_feature(self, feature: adsk.fusion.CustomFeature):
+        param = self._required_feature_param(feature)
+        self.value = int(param.value)
+        if self.input: self.input.value = self.value
+
+    def update_from_input(self):
+        val = self.input.value
+        if val is not None:
+            self.value = val
+
+class DropDownInput(Input):
+    @dataclass
+    class Item:
+        name: str
+        value: int
+
+    default_value: int
+    value: int
+    options: list[Item]
+    input: adsk.core.DropDownCommandInput
+
+    def __init__(self, id, name, options: list[Item], default_value: int, tool_tip, update_visibility: Callable[[], bool] = lambda: True):
+        super().__init__(id, name, tool_tip, update_visibility)
+        self.options = options
+        self.default_value = default_value
+
+    def create_input(self, inputs: adsk.core.CommandInputs, params: adsk.fusion.CustomFeatureParameters | None):
+        self.input = inputs.addDropDownCommandInput(self.id, self.name, adsk.core.DropDownStyles.TextListDropDownStyle) # type: ignore
+        items = self.input.listItems
+        val = self._required_param(params).value if params else self.default_value
+        for option in self.options:
+            selected = val == option.value
+            items.add(option.name, selected)
+
+    def create_in_feature_input(self, feature_input: adsk.fusion.CustomFeatureInput):
+        value_input = adsk.core.ValueInput.createByReal(self.value)
+        feature_input.addCustomParameter(self.id, self.name, value_input, '', True)
+
+    def update_in_feature(self, feature: adsk.fusion.CustomFeature):
+        self._required_feature_param(feature).value = self.value
+
+    def update_from_feature(self, feature: adsk.fusion.CustomFeature):
+        param = self._required_feature_param(feature)
+        self.value = int(param.value)
+        name = self._option_name_for_value(self.value)
+        if self.input:
+            for item in self.input.listItems:
+                item.isSelected = item.name == name
+
+    def update_from_input(self):
+        selected = self.input.selectedItem
+        if not selected:
+            raise errors.InvalidInputError(f"Dropdown '{self.name}' has no selected item.")
+        val = self._option_value_for_name(selected.name)
+        self.value = val
+
+    def _option_name_for_value(self, value: int) -> str:
+        for item in self.options:
+            if item.value == value:
+                return item.name
+        raise errors.InvalidInputError(
+            f"Dropdown '{self.name}' has no option for value '{value}'."
+        )
+
+    def _option_value_for_name(self, name: str) -> int:
+        for item in self.options:
+            if item.name == name:
+                return item.value
+        raise errors.InvalidInputError(
+            f"Dropdown '{self.name}' has no option named '{name}'."
+        )
+
+
+class SelectionByEntityTokenInput(Input):
+    input: adsk.core.SelectionCommandInput
+    value: list[adsk.fusion.BRepEdge | adsk.fusion.SketchPoint | adsk.fusion.BRepFace]
+
+    def __init__(self, id, name, filter: list[str], lower_bound: int, upper_bound: int, tool_tip: str, update_visibility: Callable[[], bool] = lambda: True):
+        super().__init__(id, name, tool_tip, update_visibility)
+        self.filter = filter
+        self.lower_bound = lower_bound
+        self.upper_bound = upper_bound
+        self.tokens = []
+        self.value = []
+
+    def create_input(self, inputs: adsk.core.CommandInputs, params: adsk.fusion.CustomFeatureParameters | None):
+        self.input = inputs.addSelectionInput(self.id, self.name, self.tool_tip)
+        for filter in self.filter:
+            self.input.addSelectionFilter(filter)
+        self.input.setSelectionLimits(self.lower_bound, self.upper_bound)
+
+    def create_in_feature_input(self, feature_input: adsk.fusion.CustomFeatureInput):
+        self.tokens = []
+        for idx in range(len(self.value)):
+            entity = self.value[idx]
+            feature_input.addDependency(self.dependency_id(idx), entity)
+            self.tokens.append(entity.entityToken)
+
+    def create_named_values(self, feature: adsk.fusion.CustomFeature):
+        for idx in range(len(self.value)):
+            feature.customNamedValues.addOrSetValue(self.dependency_id(idx), self.value[idx].entityToken)
+
+    def update_in_feature(self, feature: adsk.fusion.CustomFeature):
+        for idx in range(len(self.value)):
+            id = self.dependency_id(idx)
+            feature.dependencies.add(id, self.value[idx])
+            feature.customNamedValues.addOrSetValue(id, self.value[idx].entityToken)
+
+    def update_from_feature(self, feature: adsk.fusion.CustomFeature):
+        result = []
+        if self.input: self.input.clearSelection()
+        deps = [d for d in feature.dependencies if d.id.startswith(self.dependency_id_prefix)]
+        for idx in range(len(deps)):
+            dep = deps[idx]
+            token = feature.customNamedValues.value(dep.id) or self.tokens[idx]
+            entities = feature.parentComponent.parentDesign.findEntityByToken(token)
+            if not entities:
+                raise errors.ReferenceLostError()
+            entity = entities[0]
+            result.append(entity)
+            if self.input: self.input.addSelection(entity)
+        self.value = result
+        
+    def update_from_input(self):
+        result = []
+        for idx in range(self.input.selectionCount):
+            result.append(self.input.selection(idx).entity)
+        self.value = result
+
+    @property
+    def dependency_id_prefix(self):
+        return f"{self.id}__"
+
+    def dependency_id(self, idx):
+        return f"{self.dependency_id_prefix}{idx}"
+
+
+
+
+class Inputs(ABC):
+    inputs: list[Input]
+
+    def __init__(self):
+        self.inputs = []
+        for _, value in vars(self).items():
+            if isinstance(value, Input):
+                self.inputs.append(value)
+
+    def update_visibilities(self):
+        for input in self.inputs:
+            input._update_visibility()

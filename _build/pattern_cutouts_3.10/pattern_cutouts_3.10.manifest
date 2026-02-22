@@ -1,0 +1,13 @@
+{
+  "autodeskProduct": "Fusion360",
+  "type": "addin",
+  "id": "com.floriankugler.pattern-cutouts_1.2",
+  "author": "",
+  "description": {
+    "": ""
+  },
+  "version": "3.10",
+  "runOnStartup": false,
+  "supportedOS": "windows|mac",
+  "editEnabled": true
+}
