@@ -36,6 +36,9 @@ Furthermore, updates to this code might break existing usages of the addins.
   Cleans up orphaned external combine/base/intersect features tracked by the shared combine module.
 	
   If a custom feature is created in one component, but modifies bodies from other components, we have to create features external to the custom feature. If you then delete the custom feature, these external features will stay around. This addin can be used to garbage collect them.
+- **Multi Combine**
+
+  Applies one combine setup to multiple target bodies. Select one or more targets (bodies and/or component occurrences), one or more tools, and an operation (join/cut/intersect). The add-in expands target selections to bodies, creates one combine feature per target body, and always keeps tool bodies so they can be reused across all targets.
 
 ## Installation
 
