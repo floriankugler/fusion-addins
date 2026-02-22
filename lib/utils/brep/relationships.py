@@ -72,22 +72,6 @@ def face_contains_edge(face: adsk.fusion.BRepFace, edge: adsk.fusion.BRepEdge) -
     evaluated = [1 if face.isPointOnFace(p, 1e-6) else 0 for p in test_points]
     return sum(evaluated) > 5
 
-def are_sketch_curves_right_handed(curves: list[adsk.fusion.SketchCurve], face: adsk.fusion.BRepFace) -> bool:
-    if len(curves) <= 1:
-        return False
-    curve = curves[0]
-    eval: adsk.core.CurveEvaluator3D = curve.worldGeometry.evaluator # type: ignore
-    _, min, max = eval.getParameterExtents()
-    middle = min + 0.5 * (max - min)
-    point = eval.getPointAtParameter(middle)[1]
-    tangent = eval.getTangent(middle)[1]
-    sketch = curve.parentSketch
-    normal = sketch.xDirection.crossProduct(sketch.yDirection)
-    across = vector.normalized(tangent.crossProduct(normal))
-    test_point = vector.add(point.asVector(), vector.scaled_by(across, 0.01)).asPoint()
-    is_on_face = face.isPointOnFace(test_point)
-    return not is_on_face
-
 def is_smooth_edge(edge: adsk.fusion.BRepEdge) -> bool:
     """
     Determines whether the given edge is smooth between its two adjacent faces.

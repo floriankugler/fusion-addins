@@ -46,56 +46,67 @@ class _TargetCombine:
         return inside_component, outside_component
 
 
+_base_target_attribute_group_name = 'target-body-token'
+_base_target_attribute_value_name = 'value'
+
 def create_features_from_combines(component: adsk.fusion.Component, combines: list[Combine], feature: adsk.fusion.CustomFeature | None, is_compute: bool) -> tuple[list[adsk.fusion.Feature], list[adsk.fusion.Feature], list[adsk.fusion.BRepBody]]:
     mgr = adsk.fusion.TemporaryBRepManager.get()
-    token_group_name = 'target-body-token'
-    token_value_name = 'value'
-    external_combine_key = lambda idx: f"external-combine-{idx}"
+    external_combine_key = lambda idx, op: f"external-combine-{idx}-{op}"
 
     combines_inside_component, combines_outside_component = _TargetCombine.aggregate_combines(combines, component)
     all_combines = combines_inside_component | combines_outside_component
     dependencies = [c.target_body for c in all_combines.values()]
 
-    existing_base_features: list[adsk.fusion.BaseFeature] = []
-    existing_inside_combine_features: list[adsk.fusion.CombineFeature] = []
-    existing_outside_combine_features: list[adsk.fusion.CombineFeature] = []
+    existing_inside_features: list[tuple[adsk.fusion.BaseFeature, adsk.fusion.CombineFeature, adsk.fusion.CombineFeature]] = []
+    existing_outside_features: list[tuple[adsk.fusion.BaseFeature, adsk.fusion.CombineFeature, adsk.fusion.CombineFeature]] = []
     existing_targets: set[str] = set()
     targets_to_delete: list[tuple[adsk.fusion.BaseFeature, adsk.fusion.CombineFeature, adsk.fusion.CombineFeature]] = []
     
     if feature:
         existing_features = cast(list[adsk.fusion.Feature], list(feature.features))
+        internal_idx = 0
+        while internal_idx < len(existing_features) and isinstance(existing_features[internal_idx], adsk.fusion.BaseFeature):
+            base = cast(adsk.fusion.BaseFeature, existing_features[internal_idx])
+            base = base.nativeObject or base
+            join = cast(adsk.fusion.CombineFeature, existing_features[internal_idx + 1])
+            join = join.nativeObject or join
+            intersect = cast(adsk.fusion.CombineFeature, existing_features[internal_idx + 2])
+            intersect = intersect.nativeObject or intersect
+            existing_inside_features.append((base, join, intersect))
+            internal_idx += 3
 
-        base_idx = 0
-        while base_idx < len(existing_features) and isinstance(existing_features[base_idx], adsk.fusion.BaseFeature):
-            base = cast(adsk.fusion.BaseFeature, existing_features[base_idx])
-            if base.nativeObject:
-                base = base.nativeObject
-            existing_base_features.append(base)
-            base_idx += 1
-        existing_inside_combine_features = cast(list[adsk.fusion.CombineFeature], existing_features[base_idx:])
-        
         external_idx = 0
-        while token := feature.customNamedValues.value(external_combine_key(external_idx)):
-            features = component.parentDesign.findEntityByToken(token)
-            if features:
-                existing_outside_combine_features.append(cast(adsk.fusion.CombineFeature, features[0]))
+        while True:
+            base_token = feature.customNamedValues.value(external_combine_key(external_idx, 'base'))
+            join_token = feature.customNamedValues.value(external_combine_key(external_idx, 'join'))
+            intersect_token = feature.customNamedValues.value(external_combine_key(external_idx, 'intersect'))
+            if not base_token or not join_token or not intersect_token:
+                break
+            bases = component.parentDesign.findEntityByToken(base_token)
+            joins = component.parentDesign.findEntityByToken(join_token)
+            intersects = component.parentDesign.findEntityByToken(intersect_token)
+            if bases and joins and intersects:
+                base = cast(adsk.fusion.BaseFeature, bases[0])
+                join = cast(adsk.fusion.CombineFeature, joins[0])
+                intersect = cast(adsk.fusion.CombineFeature, intersects[0])
+                existing_outside_features.append((base, join, intersect))
             external_idx += 1
-        existing_combine_features = existing_inside_combine_features + existing_outside_combine_features
-        existing_join_features = existing_combine_features[::2]
-        existing_intersect_features = existing_combine_features[1::2]
-
-        for base, join, intersect in zip(existing_base_features, existing_join_features, existing_intersect_features):
-            target_token = base.attributes.itemByName(token_group_name, token_value_name).value
+        
+        for base, join, intersect in existing_inside_features + existing_outside_features:
+            target_token = base.attributes.itemByName(_base_target_attribute_group_name, _base_target_attribute_value_name).value
             targets = component.parentDesign.findEntityByToken(target_token)
             if targets:
                 target = cast(adsk.fusion.BRepBody, targets[0])
                 token = target.entityToken
-                existing_targets.add(token)
-                new_body = all_combines[token].new_body if token in all_combines else mgr.copy(target)
-                base.startEdit()
-                base.updateBody(base.bodies[0], new_body)
-                base.finishEdit()
-                base.attributes.add(token_group_name, token_value_name, token)
+                if token in all_combines:
+                    existing_targets.add(token)
+                    new_body = all_combines[token].new_body
+                    base.startEdit()
+                    base.updateBody(base.bodies[0], new_body)
+                    base.finishEdit()
+                    base.attributes.add(_base_target_attribute_group_name, _base_target_attribute_value_name, token)
+                else:
+                    targets_to_delete.append((base, join, intersect))
             else:
                 targets_to_delete.append((base, join, intersect))
 
@@ -105,8 +116,8 @@ def create_features_from_combines(component: adsk.fusion.Component, combines: li
     if is_compute:
         assert not new_combines_inside_component
         assert not new_combines_outside_component
-        features_inside = cast(list[adsk.fusion.Feature], existing_base_features + existing_inside_combine_features)
-        features_outside = cast(list[adsk.fusion.Feature], existing_outside_combine_features)
+        features_inside = cast(list[adsk.fusion.Feature], [f for triplet in existing_inside_features for f in triplet])
+        features_outside = cast(list[adsk.fusion.Feature], [f for triplet in existing_outside_features for f in triplet])
         return features_inside, features_outside, dependencies
 
     if feature:
@@ -114,66 +125,87 @@ def create_features_from_combines(component: adsk.fusion.Component, combines: li
         feature.setStartAndEndFeatures(None, None) # type: ignore
 
         for base, join, intersect in targets_to_delete:
-            existing_base_features.remove(base)
-            if join in existing_inside_combine_features: 
-                existing_inside_combine_features.remove(join)
-            else:
-                existing_outside_combine_features.remove(join)
-            if intersect in existing_inside_combine_features: 
-                existing_inside_combine_features.remove(intersect)
-            else:   
-                existing_outside_combine_features.remove(intersect)
+            if (base, join, intersect) in existing_inside_features:
+                existing_inside_features.remove((base, join, intersect)) 
+            elif (base, join, intersect) in existing_outside_features:
+                existing_outside_features.remove((base, join, intersect))
             intersect.deleteMe()
             join.deleteMe()
             base.deleteMe()
 
-    if last_existing_base_feature := last_in_lists(feature, existing_base_features):
-        last_existing_base_feature.timelineObject.rollTo(False)
-    new_base_features: list[adsk.fusion.BaseFeature] = []
-    for combine in new_combines_inside_component + new_combines_outside_component:
-        base = component.features.baseFeatures.add()
-        base.startEdit()
-        component.bRepBodies.add(combine.new_body, base)
-        base.attributes.add(token_group_name, token_value_name, combine.target_body.entityToken)
-        base.finishEdit()
-        new_base_features.append(base)
+    if existing_inside_features:
+        existing_inside_features[-1][2].timelineObject.rollTo(False)
+    elif feature:
+        feature.timelineObject.rollTo(False)
+    
+    new_inside_features: list[tuple[adsk.fusion.BaseFeature, adsk.fusion.CombineFeature, adsk.fusion.CombineFeature]] = []
+    for combine in new_combines_inside_component:
+        new_inside_features.append(_create_combine_triplet(combine, component))
 
-    if last_existing_inside_combine := last_in_lists(last_existing_base_feature, existing_inside_combine_features, new_base_features):
-        last_existing_inside_combine.timelineObject.rollTo(False)
-    new_inside_combine_features: list[adsk.fusion.Feature] = []
-    for combine, base in zip(new_combines_inside_component, new_base_features):
-        new_inside_combine_features.extend(create_combine_features(combine, base, component))
+    new_outside_features: list[tuple[adsk.fusion.BaseFeature, adsk.fusion.CombineFeature, adsk.fusion.CombineFeature]] = []
+    for combine in new_combines_outside_component:
+        outside_comp = combine.target_body.parentComponent
+        new_outside_features.append(_create_combine_triplet(combine, outside_comp))
 
-    if last_existing_outside_combine := last_in_lists(last_existing_inside_combine, existing_outside_combine_features, new_inside_combine_features):
-        last_existing_outside_combine.timelineObject.rollTo(False)
-    new_outside_combine_features: list[adsk.fusion.Feature] = []
-    for combine, base in zip(new_combines_outside_component, new_base_features[len(new_combines_inside_component):]):
-        new_outside_combine_features.extend(create_combine_features(combine, base, component))
-        
-    for idx, f in enumerate(existing_outside_combine_features + new_outside_combine_features):
-        id = feature.name if feature else "<unknown>"
-        f.name = f"custom-feature<{id}>-{'join' if idx % 2 == 0 else 'intersect'}-{idx}"
+    if feature:
+        _register_external_features(new_outside_features + existing_outside_features, component.parentDesign, feature)
+
+    for idx, (base, join, intersect) in enumerate(existing_outside_features + new_outside_features):
+        id = f"custom-feature<{feature.name if feature else "<unknown>"}>-{idx}"
+        base.name = f"{id}-base"
+        join.name = f"{id}-join"
+        intersect.name = f"{id}-intersect"
         if feature:
-            feature.customNamedValues.addOrSetValue(external_combine_key(idx), f.entityToken)
+            feature.customNamedValues.addOrSetValue(external_combine_key(idx, 'base'), base.entityToken)
+            feature.customNamedValues.addOrSetValue(external_combine_key(idx, 'join'), join.entityToken)
+            feature.customNamedValues.addOrSetValue(external_combine_key(idx, 'intersect'), intersect.entityToken)
 
-    features_inside = existing_base_features + new_base_features + existing_inside_combine_features + new_inside_combine_features
-    features_outside = existing_outside_combine_features + new_outside_combine_features
-    return features_inside, features_outside, dependencies
+    features_inside = cast(list[adsk.fusion.Feature], [f for triplet in existing_inside_features + new_inside_features for f in triplet])
+    features_outside = cast(list[adsk.fusion.Feature], [f for triplet in new_outside_features + existing_outside_features for f in triplet])
+    return cast(list[adsk.fusion.Feature], features_inside), cast(list[adsk.fusion.Feature], features_outside), dependencies
 
-def last_in_lists(fallback, *lists):
-    for list in lists:
-        if list:
-            return list[-1]
-    return fallback
+def _create_combine_triplet(combine: _TargetCombine, component: adsk.fusion.Component) -> tuple[adsk.fusion.BaseFeature, adsk.fusion.CombineFeature, adsk.fusion.CombineFeature]:
+    base = component.features.baseFeatures.add()
+    base.startEdit()
+    new_body = combine.new_body
+    ac = combine.target_body.assemblyContext
+    if ac and not ac.transform2.isEqualTo(adsk.core.Matrix3D.create()):
+        new_body = utils.brep.transformed(new_body, utils.matrix.inverted_matrix(ac.transform2))
+    component.bRepBodies.add(new_body, base)
+    base.attributes.add(_base_target_attribute_group_name, _base_target_attribute_value_name, combine.target_body.entityToken)
+    base.finishEdit()
 
-def create_combine_features(combine: _TargetCombine, base: adsk.fusion.BaseFeature, component: adsk.fusion.Component) -> list[adsk.fusion.Feature]:
     coll = utils.fusion.as_object_collection(base.bodies)
     join_input = component.features.combineFeatures.createInput(combine.target_body, coll)
     join_input.operation = adsk.fusion.FeatureOperations.JoinFeatureOperation # type: ignore
     join_input.isKeepToolBodies = True
-    join_feature = component.features.combineFeatures.add(join_input)
+    join = component.features.combineFeatures.add(join_input)
     intersect_input = component.features.combineFeatures.createInput(combine.target_body, coll)
     intersect_input.operation = adsk.fusion.FeatureOperations.IntersectFeatureOperation # type: ignore
     intersect_input.isKeepToolBodies = False
-    intersect_feature = component.features.combineFeatures.add(intersect_input)
-    return [join_feature, intersect_feature]
+    intersect = component.features.combineFeatures.add(intersect_input)
+    return (base, join, intersect)
+
+def _register_external_features(external_features: list[tuple[adsk.fusion.BaseFeature, adsk.fusion.CombineFeature, adsk.fusion.CombineFeature]], design: adsk.fusion.Design, feature: adsk.fusion.CustomFeature):
+    garbage_collect_features(design)
+    for base, join, intersect in external_features:
+        design.attributes.add('external-base-features', base.entityToken, feature.entityToken)
+        design.attributes.add('external-join-features', join.entityToken, feature.entityToken)
+        design.attributes.add('external-intersect-features', intersect.entityToken, feature.entityToken)
+
+def garbage_collect_features(design: adsk.fusion.Design):
+    _garbage_collect_attributes(design, design.attributes.itemsByGroup('external-intersect-features'))
+    _garbage_collect_attributes(design, design.attributes.itemsByGroup('external-join-features'))
+    _garbage_collect_attributes(design, design.attributes.itemsByGroup('external-base-features'))
+
+def _garbage_collect_attributes(design: adsk.fusion.Design, attributes: list[adsk.core.Attribute]):
+    for att in attributes:
+        external_feature_token = att.name
+        parent_feature_token = att.value
+        external_feature = design.findEntityByToken(external_feature_token)
+        parent_feature = design.findEntityByToken(parent_feature_token)
+        if not external_feature or not parent_feature:
+            if external_feature:
+                cast(adsk.fusion.Feature, external_feature[0]).deleteMe()
+            att.deleteMe()
+

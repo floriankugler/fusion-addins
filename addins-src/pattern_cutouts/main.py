@@ -6,7 +6,7 @@ from lib.fusionbootstrap.runtime import RuntimeInfo
 from Shared import CoordinateSystem, PatternInputs
 import Triangles, Rhombuses, Cross, RoundedRectangle, Froli
 
-_feature: custom_compute_feature.CustomComputeFeature
+_feature: custom_compute_feature.CustomComputeFeature | None = None
 
 def run(context, runtime_info: RuntimeInfo):
     global _feature
@@ -154,34 +154,56 @@ class PatternCutout(custom_compute_feature.CustomComputeFeature):
         # Start base feature for temporary offsetting operations. This will be deleted afterwards.
         temp_base = self.component.features.baseFeatures.add()
         temp_base.startEdit()
-        self.component.bRepBodies.add(face.body, temp_base)
+        self.component.bRepBodies.add(mgr.copy(face.body), temp_base)
         base_body = temp_base.bodies[0]
         base_face = next((f for f in base_body.faces if f.boundingBox.minPoint.isEqualTo(face.boundingBox.minPoint) and f.boundingBox.maxPoint.isEqualTo(face.boundingBox.maxPoint)))
 
         # Create sketch to offset all loops
         sketch = self.component.sketches.addToBaseOrFormFeature(base_face, temp_base, includeFaceEdges=False)
+        offset_curves: list[adsk.fusion.SketchCurve] = []
         for loop in base_face.loops:
             loop_edges = cast(list[adsk.core.Base], utils.fusion.as_list(loop.edges))
             entities = cast(list[adsk.fusion.SketchCurve], list(sketch.project2(loop_edges, False)))
+            if sketch.profiles.count < 1:
+                raise ValueError("Projected loop did not create a profile")
+            original_profile = sketch.profiles[0]
             offset_value = self.inputs.inset.value if loop.isOuter else self.inputs.inner_loop_offset.value
             if offset_value != 0:
                 sketch.setConstructionState(entities, adsk.fusion.SketchCurveConstructionStates.ConstructionSketchCurveConstructionState) # type: ignore
             else:   
                 continue
-            # curves = cast(list[adsk.fusion.SketchCurve], utils.fusion.as_list(sketch.findConnectedCurves(entities[0])))
-            sign = -1 if utils.brep.are_sketch_curves_right_handed(entities, base_face) else 1
-            if loop.isOuter and loop.edges.count == 1: # special case for outer loops with a single edge (circle)
-                sign *= -1
-            input = sketch.geometricConstraints.createOffsetInput(entities, adsk.core.ValueInput.createByReal(offset_value * sign))
-            input.isTopologyMatched = False
-            sketch.geometricConstraints.addOffset2(input)
+
+            def create_offset(value: float) -> adsk.fusion.OffsetConstraint | None:
+                try:
+                    input = sketch.geometricConstraints.createOffsetInput(entities, adsk.core.ValueInput.createByReal(value))
+                    input.isTopologyMatched = False
+                    return sketch.geometricConstraints.addOffset2(input)
+                except:
+                    return None
+            
+            constraint = create_offset(offset_value) or create_offset(-offset_value)
+            if not constraint or sketch.profiles.count < 1:
+                continue
+            offset_profile = sketch.profiles[0]
+            is_offset_smaller = offset_profile.areaProperties().area < original_profile.areaProperties().area
+            if (is_offset_smaller and not loop.isOuter) or (not is_offset_smaller and loop.isOuter):
+                for c in constraint.childCurves:
+                    c.deleteMe()
+                constraint = create_offset(-offset_value)
+            if not constraint:
+                continue
+
+            # store off the created curves and set them to construction state, so that they don't interefere with processing other loops
+            offset_curves.extend(constraint.childCurves)
+            sketch.setConstructionState(constraint.childCurves, adsk.fusion.SketchCurveConstructionStates.ConstructionSketchCurveConstructionState) # type: ignore
+            
+        # restore all created offset curves to normal state
+        sketch.setConstructionState(offset_curves, adsk.fusion.SketchCurveConstructionStates.NormalSketchCurveConstructionState) # type: ignore
 
         # Find largest profile in sketch, create a body from the profile and intersect with the cut body
         sorted_profiles = sorted(utils.fusion.as_list(sketch.profiles), key=lambda p: p.areaProperties().area, reverse=True)
-        offset_profile = sorted_profiles[0]
-        offset_start_face = offset_profile.face
-        mgr.transform(offset_start_face.body, utils.matrix.transform_from_root(sketch.origin, sketch.xDirection, sketch.yDirection))
-        offset_body = utils.brep.create_body_from_face(offset_start_face, cut)
+        offset_start_face_body = utils.brep.create_body_from_profile(sorted_profiles[0])
+        offset_body = utils.brep.create_body_from_face(offset_start_face_body.faces[0], cut)
         mgr.booleanOperation(shape, offset_body, adsk.fusion.BooleanTypes.IntersectionBooleanType) # type: ignore
 
         temp_base.finishEdit()
