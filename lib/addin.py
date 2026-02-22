@@ -45,6 +45,10 @@ class Addin(ABC):
     def plugin_tooltip(self) -> str:
         pass
 
+    @property
+    def has_command_ui(self) -> bool:
+        return True
+
     def __init__(self, runtime_info: RuntimeInfo):
         try:
             self.runtime_info = runtime_info
@@ -105,8 +109,11 @@ class Addin(ABC):
 
     def _create_ui(self, args: adsk.core.EventArgs) -> None:
         command = adsk.core.CommandCreatedEventArgs.cast(args).command
-        self._initialize_inputs(command, None)
-        self._attach_common_handlers(command)
+        if self.has_command_ui:
+            self._initialize_inputs(command, None)
+            self._attach_common_handlers(command)
+        else:
+            command.isAutoExecute = True
 
         on_execute = new_event_handler(self._execute, adsk.core.CommandEventHandler)
         command.execute.add(on_execute)
@@ -124,9 +131,8 @@ class Addin(ABC):
         self.input_changed(args.input)
 
     def _execute(self, args: adsk.core.CommandEventArgs):
-        if self.inputs is None:
-            raise RuntimeError("Add-in inputs are not initialized.")
-        self.update_inputs_from_ui()
+        if self.inputs is not None:
+            self.update_inputs_from_ui()
         self.execute()
         self.inputs = None
 
@@ -199,9 +205,8 @@ class Addin(ABC):
             f"[ADDIN] Error id={self.runtime_info.id} context={context}: {error}\n{traceback.format_exc()}"
         )
         
-    @abstractmethod
     def create_inputs(self) -> inp.Inputs:
-        pass
+        return inp.Inputs()
 
     @abstractmethod
     def execute(self):

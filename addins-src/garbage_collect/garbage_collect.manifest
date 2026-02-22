@@ -1,0 +1,13 @@
+{
+  "autodeskProduct": "Fusion360",
+  "type": "addin",
+  "id": "com.floriankugler.garbage-collect",
+  "author": "",
+  "description": {
+    "": ""
+  },
+  "version": "",
+  "runOnStartup": false,
+  "supportedOS": "windows|mac",
+  "editEnabled": true
+}
