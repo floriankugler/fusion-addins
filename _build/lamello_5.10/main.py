@@ -276,10 +276,4 @@ class LamelloFeature(custom_compute_feature.CustomComputeFeature):
                 computed_spacing = available_length / (number_of_connectors-1) if number_of_connectors > 1 else 0
                 positions = [utils.vector.add(start, utils.vector.scaled_by(edge_normal, idx * computed_spacing)) for idx in range(number_of_connectors)]
         return positions
-
-    def pre_select(self, input: adsk.core.SelectionCommandInput, selection: adsk.fusion.BRepEdge) -> bool:
-        if input.id == self.inputs.edge.id:
-            return utils.brep.find_mating_faces_at_edge(selection) is not None
-        else:
-            return True
         
