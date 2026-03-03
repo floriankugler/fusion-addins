@@ -29,8 +29,15 @@ class HealingInputs(inputs.Inputs):
         self.tolerance = inputs.FloatInput(
             id='tolerance',
             name='Tolerance',
-            default_value=0.1,
+            default_value=1,
             tool_tip='Maximum distance between points to consider them for healing',
+            units=units,
+        )
+        self.max_segment_length = inputs.FloatInput(
+            id='max_segment_length',
+            name='Max segment length',
+            default_value=2,
+            tool_tip='Distance between sampled fit points along the healed curve',
             units=units,
         )
         super().__init__()
@@ -85,7 +92,17 @@ class HealSketchLines(addin.Addin):
         ]
         while len(nurbs) > 0:
             joined = self.join_nurbs(nurbs)
-            sketch.sketchCurves.sketchFixedSplines.addByNurbsCurve(joined)
+            points = self.fit_points_from_nurbs(joined)
+            if len(points) < 2:
+                continue
+
+            fit_points = adsk.core.ObjectCollection.create()
+            for point in points:
+                fit_points.add(point)
+
+            spline = sketch.sketchCurves.sketchFittedSplines.add(fit_points)
+            if spline and self.is_closed_curve(joined):
+                spline.isClosed = True
 
         for curve in selection:
             curve.isConstruction = True
@@ -142,3 +159,57 @@ class HealSketchLines(addin.Addin):
         if dist <= self.inputs.tolerance.value:
             return dist
         return None
+
+    def fit_points_from_nurbs(self, curve: adsk.core.NurbsCurve3D) -> list[adsk.core.Point3D]:
+        evaluator = curve.evaluator
+        ok, start_param, end_param = evaluator.getParameterExtents()
+        if not ok:
+            return []
+
+        ok, total_length = evaluator.getLengthAtParameter(start_param, end_param)
+        if not ok:
+            return []
+
+        ok, start_point = evaluator.getPointAtParameter(start_param)
+        if not ok:
+            return []
+        ok, end_point = evaluator.getPointAtParameter(end_param)
+        if not ok:
+            return []
+
+        spacing = max(1e-6, self.inputs.max_segment_length.value)
+        points: list[adsk.core.Point3D] = [start_point]
+        if total_length > spacing:
+            offset = spacing
+            while offset < total_length:
+                ok, param = evaluator.getParameterAtLength(start_param, offset)
+                if not ok:
+                    break
+                ok, point = evaluator.getPointAtParameter(param)
+                if not ok:
+                    break
+                points.append(point)
+                offset += spacing
+        points.append(end_point)
+        points = self.dedupe_points(points)
+        if len(points) > 2 and self.is_effectively_closed_points(points):
+            # Fitted splines should not repeat the first point as the last point.
+            # Closure is handled via spline.isClosed = True.
+            points.pop()
+        return points
+
+    def dedupe_points(self, points: list[adsk.core.Point3D]) -> list[adsk.core.Point3D]:
+        if not points:
+            return []
+        result = [points[0]]
+        for point in points[1:]:
+            if point.distanceTo(result[-1]) > 1e-9:
+                result.append(point)
+        return result
+
+    def is_effectively_closed_points(self, points: list[adsk.core.Point3D]) -> bool:
+        return points[0].distanceTo(points[-1]) <= 1e-6
+
+    def is_closed_curve(self, curve: adsk.core.NurbsCurve3D) -> bool:
+        ok, start, end = curve.evaluator.getEndPoints()
+        return bool(ok and start.distanceTo(end) <= 1e-6 and utils.sketch.nurbs_length(curve) > 1e-6)
