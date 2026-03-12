@@ -16,6 +16,10 @@ def stop(context):
     _addin = None
 
 class HealingInputs(inputs.Inputs):
+    class Modes:
+        PATCH_GAPS = inputs.DropDownInput.Item('Patch gaps with lines', 0)
+        CREATE_SPLINE = inputs.DropDownInput.Item('Create healed spline', 1)
+
     def __init__(self, units_manager: adsk.core.UnitsManager):
         units = units_manager.defaultLengthUnits
         self.edges = inputs.SelectionByEntityTokenInput(
@@ -33,12 +37,20 @@ class HealingInputs(inputs.Inputs):
             tool_tip='Maximum distance between points to consider them for healing',
             units=units,
         )
+        self.mode = inputs.DropDownInput(
+            id='mode',
+            name='Mode',
+            options=[HealingInputs.Modes.PATCH_GAPS, HealingInputs.Modes.CREATE_SPLINE],
+            default_value=HealingInputs.Modes.PATCH_GAPS.value,
+            tool_tip='Choose whether to create one healed spline or patch gaps with lines.',
+        )
         self.max_segment_length = inputs.FloatInput(
             id='max_segment_length',
             name='Max segment length',
             default_value=2,
             tool_tip='Distance between sampled fit points along the healed curve',
             units=units,
+            update_visibility=lambda: self.mode.value == HealingInputs.Modes.CREATE_SPLINE.value,
         )
         super().__init__()
 
@@ -86,9 +98,14 @@ class HealSketchLines(addin.Addin):
         for spline in sketch.sketchCurves.sketchControlPointSplines:
             handles.extend(spline.controlFrameLines)
 
+        filtered_selection = [curve for curve in selection if curve not in handles]
+        if self.inputs.mode.value == HealingInputs.Modes.PATCH_GAPS.value:
+            self.patch_gaps_with_lines(sketch, filtered_selection)
+            return
+
         nurbs: list[adsk.core.NurbsCurve3D] = [
             curve.geometry if isinstance(curve.geometry, adsk.core.NurbsCurve3D) else curve.geometry.asNurbsCurve # type: ignore
-            for curve in selection if curve not in handles
+            for curve in filtered_selection
         ]
         while len(nurbs) > 0:
             joined = self.join_nurbs(nurbs)
@@ -106,6 +123,122 @@ class HealSketchLines(addin.Addin):
 
         for curve in selection:
             curve.isConstruction = True
+
+    def patch_gaps_with_lines(self, sketch: adsk.fusion.Sketch, selection: list[adsk.fusion.SketchCurve]) -> None:
+        remaining = [self.curve_endpoints(curve) for curve in selection]
+        remaining = [entry for entry in remaining if entry is not None]
+
+        while len(remaining) > 0:
+            chain_start, chain_start_curve, chain_end, chain_end_curve = remaining.pop(0)
+            while True:
+                next_curve = self.find_next_curve_for_patch(chain_start, chain_end, remaining)
+                if next_curve is None:
+                    break
+                idx, chain_side, other_side = next_curve
+                other_start, other_start_curve, other_end, other_end_curve = remaining.pop(idx)
+
+                if chain_side == 'end':
+                    chain_sketch_point = chain_end
+                    chain_curve = chain_end_curve
+                else:
+                    chain_sketch_point = chain_start
+                    chain_curve = chain_start_curve
+
+                if other_side == 'start':
+                    other_sketch_point = other_start
+                    other_far_sketch_point = other_end
+                    other_far_curve = other_end_curve
+                    other_curve = other_start_curve
+                else:
+                    other_sketch_point = other_end
+                    other_far_sketch_point = other_start
+                    other_far_curve = other_start_curve
+                    other_curve = other_end_curve
+
+                self.create_patch_line(
+                    sketch,
+                    chain_sketch_point,
+                    chain_curve,
+                    other_sketch_point,
+                    other_curve,
+                )
+
+                if chain_side == 'end':
+                    chain_end = other_far_sketch_point
+                    chain_end_curve = other_far_curve
+                else:
+                    chain_start = other_far_sketch_point
+                    chain_start_curve = other_far_curve
+
+            self.create_patch_line(
+                sketch,
+                chain_start,
+                chain_start_curve,
+                chain_end,
+                chain_end_curve,
+            )
+
+    def create_patch_line(
+        self,
+        sketch: adsk.fusion.Sketch,
+        point1: adsk.fusion.SketchPoint,
+        curve1: adsk.fusion.SketchCurve,
+        point2: adsk.fusion.SketchPoint,
+        curve2: adsk.fusion.SketchCurve,
+    ) -> None:
+        if point1.geometry.distanceTo(point2.geometry) <= 1e-9:
+            return
+        if self.within_tolerance(point1.geometry, point2.geometry) is None:
+            return
+
+        line: adsk.fusion.SketchLine | None = None
+        try:
+            line = sketch.sketchCurves.sketchLines.addByTwoPoints(point1, point2)
+            if not line:
+                return
+            if line.startSketchPoint != point1:
+                sketch.geometricConstraints.addCoincident(line.startSketchPoint, point1)
+            if line.endSketchPoint != point2:
+                sketch.geometricConstraints.addCoincident(line.endSketchPoint, point2)
+        except Exception as error:
+            utils.fusion.log(f'Error creating patch line: {error}')
+            if line and line.isValid and line.isDeletable:
+                line.deleteMe()
+
+    def curve_endpoints(
+        self, curve: adsk.fusion.SketchCurve
+    ) -> tuple[adsk.fusion.SketchPoint, adsk.fusion.SketchCurve, adsk.fusion.SketchPoint, adsk.fusion.SketchCurve] | None:
+        start_sketch_point = adsk.fusion.SketchPoint.cast(getattr(curve, 'startSketchPoint', None))
+        end_sketch_point = adsk.fusion.SketchPoint.cast(getattr(curve, 'endSketchPoint', None))
+        if not start_sketch_point or not end_sketch_point:
+            return None
+        return start_sketch_point, curve, end_sketch_point, curve
+
+    def find_next_curve_for_patch(
+        self,
+        start: adsk.fusion.SketchPoint,
+        end: adsk.fusion.SketchPoint,
+        curves: list[tuple[adsk.fusion.SketchPoint, adsk.fusion.SketchCurve, adsk.fusion.SketchPoint, adsk.fusion.SketchCurve]],
+    ) -> tuple[int, str, str] | None:
+        result: list[tuple[float, int, str, str]] = []
+        for idx, (other_start, _, other_end, _) in enumerate(curves):
+            dist = self.within_tolerance(end.geometry, other_start.geometry)
+            if dist is not None:
+                result.append((dist, idx, 'end', 'start'))
+            dist = self.within_tolerance(end.geometry, other_end.geometry)
+            if dist is not None:
+                result.append((dist, idx, 'end', 'end'))
+            dist = self.within_tolerance(start.geometry, other_end.geometry)
+            if dist is not None:
+                result.append((dist, idx, 'start', 'end'))
+            dist = self.within_tolerance(start.geometry, other_start.geometry)
+            if dist is not None:
+                result.append((dist, idx, 'start', 'start'))
+
+        if result:
+            result.sort(key=lambda x: x[0])
+            _, idx, chain_side, other_side = result[0]
+            return idx, chain_side, other_side
 
     def join_nurbs(self, nurbs: list[adsk.core.NurbsCurve3D]) -> adsk.core.NurbsCurve3D:
         joined = nurbs.pop(0)
@@ -141,13 +274,17 @@ class HealSketchLines(addin.Addin):
         result: list[tuple[float, adsk.core.NurbsCurve3D, bool, bool]] = []
         for other_curve in curves:
             _, other_start, other_end = other_curve.evaluator.getEndPoints()
-            if dist := self.within_tolerance(end, other_start):
+            dist = self.within_tolerance(end, other_start)
+            if dist is not None:
                 result.append((dist, other_curve, False, False))
-            elif dist := self.within_tolerance(end, other_end):
+            dist = self.within_tolerance(end, other_end)
+            if dist is not None:
                 result.append((dist, other_curve, False, True))
-            elif dist := self.within_tolerance(start, other_end):
+            dist = self.within_tolerance(start, other_end)
+            if dist is not None:
                 result.append((dist, other_curve, True, False))
-            elif dist := self.within_tolerance(start, other_start):
+            dist = self.within_tolerance(start, other_start)
+            if dist is not None:
                 result.append((dist, other_curve, True, True))
 
         if result:

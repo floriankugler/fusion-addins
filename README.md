@@ -28,6 +28,9 @@ Furthermore, updates to this code might break existing usages of the addins.
 - **Heal Sketch Lines**
 
   Connects sketch curves that should be connected but are not quite. This often happens when projecting or intersecting complex geometry from e.g. a vehicle model, so that the projected curves do not form a closed profile. This addin automatically heals these curves by placing coincident constraints for end points within a tolerance.
+- **Transfer Shape**
+
+  Transfers geometry to a target body by creating a temporary sketch from selected intersection faces and projected faces/edges, healing endpoint gaps, applying an optional offset, combining with a selected base sketch, and then creating a body from the largest resulting profile for a join/cut/intersect operation.
 - **Flatten Design**
 
   Flattens a design hierarchy into the root component and deletes root-level bodies below a configurable size threshold.

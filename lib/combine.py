@@ -7,6 +7,7 @@ from . import utils
 class Operation(Enum):
     CUT = 1
     JOIN = 2
+    INTERSECT = 3
 
 class Combine:        
     target_body: adsk.fusion.BRepBody
@@ -30,7 +31,14 @@ class _TargetCombine:
         if self.target_body != op.target_body:
             raise ValueError("Cannot merge combine operations with different target bodies.")
         mgr = adsk.fusion.TemporaryBRepManager.get()
-        bool_type = adsk.fusion.BooleanTypes.UnionBooleanType if op.type == Operation.JOIN else adsk.fusion.BooleanTypes.DifferenceBooleanType
+        if op.type == Operation.JOIN:
+            bool_type = adsk.fusion.BooleanTypes.UnionBooleanType
+        elif op.type == Operation.CUT:
+            bool_type = adsk.fusion.BooleanTypes.DifferenceBooleanType
+        elif op.type == Operation.INTERSECT:
+            bool_type = adsk.fusion.BooleanTypes.IntersectionBooleanType
+        else:
+            raise ValueError(f"Unsupported combine operation: {op.type}")
         mgr.booleanOperation(self.new_body, op.tool_body, bool_type) # type: ignore
 
     @classmethod
@@ -208,4 +216,3 @@ def _garbage_collect_attributes(design: adsk.fusion.Design, attributes: list[ads
             if external_feature:
                 cast(adsk.fusion.Feature, external_feature[0]).deleteMe()
             att.deleteMe()
-
