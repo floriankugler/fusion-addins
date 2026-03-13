@@ -5,7 +5,7 @@ from typing import cast
 from dataclasses import dataclass
 
 _feature: custom_compute_feature.CustomComputeFeature | None = None
-DEBUG_KEEP_RESULT_SKETCH = False
+DEBUG_KEEP_RESULT_SKETCH = True
 
 
 def run(context, runtime_info: RuntimeInfo):
@@ -66,6 +66,12 @@ class TransferShapeInputs(inputs.Inputs):
             default_value=3,
             tool_tip="Maximum endpoint distance for healing projected/intersected curves.",
             units=units,
+        )
+        self.close_loop = inputs.CheckboxInput(
+            id="closeLoop",
+            name="Close loop",
+            default_value=False,
+            tool_tip="Automatically close the transfer curve if start and end points are within the heal tolerance.",
         )
         self.offset = inputs.FloatInput(
             id="offset",
@@ -139,6 +145,7 @@ class TransferShape(custom_compute_feature.CustomComputeFeature):
             temp_sketch = self.component.sketches.addToBaseOrFormFeature(target_face, temp_base, includeFaceEdges=False)
 
             source_curves = self.intersect_transfer_faces(temp_sketch) + self.project_transfer_geometry(temp_sketch)
+            utils.fusion.log(len(source_curves))
             rebuilt = self.rebuild_curves_as_spline(temp_sketch, source_curves)
             if not rebuilt:
                 raise errors.InvalidInputError("Failed to resolve intersected/projected curves into a continuous spline.")
@@ -178,35 +185,11 @@ class TransferShape(custom_compute_feature.CustomComputeFeature):
             if not DEBUG_KEEP_RESULT_SKETCH:
                 temp_base.deleteMe()
 
-    def find_matching_face(self, body: adsk.fusion.BRepBody, reference_face: adsk.fusion.BRepFace) -> adsk.fusion.BRepFace:
-        if not isinstance(reference_face.geometry, adsk.core.Plane):
-            raise errors.InvalidInputError("Target face must be planar.")
-
-        candidates: list[tuple[float, adsk.fusion.BRepFace]] = []
-        for face in body.faces:
-            if not utils.brep.is_planar(face):
-                continue
-            if not utils.brep.is_parallel(face, reference_face):
-                continue
-            if not isinstance(face.geometry, adsk.core.Plane):
-                continue
-            distance = abs(reference_face.geometry.normal.dotProduct(reference_face.geometry.origin.vectorTo(face.geometry.origin)))
-            if distance > 1e-6:
-                continue
-            area_delta = abs(face.area - reference_face.area)
-            candidates.append((area_delta, face))
-
-        if not candidates:
-            raise errors.InvalidInputError("Failed to determine target sketch face in temporary base feature.")
-
-        candidates.sort(key=lambda x: x[0])
-        return candidates[0][1]
-
     def sequenced_curves(self, curves: list[adsk.fusion.SketchCurve]) -> list[tuple[adsk.fusion.SketchCurve, bool]]:
         if not curves:
             return []
         tolerance = self.inputs.heal_tolerance.value
-        remaining_curves = curves.copy()
+        remaining_curves = list(curves)
         ordered: list[tuple[adsk.fusion.SketchCurve, bool]] = []
         ordered.append((remaining_curves.pop(), False))
         while remaining_curves:
@@ -215,7 +198,7 @@ class TransferShape(custom_compute_feature.CustomComputeFeature):
             start_point = first_curve[0].startSketchPoint if not first_curve[1] else first_curve[0].endSketchPoint # type: ignore
             end_point = last_curve[0].endSketchPoint if not last_curve[1] else last_curve[0].startSketchPoint # type: ignore
 
-            def find_next_curve(point: adsk.fusion.SketchPoint, curves: list[adsk.fusion.SketchCurve]) -> tuple[adsk.fusion.SketchCurve, adsk.fusion.SketchPoint] | None:
+            def find_next_curve(point: adsk.fusion.SketchPoint, curves: list[adsk.fusion.SketchCurve]) -> tuple[adsk.fusion.SketchCurve, adsk.fusion.SketchPoint, float] | None:
                 candidates: list[tuple[float, adsk.fusion.SketchCurve, adsk.fusion.SketchPoint]] = []
                 for curve in curves:
                     start = curve.startSketchPoint  # type: ignore
@@ -229,19 +212,21 @@ class TransferShape(custom_compute_feature.CustomComputeFeature):
                 candidates.sort(key=lambda x: x[0])
                 if not candidates:
                     return None
-                return candidates[0][1], candidates[0][2]
+                return candidates[0][1], candidates[0][2], candidates[0][0]
             
-            if next_curve := find_next_curve(end_point, remaining_curves):
-                flipped = next_curve[1] == next_curve[0].endSketchPoint # type: ignore
-                ordered.append((next_curve[0], flipped))
-                remaining_curves.remove(next_curve[0])
+            next = find_next_curve(end_point, remaining_curves)
+            previous = find_next_curve(start_point, remaining_curves)
 
-            if previous_curve := find_next_curve(start_point, remaining_curves):
-                flipped = previous_curve[1] == previous_curve[0].startSketchPoint # type: ignore
-                ordered.insert(0, (previous_curve[0], flipped))
-                remaining_curves.remove(previous_curve[0])
+            if next and (not previous or next[2] <= previous[2]):
+                flipped = next[1] == next[0].endSketchPoint # type: ignore
+                ordered.append((next[0], flipped))
+                remaining_curves.remove(next[0])
+            elif previous:
+                flipped = previous[1] == previous[0].startSketchPoint # type: ignore
+                ordered.insert(0, (previous[0], flipped))
+                remaining_curves.remove(previous[0])
 
-            if not next_curve and not previous_curve:
+            if not next and not previous:
                 break
                     
         if remaining_curves:
@@ -309,7 +294,7 @@ class TransferShape(custom_compute_feature.CustomComputeFeature):
         if len(sampled_points) < 2:
             return None
         
-        if sampled_points[0].distanceTo(sampled_points[-1]) < self.inputs.heal_tolerance.value:
+        if self.inputs.close_loop.value and sampled_points[0].distanceTo(sampled_points[-1]) < self.inputs.heal_tolerance.value:
             sampled_points.append(sampled_points[0])
 
         spline: adsk.fusion.SketchCurve | None = None
