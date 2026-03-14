@@ -187,6 +187,23 @@ def create_body_from_profile(profile: adsk.fusion.Profile) -> adsk.fusion.BRepBo
     sketch = profile.parentSketch
     return trans.transformed(profile.face.body, matrix.transform_from_root(sketch.origin, sketch.xDirection, sketch.yDirection))
 
+def create_body_from_profile_by_extrude(
+    profile: adsk.fusion.Profile,
+    to_entity: adsk.core.Base,
+    base: adsk.fusion.BaseFeature,
+) -> adsk.fusion.BRepBody:
+    extrude_input = self.component.features.extrudeFeatures.createInput(profile, adsk.fusion.FeatureOperations.NewBodyFeatureOperation) # type: ignore
+    extrude_input.targetBaseFeature = base
+    extrude_input.setOneSideExtent(
+        adsk.fusion.ToEntityExtentDefinition.create(to_entity, False), 
+        adsk.fusion.ExtentDirections.PositiveExtentDirection  # type: ignore
+    )
+    extrude_feature = base.parentComponent.features.extrudeFeatures.add(extrude_input)
+    if extrude_feature.bodies.count < 1:
+        raise ValueError("Failed to extrude body from profile")
+    mgr = adsk.fusion.TemporaryBRepManager.get()
+    return mgr.copy(extrude_feature.bodies[0])
+
 def create_dogbone_for_edge(edge: adsk.fusion.BRepEdge, tool_diameter: float, offset: float, negative: bool = False) -> adsk.fusion.BRepBody | None:
     if not rel.is_linear(edge) or edge.faces.count != 2:
         return None

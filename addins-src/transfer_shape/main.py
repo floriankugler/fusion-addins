@@ -2,7 +2,6 @@ from lib import custom_compute_feature, inputs, combine, errors, utils, ui_place
 from lib.fusionbootstrap.runtime import RuntimeInfo
 import adsk.core, adsk.fusion
 from typing import cast
-from dataclasses import dataclass
 
 _feature: custom_compute_feature.CustomComputeFeature | None = None
 DEBUG_KEEP_RESULT_SKETCH = True
@@ -145,8 +144,14 @@ class TransferShape(custom_compute_feature.CustomComputeFeature):
             temp_sketch = self.component.sketches.addToBaseOrFormFeature(target_face, temp_base, includeFaceEdges=False)
 
             source_curves = self.intersect_transfer_faces(temp_sketch) + self.project_transfer_geometry(temp_sketch)
-            utils.fusion.log(len(source_curves))
-            rebuilt = self.rebuild_curves_as_spline(temp_sketch, source_curves)
+            rebuilt = utils.sketch.rebuild_curves_as_spline(
+                curves=source_curves,
+                sketch=temp_sketch,
+                sample_spacing=0.35,
+                min_fit_point_spacing=0.3,
+                tolerance=self.inputs.heal_tolerance.value,
+                close_loop=self.inputs.close_loop.value,
+            )
             if not rebuilt:
                 raise errors.InvalidInputError("Failed to resolve intersected/projected curves into a continuous spline.")
 
@@ -161,7 +166,7 @@ class TransferShape(custom_compute_feature.CustomComputeFeature):
                 rebuilt = offset_curve
 
             if base_sketch := self.selected_base_sketch():
-                temp_sketch.project2(cast(list[adsk.core.Base], utils.fusion.as_list(base_sketch.sketchCurves)), False)
+                temp_sketch.project2(cast(list[adsk.core.Base], utils.fusion.as_list(base_sketch.sketchCurves)), isLinked=False)
 
             if DEBUG_KEEP_RESULT_SKETCH:
                 temp_sketch.name = "Transfer Shape Debug Result"
@@ -177,84 +182,21 @@ class TransferShape(custom_compute_feature.CustomComputeFeature):
             profiles.sort(key=lambda p: p.areaProperties().area, reverse=True)
             largest_profile = profiles[0]
             opposite_face = utils.brep.get_opposite_face(target_face)
-            transfer_body = self.create_transfer_body_by_extrude(largest_profile, temp_base, opposite_face)
+            transfer_body = utils.brep.create_body_from_profile_by_extrude(
+                profile=largest_profile,
+                base=temp_base,
+                to_entity=opposite_face,
+            )
             return [combine.Combine(target_face.body, transfer_body, self.selected_operation())]
-        
+
         finally:
             temp_base.finishEdit()
             if not DEBUG_KEEP_RESULT_SKETCH:
                 temp_base.deleteMe()
 
-    def sequenced_curves(self, curves: list[adsk.fusion.SketchCurve]) -> list[tuple[adsk.fusion.SketchCurve, bool]]:
-        if not curves:
-            return []
-        tolerance = self.inputs.heal_tolerance.value
-        remaining_curves = list(curves)
-        ordered: list[tuple[adsk.fusion.SketchCurve, bool]] = []
-        ordered.append((remaining_curves.pop(), False))
-        while remaining_curves:
-            first_curve = ordered[0]
-            last_curve = ordered[-1]
-            start_point = first_curve[0].startSketchPoint if not first_curve[1] else first_curve[0].endSketchPoint # type: ignore
-            end_point = last_curve[0].endSketchPoint if not last_curve[1] else last_curve[0].startSketchPoint # type: ignore
-
-            def find_next_curve(point: adsk.fusion.SketchPoint, curves: list[adsk.fusion.SketchCurve]) -> tuple[adsk.fusion.SketchCurve, adsk.fusion.SketchPoint, float] | None:
-                candidates: list[tuple[float, adsk.fusion.SketchCurve, adsk.fusion.SketchPoint]] = []
-                for curve in curves:
-                    start = curve.startSketchPoint  # type: ignore
-                    end = curve.endSketchPoint # type: ignore
-                    dist = point.geometry.distanceTo(start.geometry)
-                    if dist < tolerance:
-                        candidates.append((dist, curve, start))
-                    dist = point.geometry.distanceTo(end.geometry)
-                    if dist < tolerance:
-                        candidates.append((dist, curve, end))
-                candidates.sort(key=lambda x: x[0])
-                if not candidates:
-                    return None
-                return candidates[0][1], candidates[0][2], candidates[0][0]
-            
-            next = find_next_curve(end_point, remaining_curves)
-            previous = find_next_curve(start_point, remaining_curves)
-
-            if next and (not previous or next[2] <= previous[2]):
-                flipped = next[1] == next[0].endSketchPoint # type: ignore
-                ordered.append((next[0], flipped))
-                remaining_curves.remove(next[0])
-            elif previous:
-                flipped = previous[1] == previous[0].startSketchPoint # type: ignore
-                ordered.insert(0, (previous[0], flipped))
-                remaining_curves.remove(previous[0])
-
-            if not next and not previous:
-                break
-                    
-        if remaining_curves:
-            raise errors.InvalidInputError("Failed to sequence transfer curves into a continuous path.")
-        return ordered
-
     def selected_base_sketch(self) -> adsk.fusion.Sketch | None:
-        selection = cast(list[adsk.fusion.Sketch], self.inputs.base_sketch.value)
-        if selection:
-            return selection[0]
-
-    def create_transfer_body_by_extrude(
-        self,
-        profile: adsk.fusion.Profile,
-        temp_base: adsk.fusion.BaseFeature,
-        to_entity: adsk.core.Base,
-    ) -> adsk.fusion.BRepBody:
-        extrude_input = self.component.features.extrudeFeatures.createInput(profile, adsk.fusion.FeatureOperations.NewBodyFeatureOperation) # type: ignore
-        extrude_input.targetBaseFeature = temp_base
-        extrude_input.setOneSideExtent(
-            adsk.fusion.ToEntityExtentDefinition.create(to_entity, False), 
-            adsk.fusion.ExtentDirections.PositiveExtentDirection  # type: ignore
-        )
-        extrude_feature = self.component.features.extrudeFeatures.add(extrude_input)
-        if extrude_feature.bodies.count < 1:
-            raise errors.InvalidInputError("Failed to create transfer body from profile extrusion.")
-        mgr = adsk.fusion.TemporaryBRepManager.get()
-        return mgr.copy(extrude_feature.bodies[0])
+        if self.inputs.base_sketch.value:
+            return cast(adsk.fusion.Sketch, self.inputs.base_sketch.value[0])
 
     def intersect_transfer_faces(self, sketch: adsk.fusion.Sketch) -> list[adsk.fusion.SketchCurve]:
         selected_faces = cast(list[adsk.fusion.BRepFace], self.inputs.intersect_faces.value)
@@ -274,80 +216,6 @@ class TransferShape(custom_compute_feature.CustomComputeFeature):
     def extract_sketch_curves(self, entities: list[adsk.fusion.SketchEntity]) -> list[adsk.fusion.SketchCurve]:
         return [e for e in entities if isinstance(e, adsk.fusion.SketchCurve)]
 
-    def rebuild_curves_as_spline(
-        self, sketch: adsk.fusion.Sketch, curves: list[adsk.fusion.SketchCurve]
-    ) -> adsk.fusion.SketchCurve | None:
-        if not curves:
-            return None
-        sequenced = self.sequenced_curves(curves)
-        sample_spacing = 0.35
-        fit_point_spacing = 0.3
-
-        sampled_points: list[adsk.core.Point3D] = []
-        for curve, reverse in sequenced:
-            points = self.sample_curve_points(curve, sample_spacing, reverse)
-            for point in points:
-                if sampled_points and sampled_points[-1].distanceTo(point) < fit_point_spacing:
-                    continue
-                sampled_points.append(point)
-
-        if len(sampled_points) < 2:
-            return None
-        
-        if self.inputs.close_loop.value and sampled_points[0].distanceTo(sampled_points[-1]) < self.inputs.heal_tolerance.value:
-            sampled_points.append(sampled_points[0])
-
-        spline: adsk.fusion.SketchCurve | None = None
-        try:
-            # Degree-5 control-point spline provides C2 continuity.
-            if len(sampled_points) >= 6:
-                spline = sketch.sketchCurves.sketchControlPointSplines.add(
-                    cast(list[adsk.core.Base], sampled_points),
-                    adsk.fusion.SplineDegrees.SplineDegreeFive,  # type: ignore
-                )
-                
-            elif len(sampled_points) >= 4:
-                spline = sketch.sketchCurves.sketchControlPointSplines.add(
-                    cast(list[adsk.core.Base], sampled_points),
-                    adsk.fusion.SplineDegrees.SplineDegreeThree, # type: ignore
-                )
-        except:
-            spline = None
-
-        if not spline:
-            fit_points = adsk.core.ObjectCollection.create()
-            for point in sampled_points:
-                fit_points.add(point)
-            spline = sketch.sketchCurves.sketchFittedSplines.add(fit_points)
-
-        return spline
-
-    def sample_curve_points(
-        self, curve: adsk.fusion.SketchCurve, spacing: float, reverse: bool
-    ) -> list[adsk.core.Point3D]:
-        geometry = curve.geometry # type: ignore
-        nurbs = geometry if isinstance(geometry, adsk.core.NurbsCurve3D) else geometry.asNurbsCurve  # type: ignore
-        evaluator = nurbs.evaluator
-        _, start_param, end_param = evaluator.getParameterExtents()
-        _, total_length = evaluator.getLengthAtParameter(start_param, end_param)
-
-        points: list[adsk.core.Point3D] = []
-        _, start_point = evaluator.getPointAtParameter(start_param)
-        points.append(start_point)
-        offset = spacing
-        while offset < total_length:
-            _, param = evaluator.getParameterAtLength(start_param, offset)
-            _, point = evaluator.getPointAtParameter(param)
-            points.append(point)
-            offset += spacing
-
-        _, end_point = evaluator.getPointAtParameter(end_param)
-        points.append(end_point) 
-
-        if reverse:
-            points.reverse()
-        return points
-
     def apply_offset(self, sketch: adsk.fusion.Sketch, curve: adsk.fusion.SketchCurve) -> adsk.fusion.SketchCurve:
         offset = self.inputs.offset.value
         offset_input = sketch.geometricConstraints.createOffsetInput([curve], adsk.core.ValueInput.createByReal(offset))
@@ -356,7 +224,14 @@ class TransferShape(custom_compute_feature.CustomComputeFeature):
         if not constraint:
             raise errors.InvalidInputError("Offset did not produce any curves.")
         offset_curves = constraint.childCurves
-        rebuilt = self.rebuild_curves_as_spline(sketch, offset_curves)
+        rebuilt = utils.sketch.rebuild_curves_as_spline(
+            curves=offset_curves,
+            sketch=sketch,
+            sample_spacing=0.35,
+            min_fit_point_spacing=0.3,
+            tolerance=self.inputs.heal_tolerance.value,
+            close_loop=self.inputs.close_loop.value,
+        )
         if not rebuilt:
             raise errors.InvalidInputError("Failed to resolve offset curves into a continuous spline.")
         for curve in offset_curves:
