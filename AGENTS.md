@@ -26,10 +26,15 @@
 - Naming: `snake_case` for functions/variables, lowercase filenames, add-in folder names match manifest names (e.g., `dog_bones`).
 - Keep add-in entrypoints in `main.py` and use shared helpers from `lib/`.
 
+## Fusion Modeling Rules
+
+- Every sketch created by repository code or during testing must be fully constrained before the operation is considered complete.
+
 ## Testing Guidelines
 
 - No automated test suite is present. Validate changes by loading the add-in in Fusion 360 and running the command interactively.
 - Prefer testing against a simple sample model that exercises each tool path (e.g., a single board with edges).
+- Whenever a test is performed through the Fusion MCP server, capture a screenshot of the resulting model and show it in the task conversation.
 
 ## Commit & Pull Request Guidelines
 
