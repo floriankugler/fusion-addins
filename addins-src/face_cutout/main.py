@@ -66,6 +66,12 @@ class FaceCutoutInputs(inputs.Inputs):
             units=units,
         )
         self.fillet_radius.minimum_value = 0
+        self.tabs = inputs.CheckboxInput(
+            id="tabs",
+            name="Create Tabs",
+            default_value=True,
+            tool_tip="Connect isolated inner loops to the outer perimeter with material tabs.",
+        )
 
         super().__init__()
 
@@ -202,6 +208,7 @@ class FaceCutout(addin.Addin):
 
         final_curves: list[adsk.fusion.SketchCurve] = []
         outer_curves: list[adsk.fusion.SketchCurve] = []
+        inner_loop_curves: list[list[adsk.fusion.SketchCurve]] = []
 
         for loop in face.loops:
             edges = cast(list[adsk.core.Base], utils.fusion.as_list(loop.edges))
@@ -235,14 +242,235 @@ class FaceCutout(addin.Addin):
             final_curves.extend(loop_curves)
             if loop.isOuter:
                 outer_curves.extend(loop_curves)
+            else:
+                inner_loop_curves.append(loop_curves)
             self._set_construction(sketch, loop_curves, True)
 
         self._set_construction(sketch, final_curves, False)
+        if self.inputs.tabs.value:
+            self._create_tabs(sketch, face, outer_curves, inner_loop_curves)
         profile = self._profile_bounded_by(sketch, outer_curves) or self._largest_profile(sketch)
         if not profile:
             raise RuntimeError("The inset curves did not create a usable cutout profile.")
         self._require_fully_constrained(sketch)
         return sketch, profile
+
+    def _create_tabs(
+        self,
+        sketch: adsk.fusion.Sketch,
+        face: adsk.fusion.BRepFace,
+        outer_curves: list[adsk.fusion.SketchCurve],
+        inner_loop_curves: list[list[adsk.fusion.SketchCurve]],
+    ) -> None:
+        if not outer_curves:
+            return
+
+        face_normal = utils.brep.normal_away_from_body(face)
+        overlap = 0.1
+
+        for inner_curves in inner_loop_curves:
+            if self._curve_sets_intersect(inner_curves, outer_curves):
+                continue
+
+            inner_center = self._curve_set_center(sketch, inner_curves)
+            connection = self._closest_point_on_curves(inner_center, outer_curves)
+            if not connection:
+                raise RuntimeError("Could not find a tab connection to the outer loop.")
+            outer_point, distance = connection
+            if distance <= 1e-6:
+                continue
+
+            connection_direction = inner_center.vectorTo(outer_point)
+            if not connection_direction.normalize():
+                continue
+            lateral_direction = face_normal.crossProduct(connection_direction)
+            if not lateral_direction.normalize():
+                raise RuntimeError("Could not determine the tab width direction.")
+
+            (
+                min_width_point,
+                max_width_point,
+                min_width_projection,
+                max_width_projection,
+            ) = self._curve_set_extents(inner_curves, lateral_direction)
+            tab_width = max_width_projection - min_width_projection
+            if tab_width <= 1e-6:
+                raise RuntimeError("Could not determine a valid tab width.")
+
+            first_corner = self._translated_point(
+                min_width_point,
+                connection_direction,
+                -overlap,
+            )
+            second_corner = self._translated_point(
+                max_width_point,
+                connection_direction,
+                -overlap,
+            )
+
+            width_center_projection = (
+                min_width_projection + max_width_projection
+            ) / 2
+            outer_width_projection = outer_point.asVector().dotProduct(
+                lateral_direction
+            )
+            end_center = self._translated_point(
+                outer_point,
+                lateral_direction,
+                width_center_projection - outer_width_projection,
+            )
+            end_center = self._translated_point(
+                end_center,
+                connection_direction,
+                overlap,
+            )
+            fourth_corner = self._translated_point(
+                end_center,
+                lateral_direction,
+                -tab_width / 2,
+            )
+            third_point = self._translated_point(
+                end_center,
+                lateral_direction,
+                tab_width / 2,
+            )
+
+            tab_lines = sketch.sketchCurves.sketchLines
+            first_line = tab_lines.addByTwoPoints(
+                sketch.modelToSketchSpace(first_corner),
+                sketch.modelToSketchSpace(second_corner),
+            )
+            second_line = tab_lines.addByTwoPoints(
+                first_line.endSketchPoint,
+                sketch.modelToSketchSpace(third_point),
+            )
+            third_line = tab_lines.addByTwoPoints(
+                second_line.endSketchPoint,
+                sketch.modelToSketchSpace(fourth_corner),
+            )
+            fourth_line = tab_lines.addByTwoPoints(
+                third_line.endSketchPoint,
+                first_line.startSketchPoint,
+            )
+            for line in (first_line, second_line, third_line, fourth_line):
+                line.isFixed = True
+
+    def _curve_sets_intersect(
+        self,
+        first: list[adsk.fusion.SketchCurve],
+        second: list[adsk.fusion.SketchCurve],
+    ) -> bool:
+        second_collection = adsk.core.ObjectCollection.createWithArray(
+            cast(list[adsk.core.Base], second)
+        )
+        for curve in first:
+            success, _, intersection_points = curve.intersections(second_collection)
+            if success and intersection_points.count > 0:
+                return True
+        return False
+
+    def _curve_set_center(
+        self,
+        sketch: adsk.fusion.Sketch,
+        curves: list[adsk.fusion.SketchCurve],
+    ) -> adsk.core.Point3D:
+        if not curves:
+            raise RuntimeError("Could not determine the center of an inner loop.")
+        boxes = [curve.boundingBox for curve in curves]
+        min_x = min(box.minPoint.x for box in boxes)
+        max_x = max(box.maxPoint.x for box in boxes)
+        min_y = min(box.minPoint.y for box in boxes)
+        max_y = max(box.maxPoint.y for box in boxes)
+        center = adsk.core.Point3D.create(
+            (min_x + max_x) / 2,
+            (min_y + max_y) / 2,
+            0,
+        )
+        return sketch.sketchToModelSpace(center)
+
+    def _curve_set_extents(
+        self,
+        curves: list[adsk.fusion.SketchCurve],
+        direction: adsk.core.Vector3D,
+    ) -> tuple[adsk.core.Point3D, adsk.core.Point3D, float, float]:
+        normalized_direction = direction.copy()
+        if not normalized_direction.normalize():
+            raise RuntimeError("Could not normalize the tab width direction.")
+
+        projected_points: list[tuple[float, adsk.core.Point3D]] = []
+        for curve in curves:
+            evaluator = curve.worldGeometry.evaluator  # type: ignore
+            success, start_parameter, end_parameter = evaluator.getParameterExtents()
+            if not success:
+                continue
+            success, points = evaluator.getStrokes(
+                start_parameter,
+                end_parameter,
+                1e-5,
+            )
+            if not success:
+                continue
+            projected_points.extend(
+                (
+                    point.asVector().dotProduct(normalized_direction),
+                    point,
+                )
+                for point in points
+            )
+
+        if not projected_points:
+            raise RuntimeError("Could not measure the offset inner loop.")
+        min_projection, min_point = min(projected_points, key=lambda item: item[0])
+        max_projection, max_point = max(projected_points, key=lambda item: item[0])
+        return min_point, max_point, min_projection, max_projection
+
+    def _closest_point_on_curves(
+        self,
+        point: adsk.core.Point3D,
+        curves: list[adsk.fusion.SketchCurve],
+    ) -> tuple[adsk.core.Point3D, float] | None:
+        closest: tuple[adsk.core.Point3D, float] | None = None
+        for curve in curves:
+            projected = self._project_point_to_curve(
+                point,
+                curve.worldGeometry.evaluator,  # type: ignore
+            )
+            if not projected:
+                continue
+            distance = point.distanceTo(projected)
+            if closest is None or distance < closest[1]:
+                closest = (projected, distance)
+        return closest
+
+    def _project_point_to_curve(
+        self,
+        point: adsk.core.Point3D,
+        evaluator,
+    ) -> adsk.core.Point3D | None:
+        success, parameter = evaluator.getParameterAtPoint(point)
+        if not success:
+            return None
+        success, start_parameter, end_parameter = evaluator.getParameterExtents()
+        if not success:
+            return None
+        parameter = max(
+            min(start_parameter, end_parameter),
+            min(max(start_parameter, end_parameter), parameter),
+        )
+        success, projected = evaluator.getPointAtParameter(parameter)
+        return projected if success else None
+
+    def _translated_point(
+        self,
+        point: adsk.core.Point3D,
+        direction: adsk.core.Vector3D,
+        distance: float,
+    ) -> adsk.core.Point3D:
+        result = point.copy()
+        translation = direction.copy()
+        translation.scaleBy(distance)
+        result.translateBy(translation)
+        return result
 
     def _offset_loop(
         self,
