@@ -1,3 +1,4 @@
+import math
 from typing import cast
 
 import adsk.core
@@ -23,6 +24,9 @@ def stop(context):
 
 
 class FaceCutoutInputs(inputs.Inputs):
+    FULL_CUTOUT = inputs.DropDownInput.Item("Full Cutout", 0)
+    TRIANGLES = inputs.DropDownInput.Item("Triangles", 1)
+
     def __init__(self, units_manager: adsk.core.UnitsManager):
         units = units_manager.defaultLengthUnits
 
@@ -72,12 +76,50 @@ class FaceCutoutInputs(inputs.Inputs):
             default_value=True,
             tool_tip="Connect isolated inner loops to the outer perimeter with material tabs.",
         )
+        self.pattern_type = inputs.DropDownInput(
+            id="pattern_type",
+            name="Pattern",
+            options=[self.FULL_CUTOUT, self.TRIANGLES],
+            default_value=self.FULL_CUTOUT.value,
+            tool_tip="Create one full cutout or restrict it to a triangle pattern.",
+        )
+        triangle_input_visible = lambda: (
+            self.pattern_type.value == self.TRIANGLES.value
+        )
+        self.triangle_columns = inputs.IntegerInput(
+            id="triangle_columns",
+            name="Columns",
+            default_value=8,
+            minimum=1,
+            maximum=100,
+            tool_tip="Number of triangles along the longest pattern direction.",
+            update_visibility=triangle_input_visible,
+        )
+        self.triangle_rows = inputs.IntegerInput(
+            id="triangle_rows",
+            name="Rows",
+            default_value=6,
+            minimum=1,
+            maximum=100,
+            tool_tip="Number of triangle rows.",
+            update_visibility=triangle_input_visible,
+        )
+        self.triangle_spacing = inputs.FloatInput(
+            id="triangle_spacing",
+            name="Triangle Spacing",
+            default_value=2,
+            tool_tip="True edge-to-edge clearance between adjacent triangles.",
+            units=units,
+            update_visibility=triangle_input_visible,
+        )
+        self.triangle_spacing.minimum_value = 0
 
         super().__init__()
 
 
 class FaceCutout(addin.Addin):
     inputs: FaceCutoutInputs
+    _parameter_prefix: str
 
     @property
     def plugin_name(self) -> str:
@@ -137,10 +179,17 @@ class FaceCutout(addin.Addin):
         selected_face = cast(adsk.fusion.BRepFace, self.inputs.face.value[0])
         face = selected_face.nativeObject or selected_face
         component = face.body.parentComponent
+        self._parameter_prefix = self._unique_parameter_prefix(
+            component.parentDesign
+        )
         opposite_face = utils.brep.get_opposite_face(face)
         cut_direction = utils.brep.normal_towards_face(face, opposite_face)
+        existing_body_tokens = {
+            body.entityToken
+            for body in component.bRepBodies
+        }
 
-        sketch, profile = self._create_cutout_sketch(component, face)
+        sketch, profile, outer_curves = self._create_cutout_sketch(component, face)
         extrude = self._create_tool_extrude(
             component,
             sketch,
@@ -149,13 +198,98 @@ class FaceCutout(addin.Addin):
             cut_direction,
         )
 
-        tool_body = extrude.bodies.item(0)
-        fillet = self._create_tool_fillet(component, tool_body, cut_direction)
-        if fillet:
-            tool_body = fillet.bodies.item(0)
+        tool_bodies = cast(
+            list[adsk.fusion.BRepBody],
+            utils.fusion.as_list(extrude.bodies),
+        )
+        if self.inputs.pattern_type.value == FaceCutoutInputs.TRIANGLES.value:
+            (
+                pattern_sketch,
+                u_direction,
+                v_direction,
+                pitch_u_expression,
+                pitch_v_expression,
+            ) = self._create_triangle_pattern_sketch(
+                component,
+                face,
+                outer_curves,
+            )
+            pattern_extrude = self._create_pattern_extrude(
+                component,
+                pattern_sketch,
+                opposite_face,
+                cut_direction,
+            )
+            self._create_solid_triangle_pattern(
+                component,
+                cast(
+                    list[adsk.fusion.BRepBody],
+                    utils.fusion.as_list(pattern_extrude.bodies),
+                ),
+                u_direction,
+                v_direction,
+                pitch_u_expression,
+                pitch_v_expression,
+            )
+            pattern_bodies = [
+                body
+                for body in component.bRepBodies
+                if body.entityToken not in existing_body_tokens
+                and body != tool_bodies[0]
+            ]
+            if not pattern_bodies:
+                raise RuntimeError(
+                    "The solid triangle pattern did not create any tool bodies."
+                )
+            intersection = self._create_intersect_combine(
+                component,
+                tool_bodies[0],
+                pattern_bodies,
+            )
+            tool_bodies = cast(
+                list[adsk.fusion.BRepBody],
+                utils.fusion.as_list(intersection.bodies),
+            )
 
-        combine = self._create_cut_combine(component, face.body, tool_body)
+        tool_bodies = self._create_tool_fillets(
+            component,
+            tool_bodies,
+            cut_direction,
+        )
+
+        combine = self._create_cut_combine(component, face.body, tool_bodies)
         self._group_features(component, sketch, combine)
+
+    def _unique_parameter_prefix(
+        self,
+        design: adsk.fusion.Design,
+    ) -> str:
+        parameter_names = {
+            parameter.name
+            for parameter in design.allParameters
+        }
+        base = "faceCutout"
+        index = 1
+        while True:
+            candidate = base if index == 1 else f"{base}{index}"
+            if not any(
+                name.startswith(f"{candidate}_")
+                for name in parameter_names
+            ):
+                return candidate
+            index += 1
+
+    def _name_parameter(
+        self,
+        parameter: adsk.fusion.ModelParameter,
+        role: str,
+    ) -> None:
+        name = f"{self._parameter_prefix}_{role}"
+        parameter.name = name
+        if parameter.name != name:
+            raise RuntimeError(
+                f"Fusion did not accept the parameter name '{name}'."
+            )
 
     def _validation_error(self) -> str | None:
         design = adsk.fusion.Design.cast(self.app.activeProduct)
@@ -181,6 +315,7 @@ class FaceCutout(addin.Addin):
             (self.inputs.inner_feature_inset.value, "Inner Feature Inset"),
             (self.inputs.remaining_material.value, "Remaining Material"),
             (self.inputs.fillet_radius.value, "Fillet Radius"),
+            (self.inputs.triangle_spacing.value, "Triangle Spacing"),
         ]:
             if input_value < 0:
                 return f"{name} cannot be negative."
@@ -191,13 +326,22 @@ class FaceCutout(addin.Addin):
             return f"Could not find a parallel opposite face: {exc}"
         if self.inputs.remaining_material.value >= thickness - 1e-6:
             return "Remaining Material must be smaller than the body thickness."
+        if (
+            self.inputs.pattern_type.value == FaceCutoutInputs.TRIANGLES.value
+            and self.inputs.triangle_spacing.value <= 1e-6
+        ):
+            return "Triangle Spacing must be greater than zero."
         return None
 
     def _create_cutout_sketch(
         self,
         component: adsk.fusion.Component,
         face: adsk.fusion.BRepFace,
-    ) -> tuple[adsk.fusion.Sketch, adsk.fusion.Profile]:
+    ) -> tuple[
+        adsk.fusion.Sketch,
+        adsk.fusion.Profile,
+        list[adsk.fusion.SketchCurve],
+    ]:
         # Sketches.add projects every edge of a BRep face automatically. That
         # would mix all face loops into each per-loop area probe below and can
         # make a valid inner offset look like it has the wrong direction.
@@ -209,6 +353,7 @@ class FaceCutout(addin.Addin):
         final_curves: list[adsk.fusion.SketchCurve] = []
         outer_curves: list[adsk.fusion.SketchCurve] = []
         inner_loop_curves: list[list[adsk.fusion.SketchCurve]] = []
+        inner_loop_index = 0
 
         for loop in face.loops:
             edges = cast(list[adsk.core.Base], utils.fusion.as_list(loop.edges))
@@ -226,7 +371,13 @@ class FaceCutout(addin.Addin):
             original_area = original_profile.areaProperties().area
 
             self._set_construction(sketch, projected, True)
-            input_value = self.inputs.outer_inset if loop.isOuter else self.inputs.inner_feature_inset
+            if loop.isOuter:
+                input_value = self.inputs.outer_inset
+                parameter_role = "outerInset"
+            else:
+                inner_loop_index += 1
+                input_value = self.inputs.inner_feature_inset
+                parameter_role = f"innerInset{inner_loop_index}"
             if input_value.value <= 1e-9:
                 loop_curves = projected
             else:
@@ -237,6 +388,7 @@ class FaceCutout(addin.Addin):
                     expression=input_value.expression,
                     original_area=original_area,
                     should_be_smaller=loop.isOuter,
+                    parameter_role=parameter_role,
                 )
 
             final_curves.extend(loop_curves)
@@ -253,7 +405,7 @@ class FaceCutout(addin.Addin):
         if not profile:
             raise RuntimeError("The inset curves did not create a usable cutout profile.")
         self._require_fully_constrained(sketch)
-        return sketch, profile
+        return sketch, profile, outer_curves
 
     def _create_tabs(
         self,
@@ -480,6 +632,7 @@ class FaceCutout(addin.Addin):
         expression: str,
         original_area: float,
         should_be_smaller: bool,
+        parameter_role: str,
     ) -> list[adsk.fusion.SketchCurve]:
         direction_sign: int | None = None
 
@@ -513,6 +666,12 @@ class FaceCutout(addin.Addin):
         )
         if not constraint:
             raise RuntimeError("Fusion failed to create the final parametric loop offset.")
+        dimension = constraint.dimension
+        if not dimension or not dimension.parameter:
+            raise RuntimeError(
+                "Fusion did not create a parameter for the loop offset."
+            )
+        self._name_parameter(dimension.parameter, parameter_role)
         return cast(list[adsk.fusion.SketchCurve], list(constraint.childCurves))
 
     def _add_offset_constraint(
@@ -540,6 +699,709 @@ class FaceCutout(addin.Addin):
                 curve.deleteMe()
         if constraint.isValid and constraint.isDeletable:
             constraint.deleteMe()
+
+    def _create_triangle_pattern_sketch(
+        self,
+        component: adsk.fusion.Component,
+        face: adsk.fusion.BRepFace,
+        outer_curves: list[adsk.fusion.SketchCurve],
+    ) -> tuple[
+        adsk.fusion.Sketch,
+        adsk.fusion.SketchLine,
+        adsk.fusion.SketchLine,
+        str,
+        str,
+    ]:
+        sketch = component.sketches.addWithoutEdges(face)
+        if not sketch:
+            raise RuntimeError("Fusion failed to create the triangle pattern sketch.")
+        sketch.name = "Face Cutout - Triangle Seeds"
+
+        (
+            origin,
+            u_direction,
+            v_direction,
+            extent_u,
+            extent_v,
+            extent_u_parameter,
+            extent_v_parameter,
+            u_vector,
+            v_vector,
+        ) = self._create_rectangular_pattern_boundary(
+            sketch,
+            outer_curves,
+        )
+
+        columns = self.inputs.triangle_columns.value
+        rows = self.inputs.triangle_rows.value
+        spacing = self.inputs.triangle_spacing.value
+        triangle_width, triangle_height = self._triangle_dimensions(
+            extent_u,
+            extent_v,
+            columns,
+            rows,
+            spacing,
+        )
+
+        sketch.isComputeDeferred = True
+        spacing_dimension = self._create_seed_spacing_dimension(
+            sketch,
+            origin,
+            u_direction,
+            u_vector,
+            spacing,
+        )
+        spacing_parameter = spacing_dimension.parameter
+        if not spacing_parameter:
+            raise RuntimeError("Fusion did not create the triangle spacing parameter.")
+
+        height_expression = (
+            f"(({extent_v_parameter.name}) - "
+            f"{rows - 1} * ({spacing_parameter.name})) / {rows}"
+        )
+        width_expression = self._triangle_width_expression(
+            extent_u_parameter.name,
+            height_expression,
+            spacing_parameter.name,
+            columns,
+        )
+
+        seeds: list[
+            tuple[adsk.fusion.SketchLine, adsk.fusion.SketchLine]
+        ] = []
+        width_parameter: adsk.fusion.ModelParameter | None = None
+        height_parameter: adsk.fusion.ModelParameter | None = None
+        pitch_u_expression = ""
+        pitch_v_expression = ""
+        pitch_u = (
+            triangle_width / 2
+            + spacing
+            * math.sqrt(
+                triangle_height * triangle_height
+                + (triangle_width / 2) * (triangle_width / 2)
+            )
+            / triangle_height
+        )
+        pitch_v = triangle_height + spacing
+
+        for row in range(2):
+            for column in range(2):
+                points_up = (row + column) % 2 == 0
+                seed_index = row * 2 + column + 1
+                base_u = column * pitch_u - triangle_width / 2
+                base_v = row * pitch_v + (
+                    0 if points_up else triangle_height
+                )
+                if column == 0:
+                    u_position_expression = (
+                        f"({width_parameter.name}) / 2"
+                        if width_parameter
+                        else f"({width_expression}) / 2"
+                    )
+                else:
+                    u_position_expression = (
+                        f"({pitch_u_expression}) - "
+                        f"({width_parameter.name}) / 2"
+                    )
+                v_position_expression = (
+                    (
+                        f"{row} * ({pitch_v_expression})"
+                        if points_up
+                        else (
+                            f"{row} * ({pitch_v_expression}) + "
+                            f"({height_parameter.name})"
+                        )
+                    )
+                    if height_parameter
+                    else "0 cm"
+                )
+
+                base, altitude, width_dimension, height_dimension = (
+                    self._add_seed_triangle(
+                        sketch,
+                        origin,
+                        u_direction,
+                        v_direction,
+                        u_vector,
+                        v_vector,
+                        base_u,
+                        base_v,
+                        base_u,
+                        base_v,
+                        u_position_expression,
+                        v_position_expression,
+                        triangle_width,
+                        triangle_height,
+                        points_up,
+                        width_expression,
+                        height_expression,
+                        seed_index,
+                        seeds[0] if seeds else None,
+                    )
+                )
+                seeds.append((base, altitude))
+                if not width_parameter:
+                    width_parameter = (
+                        width_dimension.parameter
+                        if width_dimension
+                        else None
+                    )
+                    height_parameter = (
+                        height_dimension.parameter
+                        if height_dimension
+                        else None
+                    )
+                    if not width_parameter or not height_parameter:
+                        raise RuntimeError(
+                            "Fusion did not create the triangle seed parameters."
+                        )
+                    pitch_u_expression = (
+                        f"(({width_parameter.name}) / 2 + "
+                        f"({spacing_parameter.name}) * "
+                        f"sqrt(({height_parameter.name}) * "
+                        f"({height_parameter.name}) + "
+                        f"(({width_parameter.name}) / 2) * "
+                        f"(({width_parameter.name}) / 2)) / "
+                        f"({height_parameter.name}))"
+                    )
+                    pitch_v_expression = (
+                        f"(({height_parameter.name}) + "
+                        f"({spacing_parameter.name}))"
+                    )
+
+        sketch.isComputeDeferred = False
+        self._require_fully_constrained(sketch)
+        if sketch.profiles.count != 4:
+            raise RuntimeError(
+                "The triangle seed sketch did not create four profiles "
+                f"({sketch.profiles.count} found)."
+            )
+        return (
+            sketch,
+            u_direction,
+            v_direction,
+            pitch_u_expression,
+            pitch_v_expression,
+        )
+
+    def _create_rectangular_pattern_boundary(
+        self,
+        sketch: adsk.fusion.Sketch,
+        outer_curves: list[adsk.fusion.SketchCurve],
+    ) -> tuple[
+        adsk.fusion.SketchPoint,
+        adsk.fusion.SketchLine,
+        adsk.fusion.SketchLine,
+        float,
+        float,
+        adsk.fusion.ModelParameter,
+        adsk.fusion.ModelParameter,
+        adsk.core.Vector3D,
+        adsk.core.Vector3D,
+    ]:
+        boundary = [
+            line
+            for entity in sketch.project2(
+                cast(list[adsk.core.Base], outer_curves),
+                True,
+            )
+            if (line := adsk.fusion.SketchLine.cast(entity))
+        ]
+        if len(boundary) != 4:
+            raise ValueError(
+                "Triangle patterns currently require a rectangular selected "
+                "face whose offset outer loop contains exactly four lines."
+            )
+        self._set_construction(
+            sketch,
+            cast(list[adsk.fusion.SketchCurve], boundary),
+            True,
+        )
+
+        u_source = max(boundary, key=lambda line: line.length)
+        origin = u_source.startSketchPoint
+        connected = [
+            line
+            for line in boundary
+            if line != u_source
+            and (
+                line.startSketchPoint.geometry.distanceTo(origin.geometry) <= 1e-5
+                or line.endSketchPoint.geometry.distanceTo(origin.geometry) <= 1e-5
+            )
+        ]
+        if len(connected) != 1:
+            raise ValueError(
+                "The offset outer loop is not a single closed rectangle."
+            )
+        v_source = connected[0]
+        u_end = u_source.endSketchPoint
+        v_end = (
+            v_source.endSketchPoint
+            if v_source.startSketchPoint.geometry.distanceTo(origin.geometry)
+            <= 1e-5
+            else v_source.startSketchPoint
+        )
+        u_vector = origin.geometry.vectorTo(u_end.geometry)
+        v_vector = origin.geometry.vectorTo(v_end.geometry)
+        extent_u = u_vector.length
+        extent_v = v_vector.length
+        if (
+            extent_u <= 1e-6
+            or extent_v <= 1e-6
+            or not u_vector.normalize()
+            or not v_vector.normalize()
+            or abs(u_vector.dotProduct(v_vector)) > 1e-5
+        ):
+            raise ValueError(
+                "The offset outer loop must contain four perpendicular lines."
+            )
+
+        directions = [
+            self._normalized_line_vector(line)
+            for line in boundary
+        ]
+        u_parallel = sum(
+            1
+            for direction in directions
+            if abs(abs(direction.dotProduct(u_vector)) - 1) <= 1e-5
+        )
+        v_parallel = sum(
+            1
+            for direction in directions
+            if abs(abs(direction.dotProduct(v_vector)) - 1) <= 1e-5
+        )
+        if u_parallel != 2 or v_parallel != 2:
+            raise ValueError(
+                "The offset outer loop must contain two pairs of parallel lines."
+            )
+
+        lines = sketch.sketchCurves.sketchLines
+        u_direction = lines.addByTwoPoints(
+            origin.geometry,
+            u_end.geometry,
+        )
+        v_direction = lines.addByTwoPoints(
+            origin.geometry,
+            v_end.geometry,
+        )
+        for direction, end in (
+            (u_direction, u_end),
+            (v_direction, v_end),
+        ):
+            direction.isConstruction = True
+            sketch.geometricConstraints.addCoincident(
+                direction.startSketchPoint,
+                origin,
+            )
+            sketch.geometricConstraints.addCoincident(
+                direction.endSketchPoint,
+                end,
+            )
+
+        u_dimension = self._dimension_line_length(
+            sketch,
+            u_direction,
+            "",
+            is_driving=False,
+            parameter_role="patternLength",
+        )
+        v_dimension = self._dimension_line_length(
+            sketch,
+            v_direction,
+            "",
+            is_driving=False,
+            parameter_role="patternWidth",
+        )
+        if not u_dimension.parameter or not v_dimension.parameter:
+            raise RuntimeError(
+                "Fusion failed to measure the rectangular pattern boundary."
+            )
+        return (
+            origin,
+            u_direction,
+            v_direction,
+            extent_u,
+            extent_v,
+            u_dimension.parameter,
+            v_dimension.parameter,
+            u_vector,
+            v_vector,
+        )
+
+    def _normalized_line_vector(
+        self,
+        line: adsk.fusion.SketchLine,
+    ) -> adsk.core.Vector3D:
+        vector = line.startSketchPoint.geometry.vectorTo(
+            line.endSketchPoint.geometry
+        )
+        if not vector.normalize():
+            raise ValueError("The rectangular boundary contains a zero-length line.")
+        return vector
+
+    def _create_seed_spacing_dimension(
+        self,
+        sketch: adsk.fusion.Sketch,
+        origin: adsk.fusion.SketchPoint,
+        u_direction: adsk.fusion.SketchLine,
+        u_vector: adsk.core.Vector3D,
+        spacing: float,
+    ) -> adsk.fusion.SketchLinearDimension:
+        end = origin.geometry.copy()
+        offset = u_vector.copy()
+        offset.scaleBy(-spacing)
+        end.translateBy(offset)
+        line = sketch.sketchCurves.sketchLines.addByTwoPoints(
+            origin.geometry,
+            end,
+        )
+        line.isConstruction = True
+        constraints = sketch.geometricConstraints
+        constraints.addCoincident(line.startSketchPoint, origin)
+        constraints.addParallel(line, u_direction)
+        return self._dimension_line_length(
+            sketch,
+            line,
+            self.inputs.triangle_spacing.expression,
+            parameter_role="triangleSpacing",
+        )
+
+    def _add_seed_triangle(
+        self,
+        sketch: adsk.fusion.Sketch,
+        origin: adsk.fusion.SketchPoint,
+        u_direction: adsk.fusion.SketchLine,
+        v_direction: adsk.fusion.SketchLine,
+        u_vector: adsk.core.Vector3D,
+        v_vector: adsk.core.Vector3D,
+        base_u: float,
+        base_v: float,
+        u_position: float,
+        v_position: float,
+        u_position_expression: str,
+        v_position_expression: str,
+        width: float,
+        height: float,
+        points_up: bool,
+        width_expression: str,
+        height_expression: str,
+        seed_index: int,
+        size_seed: tuple[
+            adsk.fusion.SketchLine,
+            adsk.fusion.SketchLine,
+        ]
+        | None,
+    ) -> tuple[
+        adsk.fusion.SketchLine,
+        adsk.fusion.SketchLine,
+        adsk.fusion.SketchLinearDimension | None,
+        adsk.fusion.SketchLinearDimension | None,
+    ]:
+        base_start_geometry = self._seed_point(
+            origin.geometry,
+            u_vector,
+            v_vector,
+            base_u,
+            base_v,
+        )
+        base_end_geometry = self._seed_point(
+            origin.geometry,
+            u_vector,
+            v_vector,
+            base_u + width,
+            base_v,
+        )
+        apex_geometry = self._seed_point(
+            origin.geometry,
+            u_vector,
+            v_vector,
+            base_u + width / 2,
+            base_v + (height if points_up else -height),
+        )
+        lines = sketch.sketchCurves.sketchLines
+        base = lines.addByTwoPoints(
+            base_start_geometry,
+            base_end_geometry,
+        )
+        constraints = sketch.geometricConstraints
+        constraints.addParallel(base, u_direction)
+        self._constrain_seed_position(
+            sketch,
+            origin,
+            base.startSketchPoint,
+            u_direction,
+            v_direction,
+            u_vector,
+            v_vector,
+            u_position,
+            v_position,
+            u_position_expression,
+            v_position_expression,
+            seed_index,
+        )
+
+        midpoint = sketch.sketchPoints.add(
+            self._seed_point(
+                origin.geometry,
+                u_vector,
+                v_vector,
+                base_u + width / 2,
+                base_v,
+            )
+        )
+        constraints.addMidPoint(midpoint, base)
+        apex = sketch.sketchPoints.add(apex_geometry)
+        altitude = lines.addByTwoPoints(midpoint, apex)
+        altitude.isConstruction = True
+        constraints.addParallel(altitude, v_direction)
+        lines.addByTwoPoints(base.endSketchPoint, apex)
+        lines.addByTwoPoints(apex, base.startSketchPoint)
+
+        width_dimension = None
+        height_dimension = None
+        if size_seed:
+            constraints.addEqual(size_seed[0], base)
+            constraints.addEqual(size_seed[1], altitude)
+        else:
+            width_dimension = self._dimension_line_length(
+                sketch,
+                base,
+                width_expression,
+                parameter_role="triangleWidth",
+            )
+            height_dimension = self._dimension_line_length(
+                sketch,
+                altitude,
+                height_expression,
+                parameter_role="triangleHeight",
+            )
+        return base, altitude, width_dimension, height_dimension
+
+    def _constrain_seed_position(
+        self,
+        sketch: adsk.fusion.Sketch,
+        origin: adsk.fusion.SketchPoint,
+        point: adsk.fusion.SketchPoint,
+        u_direction: adsk.fusion.SketchLine,
+        v_direction: adsk.fusion.SketchLine,
+        u_vector: adsk.core.Vector3D,
+        v_vector: adsk.core.Vector3D,
+        u_value: float,
+        v_value: float,
+        u_expression: str,
+        v_expression: str,
+        seed_index: int,
+    ) -> None:
+        constraints = sketch.geometricConstraints
+        anchor = origin
+        if abs(u_value) > 1e-9:
+            u_line = sketch.sketchCurves.sketchLines.addByTwoPoints(
+                origin.geometry,
+                self._seed_point(
+                    origin.geometry,
+                    u_vector,
+                    v_vector,
+                    u_value,
+                    0,
+                ),
+            )
+            u_line.isConstruction = True
+            constraints.addCoincident(u_line.startSketchPoint, origin)
+            constraints.addParallel(u_line, u_direction)
+            self._dimension_line_length(
+                sketch,
+                u_line,
+                u_expression,
+                parameter_role=f"triangleSeed{seed_index}UOffset",
+            )
+            anchor = u_line.endSketchPoint
+        if v_value > 1e-9:
+            v_line = sketch.sketchCurves.sketchLines.addByTwoPoints(
+                anchor.geometry,
+                point.geometry,
+            )
+            v_line.isConstruction = True
+            constraints.addCoincident(v_line.startSketchPoint, anchor)
+            constraints.addCoincident(v_line.endSketchPoint, point)
+            constraints.addParallel(v_line, v_direction)
+            self._dimension_line_length(
+                sketch,
+                v_line,
+                v_expression,
+                parameter_role=f"triangleSeed{seed_index}VOffset",
+            )
+        else:
+            constraints.addCoincident(point, anchor)
+
+    def _seed_point(
+        self,
+        origin: adsk.core.Point3D,
+        u_vector: adsk.core.Vector3D,
+        v_vector: adsk.core.Vector3D,
+        u: float,
+        v: float,
+    ) -> adsk.core.Point3D:
+        point = origin.copy()
+        u_offset = u_vector.copy()
+        u_offset.scaleBy(u)
+        point.translateBy(u_offset)
+        v_offset = v_vector.copy()
+        v_offset.scaleBy(v)
+        point.translateBy(v_offset)
+        return point
+
+    def _dimension_line_length(
+        self,
+        sketch: adsk.fusion.Sketch,
+        line: adsk.fusion.SketchLine,
+        expression: str,
+        is_driving: bool = True,
+        parameter_role: str | None = None,
+    ) -> adsk.fusion.SketchLinearDimension:
+        start = line.startSketchPoint.geometry
+        end = line.endSketchPoint.geometry
+        text_point = adsk.core.Point3D.create(
+            (start.x + end.x) / 2 + 0.2,
+            (start.y + end.y) / 2 + 0.2,
+            0,
+        )
+        dimension = sketch.sketchDimensions.addDistanceDimension(
+            line.startSketchPoint,
+            line.endSketchPoint,
+            adsk.fusion.DimensionOrientations.AlignedDimensionOrientation,
+            text_point,
+            is_driving,
+        )
+        if not dimension or not dimension.parameter:
+            raise RuntimeError(
+                "Fusion failed to create a triangle seed dimension."
+            )
+        if is_driving:
+            dimension.parameter.expression = expression
+        if parameter_role:
+            self._name_parameter(dimension.parameter, parameter_role)
+        return dimension
+
+    def _create_solid_triangle_pattern(
+        self,
+        component: adsk.fusion.Component,
+        seed_bodies: list[adsk.fusion.BRepBody],
+        u_direction: adsk.fusion.SketchLine,
+        v_direction: adsk.fusion.SketchLine,
+        pitch_u_expression: str,
+        pitch_v_expression: str,
+    ) -> adsk.fusion.RectangularPatternFeature | None:
+        quantity_u = max(
+            1,
+            math.ceil((self.inputs.triangle_columns.value + 1) / 2),
+        )
+        quantity_v = max(
+            1,
+            math.ceil(self.inputs.triangle_rows.value / 2),
+        )
+        if quantity_u == 1 and quantity_v == 1:
+            return None
+        entities = adsk.core.ObjectCollection.createWithArray(
+            cast(list[adsk.core.Base], seed_bodies)
+        )
+        pattern_input = (
+            component.features.rectangularPatternFeatures.createInput(
+                entities,
+                u_direction,
+                adsk.core.ValueInput.createByReal(quantity_u),
+                adsk.core.ValueInput.createByString(
+                    f"2 * ({pitch_u_expression})"
+                ),
+                adsk.fusion.PatternDistanceType.SpacingPatternDistanceType,
+            )
+        )
+        if not pattern_input:
+            raise RuntimeError(
+                "Fusion failed to initialize the solid triangle pattern."
+            )
+        if not pattern_input.setDirectionTwo(
+            v_direction,
+            adsk.core.ValueInput.createByReal(quantity_v),
+            adsk.core.ValueInput.createByString(
+                f"2 * ({pitch_v_expression})"
+            ),
+        ):
+            raise RuntimeError(
+                "Fusion rejected the solid triangle pattern row definition."
+            )
+        pattern = component.features.rectangularPatternFeatures.add(
+            pattern_input
+        )
+        if not pattern:
+            raise RuntimeError(
+                "Fusion failed to create the solid triangle pattern."
+            )
+        pattern.name = "Face Cutout - Solid Triangle Pattern"
+        return pattern
+
+    def _triangle_dimensions(
+        self,
+        extent_u: float,
+        extent_v: float,
+        columns: int,
+        rows: int,
+        spacing: float,
+    ) -> tuple[float, float]:
+        height = (extent_v - (rows - 1) * spacing) / rows
+        if height <= 1e-6:
+            raise ValueError(
+                "Triangle spacing and row count leave no room for triangle height."
+            )
+        # The first triangle is centered on the start boundary and the final
+        # triangle is centered on the opposite boundary. The requested column
+        # count therefore describes the number of center-to-center pitches
+        # across the rectangle:
+        #
+        #   extent_u = columns * (width / 2 + projected_edge_spacing)
+        #
+        # Solving that equation for width keeps both clipped end triangles
+        # exactly one half wide.
+        a = columns / 2
+        b = columns * spacing
+        coefficient = a * a - b * b / (4 * height * height)
+        if abs(coefficient) <= 1e-9:
+            raise ValueError("Triangle spacing is too large for the requested columns.")
+        discriminant = (
+            a * a * extent_u * extent_u
+            - coefficient * (extent_u * extent_u - b * b)
+        )
+        if discriminant < -1e-8:
+            raise ValueError("Triangle spacing is too large for the pattern boundary.")
+        width = (
+            a * extent_u - math.sqrt(max(0, discriminant))
+        ) / coefficient
+        if width <= 1e-6 or extent_u - a * width < -1e-6:
+            raise ValueError("The requested triangle pattern does not fit the boundary.")
+        return width, height
+
+    def _triangle_width_expression(
+        self,
+        extent_parameter: str,
+        height_expression: str,
+        spacing_parameter: str,
+        columns: int,
+    ) -> str:
+        a = columns / 2
+        b = f"({columns} * ({spacing_parameter}))"
+        height = f"({height_expression})"
+        coefficient = (
+            f"(({a}) * ({a}) - ({b}) * ({b}) / "
+            f"(4 * ({height}) * ({height})))"
+        )
+        discriminant = (
+            f"(({a}) * ({a}) * ({extent_parameter}) * ({extent_parameter}) - "
+            f"({coefficient}) * "
+            f"(({extent_parameter}) * ({extent_parameter}) - ({b}) * ({b})))"
+        )
+        return (
+            f"(({a}) * ({extent_parameter}) - sqrt({discriminant})) / "
+            f"({coefficient})"
+        )
 
     def _create_tool_extrude(
         self,
@@ -584,22 +1446,164 @@ class FaceCutout(addin.Addin):
         extrude.name = "Face Cutout - Tool"
         return extrude
 
-    def _create_tool_fillet(
+    def _create_pattern_extrude(
         self,
         component: adsk.fusion.Component,
-        tool_body: adsk.fusion.BRepBody,
+        sketch: adsk.fusion.Sketch,
+        opposite_face: adsk.fusion.BRepFace,
         cut_direction: adsk.core.Vector3D,
-    ) -> adsk.fusion.FilletFeature | None:
-        if self.inputs.fillet_radius.value <= 1e-9:
-            return None
+    ) -> adsk.fusion.ExtrudeFeature:
+        profiles = adsk.core.ObjectCollection.create()
+        for profile in sketch.profiles:
+            profiles.add(profile)
+        if profiles.count == 0:
+            raise RuntimeError("The triangle sketch does not contain any profiles.")
 
+        extrude_input = component.features.extrudeFeatures.createInput(
+            profiles,
+            adsk.fusion.FeatureOperations.NewBodyFeatureOperation,  # type: ignore
+        )
+        if not extrude_input:
+            raise RuntimeError("Fusion failed to initialize the triangle extrude.")
+
+        signed_remainder = f"-({self.inputs.remaining_material.expression})"
+        extent = adsk.fusion.ToEntityExtentDefinition.create(
+            opposite_face,
+            False,
+            adsk.core.ValueInput.createByString(signed_remainder),
+        )
+        if not extent:
+            raise RuntimeError("Fusion failed to define the triangle extrude extent.")
+        extent.directionHint = cut_direction
+
+        sketch_normal = sketch.xDirection.crossProduct(sketch.yDirection)
+        direction = (
+            adsk.fusion.ExtentDirections.PositiveExtentDirection
+            if sketch_normal.dotProduct(cut_direction) >= 0
+            else adsk.fusion.ExtentDirections.NegativeExtentDirection
+        )
+        if not extrude_input.setOneSideExtent(extent, direction):
+            raise RuntimeError("Fusion rejected the triangle extrude extent.")
+
+        extrude = component.features.extrudeFeatures.add(extrude_input)
+        if not extrude or extrude.bodies.count == 0:
+            raise RuntimeError("The triangle profiles did not produce tool bodies.")
+        extrude.name = "Face Cutout - Triangle Pattern"
+        return extrude
+
+    def _create_intersect_combine(
+        self,
+        component: adsk.fusion.Component,
+        target_body: adsk.fusion.BRepBody,
+        tool_bodies: list[adsk.fusion.BRepBody],
+    ) -> adsk.fusion.CombineFeature:
+        tools = adsk.core.ObjectCollection.createWithArray(
+            cast(list[adsk.core.Base], tool_bodies)
+        )
+        combine_input = component.features.combineFeatures.createInput(
+            target_body,
+            tools,
+        )
+        if not combine_input:
+            raise RuntimeError("Fusion failed to initialize the triangle intersection.")
+        combine_input.operation = (
+            adsk.fusion.FeatureOperations.IntersectFeatureOperation  # type: ignore
+        )
+        combine_input.isKeepToolBodies = False
+        combine = component.features.combineFeatures.add(combine_input)
+        if not combine or combine.bodies.count == 0:
+            raise RuntimeError("The triangles did not intersect the full cutout tool.")
+        combine.name = "Face Cutout - Pattern Intersection"
+        return combine
+
+    def _create_tool_fillets(
+        self,
+        component: adsk.fusion.Component,
+        tool_bodies: list[adsk.fusion.BRepBody],
+        cut_direction: adsk.core.Vector3D,
+    ) -> list[adsk.fusion.BRepBody]:
+        if self.inputs.fillet_radius.value <= 1e-9:
+            return tool_bodies
+
+        radius = self.inputs.fillet_radius.value
+        eligible = [
+            body
+            for body in tool_bodies
+            if self._body_can_accept_fillet(body, cut_direction, radius)
+        ]
+        result = [body for body in tool_bodies if body not in eligible]
+        fillets: list[adsk.fusion.FilletFeature] = []
+        result.extend(
+            self._fillet_body_group(
+                component,
+                eligible,
+                cut_direction,
+                fillets,
+            )
+        )
+        for index, fillet in enumerate(fillets, start=1):
+            fillet.name = (
+                "Face Cutout - Fillet"
+                if len(fillets) == 1
+                else f"Face Cutout - Fillet {index}"
+            )
+        return result
+
+    def _body_can_accept_fillet(
+        self,
+        body: adsk.fusion.BRepBody,
+        cut_direction: adsk.core.Vector3D,
+        radius: float,
+    ) -> bool:
+        normal = cut_direction.copy()
+        if not normal.normalize():
+            return False
+        reference = (
+            adsk.core.Vector3D.create(1, 0, 0)
+            if abs(normal.x) < 0.9
+            else adsk.core.Vector3D.create(0, 1, 0)
+        )
+        first_axis = normal.crossProduct(reference)
+        if not first_axis.normalize():
+            return False
+        second_axis = normal.crossProduct(first_axis)
+        if not second_axis.normalize():
+            return False
+
+        first_projections = [
+            vertex.geometry.asVector().dotProduct(first_axis)
+            for vertex in body.vertices
+        ]
+        second_projections = [
+            vertex.geometry.asVector().dotProduct(second_axis)
+            for vertex in body.vertices
+        ]
+        if not first_projections or not second_projections:
+            return False
+        minimum_span = min(
+            max(first_projections) - min(first_projections),
+            max(second_projections) - min(second_projections),
+        )
+        return minimum_span > 2 * radius + 1e-6
+
+    def _fillet_body_group(
+        self,
+        component: adsk.fusion.Component,
+        bodies: list[adsk.fusion.BRepBody],
+        cut_direction: adsk.core.Vector3D,
+        fillets: list[adsk.fusion.FilletFeature],
+    ) -> list[adsk.fusion.BRepBody]:
+        if not bodies:
+            return []
         edges = [
             edge
-            for edge in tool_body.edges
-            if utils.brep.is_parallel(edge, cut_direction) and not utils.brep.is_smooth_edge(edge)
+            for body in bodies
+            for edge in body.edges
+            if utils.brep.is_parallel(edge, cut_direction)
+            and not utils.brep.is_smooth_edge(edge)
         ]
         if not edges:
-            return None
+            return bodies
 
         fillet_input = component.features.filletFeatures.createInput()
         edge_collection = adsk.core.ObjectCollection.createWithArray(
@@ -607,23 +1611,49 @@ class FaceCutout(addin.Addin):
         )
         fillet_input.edgeSetInputs.addConstantRadiusEdgeSet(
             edge_collection,
-            adsk.core.ValueInput.createByString(self.inputs.fillet_radius.expression),
+            adsk.core.ValueInput.createByString(
+                self.inputs.fillet_radius.expression
+            ),
             False,
         )
-        fillet = component.features.filletFeatures.add(fillet_input)
-        if not fillet or fillet.bodies.count != 1:
-            raise RuntimeError("Fusion failed to fillet the cutout tool body.")
-        fillet.name = "Face Cutout - Fillet"
-        return fillet
+        try:
+            fillet = component.features.filletFeatures.add(fillet_input)
+        except RuntimeError:
+            if len(bodies) == 1:
+                # An irregular boundary fragment can be locally too small even
+                # when its overall span is large enough. Leave only that body
+                # unfilleted and continue with the rest of the cutout.
+                return bodies
+            midpoint = len(bodies) // 2
+            return self._fillet_body_group(
+                component,
+                bodies[:midpoint],
+                cut_direction,
+                fillets,
+            ) + self._fillet_body_group(
+                component,
+                bodies[midpoint:],
+                cut_direction,
+                fillets,
+            )
+
+        if not fillet or fillet.bodies.count == 0:
+            return bodies
+        fillets.append(fillet)
+        return cast(
+            list[adsk.fusion.BRepBody],
+            utils.fusion.as_list(fillet.bodies),
+        )
 
     def _create_cut_combine(
         self,
         component: adsk.fusion.Component,
         target_body: adsk.fusion.BRepBody,
-        tool_body: adsk.fusion.BRepBody,
+        tool_bodies: list[adsk.fusion.BRepBody],
     ) -> adsk.fusion.CombineFeature:
-        tools = adsk.core.ObjectCollection.create()
-        tools.add(tool_body)
+        tools = adsk.core.ObjectCollection.createWithArray(
+            cast(list[adsk.core.Base], tool_bodies)
+        )
         combine_input = component.features.combineFeatures.createInput(target_body, tools)
         if not combine_input:
             raise RuntimeError("Fusion failed to initialize the cut combine.")

@@ -18,7 +18,7 @@ Furthermore, updates to this code might break existing usages of the addins.
   The Froli pattern computes the best froli grid for a given rectangular surface and places cutouts accordingly.
 - **Face Cutout**
 
-  Creates one inset cutout from a selected planar face using only native Fusion timeline features: a linked offset sketch, a new-body extrude, an optional fillet, and a cut combine. Existing inner face loops are preserved using a separate inner-feature inset and can be connected to the outer perimeter with material tabs.
+  Creates either one full inset cutout or a true-edge-spacing triangle pattern from a selected planar face using only native Fusion timeline features. Existing inner face loops are preserved using a separate inner-feature inset and can be connected to the outer perimeter with material tabs. On rectangular faces, the triangle layout uses a fully constrained four-triangle seed sketch and a native solid rectangular pattern.
 - **Concealed Hinge**
 
   This places holes for concealed hinges in the door and carcass boards. Currently there's just one type of hinge implemented (Blum cliptop 110 for thin doors).
