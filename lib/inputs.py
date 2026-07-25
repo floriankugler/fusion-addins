@@ -247,7 +247,15 @@ class DropDownInput(Input):
 
 class SelectionByEntityTokenInput(Input):
     input: adsk.core.SelectionCommandInput
-    value: list[adsk.fusion.BRepEdge | adsk.fusion.SketchPoint | adsk.fusion.BRepFace]
+    value: list[
+        adsk.fusion.BRepEdge
+        | adsk.fusion.BRepFace
+        | adsk.fusion.BRepVertex
+        | adsk.fusion.ConstructionAxis
+        | adsk.fusion.ConstructionPoint
+        | adsk.fusion.SketchLine
+        | adsk.fusion.SketchPoint
+    ]
 
     def __init__(self, id, name, filter: list[str], lower_bound: int, upper_bound: int, tool_tip: str, update_visibility: Callable[[], bool] = lambda: True):
         super().__init__(id, name, tool_tip, update_visibility)
