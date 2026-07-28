@@ -11,6 +11,9 @@ Furthermore, updates to this code might break existing usages of the addins.
 - **Sheet Good Tenons**
 
   Creates mortise and tenon connections between sheet good boards and also (optionally) places the holes for screw, Clamex or Cabineo connectors in one go.
+- **Tenons (Native)**
+
+  Creates fully constrained tenon, mortise, and dog-bone sketches with standard Fusion extrude and combine features. Select one straight joint edge, then position tenons by count with dimensioned equal spacing or by projected custom sketch points. Optional screw, Clamex, and Cabineo connector cuts use native features and reference the generated tenon geometry.
 - **Pattern Cutouts**
 
   This is a collection of differently shaped pattern cutouts, e.g. triangles, rhombuses etc. The cutouts take existing inner features of the selected faces into account.
@@ -18,16 +21,25 @@ Furthermore, updates to this code might break existing usages of the addins.
   The Froli pattern computes the best froli grid for a given rectangular surface and places cutouts accordingly.
 - **Face Cutout**
 
-  Creates either one full inset cutout or a true-edge-spacing triangle pattern from a selected planar face using only native Fusion timeline features. Existing inner face loops are preserved using a separate inner-feature inset and can be connected to the outer perimeter with material tabs. The triangle layout uses a fully constrained four-triangle seed sketch and a native solid rectangular pattern. Rectangular faces can use an optional pattern axis; non-rectangular faces can use an axis plus two to four points that define an oriented pattern bounding box.
+  Creates a full inset cutout, a diagonal Cross, or a true-edge-spacing triangle pattern from one or more parallel planar faces using only native Fusion timeline features. The first selected face defines the shared sketches; each selected face gets its own start-to-opposite-face tool extrusion, while the user is responsible for choosing faces compatible with that shared layout. The Cross cuts four edge wedges and leaves two user-sized diagonal material bands. Existing inner face loops are preserved using a separate inner-feature inset and can be connected to the outer perimeter with material tabs. The triangle layout uses a fully constrained four-triangle seed sketch and a native solid rectangular pattern. An optional Align Triangles mode rounds the seed tips in the sketch and makes them tangent to adjacent baselines before the remaining solid edges are filleted. Rectangular faces can use an optional pattern axis; non-rectangular faces can use an axis plus two to four points that define an oriented pattern bounding box.
 - **Concealed Hinge**
 
   This places holes for concealed hinges in the door and carcass boards. Currently there's just one type of hinge implemented (Blum cliptop 110 for thin doors).
+- **Concealed Hinge (Native)**
+
+  Creates the same door and carcass drilling patterns from one explicitly selected door edge and one explicitly selected carcass-board edge. The fully constrained door sketch uses linked projections of both edges, and the carcass sketch projects the door sketch to preserve hinge alignment. The result is a group of native Fusion sketches and cut extrudes without fixed sketch geometry; it does not use the custom feature API or automatically search for a matching carcass board.
 - **Door Latch**
 
   Places holes for door latches in the door and carcass boards. Currently this supports Everlocks and the small 44mm pull locks.
+- **Door Latch (Native)**
+
+  Creates the same Everlock and 44mm pull-lock drilling patterns as fully constrained sketches and native Fusion cut extrudes. Select exactly one door or drawer edge and the corresponding carcass-face edge; the add-in does not use the custom feature API or search for the carcass face automatically.
 - **Dog Bones**
 
   Creates dog bones for inner corners based on the tool diameter. Specific edges or faces can be selected.
+- **Dog Bones (Native)**
+
+  Creates the same corner relief as a fully constrained sketch and a native cut extrude, without the custom feature API. Select either one planar face to process all eligible concave outer-loop corners, or one or more parallel concave edges on the same body.
 - **Heal Sketch Lines**
 
   Connects sketch curves that should be connected but are not quite. This often happens when projecting or intersecting complex geometry from e.g. a vehicle model, so that the projected curves do not form a closed profile. This addin automatically heals these curves by placing coincident constraints for end points within a tolerance.

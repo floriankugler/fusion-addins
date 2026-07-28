@@ -1,0 +1,13 @@
+{
+  "autodeskProduct": "Fusion360",
+  "type": "addin",
+  "id": "com.floriankugler.tenons",
+  "author": "",
+  "description": {
+    "": "Creates sheet-good tenons, mortises, dog bones, and optional connectors using native Fusion timeline features."
+  },
+  "version": "",
+  "runOnStartup": false,
+  "supportedOS": "windows|mac",
+  "editEnabled": true
+}

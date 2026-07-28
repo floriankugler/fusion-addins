@@ -1,0 +1,13 @@
+{
+  "autodeskProduct": "Fusion360",
+  "type": "addin",
+  "id": "com.floriankugler.dogbones-native",
+  "author": "",
+  "description": {
+    "": "Creates dog-bone cutouts using a fully constrained sketch and a native Fusion cut extrude."
+  },
+  "version": "",
+  "runOnStartup": false,
+  "supportedOS": "windows|mac",
+  "editEnabled": true
+}

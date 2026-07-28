@@ -1,0 +1,13 @@
+{
+  "autodeskProduct": "Fusion360",
+  "type": "addin",
+  "id": "com.floriankugler.door-latch-native",
+  "author": "",
+  "description": {
+    "": "Creates door-latch holes using fully constrained sketches and native Fusion cut features."
+  },
+  "version": "",
+  "runOnStartup": false,
+  "supportedOS": "windows|mac",
+  "editEnabled": true
+}

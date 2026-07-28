@@ -1,0 +1,13 @@
+{
+  "autodeskProduct": "Fusion360",
+  "type": "addin",
+  "id": "com.floriankugler.concealed-hinge-native",
+  "author": "",
+  "description": {
+    "": "Creates concealed-hinge holes using native Fusion sketches and cut extrudes."
+  },
+  "version": "",
+  "runOnStartup": false,
+  "supportedOS": "windows|mac",
+  "editEnabled": true
+}
