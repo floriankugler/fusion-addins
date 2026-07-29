@@ -96,11 +96,11 @@ class _TenonLayout:
 class _GuideHole:
     diameter: float
     diameter_expression: str
-    depth: float | str
+    depth: str
     edge_distance: float
     collar_diameter: float | None = None
     collar_diameter_expression: str | None = None
-    collar_depth: float | str | None = None
+    collar_depth: str | None = None
 
 
 @dataclass(frozen=True)
@@ -109,6 +109,18 @@ class _CutSpec:
     body_role: str
     direction: adsk.core.Vector3D
     distance: float | str | None
+    name: str
+    parameter_role: str
+
+
+@dataclass(frozen=True)
+class _HoleSpec:
+    sketch: adsk.fusion.Sketch
+    body_role: str
+    direction: adsk.core.Vector3D
+    center_points: list[adsk.fusion.SketchPoint]
+    diameter_expression: str
+    depth: str | None  # None cuts through the whole target body.
     name: str
     parameter_role: str
 
@@ -275,6 +287,10 @@ class TenonsInputs(inputs.Inputs):
             tool_tip="Clearance added to the mortise along the selected edge.",
             units=units,
         )
+        # The offset dimensions between the projected tenon profile and the
+        # mortise rectangle require a positive value.
+        self.mortise_length_offset.minimum_value = 0
+        self.mortise_length_offset.minimum_inclusive = False
         self.mortise_width_offset = inputs.FloatInput(
             id="mortiseWidthOffset",
             name="Mortise Width Offset",
@@ -282,6 +298,8 @@ class TenonsInputs(inputs.Inputs):
             tool_tip="Clearance added across the tenon-board thickness.",
             units=units,
         )
+        self.mortise_width_offset.minimum_value = 0
+        self.mortise_width_offset.minimum_inclusive = False
         self.mortise_depth_offset = inputs.FloatInput(
             id="mortiseDepthOffset",
             name="Mortise Depth Offset",
@@ -485,7 +503,7 @@ class TenonsInputs(inputs.Inputs):
 class Tenons(addin.Addin):
     inputs: TenonsInputs
     _parameter_prefix: str
-    _body_indices: dict[str, int]
+    _body_tokens: dict[str, str]
 
     @property
     def plugin_name(self) -> str:
@@ -564,9 +582,9 @@ class Tenons(addin.Addin):
         self._parameter_prefix = self._unique_parameter_prefix(
             component.parentDesign
         )
-        self._body_indices = {
-            "tenon": self._body_index(component, geometry.tenon_face.body),
-            "mortise": self._body_index(component, geometry.mortise_face.body),
+        self._body_tokens = {
+            "tenon": geometry.tenon_face.body.entityToken,
+            "mortise": geometry.mortise_face.body.entityToken,
         }
 
         positions = self._tenon_positions(geometry.edge)
@@ -622,14 +640,23 @@ class Tenons(addin.Addin):
         connector_type = ConnectorType(self.inputs.connector.value)
         connector_sketches: list[adsk.fusion.Sketch] = []
         connector_specs: list[_CutSpec] = []
+        connector_holes: list[_HoleSpec] = []
         if connector_type == ConnectorType.SCREW:
-            connector_sketches, connector_specs = self._create_screw_sketches(
+            (
+                connector_sketches,
+                connector_specs,
+                connector_holes,
+            ) = self._create_screw_sketches(
                 component,
                 geometry,
                 layout,
             )
         elif connector_type.is_clamex or connector_type.is_cabineo:
-            connector_sketches, connector_specs = self._create_lamello_sketches(
+            (
+                connector_sketches,
+                connector_specs,
+                connector_holes,
+            ) = self._create_lamello_sketches(
                 component,
                 geometry,
                 layout,
@@ -694,6 +721,12 @@ class Tenons(addin.Addin):
                     name=spec.name,
                     parameter_role=spec.parameter_role,
                 )
+        for hole_spec in connector_holes:
+            last_feature = self._create_hole_feature(
+                component,
+                hole_spec,
+                self._target_body(component, hole_spec.body_role),
+            )
 
         self._group_features(
             component,
@@ -732,10 +765,7 @@ class Tenons(addin.Addin):
             )
         if geometry.mortise_face.body.parentComponent != design.activeComponent:
             return "Both board bodies must be in the active component."
-        if self._same_body_geometry(
-            geometry.tenon_face.body,
-            geometry.mortise_face.body,
-        ):
+        if geometry.tenon_face.body == geometry.mortise_face.body:
             return "The mortises must be cut into a second solid body."
 
         if self.inputs.width.value <= 0:
@@ -756,17 +786,10 @@ class Tenons(addin.Addin):
                 "Remaining Material must be smaller than the mortise-board "
                 "thickness."
             )
-        if (
-            self.inputs.width.value + self.inputs.mortise_length_offset.value
-            <= 0
-        ):
-            return "Mortise Length Offset makes the mortise length non-positive."
-        if (
-            geometry.tenon_thickness
-            + self.inputs.mortise_width_offset.value
-            <= 0
-        ):
-            return "Mortise Width Offset makes the mortise width non-positive."
+        if self.inputs.mortise_length_offset.value <= 0:
+            return "Mortise Length Offset must be greater than zero."
+        if self.inputs.mortise_width_offset.value <= 0:
+            return "Mortise Width Offset must be greater than zero."
 
         intervals = sorted(
             self._distance_from_edge_start(geometry.edge, point)
@@ -813,8 +836,14 @@ class Tenons(addin.Addin):
         if connector == ConnectorType.SCREW:
             if self.inputs.screw_diameter.value <= 0:
                 return "Screw Diameter must be greater than zero."
-            if self.inputs.screw_offset.value < 0:
-                return "Screw Offset cannot be negative."
+            if (
+                self.inputs.mortise_screw.value == ScrewType.TWO_SIDES.value
+                or self.inputs.tenon_screw.value == ScrewType.TWO_SIDES.value
+            ) and self.inputs.screw_offset.value <= 0:
+                return (
+                    "Screw Offset must be greater than zero for two-sided "
+                    "screws."
+                )
             if (
                 self.inputs.tenon_screw.value == ScrewType.TWO_SIDES.value
                 and 2 * self.inputs.screw_offset.value
@@ -1086,34 +1115,52 @@ class Tenons(addin.Addin):
             == TenonsInputs.Positioning.NUMBER.value
             and len(bases) > 1
         ):
-            start_margin = self._add_distance_dimension(
-                sketch,
-                context.edge_start,
-                bases[0].startSketchPoint,
-                self.inputs.distance_from_edge.expression,
-                "startMargin",
-            )
-            self._add_distance_dimension(
-                sketch,
-                bases[-1].endSketchPoint,
-                context.edge_end,
-                start_margin.parameter.name,
-                "endMargin",
-            )
-            spans: list[adsk.fusion.SketchLine] = []
-            for left_center, right_center in zip(centers, centers[1:]):
-                span = sketch.sketchCurves.sketchLines.addByTwoPoints(
-                    left_center,
-                    right_center,
+            if (
+                self.inputs.distance_from_edge.value
+                <= self.app.pointTolerance * 10
+            ):
+                # A zero End Margin cannot be expressed as a distance
+                # dimension between coincident points.
+                constraints.addCoincident(
+                    bases[0].startSketchPoint,
+                    context.edge_start,
                 )
-                if not span:
-                    raise RuntimeError(
-                        "Fusion failed to create a tenon spacing line."
+                constraints.addCoincident(
+                    bases[-1].endSketchPoint,
+                    context.edge_end,
+                )
+            else:
+                start_margin = self._add_distance_dimension(
+                    sketch,
+                    context.edge_start,
+                    bases[0].startSketchPoint,
+                    self.inputs.distance_from_edge.expression,
+                    "startMargin",
+                )
+                self._add_distance_dimension(
+                    sketch,
+                    bases[-1].endSketchPoint,
+                    context.edge_end,
+                    start_margin.parameter.name,
+                    "endMargin",
+                )
+            if len(centers) > 2:
+                # With two tenons the spacing is already determined by the
+                # margins; a single span would stay unconstrained.
+                spans: list[adsk.fusion.SketchLine] = []
+                for left_center, right_center in zip(centers, centers[1:]):
+                    span = sketch.sketchCurves.sketchLines.addByTwoPoints(
+                        left_center,
+                        right_center,
                     )
-                span.isConstruction = True
-                spans.append(span)
-            for span in spans[1:]:
-                constraints.addEqual(spans[0], span)
+                    if not span:
+                        raise RuntimeError(
+                            "Fusion failed to create a tenon spacing line."
+                        )
+                    span.isConstruction = True
+                    spans.append(span)
+                for span in spans[1:]:
+                    constraints.addEqual(spans[0], span)
         sketch.isComputeDeferred = False
         return _TenonLayout(
             context=context,
@@ -1222,6 +1269,8 @@ class Tenons(addin.Addin):
             rectangles,
             context.edge_line,
             "mortiseDogBone",
+            geometry.mortise_face.body,
+            utils.brep.normal_away_from_body(geometry.small_face),
         )
         sketch.isComputeDeferred = False
         return sketch
@@ -1297,9 +1346,13 @@ class Tenons(addin.Addin):
         component: adsk.fusion.Component,
         geometry: _ResolvedGeometry,
         layout: _TenonLayout,
-    ) -> tuple[list[adsk.fusion.Sketch], list[_CutSpec]]:
+    ) -> tuple[
+        list[adsk.fusion.Sketch],
+        list[_CutSpec],
+        list[_HoleSpec],
+    ]:
         sketches: list[adsk.fusion.Sketch] = []
-        specs: list[_CutSpec] = []
+        holes: list[_HoleSpec] = []
         mortise_type = ScrewType(self.inputs.mortise_screw.value)
         if mortise_type != ScrewType.NONE:
             context, projected_bases, _ = self._create_layout_reference_sketch(
@@ -1329,25 +1382,20 @@ class Tenons(addin.Addin):
                 geometry.small_face,
                 geometry.edge,
             )
-            self._add_equal_circles(
-                sketch,
-                centers,
-                self.inputs.screw_diameter.value / 2,
-                self.inputs.screw_diameter.expression,
-                "mortiseScrewDiameter",
-            )
             sketch.isComputeDeferred = False
             sketches.append(sketch)
-            specs.append(
-                _CutSpec(
+            holes.append(
+                _HoleSpec(
                     sketch=sketch,
                     body_role="mortise",
                     direction=utils.brep.normal_away_from_body(
                         geometry.small_face
                     ),
-                    distance=None,
-                    name="Tenons - Mortise Screw Cut",
-                    parameter_role="mortiseScrewDepth",
+                    center_points=centers,
+                    diameter_expression=self.inputs.screw_diameter.expression,
+                    depth=None,
+                    name="Tenons - Mortise Screw Holes",
+                    parameter_role="mortiseScrew",
                 )
             )
 
@@ -1381,29 +1429,24 @@ class Tenons(addin.Addin):
                 parameter_outers,
                 1 if tenon_type == ScrewType.CENTERED else 2,
             )
-            self._add_equal_circles(
-                sketch,
-                centers,
-                self.inputs.screw_diameter.value / 2,
-                self.inputs.screw_diameter.expression,
-                "tenonScrewDiameter",
-            )
             sketch.isComputeDeferred = False
             sketches.append(sketch)
-            specs.append(
-                _CutSpec(
+            holes.append(
+                _HoleSpec(
                     sketch=sketch,
                     body_role="tenon",
                     direction=utils.brep.normal_towards_face(
                         geometry.tenon_face,
                         geometry.tenon_opposite_face,
                     ),
-                    distance=None,
-                    name="Tenons - Tenon Screw Cut",
-                    parameter_role="tenonScrewDepth",
+                    center_points=centers,
+                    diameter_expression=self.inputs.screw_diameter.expression,
+                    depth=None,
+                    name="Tenons - Tenon Screw Holes",
+                    parameter_role="tenonScrew",
                 )
             )
-        return sketches, specs
+        return sketches, [], holes
 
     def _create_lamello_sketches(
         self,
@@ -1411,9 +1454,14 @@ class Tenons(addin.Addin):
         geometry: _ResolvedGeometry,
         layout: _TenonLayout,
         connector_type: ConnectorType,
-    ) -> tuple[list[adsk.fusion.Sketch], list[_CutSpec]]:
+    ) -> tuple[
+        list[adsk.fusion.Sketch],
+        list[_CutSpec],
+        list[_HoleSpec],
+    ]:
         sketches: list[adsk.fusion.Sketch] = []
         specs: list[_CutSpec] = []
+        holes: list[_HoleSpec] = []
         (
             access_context,
             access_bases,
@@ -1431,7 +1479,11 @@ class Tenons(addin.Addin):
             access_context,
             access_bases,
         )
-        alignment_points = self._add_access_geometry(
+        (
+            alignment_points,
+            access_hole_centers,
+            access_hole_diameter,
+        ) = self._add_access_geometry(
             access_context,
             access_points,
             utils.brep.normal_into_face(
@@ -1442,7 +1494,7 @@ class Tenons(addin.Addin):
         )
         access_context.sketch.isComputeDeferred = False
         sketches.append(access_context.sketch)
-        access_depth: float | str
+        access_depth: str
         if connector_type.is_clamex:
             access_depth = self._real_length_expression(
                 geometry.tenon_thickness / 2
@@ -1454,18 +1506,34 @@ class Tenons(addin.Addin):
                 == CabineoSurface.FLUSH.value
                 else "1.1 cm"
             )
-        specs.append(
-            _CutSpec(
-                sketch=access_context.sketch,
-                body_role="tenon",
-                direction=self._opposite(
-                    utils.brep.normal_away_from_body(geometry.tenon_face)
-                ),
-                distance=access_depth,
-                name="Tenons - Connector Access Cut",
-                parameter_role="connectorAccessDepth",
-            )
+        access_direction = self._opposite(
+            utils.brep.normal_away_from_body(geometry.tenon_face)
         )
+        if access_hole_centers is None or access_hole_diameter is None:
+            # Clamex P10 slots are not round; they stay a cut extrude.
+            specs.append(
+                _CutSpec(
+                    sketch=access_context.sketch,
+                    body_role="tenon",
+                    direction=access_direction,
+                    distance=access_depth,
+                    name="Tenons - Connector Access Cut",
+                    parameter_role="connectorAccessDepth",
+                )
+            )
+        else:
+            holes.append(
+                _HoleSpec(
+                    sketch=access_context.sketch,
+                    body_role="tenon",
+                    direction=access_direction,
+                    center_points=access_hole_centers,
+                    diameter_expression=access_hole_diameter,
+                    depth=access_depth,
+                    name="Tenons - Connector Access Holes",
+                    parameter_role="connectorAccess",
+                )
+            )
 
         surface = CabineoSurface(self.inputs.cabineo_surface.value)
         if connector_type.is_cabineo and surface != CabineoSurface.NONE:
@@ -1484,7 +1552,10 @@ class Tenons(addin.Addin):
                 relief_context,
                 relief_bases,
             )
-            self._add_access_relief_geometry(
+            (
+                relief_hole_centers,
+                relief_hole_diameter,
+            ) = self._add_access_relief_geometry(
                 relief_context,
                 relief_points,
                 utils.brep.normal_into_face(
@@ -1500,23 +1571,33 @@ class Tenons(addin.Addin):
                 if surface == CabineoSurface.ANTI_BREAK
                 else "0.08 cm"
             )
-            specs.append(
-                _CutSpec(
-                    sketch=relief_context.sketch,
-                    body_role="tenon",
-                    direction=self._opposite(
-                        utils.brep.normal_away_from_body(geometry.tenon_face)
-                    ),
-                    distance=relief_depth,
-                    name="Tenons - Connector Relief Cut",
-                    parameter_role="connectorReliefDepth",
+            if relief_hole_centers is None or relief_hole_diameter is None:
+                # Flush relief slots are not round; they stay a cut extrude.
+                specs.append(
+                    _CutSpec(
+                        sketch=relief_context.sketch,
+                        body_role="tenon",
+                        direction=access_direction,
+                        distance=relief_depth,
+                        name="Tenons - Connector Relief Cut",
+                        parameter_role="connectorReliefDepth",
+                    )
                 )
-            )
+            else:
+                holes.append(
+                    _HoleSpec(
+                        sketch=relief_context.sketch,
+                        body_role="tenon",
+                        direction=access_direction,
+                        center_points=relief_hole_centers,
+                        diameter_expression=relief_hole_diameter,
+                        depth=relief_depth,
+                        name="Tenons - Connector Relief Holes",
+                        parameter_role="connectorRelief",
+                    )
+                )
 
-        guide_hole = self._guide_hole(
-            connector_type,
-            geometry.mortise_thickness,
-        )
+        guide_hole = self._guide_hole(connector_type)
         guide_context, projected_alignment = (
             self._create_projected_points_edge_sketch(
                 component,
@@ -1543,26 +1624,28 @@ class Tenons(addin.Addin):
         )
         guide_context.sketch.isComputeDeferred = False
         sketches.append(guide_context.sketch)
-        specs.append(
-            _CutSpec(
+        guide_direction = utils.brep.normal_away_from_body(
+            geometry.small_face
+        )
+        holes.append(
+            _HoleSpec(
                 sketch=guide_context.sketch,
                 body_role="mortise",
-                direction=utils.brep.normal_away_from_body(
-                    geometry.small_face
-                ),
-                distance=(
+                direction=guide_direction,
+                center_points=guide_centers,
+                diameter_expression=guide_hole.diameter_expression,
+                depth=(
                     None
                     if self.inputs.through_guide_holes.value
                     else guide_hole.depth
                 ),
-                name="Tenons - Connector Opposite Cut",
-                parameter_role="connectorGuideDepth",
+                name="Tenons - Connector Opposite Holes",
+                parameter_role="connectorGuide",
             )
         )
 
         if (
-            guide_hole.collar_diameter is not None
-            and guide_hole.collar_depth is not None
+            guide_hole.collar_depth is not None
             and guide_hole.collar_diameter_expression is not None
         ):
             collar_context, collar_centers = (
@@ -1575,29 +1658,22 @@ class Tenons(addin.Addin):
                     "connectorCollar",
                 )
             )
-            collar_context.sketch.isComputeDeferred = True
-            self._add_equal_circles(
-                collar_context.sketch,
-                collar_centers,
-                guide_hole.collar_diameter / 2,
-                guide_hole.collar_diameter_expression,
-                "connectorCollarDiameter",
-            )
-            collar_context.sketch.isComputeDeferred = False
             sketches.append(collar_context.sketch)
-            specs.append(
-                _CutSpec(
+            holes.append(
+                _HoleSpec(
                     sketch=collar_context.sketch,
                     body_role="mortise",
-                    direction=utils.brep.normal_away_from_body(
-                        geometry.small_face
+                    direction=guide_direction,
+                    center_points=collar_centers,
+                    diameter_expression=(
+                        guide_hole.collar_diameter_expression
                     ),
-                    distance=guide_hole.collar_depth,
-                    name="Tenons - Connector Insert Collar Cut",
-                    parameter_role="connectorCollarDepth",
+                    depth=guide_hole.collar_depth,
+                    name="Tenons - Connector Insert Collar Holes",
+                    parameter_role="connectorCollar",
                 )
             )
-        return sketches, specs
+        return sketches, specs, holes
 
     def _add_access_geometry(
         self,
@@ -1605,7 +1681,11 @@ class Tenons(addin.Addin):
         position_points: list[adsk.fusion.SketchPoint],
         inward: adsk.core.Vector3D,
         connector_type: ConnectorType,
-    ) -> list[adsk.fusion.SketchPoint]:
+    ) -> tuple[
+        list[adsk.fusion.SketchPoint],
+        list[adsk.fusion.SketchPoint] | None,
+        str | None,
+    ]:
         if connector_type == ConnectorType.CLAMEX_P14:
             centers = self._add_normal_points(
                 context,
@@ -1615,14 +1695,9 @@ class Tenons(addin.Addin):
                 ["0.75 cm"],
                 "HoleInset",
             )
-            circles = self._add_equal_circles(
-                context.sketch,
-                centers,
-                0.3,
-                "0.6 cm",
-                "connectorAccessDiameter",
-            )
-            return [circle.centerSketchPoint for circle in circles]
+            # The round access holes are created as Hole features from
+            # these constrained points.
+            return centers, centers, "0.6 cm"
         if connector_type == ConnectorType.CLAMEX_P10:
             centers = self._add_normal_points(
                 context,
@@ -1661,7 +1736,7 @@ class Tenons(addin.Addin):
                     centerline,
                 )
                 alignment_points.append(midpoint)
-            return alignment_points
+            return alignment_points, None, None
         centers = self._add_normal_points(
             context,
             position_points,
@@ -1670,17 +1745,11 @@ class Tenons(addin.Addin):
             ["0.36 cm", "1.48 cm", "2.6 cm"],
             "HoleInset",
         )
-        circles = self._add_equal_circles(
-            context.sketch,
-            centers,
-            0.75,
-            "1.5 cm",
-            "connectorAccessDiameter",
-        )
-        return [
-            circles[index].centerSketchPoint
-            for index in range(1, len(circles), 3)
+        alignment_points = [
+            centers[index]
+            for index in range(1, len(centers), 3)
         ]
+        return alignment_points, centers, "1.5 cm"
 
     def _add_access_relief_geometry(
         self,
@@ -1688,7 +1757,7 @@ class Tenons(addin.Addin):
         position_points: list[adsk.fusion.SketchPoint],
         inward: adsk.core.Vector3D,
         surface: CabineoSurface,
-    ) -> None:
+    ) -> tuple[list[adsk.fusion.SketchPoint] | None, str | None]:
         if surface == CabineoSurface.ANTI_BREAK:
             centers = self._add_normal_points(
                 context,
@@ -1698,17 +1767,10 @@ class Tenons(addin.Addin):
                 ["0.36 cm", "1.48 cm", "2.6 cm"],
                 "HoleInset",
             )
-            self._add_equal_circles(
-                context.sketch,
-                centers,
-                0.75 + self.inputs.cabineo_anti_break_distance.value,
-                (
-                    "1.5 cm + 2 * "
-                    f"({self.inputs.cabineo_anti_break_distance.expression})"
-                ),
-                "connectorReliefDiameter",
+            return centers, (
+                "1.5 cm + 2 * "
+                f"({self.inputs.cabineo_anti_break_distance.expression})"
             )
-            return
         top_centers = self._add_normal_points(
             context,
             position_points,
@@ -1736,6 +1798,7 @@ class Tenons(addin.Addin):
             )
             if slot_width_parameter is None:
                 slot_width_parameter = dimension.parameter
+        return None, None
 
     def _add_guide_geometry(
         self,
@@ -1805,16 +1868,11 @@ class Tenons(addin.Addin):
                         centerline.endSketchPoint,
                     ]
                 )
-            self._add_equal_circles(
-                context.sketch,
-                centers,
-                guide_hole.diameter / 2,
-                guide_hole.diameter_expression,
-                "connectorGuideDiameter",
-            )
+            # The guide holes themselves are created as Hole features from
+            # these constrained points.
             return centers
 
-        centers = self._add_normal_points(
+        return self._add_normal_points(
             context,
             alignment_points,
             inward,
@@ -1822,31 +1880,20 @@ class Tenons(addin.Addin):
             [self._real_length_expression(guide_hole.edge_distance)],
             "HoleInset",
         )
-        self._add_equal_circles(
-            context.sketch,
-            centers,
-            guide_hole.diameter / 2,
-            guide_hole.diameter_expression,
-            "connectorGuideDiameter",
-        )
-        return centers
 
     def _guide_hole(
         self,
         connector_type: ConnectorType,
-        mortise_thickness: float,
     ) -> _GuideHole:
         if connector_type.is_clamex:
+            # Through holes are handled by the caller with a to-body extent,
+            # so the fixed depth here only applies to non-through holes.
             return _GuideHole(
                 diameter=self.inputs.clamex_guide_hole_diameter.value,
                 diameter_expression=(
                     self.inputs.clamex_guide_hole_diameter.expression
                 ),
-                depth=(
-                    self._real_length_expression(mortise_thickness)
-                    if self.inputs.through_guide_holes.value
-                    else "0.8 cm"
-                ),
+                depth="0.8 cm",
                 edge_distance=0,
             )
 
@@ -1858,7 +1905,7 @@ class Tenons(addin.Addin):
         if connector_type == ConnectorType.CABINEO_8:
             diameter = 0.5
             diameter_expression = "0.5 cm"
-            depth: float | str = "0.8 cm"
+            depth = "0.8 cm"
         elif connector_type == ConnectorType.CABINEO_12:
             diameter = 0.5
             diameter_expression = "0.5 cm"
@@ -1886,8 +1933,6 @@ class Tenons(addin.Addin):
                     self.inputs.threaded_insert_collar_diameter.expression
                 )
                 collar_depth = self.inputs.threaded_insert_collar_depth.expression
-        if self.inputs.through_guide_holes.value:
-            depth = self._real_length_expression(mortise_thickness)
         return _GuideHole(
             diameter=diameter,
             diameter_expression=diameter_expression,
@@ -1896,26 +1941,6 @@ class Tenons(addin.Addin):
             collar_diameter=collar_diameter,
             collar_diameter_expression=collar_expression,
             collar_depth=collar_depth,
-        )
-
-    def _create_edge_sketch(
-        self,
-        component: adsk.fusion.Component,
-        face: adsk.core.Base,
-        edge: adsk.fusion.BRepEdge,
-        name: str,
-        parameter_role: str,
-        orientation_point: adsk.core.Point3D | None = None,
-    ) -> _SketchContext:
-        sketch = component.sketches.addWithoutEdges(face)
-        if not sketch:
-            raise RuntimeError(f"Fusion failed to create '{name}'.")
-        sketch.name = name
-        return self._finish_edge_context(
-            sketch,
-            edge,
-            parameter_role,
-            orientation_point,
         )
 
     def _finish_edge_context(
@@ -2129,8 +2154,8 @@ class Tenons(addin.Addin):
             origin = adsk.core.Point3D.create(0, 0, 0)
 
             def at(u: float, v: float) -> adsk.core.Point3D:
-                point = self._translated_2d(origin, edge_vector, u)
-                return self._translated_2d(point, normal, v)
+                point = self._translated(origin, edge_vector, u)
+                return self._translated(point, normal, v)
 
             length_offset = self.inputs.mortise_length_offset.value / 2
             width_offset = self.inputs.mortise_width_offset.value / 2
@@ -2249,6 +2274,8 @@ class Tenons(addin.Addin):
         ],
         edge_line: adsk.fusion.SketchLine,
         parameter_role: str,
+        target_body: adsk.fusion.BRepBody,
+        into_body: adsk.core.Vector3D,
     ) -> None:
         constraints = sketch.geometricConstraints
         offset = self.inputs.tool_diameter.value / (2 * math.sqrt(2))
@@ -2288,12 +2315,24 @@ class Tenons(addin.Addin):
                 y_in = corner.geometry.vectorTo(y_inside.geometry)
                 x_in.normalize()
                 y_in.normalize()
-                step_point = self._translated_2d(
+                if not self._corner_needs_dogbone(
+                    sketch,
+                    corner.geometry,
+                    x_in,
+                    y_in,
+                    target_body,
+                    into_body,
+                ):
+                    # The mortise breaks out of the board here, so the tool
+                    # can enter from the open side and no relief is needed.
+                    # Cutting one anyway would notch the mating surface.
+                    continue
+                step_point = self._translated(
                     corner.geometry,
                     x_in,
                     offset,
                 )
-                center_point = self._translated_2d(
+                center_point = self._translated(
                     step_point,
                     y_in,
                     offset,
@@ -2357,6 +2396,40 @@ class Tenons(addin.Addin):
                     )
                 else:
                     constraints.addEqual(first_circle, circle)
+
+    def _corner_needs_dogbone(
+        self,
+        sketch: adsk.fusion.Sketch,
+        corner: adsk.core.Point3D,
+        x_in: adsk.core.Vector3D,
+        y_in: adsk.core.Vector3D,
+        target_body: adsk.fusion.BRepBody,
+        into_body: adsk.core.Vector3D,
+    ) -> bool:
+        # Probe slightly outside the rectangle corner (along the outward
+        # diagonal) and slightly into the board (the sketch plane lies on
+        # the board surface): only corners embedded in material need a
+        # relief.
+        outward = adsk.core.Vector3D.create(
+            -(x_in.x + y_in.x),
+            -(x_in.y + y_in.y),
+            0,
+        )
+        if not outward.normalize():
+            return True
+        epsilon = max(self.app.pointTolerance * 100, 0.01)
+        probe = corner.copy()
+        translation = outward.copy()
+        translation.scaleBy(epsilon)
+        probe.translateBy(translation)
+        probe_model = sketch.sketchToModelSpace(probe)
+        depth_offset = into_body.copy()
+        depth_offset.scaleBy(epsilon)
+        probe_model.translateBy(depth_offset)
+        return (
+            target_body.pointContainment(probe_model)
+            == adsk.fusion.PointContainment.PointInsidePointContainment
+        )
 
     def _add_dogbone_circles_from_model_points(
         self,
@@ -2820,36 +2893,89 @@ class Tenons(addin.Addin):
             result.extend(item_points)
         return result
 
-    def _add_equal_circles(
+    def _create_hole_feature(
         self,
-        sketch: adsk.fusion.Sketch,
-        centers: list[adsk.fusion.SketchPoint],
-        radius: float,
-        diameter_expression: str,
-        parameter_role: str,
-    ) -> list[adsk.fusion.SketchCircle]:
-        if not centers:
-            raise ValueError("At least one circle center is required.")
-        constraints = sketch.geometricConstraints
-        circles = []
-        for center in centers:
-            circle = sketch.sketchCurves.sketchCircles.addByCenterRadius(
-                center.geometry,
-                radius,
+        component: adsk.fusion.Component,
+        spec: _HoleSpec,
+        target_body: adsk.fusion.BRepBody,
+    ) -> adsk.fusion.HoleFeature:
+        if not spec.center_points:
+            raise RuntimeError(
+                f"'{spec.name}' requires at least one hole center."
             )
-            if not circle:
-                raise RuntimeError("Fusion failed to create a circle.")
-            constraints.addCoincident(circle.centerSketchPoint, center)
-            circles.append(circle)
-        self._add_circle_diameter_dimension(
-            sketch,
-            circles[0],
-            diameter_expression,
-            parameter_role,
+        hole_features = component.features.holeFeatures
+        hole_input = hole_features.createSimpleInput(
+            adsk.core.ValueInput.createByString(spec.diameter_expression)
         )
-        for circle in circles[1:]:
-            constraints.addEqual(circles[0], circle)
-        return circles
+        if not hole_input:
+            raise RuntimeError(f"Fusion failed to initialize '{spec.name}'.")
+        if not hole_input.setPositionBySketchPoints(
+            adsk.core.ObjectCollection.createWithArray(
+                cast(list[adsk.core.Base], spec.center_points)
+            )
+        ):
+            raise RuntimeError(
+                f"Fusion rejected the positions of '{spec.name}'."
+            )
+        # The natural hole direction is opposite the sketch normal.
+        sketch_normal = spec.sketch.xDirection.crossProduct(
+            spec.sketch.yDirection
+        )
+        natural_direction = sketch_normal.copy()
+        natural_direction.scaleBy(-1)
+        hole_input.isDefaultDirection = (
+            natural_direction.dotProduct(spec.direction) > 0
+        )
+        if spec.depth is None:
+            # Through hole: cut to the far side of the target body instead
+            # of a fixed depth.
+            if not hole_input.setOneSideToExtent(
+                target_body,
+                False,
+                spec.direction,
+            ):
+                raise RuntimeError(
+                    f"Fusion rejected the to-body extent of '{spec.name}'."
+                )
+        else:
+            if not hole_input.setDistanceExtent(
+                adsk.core.ValueInput.createByString(spec.depth)
+            ):
+                raise RuntimeError(
+                    f"Fusion rejected the depth of '{spec.name}'."
+                )
+            # Fixed-depth holes are always flat-bottomed to match the
+            # geometry a router or Forstner bit produces.
+            hole_input.tipAngle = adsk.core.ValueInput.createByString(
+                "180 deg"
+            )
+        hole_input.participantBodies = [target_body]
+
+        hole = hole_features.add(hole_input)
+        if not hole:
+            raise RuntimeError(f"Fusion failed to create '{spec.name}'.")
+        hole.name = spec.name
+        spec.sketch.isVisible = False
+
+        if hole.holeDiameter:
+            self._name_parameter(
+                hole.holeDiameter,
+                f"{spec.parameter_role}Diameter",
+            )
+        depth_extent = adsk.fusion.DistanceExtentDefinition.cast(
+            hole.extentDefinition
+        )
+        if depth_extent and depth_extent.distance:
+            self._name_parameter(
+                depth_extent.distance,
+                f"{spec.parameter_role}Depth",
+            )
+        if hole.tipAngle:
+            self._name_parameter(
+                hole.tipAngle,
+                f"{spec.parameter_role}TipAngle",
+            )
+        return hole
 
     def _add_center_to_center_slot(
         self,
@@ -3193,32 +3319,6 @@ class Tenons(addin.Addin):
             raise RuntimeError("The projected selected edge has zero length.")
         return direction.dotProduct(start.vectorTo(point))
 
-    def _opposite_parallel_edge(
-        self,
-        edge: adsk.fusion.BRepEdge,
-        face: adsk.fusion.BRepFace,
-    ) -> adsk.fusion.BRepEdge:
-        candidates = [
-            candidate
-            for loop in face.loops
-            for candidate in loop.edges
-            if candidate != edge
-            and utils.brep.is_linear(candidate)
-            and utils.brep.is_parallel(candidate, edge)
-        ]
-        if not candidates:
-            raise ValueError(
-                "The tenon-board edge face needs an opposite straight edge."
-            )
-        midpoint = utils.brep.edge_middle_point(edge)
-        candidates.sort(
-            key=lambda candidate: midpoint.distanceTo(
-                utils.brep.edge_middle_point(candidate)
-            ),
-            reverse=True,
-        )
-        return candidates[0]
-
     def _extent_direction(
         self,
         sketch: adsk.fusion.Sketch,
@@ -3231,44 +3331,27 @@ class Tenons(addin.Addin):
             else adsk.fusion.ExtentDirections.NegativeExtentDirection
         )
 
-    def _body_index(
-        self,
-        component: adsk.fusion.Component,
-        body: adsk.fusion.BRepBody,
-    ) -> int:
-        for index, candidate in enumerate(component.bRepBodies):
-            if self._same_body_geometry(candidate, body):
-                return index
-        raise RuntimeError("Fusion could not locate a target body.")
-
     def _target_body(
         self,
         component: adsk.fusion.Component,
         role: str,
     ) -> adsk.fusion.BRepBody:
-        index = self._body_indices[role]
-        if index >= component.bRepBodies.count:
-            raise RuntimeError(f"Fusion could not re-resolve the {role} body.")
-        return component.bRepBodies.item(index)
-
-    def _same_body_geometry(
-        self,
-        left: adsk.fusion.BRepBody,
-        right: adsk.fusion.BRepBody,
-    ) -> bool:
-        if abs(left.volume - right.volume) > 1e-7:
-            return False
-        return all(
-            abs(left_value - right_value) <= 1e-7
-            for left_point, right_point in (
-                (left.boundingBox.minPoint, right.boundingBox.minPoint),
-                (left.boundingBox.maxPoint, right.boundingBox.maxPoint),
-            )
-            for left_value, right_value in zip(
-                left_point.asArray(),
-                right_point.asArray(),
-            )
+        # Re-resolve via entity token: features created in between can
+        # invalidate direct body references.
+        entities = component.parentDesign.findEntityByToken(
+            self._body_tokens[role]
         )
+        body = next(
+            (
+                candidate
+                for entity in entities
+                if (candidate := adsk.fusion.BRepBody.cast(entity))
+            ),
+            None,
+        )
+        if not body:
+            raise RuntimeError(f"Fusion could not re-resolve the {role} body.")
+        return body
 
     def _unique_parameter_prefix(
         self,
@@ -3355,13 +3438,6 @@ class Tenons(addin.Addin):
     def _real_length_expression(self, value: float) -> str:
         return f"{value:.12g} cm"
 
-    def _safe_role(self, name: str) -> str:
-        return "".join(
-            character
-            for character in name.title()
-            if character.isalnum()
-        )
-
     def _translated(
         self,
         point: adsk.core.Point3D,
@@ -3373,14 +3449,6 @@ class Tenons(addin.Addin):
         translation.scaleBy(distance)
         result.translateBy(translation)
         return result
-
-    def _translated_2d(
-        self,
-        point: adsk.core.Point3D,
-        direction: adsk.core.Vector3D,
-        distance: float,
-    ) -> adsk.core.Point3D:
-        return self._translated(point, direction, distance)
 
     def _opposite(
         self,

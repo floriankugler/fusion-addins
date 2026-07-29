@@ -104,6 +104,7 @@ class FloatInput(Input):
     input: adsk.core.ValueCommandInput
     units: str
     minimum_value: float | None = None
+    minimum_inclusive: bool = True
 
     def __init__(self, id: str, name: str, default_value: float, tool_tip: str, units: str, update_visibility: Callable[[], bool] = lambda: True):
         super().__init__(id, name, tool_tip, update_visibility)
@@ -124,7 +125,7 @@ class FloatInput(Input):
         self.input = inputs.addValueInput(self.id, self.name, self.units, value_input)
         if self.minimum_value is not None:
             self.input.minimumValue = self.minimum_value
-            self.input.isMinimumInclusive = True
+            self.input.isMinimumInclusive = self.minimum_inclusive
 
     def create_in_feature_input(self, feature_input: adsk.fusion.CustomFeatureInput):
         value_input = adsk.core.ValueInput.createByString(self.expression)

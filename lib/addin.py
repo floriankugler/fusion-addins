@@ -131,10 +131,16 @@ class Addin(ABC):
         self.input_changed(args.input)
 
     def _execute(self, args: adsk.core.CommandEventArgs):
-        if self.inputs is not None:
-            self.update_inputs_from_ui()
-        self.execute()
-        self.inputs = None
+        try:
+            if self.inputs is not None:
+                self.update_inputs_from_ui()
+            self.execute()
+        except Exception as error:
+            self.log_exception_traceback("execute", error)
+            args.executeFailed = True
+            args.executeFailedMessage = str(error) or error.__class__.__name__
+        finally:
+            self.inputs = None
 
     def _execute_preview(self, args: adsk.core.CommandEventArgs):
         pass

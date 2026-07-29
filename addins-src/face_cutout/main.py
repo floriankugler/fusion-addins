@@ -176,6 +176,7 @@ class FaceCutoutInputs(inputs.Inputs):
             update_visibility=triangle_input_visible,
         )
         self.triangle_spacing.minimum_value = 0
+        self.triangle_spacing.minimum_inclusive = False
         self.align_triangles = inputs.CheckboxInput(
             id="align_triangles",
             name="Align Triangles",
@@ -197,6 +198,7 @@ class FaceCutoutInputs(inputs.Inputs):
             ),
         )
         self.cross_width.minimum_value = 0
+        self.cross_width.minimum_inclusive = False
 
         super().__init__()
 
@@ -204,6 +206,7 @@ class FaceCutoutInputs(inputs.Inputs):
 class FaceCutout(addin.Addin):
     inputs: FaceCutoutInputs
     _parameter_prefix: str
+    _remainder_parameter_name: str | None = None
 
     @property
     def plugin_name(self) -> str:
@@ -280,6 +283,7 @@ class FaceCutout(addin.Addin):
         self._parameter_prefix = self._unique_parameter_prefix(
             component.parentDesign
         )
+        self._remainder_parameter_name = None
         target_bodies: list[adsk.fusion.BRepBody] = []
         target_body_locators: list[_BodyLocator] = []
         target_body_indices: list[int] = []
@@ -353,10 +357,6 @@ class FaceCutout(addin.Addin):
                     raise RuntimeError(
                         "The triangle pattern directions were not created."
                     )
-                existing_pattern_body_tokens = {
-                    body.entityToken
-                    for body in component.bRepBodies
-                }
                 pattern_extrude = self._create_pattern_extrude(
                     component,
                     pattern_sketch,
@@ -366,12 +366,13 @@ class FaceCutout(addin.Addin):
                     face_index,
                     face_count,
                 )
-                self._create_solid_triangle_pattern(
+                pattern_bodies = cast(
+                    list[adsk.fusion.BRepBody],
+                    utils.fusion.as_list(pattern_extrude.bodies),
+                )
+                pattern_feature = self._create_solid_triangle_pattern(
                     component,
-                    cast(
-                        list[adsk.fusion.BRepBody],
-                        utils.fusion.as_list(pattern_extrude.bodies),
-                    ),
+                    pattern_bodies,
                     u_direction,
                     v_direction,
                     pitch_u_expression,
@@ -379,15 +380,23 @@ class FaceCutout(addin.Addin):
                     face_index,
                     face_count,
                 )
-                pattern_bodies = [
-                    body
-                    for body in component.bRepBodies
-                    if body.entityToken not in existing_pattern_body_tokens
-                ]
+                if pattern_feature:
+                    for body in pattern_feature.bodies:
+                        if not any(
+                            body == existing
+                            for existing in pattern_bodies
+                        ):
+                            pattern_bodies.append(body)
                 if not pattern_bodies:
                     raise RuntimeError(
                         "The solid triangle pattern did not create any tool "
                         f"bodies for selected face {face_index}."
+                    )
+                if len(tool_bodies) != 1:
+                    raise RuntimeError(
+                        "The full cutout tool for selected face "
+                        f"{face_index} is not a single body "
+                        f"({len(tool_bodies)} bodies found)."
                     )
                 intersection = self._create_intersect_combine(
                     component,
@@ -442,7 +451,7 @@ class FaceCutout(addin.Addin):
                         component,
                         locator,
                         "cut tool",
-                        tool_bodies,
+                        [target_body, *tool_bodies],
                     )
                 )
             last_combine = self._create_cut_combine(
@@ -741,6 +750,7 @@ class FaceCutout(addin.Addin):
         outer_curves: list[adsk.fusion.SketchCurve] = []
         inner_loop_curves: list[list[adsk.fusion.SketchCurve]] = []
         inner_loop_index = 0
+        inner_inset_reference: str | None = None
 
         for loop in face.loops:
             edges = cast(list[adsk.core.Base], utils.fusion.as_list(loop.edges))
@@ -761,22 +771,28 @@ class FaceCutout(addin.Addin):
             if loop.isOuter:
                 input_value = self.inputs.outer_inset
                 parameter_role = "outerInset"
+                expression = input_value.expression
             else:
                 inner_loop_index += 1
                 input_value = self.inputs.inner_feature_inset
                 parameter_role = f"innerInset{inner_loop_index}"
+                # Later inner loops reference the first inner-inset parameter
+                # instead of duplicating the user expression.
+                expression = inner_inset_reference or input_value.expression
             if input_value.value <= 1e-9:
                 loop_curves = projected
             else:
-                loop_curves = self._offset_loop(
+                loop_curves, offset_parameter = self._offset_loop(
                     sketch=sketch,
                     source_curves=projected,
                     distance=input_value.value,
-                    expression=input_value.expression,
+                    expression=expression,
                     original_area=original_area,
                     should_be_smaller=loop.isOuter,
                     parameter_role=parameter_role,
                 )
+                if not loop.isOuter and inner_inset_reference is None:
+                    inner_inset_reference = offset_parameter.name
 
             final_curves.extend(loop_curves)
             if loop.isOuter:
@@ -1136,6 +1152,8 @@ class FaceCutout(addin.Addin):
         sketch: adsk.fusion.Sketch,
         point: adsk.core.Point3D,
     ) -> adsk.fusion.Profile | None:
+        # Note: Profile.face is positioned in sketch space (verified
+        # empirically), so the sketch-space probe points are passed directly.
         for profile in sketch.profiles:
             face = profile.face
             if face and face.isPointOnFace(point, 1e-6):
@@ -1298,21 +1316,29 @@ class FaceCutout(addin.Addin):
             centerline.isConstruction = True
 
             constraints = sketch.geometricConstraints
-            constraints.addCoincident(
+            anchored_first = self._add_curve_coincident(
+                constraints,
                 first_line.startSketchPoint,
                 first_inner_curve,
+                first_corner,
             )
-            constraints.addCoincident(
+            anchored_second = self._add_curve_coincident(
+                constraints,
                 first_line.endSketchPoint,
                 second_inner_curve,
+                second_corner,
             )
-            constraints.addCoincident(
+            self._add_curve_coincident(
+                constraints,
                 second_line.endSketchPoint,
                 first_outer_curve,
+                third_point,
             )
-            constraints.addCoincident(
+            self._add_curve_coincident(
+                constraints,
                 third_line.endSketchPoint,
                 second_outer_curve,
+                fourth_corner,
             )
             constraints.addMidPoint(
                 centerline.startSketchPoint,
@@ -1322,13 +1348,54 @@ class FaceCutout(addin.Addin):
                 centerline.endSketchPoint,
                 third_line,
             )
+            # The fourth tab side needs no constraint of its own: its
+            # endpoints are shared with the constrained sides, and the
+            # midpoint constraints already force the quad to close as a
+            # parallelogram-free rectangle.
             constraints.addPerpendicular(first_line, centerline)
             constraints.addParallel(second_line, centerline)
-            constraints.addPerpendicular(third_line, centerline)
+            if not (anchored_first and anchored_second):
+                # With both inner corners snapped to curve endpoints the tab
+                # is already fixed and this constraint would be redundant.
+                constraints.addPerpendicular(third_line, centerline)
+            if not (anchored_first or anchored_second):
+                # The tab width is not implied by curve endpoints (e.g. a
+                # circular inner loop), so it needs a driving dimension.
+                self._dimension_line_length(
+                    sketch,
+                    first_line,
+                    f"{tab_width} cm",
+                    parameter_role=f"tab{len(tab_boundaries) + 1}Width",
+                )
             tab_boundaries.append(
                 [first_line, second_line, third_line, fourth_line]
             )
         return tab_boundaries
+
+    def _add_curve_coincident(
+        self,
+        constraints: adsk.fusion.GeometricConstraints,
+        sketch_point: adsk.fusion.SketchPoint,
+        curve: adsk.fusion.SketchCurve,
+        model_point: adsk.core.Point3D,
+    ) -> bool:
+        # Snap to an existing curve endpoint when the tab corner lands on one
+        # (e.g. the corner of a rectangular inner loop). This pins the tab
+        # without an extra dimension. Returns True when snapped.
+        tolerance = self.app.pointTolerance * 10
+        for candidate in (
+            getattr(curve, "startSketchPoint", None),
+            getattr(curve, "endSketchPoint", None),
+        ):
+            if (
+                candidate
+                and candidate.worldGeometry.distanceTo(model_point)
+                <= tolerance
+            ):
+                constraints.addCoincident(sketch_point, candidate)
+                return True
+        constraints.addCoincident(sketch_point, curve)
+        return False
 
     def _curve_sets_intersect(
         self,
@@ -1472,7 +1539,7 @@ class FaceCutout(addin.Addin):
         original_area: float,
         should_be_smaller: bool,
         parameter_role: str,
-    ) -> list[adsk.fusion.SketchCurve]:
+    ) -> tuple[list[adsk.fusion.SketchCurve], adsk.fusion.ModelParameter]:
         direction_sign: int | None = None
 
         for sign in (1, -1):
@@ -1511,7 +1578,10 @@ class FaceCutout(addin.Addin):
                 "Fusion did not create a parameter for the loop offset."
             )
         self._name_parameter(dimension.parameter, parameter_role)
-        return cast(list[adsk.fusion.SketchCurve], list(constraint.childCurves))
+        return (
+            cast(list[adsk.fusion.SketchCurve], list(constraint.childCurves)),
+            dimension.parameter,
+        )
 
     def _add_offset_constraint(
         self,
@@ -2617,14 +2687,16 @@ class FaceCutout(addin.Addin):
             raise RuntimeError("Fusion failed to initialize the cutout tool extrude.")
 
         self._set_extrude_start(extrude_input, start_face)
-        remainder_expression = self.inputs.remaining_material.expression
         # A negative to-entity offset stops before the entity in the extrude
-        # direction, leaving material at the opposite face.
-        signed_remainder = f"-({remainder_expression})"
+        # direction, leaving material at the opposite face. Later extrudes
+        # reference the first named offset parameter instead of duplicating
+        # the user expression.
         extent = adsk.fusion.ToEntityExtentDefinition.create(
             opposite_face,
             False,
-            adsk.core.ValueInput.createByString(signed_remainder),
+            adsk.core.ValueInput.createByString(
+                self._remainder_offset_expression()
+            ),
         )
         if not extent:
             raise RuntimeError("Fusion failed to define the opposite-face extrude extent.")
@@ -2686,11 +2758,12 @@ class FaceCutout(addin.Addin):
             raise RuntimeError("Fusion failed to initialize the triangle extrude.")
 
         self._set_extrude_start(extrude_input, start_face)
-        signed_remainder = f"-({self.inputs.remaining_material.expression})"
         extent = adsk.fusion.ToEntityExtentDefinition.create(
             opposite_face,
             False,
-            adsk.core.ValueInput.createByString(signed_remainder),
+            adsk.core.ValueInput.createByString(
+                self._remainder_offset_expression()
+            ),
         )
         if not extent:
             raise RuntimeError("Fusion failed to define the triangle extrude extent.")
@@ -2720,6 +2793,12 @@ class FaceCutout(addin.Addin):
             face_count,
         )
         return extrude
+
+    def _remainder_offset_expression(self) -> str:
+        return (
+            self._remainder_parameter_name
+            or f"-({self.inputs.remaining_material.expression})"
+        )
 
     def _name_extrude_parameters(
         self,
@@ -2761,6 +2840,8 @@ class FaceCutout(addin.Addin):
                         face_count,
                     ),
                 )
+        if end_offset and self._remainder_parameter_name is None:
+            self._remainder_parameter_name = end_offset.name
 
     def _set_extrude_start(
         self,
@@ -3029,18 +3110,20 @@ class FaceCutout(addin.Addin):
         sketch: adsk.fusion.Sketch,
         outer_curves: list[adsk.fusion.SketchCurve],
     ) -> adsk.fusion.Profile | None:
-        outer_tokens = {curve.entityToken for curve in outer_curves}
         candidates: list[adsk.fusion.Profile] = []
         for profile in sketch.profiles:
             outer_loop = next((loop for loop in profile.profileLoops if loop.isOuter), None)
             if not outer_loop:
                 continue
-            loop_tokens = {
-                curve.sketchEntity.entityToken
-                for curve in outer_loop.profileCurves
-                if curve.sketchEntity
-            }
-            if loop_tokens & outer_tokens:
+            uses_outer_curve = any(
+                profile_curve.sketchEntity
+                and any(
+                    profile_curve.sketchEntity == outer_curve
+                    for outer_curve in outer_curves
+                )
+                for profile_curve in outer_loop.profileCurves
+            )
+            if uses_outer_curve:
                 candidates.append(profile)
         if not candidates:
             return None

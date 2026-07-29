@@ -61,6 +61,19 @@ class _ResolvedGeometry:
 
 
 @dataclass(frozen=True)
+class _AdditionalBoard:
+    """A board selected via an additional edge. It receives the same
+    connector pattern as the first board: the shared access-sketch profiles
+    are extruded into it, and its guide holes are added to the shared
+    small-face sketch."""
+
+    edge: adsk.fusion.BRepEdge
+    access_face: adsk.fusion.BRepFace
+    small_face: adsk.fusion.BRepFace
+    access_thickness: float
+
+
+@dataclass(frozen=True)
 class _GuideHole:
     diameter: float
     diameter_expression: str
@@ -223,13 +236,16 @@ class ConnectorInputs(inputs.Inputs):
 
         self.edge = inputs.SelectionByEntityTokenInput(
             id="edge",
-            name="Edge",
+            name="Edges",
             filter=["LinearEdges"],
             lower_bound=1,
-            upper_bound=1,
+            upper_bound=0,
             tool_tip=(
-                "Select the edge of the board whose large face receives the "
-                "connector access holes."
+                "Select one or more parallel edges lying in one plane. The "
+                "first edge's large face receives the access holes and "
+                "defines the connector positions; every edge's board gets "
+                "the same pattern. The common plane must be perpendicular "
+                "to the first edge's large face."
             ),
         )
         self.size = inputs.DropDownInput(
@@ -431,7 +447,7 @@ class ConnectorInputs(inputs.Inputs):
 class Connector(addin.Addin):
     inputs: ConnectorInputs
     _parameter_prefix: str
-    _target_body_indices: dict[str, int]
+    _target_body_tokens: dict[str, str]
 
     @property
     def plugin_name(self) -> str:
@@ -480,13 +496,23 @@ class Connector(addin.Addin):
             return True
         if input.id == self.inputs.edge.id:
             edge = adsk.fusion.BRepEdge.cast(selection)
-            return bool(
+            if not (
                 edge
                 and edge.body.isSolid
                 and utils.brep.is_linear(edge)
                 and edge.faces.count == 2
                 and all(utils.brep.is_planar(face) for face in edge.faces)
+            ):
+                return False
+            first = next(
+                (
+                    candidate
+                    for entity in self.inputs.edge.value
+                    if (candidate := adsk.fusion.BRepEdge.cast(entity))
+                ),
+                None,
             )
+            return first is None or utils.brep.is_parallel(first, edge)
         if input.id == self.inputs.points.id:
             return bool(
                 adsk.fusion.BRepVertex.cast(selection)
@@ -510,19 +536,18 @@ class Connector(addin.Addin):
             raise ValueError(error)
 
         geometry = self._resolve_geometry()
+        additional_boards = self._resolve_additional_boards(geometry)
         component = geometry.access_face.body.parentComponent
         design = component.parentDesign
         self._parameter_prefix = self._unique_parameter_prefix(design)
-        self._target_body_indices = {
-            "access": self._body_index(
-                component,
-                geometry.access_face.body,
-            ),
-            "guide": self._body_index(
-                component,
-                geometry.guide_face.body,
-            ),
+        self._target_body_tokens = {
+            "access0": geometry.access_face.body.entityToken,
+            "guide": geometry.guide_face.body.entityToken,
         }
+        for board_index, board in enumerate(additional_boards, start=1):
+            self._target_body_tokens[f"access{board_index}"] = (
+                board.edge.body.entityToken
+            )
         connector_type = ConnectorType(self.inputs.size.value)
         surface = CabineoSurface(self.inputs.cabineo_surface.value)
         positions = self._connector_positions(geometry.edge)
@@ -597,6 +622,7 @@ class Connector(addin.Addin):
             connector_type,
             surface,
             guide_hole,
+            additional_boards,
         )
         self._require_fully_constrained(guide_context.sketch)
 
@@ -621,27 +647,52 @@ class Connector(addin.Addin):
             )
             self._require_fully_constrained(collar_context.sketch)
 
-        access_depth: float | str = (
-            (
-                f"({self.inputs.clamex_board_thickness.expression}) / 2"
-                if self.inputs.clamex_board_thickness.expression
-                else geometry.access_thickness / 2
+        access_faces = [geometry.access_face] + [
+            board.access_face for board in additional_boards
+        ]
+        access_thicknesses = [geometry.access_thickness] + [
+            board.access_thickness for board in additional_boards
+        ]
+        board_count = len(access_faces)
+
+        def board_suffix(index: int) -> str:
+            return "" if index == 0 else str(index + 1)
+
+        def board_name(base: str, index: int) -> str:
+            return (
+                base
+                if board_count == 1
+                else f"{base} (Board {index + 1})"
             )
-            if connector_type.is_clamex
-            else 1.15
-            if surface == CabineoSurface.FLUSH
-            else 1.1
-        )
-        access_cut = self._create_cut_extrude(
-            component=component,
-            sketch=access_context.sketch,
-            target_body=self._target_body(component, "access"),
-            direction=access_cut_direction,
-            distance=access_depth,
-            name="Connector - Access Cut",
-            parameter_role="accessDepth",
-        )
-        last_feature: adsk.fusion.Feature = access_cut
+
+        last_feature: adsk.fusion.Feature | None = None
+        for board_index, (access_face, access_thickness) in enumerate(
+            zip(access_faces, access_thicknesses)
+        ):
+            access_depth: float | str = (
+                (
+                    f"({self.inputs.clamex_board_thickness.expression}) / 2"
+                    if self.inputs.clamex_board_thickness.expression
+                    else access_thickness / 2
+                )
+                if connector_type.is_clamex
+                else 1.15
+                if surface == CabineoSurface.FLUSH
+                else 1.1
+            )
+            last_feature = self._create_cut_extrude(
+                component=component,
+                sketch=access_context.sketch,
+                target_body=self._target_body(
+                    component,
+                    f"access{board_index}",
+                ),
+                direction=access_cut_direction,
+                distance=access_depth,
+                name=board_name("Connector - Access Cut", board_index),
+                parameter_role=f"accessDepth{board_suffix(board_index)}",
+                start_face=access_face,
+            )
 
         if relief_context:
             relief_depth: float | str = (
@@ -649,15 +700,25 @@ class Connector(addin.Addin):
                 if surface == CabineoSurface.FLUSH
                 else self.inputs.cabineo_anti_break_depth.expression
             )
-            last_feature = self._create_cut_extrude(
-                component=component,
-                sketch=relief_context.sketch,
-                target_body=self._target_body(component, "access"),
-                direction=access_cut_direction,
-                distance=relief_depth,
-                name="Connector - Access Relief Cut",
-                parameter_role="accessReliefDepth",
-            )
+            for board_index, access_face in enumerate(access_faces):
+                last_feature = self._create_cut_extrude(
+                    component=component,
+                    sketch=relief_context.sketch,
+                    target_body=self._target_body(
+                        component,
+                        f"access{board_index}",
+                    ),
+                    direction=access_cut_direction,
+                    distance=relief_depth,
+                    name=board_name(
+                        "Connector - Access Relief Cut",
+                        board_index,
+                    ),
+                    parameter_role=(
+                        f"accessReliefDepth{board_suffix(board_index)}"
+                    ),
+                    start_face=access_face,
+                )
 
         last_feature = self._create_cut_extrude(
             component=component,
@@ -688,18 +749,30 @@ class Connector(addin.Addin):
             return "An active Fusion design is required."
         if design.designType != adsk.fusion.DesignTypes.ParametricDesignType:  # type: ignore
             return "Connector requires Design History (a parametric design)."
-        if not self.inputs or len(self.inputs.edge.value) != 1:
-            return "Select one straight edge."
+        if not self.inputs or len(self.inputs.edge.value) < 1:
+            return "Select at least one straight edge."
 
-        selected_edge = adsk.fusion.BRepEdge.cast(self.inputs.edge.value[0])
-        if not selected_edge or not utils.brep.is_linear(selected_edge):
-            return "The selected entity must be a straight BRep edge."
-        if not selected_edge.body.isSolid:
-            return "The selected edge must belong to a solid body."
-        if selected_edge.faces.count != 2 or not all(
-            utils.brep.is_planar(face) for face in selected_edge.faces
+        for edge_index, selected in enumerate(
+            self.inputs.edge.value,
+            start=1,
         ):
-            return "The selected edge must join two planar faces."
+            selected_edge = adsk.fusion.BRepEdge.cast(selected)
+            if not selected_edge or not utils.brep.is_linear(selected_edge):
+                return (
+                    f"Selected edge {edge_index} must be a straight BRep "
+                    "edge."
+                )
+            if not selected_edge.body.isSolid:
+                return (
+                    f"Selected edge {edge_index} must belong to a solid "
+                    "body."
+                )
+            if selected_edge.faces.count != 2 or not all(
+                utils.brep.is_planar(face) for face in selected_edge.faces
+            ):
+                return (
+                    f"Selected edge {edge_index} must join two planar faces."
+                )
 
         try:
             geometry = self._resolve_geometry()
@@ -716,10 +789,7 @@ class Connector(addin.Addin):
                 "This first Connector version requires both board bodies in "
                 "the active component."
             )
-        if self._same_body_geometry(
-            geometry.access_face.body,
-            geometry.guide_face.body,
-        ):
+        if geometry.access_face.body == geometry.guide_face.body:
             return "The adjacent holes must be cut into a second solid body."
 
         positioning = PositioningMode(self.inputs.positioning.value)
@@ -765,6 +835,72 @@ class Connector(addin.Addin):
                     "End Offset must leave positive spacing between the first "
                     "and last connector."
                 )
+
+        try:
+            additional_boards = self._resolve_additional_boards(geometry)
+        except Exception as exc:
+            return str(exc)
+        if additional_boards:
+            small_plane = adsk.core.Plane.cast(geometry.small_face.geometry)
+            if not small_plane:
+                return "The first edge's small face must be planar."
+            seen_bodies = [geometry.access_face.body]
+            for board in additional_boards:
+                if not utils.brep.is_parallel(board.edge, geometry.edge):
+                    return "All selected edges must be parallel."
+                if any(board.edge.body == body for body in seen_bodies):
+                    return "Each selected edge must lie on a different body."
+                seen_bodies.append(board.edge.body)
+                if board.edge.body == geometry.guide_face.body:
+                    return (
+                        "The adjacent holes must be cut into a second solid "
+                        "body."
+                    )
+                if (
+                    board.edge.body.parentComponent
+                    != design.activeComponent
+                ):
+                    return (
+                        "Activate the component that owns all selected "
+                        "edges, then run Connector again."
+                    )
+                for vertex in (
+                    board.edge.startVertex,
+                    board.edge.endVertex,
+                ):
+                    delta = small_plane.origin.vectorTo(vertex.geometry)
+                    if (
+                        abs(delta.dotProduct(small_plane.normal))
+                        > self.app.pointTolerance * 100
+                    ):
+                        return (
+                            "Every selected edge must lie in the plane of "
+                            "the first edge's small face."
+                        )
+            try:
+                positions = self._connector_positions(geometry.edge)
+            except Exception as exc:
+                return str(exc)
+            span_tolerance = self.app.pointTolerance * 10
+            for board in additional_boards:
+                board_direction = utils.brep.normal_along_edge(board.edge)
+                board_start = board.edge.startVertex.geometry
+                for position in positions:
+                    projected = utils.brep.project_point_onto_edge(
+                        position,
+                        board.edge,
+                    )
+                    distance = board_start.vectorTo(projected).dotProduct(
+                        board_direction
+                    )
+                    if (
+                        distance < -span_tolerance
+                        or distance > board.edge.length + span_tolerance
+                    ):
+                        return (
+                            "Every connector position must lie within every "
+                            "selected edge."
+                        )
 
         connector_type = ConnectorType(self.inputs.size.value)
         surface = CabineoSurface(self.inputs.cabineo_surface.value)
@@ -816,6 +952,46 @@ class Connector(addin.Addin):
             ):
                 return "Collar Diameter cannot be smaller than Core Diameter."
         return None
+
+    def _resolve_additional_boards(
+        self,
+        first: _ResolvedGeometry,
+    ) -> list[_AdditionalBoard]:
+        boards: list[_AdditionalBoard] = []
+        first_normal = utils.brep.normal_away_from_body(first.access_face)
+        for selected in self.inputs.edge.value[1:]:
+            proxy = adsk.fusion.BRepEdge.cast(selected)
+            if not proxy:
+                raise ValueError("Every selection must be a straight edge.")
+            edge = cast(adsk.fusion.BRepEdge, proxy.nativeObject or proxy)
+            access_face: adsk.fusion.BRepFace | None = None
+            small_face: adsk.fusion.BRepFace | None = None
+            for face in edge.faces:
+                if not utils.brep.is_planar(face):
+                    raise ValueError(
+                        "Every selected edge must join two planar faces."
+                    )
+                normal = utils.brep.normal_away_from_body(face)
+                if normal.dotProduct(first_normal) > 1 - 1e-6:
+                    access_face = face
+                else:
+                    small_face = face
+            if not access_face or not small_face:
+                raise ValueError(
+                    "Each additional edge must border a face oriented like "
+                    "the first edge's large face."
+                )
+            boards.append(
+                _AdditionalBoard(
+                    edge=edge,
+                    access_face=access_face,
+                    small_face=small_face,
+                    access_thickness=utils.brep.get_board_thickness(
+                        access_face
+                    ),
+                )
+            )
+        return boards
 
     def _resolve_geometry(self) -> _ResolvedGeometry:
         selected = cast(adsk.fusion.BRepEdge, self.inputs.edge.value[0])
@@ -876,10 +1052,21 @@ class Connector(addin.Addin):
             utils.brep.normal_into_face(edge, small_face),
             0.1,
         )
+        # Exclude every selected edge's body: the guide board is the one
+        # the selected boards are mounted against.
+        excluded_bodies = [access_face.body]
+        for selected in self.inputs.edge.value:
+            proxy = adsk.fusion.BRepEdge.cast(selected)
+            if proxy:
+                native = cast(
+                    adsk.fusion.BRepEdge,
+                    proxy.nativeObject or proxy,
+                )
+                excluded_bodies.append(native.body)
         candidates: list[adsk.fusion.BRepFace] = []
         component = access_face.body.parentComponent
         for body in component.bRepBodies:
-            if self._same_body_geometry(body, access_face.body):
+            if any(body == excluded for excluded in excluded_bodies):
                 continue
             for face in body.faces:
                 if (
@@ -1182,15 +1369,26 @@ class Connector(addin.Addin):
         connector_type: ConnectorType,
         surface: CabineoSurface,
         guide_hole: _GuideHole,
+        additional_boards: list[_AdditionalBoard],
     ) -> list[adsk.fusion.SketchPoint]:
         if connector_type.is_clamex:
-            centerline_points = self._clamex_guide_center_points(
-                context,
-                alignment_points,
-                small_face,
-                edge,
-                inward,
+            centerline_points, reference_cross_lines = (
+                self._clamex_guide_center_points(
+                    context,
+                    alignment_points,
+                    small_face,
+                    edge,
+                    inward,
+                )
             )
+            for board in additional_boards:
+                centerline_points.extend(
+                    self._clamex_guide_centers_for_board(
+                        context,
+                        board,
+                        reference_cross_lines,
+                    )
+                )
             centers: list[adsk.fusion.SketchPoint] = []
             lines = context.sketch.sketchCurves.sketchLines
             constraints = context.sketch.geometricConstraints
@@ -1244,12 +1442,22 @@ class Connector(addin.Addin):
             )
             return centers
 
-        centerline_points = self._cabineo_guide_center_points(
-            context,
-            alignment_points,
-            inward,
-            surface,
+        centerline_points, reference_offset_lines = (
+            self._cabineo_guide_center_points(
+                context,
+                alignment_points,
+                inward,
+                surface,
+            )
         )
+        for board in additional_boards:
+            centerline_points.extend(
+                self._cabineo_guide_centers_for_board(
+                    context,
+                    board,
+                    reference_offset_lines,
+                )
+            )
         self._add_equal_circles(
             context.sketch,
             centerline_points,
@@ -1288,7 +1496,10 @@ class Connector(addin.Addin):
         small_face: adsk.fusion.BRepFace,
         edge: adsk.fusion.BRepEdge,
         inward: adsk.core.Vector3D,
-    ) -> list[adsk.fusion.SketchPoint]:
+    ) -> tuple[
+        list[adsk.fusion.SketchPoint],
+        list[adsk.fusion.SketchLine],
+    ]:
         projected_points = self._project_points(
             context.sketch,
             alignment_points,
@@ -1302,6 +1513,7 @@ class Connector(addin.Addin):
         lines = context.sketch.sketchCurves.sketchLines
         constraints = context.sketch.geometricConstraints
         centers: list[adsk.fusion.SketchPoint] = []
+        cross_lines: list[adsk.fusion.SketchLine] = []
         for projected_point in projected_points:
             initial_end = self._translated(
                 projected_point.worldGeometry,
@@ -1337,6 +1549,77 @@ class Connector(addin.Addin):
                 )
             constraints.addMidPoint(midpoint, cross_line)
             centers.append(midpoint)
+            cross_lines.append(cross_line)
+        return centers, cross_lines
+
+    def _clamex_guide_centers_for_board(
+        self,
+        context: _SketchContext,
+        board: _AdditionalBoard,
+        reference_cross_lines: list[adsk.fusion.SketchLine],
+    ) -> list[adsk.fusion.SketchPoint]:
+        sketch = context.sketch
+        lines = sketch.sketchCurves.sketchLines
+        constraints = sketch.geometricConstraints
+        board_edge_line = self._project_reference_line(
+            sketch,
+            board.edge,
+            "additional board edge",
+        )
+        opposite_edge = self._project_opposite_edge(
+            sketch,
+            board.small_face,
+            board.edge,
+        )
+        inward = utils.brep.normal_into_face(board.edge, board.small_face)
+        centers: list[adsk.fusion.SketchPoint] = []
+        for reference in reference_cross_lines:
+            # Same station as the first board's cross line, spanning this
+            # board's own small face so the holes stay centered on its
+            # thickness. Collinearity with the reference line carries the
+            # along-edge position without a fixed dimension.
+            start_model = utils.brep.project_point_onto_edge(
+                reference.startSketchPoint.worldGeometry,
+                board.edge,
+            )
+            end_model = self._translated(
+                start_model,
+                inward,
+                board.access_thickness,
+            )
+            cross_line = lines.addByTwoPoints(
+                sketch.modelToSketchSpace(start_model),
+                sketch.modelToSketchSpace(end_model),
+            )
+            if not cross_line:
+                raise RuntimeError(
+                    "Fusion failed to create a board-center construction line."
+                )
+            cross_line.isConstruction = True
+            constraints.addCoincident(
+                cross_line.startSketchPoint,
+                board_edge_line,
+            )
+            constraints.addCoincident(
+                cross_line.endSketchPoint,
+                opposite_edge,
+            )
+            constraints.addCollinear(cross_line, reference)
+            start = cross_line.startSketchPoint.geometry
+            end = cross_line.endSketchPoint.geometry
+            midpoint = sketch.sketchPoints.add(
+                adsk.core.Point3D.create(
+                    (start.x + end.x) / 2,
+                    (start.y + end.y) / 2,
+                    0,
+                )
+            )
+            if not midpoint:
+                raise RuntimeError(
+                    "Fusion failed to create a board-center midpoint."
+                )
+            constraints.addMidPoint(midpoint, cross_line)
+            centers.append(midpoint)
         return centers
 
     def _cabineo_guide_center_points(
@@ -1345,7 +1628,10 @@ class Connector(addin.Addin):
         alignment_points: list[adsk.fusion.SketchPoint],
         inward: adsk.core.Vector3D,
         surface: CabineoSurface,
-    ) -> list[adsk.fusion.SketchPoint]:
+    ) -> tuple[
+        list[adsk.fusion.SketchPoint],
+        list[adsk.fusion.SketchLine],
+    ]:
         projected_points = self._project_points(
             context.sketch,
             alignment_points,
@@ -1385,7 +1671,84 @@ class Connector(addin.Addin):
         )
         for offset_line in offset_lines[1:]:
             constraints.addEqual(offset_lines[0], offset_line)
-        return [line.endSketchPoint for line in offset_lines]
+        return (
+            [line.endSketchPoint for line in offset_lines],
+            offset_lines,
+        )
+
+    def _cabineo_guide_centers_for_board(
+        self,
+        context: _SketchContext,
+        board: _AdditionalBoard,
+        reference_offset_lines: list[adsk.fusion.SketchLine],
+    ) -> list[adsk.fusion.SketchPoint]:
+        sketch = context.sketch
+        lines = sketch.sketchCurves.sketchLines
+        constraints = sketch.geometricConstraints
+        board_edge_line = self._project_reference_line(
+            sketch,
+            board.edge,
+            "additional board edge",
+        )
+        inward = utils.brep.normal_into_face(board.edge, board.small_face)
+        centers: list[adsk.fusion.SketchPoint] = []
+        for reference in reference_offset_lines:
+            # Same station and edge offset as the first board's line.
+            # Collinearity with the reference line carries the along-edge
+            # position without a fixed dimension; the equal constraint
+            # carries the edge offset.
+            reference_length = (
+                reference.startSketchPoint.geometry.distanceTo(
+                    reference.endSketchPoint.geometry
+                )
+            )
+            start_model = utils.brep.project_point_onto_edge(
+                reference.startSketchPoint.worldGeometry,
+                board.edge,
+            )
+            end_model = self._translated(
+                start_model,
+                inward,
+                reference_length,
+            )
+            offset_line = lines.addByTwoPoints(
+                sketch.modelToSketchSpace(start_model),
+                sketch.modelToSketchSpace(end_model),
+            )
+            if not offset_line:
+                raise RuntimeError(
+                    "Fusion failed to create a Cabineo edge-offset line."
+                )
+            offset_line.isConstruction = True
+            constraints.addCoincident(
+                offset_line.startSketchPoint,
+                board_edge_line,
+            )
+            constraints.addCollinear(offset_line, reference)
+            constraints.addEqual(reference, offset_line)
+            centers.append(offset_line.endSketchPoint)
+        return centers
+
+    def _project_reference_line(
+        self,
+        sketch: adsk.fusion.Sketch,
+        edge: adsk.fusion.BRepEdge,
+        description: str,
+    ) -> adsk.fusion.SketchLine:
+        projected = [
+            line
+            for entity in sketch.project2(
+                cast(list[adsk.core.Base], [edge]),
+                True,
+            )
+            if (line := adsk.fusion.SketchLine.cast(entity))
+        ]
+        if len(projected) != 1:
+            raise RuntimeError(
+                f"Fusion failed to project the {description}."
+            )
+        projected[0].isConstruction = True
+        return projected[0]
 
     def _project_opposite_edge(
         self,
@@ -1891,50 +2254,29 @@ class Connector(addin.Addin):
         self._name_parameter(dimension.parameter, parameter_role)
         return dimension
 
-    def _body_index(
-        self,
-        component: adsk.fusion.Component,
-        body: adsk.fusion.BRepBody,
-    ) -> int:
-        for index, candidate in enumerate(component.bRepBodies):
-            if self._same_body_geometry(candidate, body):
-                return index
-        raise RuntimeError(
-            "Fusion could not locate a connector target body."
-        )
-
-    def _same_body_geometry(
-        self,
-        left: adsk.fusion.BRepBody,
-        right: adsk.fusion.BRepBody,
-    ) -> bool:
-        if abs(left.volume - right.volume) > 1e-7:
-            return False
-        left_box = left.boundingBox
-        right_box = right.boundingBox
-        return all(
-            abs(left_value - right_value) <= 1e-7
-            for left_point, right_point in (
-                (left_box.minPoint, right_box.minPoint),
-                (left_box.maxPoint, right_box.maxPoint),
-            )
-            for left_value, right_value in zip(
-                left_point.asArray(),
-                right_point.asArray(),
-            )
-        )
-
     def _target_body(
         self,
         component: adsk.fusion.Component,
         role: str,
     ) -> adsk.fusion.BRepBody:
-        index = self._target_body_indices[role]
-        if index >= component.bRepBodies.count:
+        # Re-resolve via entity token: features created in between can
+        # invalidate direct body references.
+        entities = component.parentDesign.findEntityByToken(
+            self._target_body_tokens[role]
+        )
+        body = next(
+            (
+                candidate
+                for entity in entities
+                if (candidate := adsk.fusion.BRepBody.cast(entity))
+            ),
+            None,
+        )
+        if not body:
             raise RuntimeError(
                 f"Fusion could not re-resolve the connector {role} body."
             )
-        return component.bRepBodies.item(index)
+        return body
 
     def _create_cut_extrude(
         self,
@@ -1945,6 +2287,7 @@ class Connector(addin.Addin):
         distance: float | str,
         name: str,
         parameter_role: str,
+        start_face: adsk.fusion.BRepFace | None = None,
     ) -> adsk.fusion.ExtrudeFeature:
         profiles = adsk.core.ObjectCollection.create()
         for profile in sketch.profiles:
@@ -1958,6 +2301,18 @@ class Connector(addin.Addin):
         )
         if not extrude_input:
             raise RuntimeError(f"Fusion failed to initialize '{name}'.")
+        if start_face is not None:
+            # Start the cut at the target board's own face: additional
+            # boards can sit at a different depth than the sketch plane.
+            start = adsk.fusion.FromEntityStartDefinition.create(
+                start_face,
+                adsk.core.ValueInput.createByReal(0),
+            )
+            if not start:
+                raise RuntimeError(
+                    f"Fusion failed to define the start face of '{name}'."
+                )
+            extrude_input.startExtent = start
         value_input = (
             adsk.core.ValueInput.createByString(distance)
             if isinstance(distance, str)
@@ -1982,6 +2337,16 @@ class Connector(addin.Addin):
         )
         if final_extent and final_extent.distance:
             self._name_parameter(final_extent.distance, parameter_role)
+        final_start = adsk.fusion.FromEntityStartDefinition.cast(
+            extrude.startExtent
+        )
+        if final_start:
+            start_offset = adsk.fusion.ModelParameter.cast(final_start.offset)
+            if start_offset:
+                self._name_parameter(
+                    start_offset,
+                    f"{parameter_role}StartOffset",
+                )
         if extrude.taperAngleOne:
             self._name_parameter(
                 extrude.taperAngleOne,

@@ -1,6 +1,6 @@
 import math
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import cast
 
 import adsk.core
@@ -19,6 +19,8 @@ class _Corner:
     edge_one: adsk.fusion.BRepEdge
     edge_two: adsk.fusion.BRepEdge
     bisector: adsk.core.Vector3D
+    outside_angle: float
+    perpendicular_edge: adsk.fusion.BRepEdge | None = None
 
 
 def run(context, runtime_info: RuntimeInfo):
@@ -62,13 +64,18 @@ class DogBonesNativeInputs(inputs.Inputs):
             tool_tip="Additional clearance added to the dog-bone diameter.",
             units=units,
         )
+        # A zero offset degenerates the in-face region into two lens
+        # profiles that touch only at the corner vertex, so it is excluded.
         self.offset.minimum_value = 0
+        self.offset.minimum_inclusive = False
         super().__init__()
 
 
 class DogBonesNative(addin.Addin):
     inputs: DogBonesNativeInputs
     _parameter_prefix: str
+    _first_center_distance_name: str | None = None
+    _first_diameter_name: str | None = None
 
     @property
     def resource_dir(self) -> str:
@@ -171,7 +178,6 @@ class DogBonesNative(addin.Addin):
             ]
             face, corners = self._face_and_corners_for_edges(selected_edges)
 
-        opposite_face = utils.brep.get_opposite_face(face)
         component = face.body.parentComponent
         sketch, circles = self._create_dogbone_sketch(
             component,
@@ -179,15 +185,74 @@ class DogBonesNative(addin.Addin):
             selected_edges,
             corners,
         )
-        profiles = self._dogbone_profiles(sketch, face, corners, circles)
-        extrude = self._create_cut_extrude(
-            component,
-            face,
-            opposite_face,
-            sketch,
-            profiles,
-        )
-        self._group_features(component, sketch, extrude)
+        corner_profiles = self._dogbone_profiles(sketch, face, corners, circles)
+
+        # Cut each corner to the face at the far end of its perpendicular
+        # edge. Corners of different depths (e.g. pocket vs. through window)
+        # get separate extrudes instead of all cutting to the largest
+        # parallel face of the body.
+        groups: list[
+            tuple[adsk.fusion.BRepFace, list[adsk.fusion.Profile]]
+        ] = []
+        for corner, profile in corner_profiles:
+            extent_face = self._extent_face_for_corner(face, corner)
+            group = next(
+                (item for item in groups if item[0] == extent_face),
+                None,
+            )
+            if group is None:
+                groups.append((extent_face, [profile]))
+            elif all(profile != existing for existing in group[1]):
+                group[1].append(profile)
+
+        last_extrude: adsk.fusion.ExtrudeFeature | None = None
+        for group_index, (extent_face, group_profiles) in enumerate(
+            groups,
+            start=1,
+        ):
+            last_extrude = self._create_cut_extrude(
+                component,
+                face,
+                extent_face,
+                sketch,
+                adsk.core.ObjectCollection.createWithArray(
+                    cast(list[adsk.core.Base], group_profiles)
+                ),
+                group_index,
+                len(groups),
+            )
+        if not last_extrude:
+            raise RuntimeError("Dog Bones (Native) did not create any cut.")
+        self._group_features(component, sketch, last_extrude)
+
+    def _extent_face_for_corner(
+        self,
+        face: adsk.fusion.BRepFace,
+        corner: _Corner,
+    ) -> adsk.fusion.BRepFace:
+        edge = corner.perpendicular_edge
+        plane = adsk.core.Plane.cast(face.geometry)
+        if edge and plane:
+            far_vertex = (
+                edge.endVertex
+                if self._same_vertex(edge.startVertex, corner.vertex)
+                else edge.startVertex
+            )
+            candidates = [
+                candidate
+                for candidate in far_vertex.faces
+                if candidate != face
+                and (
+                    candidate_plane := adsk.core.Plane.cast(
+                        candidate.geometry
+                    )
+                )
+                and candidate_plane.normal.isParallelTo(plane.normal)
+            ]
+            if candidates:
+                candidates.sort(key=lambda item: item.area, reverse=True)
+                return candidates[0]
+        return utils.brep.get_opposite_face(face)
 
     def _validation_error(self) -> str | None:
         design = adsk.fusion.Design.cast(self.app.activeProduct)
@@ -199,8 +264,8 @@ class DogBonesNative(addin.Addin):
             return "Select one planar face, or one or more parallel edges."
         if self.inputs.diameter.value <= 0:
             return "Tool Diameter must be greater than zero."
-        if self.inputs.offset.value < 0:
-            return "Offset cannot be negative."
+        if self.inputs.offset.value <= 0:
+            return "Offset must be greater than zero."
 
         entities = self.inputs.entities.value
         faces = [
@@ -228,8 +293,8 @@ class DogBonesNative(addin.Addin):
                 )
             if not self._corners_for_face(face):
                 return (
-                    "The selected face has no eligible concave outer-loop "
-                    "corners with perpendicular linear body edges."
+                    "The selected face has no eligible concave corners "
+                    "with perpendicular linear body edges."
                 )
             try:
                 utils.brep.get_opposite_face(face)
@@ -264,7 +329,7 @@ class DogBonesNative(addin.Addin):
         try:
             face, corners = self._face_and_corners_for_edges(native_edges)
             if len(corners) != len(native_edges):
-                return "Each selected edge must terminate at a concave outer-loop corner."
+                return "Each selected edge must terminate at a concave corner."
             utils.brep.get_opposite_face(face)
         except Exception as exc:
             return str(exc)
@@ -291,15 +356,14 @@ class DogBonesNative(addin.Addin):
         self,
         face: adsk.fusion.BRepFace,
     ) -> list[_Corner]:
-        outer_loop = next((loop for loop in face.loops if loop.isOuter), None)
-        if not outer_loop:
-            return []
-
         vertices: list[adsk.fusion.BRepVertex] = []
-        for edge in outer_loop.edges:
-            for vertex in (edge.startVertex, edge.endVertex):
-                if not any(self._same_vertex(vertex, item) for item in vertices):
-                    vertices.append(vertex)
+        for loop in face.loops:
+            for edge in loop.edges:
+                for vertex in (edge.startVertex, edge.endVertex):
+                    if not any(
+                        self._same_vertex(vertex, item) for item in vertices
+                    ):
+                        vertices.append(vertex)
 
         corners: list[_Corner] = []
         for vertex in vertices:
@@ -315,7 +379,12 @@ class DogBonesNative(addin.Addin):
                 and utils.brep.is_perpendicular(edge, face)
             ]
             if perpendicular_edges:
-                corners.append(corner)
+                corners.append(
+                    replace(
+                        corner,
+                        perpendicular_edge=perpendicular_edges[0],
+                    )
+                )
         return corners
 
     def _face_and_corners_for_edges(
@@ -344,7 +413,7 @@ class DogBonesNative(addin.Addin):
         if not candidates:
             raise ValueError(
                 "The selected edges do not share a perpendicular face where "
-                "each edge ends at a concave outer-loop corner."
+                "each edge ends at a concave corner."
             )
         candidates.sort(key=lambda candidate: candidate[0].area, reverse=True)
         return candidates[0]
@@ -354,22 +423,21 @@ class DogBonesNative(addin.Addin):
         face: adsk.fusion.BRepFace,
         edge: adsk.fusion.BRepEdge,
     ) -> _Corner | None:
-        outer_loop = next((loop for loop in face.loops if loop.isOuter), None)
-        if not outer_loop:
-            return None
-
         for endpoint in (edge.startVertex, edge.endVertex):
             face_vertex = next(
                 (
                     vertex
-                    for boundary in outer_loop.edges
+                    for loop in face.loops
+                    for boundary in loop.edges
                     for vertex in (boundary.startVertex, boundary.endVertex)
                     if self._same_vertex(vertex, endpoint)
                 ),
                 None,
             )
             if face_vertex:
-                return self._corner_at_vertex(face, face_vertex)
+                corner = self._corner_at_vertex(face, face_vertex)
+                if corner:
+                    return replace(corner, perpendicular_edge=edge)
         return None
 
     def _corner_at_vertex(
@@ -377,49 +445,58 @@ class DogBonesNative(addin.Addin):
         face: adsk.fusion.BRepFace,
         vertex: adsk.fusion.BRepVertex,
     ) -> _Corner | None:
-        outer_loop = next((loop for loop in face.loops if loop.isOuter), None)
-        if not outer_loop:
-            return None
-        incident = [
-            edge
-            for edge in outer_loop.edges
-            if self._edge_has_vertex(edge, vertex)
-        ]
-        if len(incident) != 2 or any(
-            not utils.brep.is_linear(edge)
-            for edge in incident
-        ):
-            return None
+        # Consider every loop: notches sit on the outer loop, while window
+        # and pocket corners sit on inner loops. The off-face probe below
+        # works identically for both.
+        for loop in face.loops:
+            incident = [
+                edge
+                for edge in loop.edges
+                if self._edge_has_vertex(edge, vertex)
+            ]
+            if len(incident) != 2 or any(
+                not utils.brep.is_linear(edge)
+                for edge in incident
+            ):
+                continue
 
-        direction_one = self._edge_direction_from_vertex(incident[0], vertex)
-        direction_two = self._edge_direction_from_vertex(incident[1], vertex)
-        dot = max(-1.0, min(1.0, direction_one.dotProduct(direction_two)))
-        outside_angle = math.acos(dot)
-        if outside_angle <= 1e-6 or outside_angle >= math.pi - 1e-6:
-            return None
+            direction_one = self._edge_direction_from_vertex(
+                incident[0],
+                vertex,
+            )
+            direction_two = self._edge_direction_from_vertex(
+                incident[1],
+                vertex,
+            )
+            dot = max(-1.0, min(1.0, direction_one.dotProduct(direction_two)))
+            outside_angle = math.acos(dot)
+            if outside_angle <= 1e-6 or outside_angle >= math.pi - 1e-6:
+                continue
 
-        bisector = direction_one.copy()
-        bisector.add(direction_two)
-        if not bisector.normalize():
-            return None
+            bisector = direction_one.copy()
+            bisector.add(direction_two)
+            if not bisector.normalize():
+                continue
 
-        probe_distance = min(
-            min(incident[0].length, incident[1].length) * 0.05,
-            max(self.app.pointTolerance * 100, 0.01),
-        )
-        probe = vertex.geometry.copy()
-        probe_vector = bisector.copy()
-        probe_vector.scaleBy(probe_distance)
-        probe.translateBy(probe_vector)
-        if face.isPointOnFace(probe, self.app.pointTolerance * 10):
-            return None
+            probe_distance = min(
+                min(incident[0].length, incident[1].length) * 0.05,
+                max(self.app.pointTolerance * 100, 0.01),
+            )
+            probe = vertex.geometry.copy()
+            probe_vector = bisector.copy()
+            probe_vector.scaleBy(probe_distance)
+            probe.translateBy(probe_vector)
+            if face.isPointOnFace(probe, self.app.pointTolerance * 10):
+                continue
 
-        return _Corner(
-            vertex=vertex,
-            edge_one=incident[0],
-            edge_two=incident[1],
-            bisector=bisector,
-        )
+            return _Corner(
+                vertex=vertex,
+                edge_one=incident[0],
+                edge_two=incident[1],
+                bisector=bisector,
+                outside_angle=outside_angle,
+            )
+        return None
 
     def _same_vertex(
         self,
@@ -500,6 +577,8 @@ class DogBonesNative(addin.Addin):
                 raise RuntimeError("Fusion failed to project every selected edge.")
 
         sketch.isComputeDeferred = True
+        self._first_center_distance_name = None
+        self._first_diameter_name = None
         circles: list[adsk.fusion.SketchCircle] = []
         for corner_index, corner in enumerate(corners, start=1):
             line_one = self._projected_line(
@@ -557,6 +636,13 @@ class DogBonesNative(addin.Addin):
                 return line
         raise RuntimeError("Could not match a projected boundary edge.")
 
+    def _center_distance_for_corner(self, corner: _Corner) -> float:
+        # For non-perpendicular corners the tool cannot reach the corner
+        # along the bisector unless the center moves out by 1/sin(angle)
+        # (same compensation as the old custom-feature version).
+        radius = self.inputs.diameter.value / 2
+        return max(radius, radius / math.sin(corner.outside_angle))
+
     def _add_dogbone_geometry(
         self,
         sketch: adsk.fusion.Sketch,
@@ -566,9 +652,10 @@ class DogBonesNative(addin.Addin):
         corner_index: int,
     ) -> adsk.fusion.SketchCircle:
         vertex_point = sketch.modelToSketchSpace(corner.vertex.geometry)
+        center_distance = self._center_distance_for_corner(corner)
         center_model = corner.vertex.geometry.copy()
         center_offset = corner.bisector.copy()
-        center_offset.scaleBy(self.inputs.diameter.value / 2)
+        center_offset.scaleBy(center_distance)
         center_model.translateBy(center_offset)
         center_point = sketch.modelToSketchSpace(center_model)
 
@@ -583,7 +670,7 @@ class DogBonesNative(addin.Addin):
 
         circle = sketch.sketchCurves.sketchCircles.addByCenterRadius(
             center_line.endSketchPoint,
-            (self.inputs.diameter.value + self.inputs.offset.value) / 2,
+            center_distance + self.inputs.offset.value / 2,
         )
         if not circle:
             raise RuntimeError("Fusion failed to create a dog-bone circle.")
@@ -615,6 +702,38 @@ class DogBonesNative(addin.Addin):
             f"corner{corner_index}_outsideAngle",
         )
 
+        # The length dimension must precede the bisector angular dimension:
+        # the reverse order makes the sketch solver flag some corners as
+        # over-constrained.
+        length_text = center_line.endSketchPoint.geometry.copy()
+        perpendicular = adsk.core.Vector3D.create(
+            -bisector_2d.y,
+            bisector_2d.x,
+            0,
+        )
+        length_text.translateBy(perpendicular)
+        length_dimension = sketch.sketchDimensions.addDistanceDimension(
+            center_line.startSketchPoint,
+            center_line.endSketchPoint,
+            adsk.fusion.DimensionOrientations.AlignedDimensionOrientation,  # type: ignore
+            length_text,
+        )
+        if not length_dimension or not length_dimension.parameter:
+            raise RuntimeError("Fusion failed to dimension the dog-bone center line.")
+        # The 1/sin(angle) reach compensation is baked as a numeric factor:
+        # the corner angle is measured from fixed projected geometry and can
+        # never change parametrically, and a max()/sin() expression that
+        # references the driven angle breaks the sketch solver.
+        compensation = max(1.0, 1.0 / math.sin(corner.outside_angle))
+        length_dimension.parameter.expression = (
+            f"({self.inputs.diameter.expression}) / 2 * {compensation:.9g}"
+        )
+        self._name_parameter(
+            length_dimension.parameter,
+            f"corner{corner_index}_centerDistance",
+        )
+        center_distance_name = length_dimension.parameter.name
+
         half_direction = edge_one_direction.copy()
         half_direction.add(bisector_2d)
         if not half_direction.normalize():
@@ -639,29 +758,6 @@ class DogBonesNative(addin.Addin):
             f"corner{corner_index}_bisectorAngle",
         )
 
-        length_text = center_line.endSketchPoint.geometry.copy()
-        perpendicular = adsk.core.Vector3D.create(
-            -bisector_2d.y,
-            bisector_2d.x,
-            0,
-        )
-        length_text.translateBy(perpendicular)
-        length_dimension = sketch.sketchDimensions.addDistanceDimension(
-            center_line.startSketchPoint,
-            center_line.endSketchPoint,
-            adsk.fusion.DimensionOrientations.AlignedDimensionOrientation,  # type: ignore
-            length_text,
-        )
-        if not length_dimension or not length_dimension.parameter:
-            raise RuntimeError("Fusion failed to dimension the dog-bone center line.")
-        length_dimension.parameter.expression = (
-            f"({self.inputs.diameter.expression}) / 2"
-        )
-        self._name_parameter(
-            length_dimension.parameter,
-            f"corner{corner_index}_centerDistance",
-        )
-
         diameter_text = circle.centerSketchPoint.geometry.copy()
         diameter_text.x += max(
             self.inputs.diameter.value + self.inputs.offset.value,
@@ -673,14 +769,26 @@ class DogBonesNative(addin.Addin):
         )
         if not diameter_dimension or not diameter_dimension.parameter:
             raise RuntimeError("Fusion failed to dimension the dog-bone circle.")
-        diameter_dimension.parameter.expression = (
-            f"({self.inputs.diameter.expression}) + "
-            f"({self.inputs.offset.expression})"
-        )
+        if self._first_center_distance_name is None:
+            # The first corner carries the user's offset expression; later
+            # corners reference it instead of duplicating the expression.
+            diameter_dimension.parameter.expression = (
+                f"2 * {center_distance_name} + "
+                f"({self.inputs.offset.expression})"
+            )
+        else:
+            diameter_dimension.parameter.expression = (
+                f"2 * {center_distance_name} + "
+                f"({self._first_diameter_name} - "
+                f"2 * {self._first_center_distance_name})"
+            )
         self._name_parameter(
             diameter_dimension.parameter,
             f"corner{corner_index}_diameter",
         )
+        if self._first_center_distance_name is None:
+            self._first_center_distance_name = center_distance_name
+            self._first_diameter_name = diameter_dimension.parameter.name
         return circle
 
     def _unique_parameter_prefix(
@@ -760,11 +868,11 @@ class DogBonesNative(addin.Addin):
         face: adsk.fusion.BRepFace,
         corners: list[_Corner],
         circles: list[adsk.fusion.SketchCircle],
-    ) -> adsk.core.ObjectCollection:
+    ) -> list[tuple[_Corner, adsk.fusion.Profile]]:
         if len(corners) != len(circles):
             raise RuntimeError("Each dog-bone corner must have one sketch circle.")
 
-        selected: list[adsk.fusion.Profile] = []
+        selected: list[tuple[_Corner, adsk.fusion.Profile]] = []
         for corner, circle in zip(corners, circles):
             probe = self._dogbone_profile_probe(sketch, face, corner, circle)
             matches = [
@@ -781,15 +889,11 @@ class DogBonesNative(addin.Addin):
                     "Fusion could not identify exactly one in-face profile "
                     "for a dog-bone circle."
                 )
-            if all(matches[0] != profile for profile in selected):
-                selected.append(matches[0])
+            selected.append((corner, matches[0]))
 
-        profiles = adsk.core.ObjectCollection.createWithArray(
-            cast(list[adsk.core.Base], selected)
-        )
-        if profiles.count == 0:
+        if not selected:
             raise RuntimeError("No in-face dog-bone profiles were found.")
-        return profiles
+        return selected
 
     def _profile_uses_circle(
         self,
@@ -824,7 +928,7 @@ class DogBonesNative(addin.Addin):
         if not probe_direction.normalize():
             raise RuntimeError("Could not determine an in-face profile probe.")
 
-        center_distance = self.inputs.diameter.value / 2
+        center_distance = self._center_distance_for_corner(corner)
         progress_towards_center = probe_direction.dotProduct(corner.bisector)
         if progress_towards_center <= 0:
             raise RuntimeError("The dog-bone profile probe points away from its circle.")
@@ -855,6 +959,8 @@ class DogBonesNative(addin.Addin):
         opposite_face: adsk.fusion.BRepFace,
         sketch: adsk.fusion.Sketch,
         profiles: adsk.core.ObjectCollection,
+        group_index: int = 1,
+        group_count: int = 1,
     ) -> adsk.fusion.ExtrudeFeature:
         extrude_input = component.features.extrudeFeatures.createInput(
             profiles,
@@ -885,7 +991,11 @@ class DogBonesNative(addin.Addin):
         extrude = component.features.extrudeFeatures.add(extrude_input)
         if not extrude:
             raise RuntimeError("Fusion failed to create the dog-bone cut.")
-        extrude.name = "Dog Bones (Native) - Cut"
+        extrude.name = (
+            "Dog Bones (Native) - Cut"
+            if group_count == 1
+            else f"Dog Bones (Native) - Cut (Depth {group_index})"
+        )
         sketch.isVisible = False
         return extrude
 

@@ -10,6 +10,27 @@ from lib.fusionbootstrap.runtime import RuntimeInfo
 _addin: addin.Addin | None = None
 
 
+def _mm(value_cm: float) -> str:
+    """Derive a millimeter expression string from a centimeter value so the
+    sketch dimensions can never drift from the analytic placement math."""
+    return f"{value_cm * 10:g} mm"
+
+
+# Blum CLIP top hinge drilling specification (all values in cm).
+HOLE_PAIR_SPACING = 3.2
+PAIR_HALF_SPACING = HOLE_PAIR_SPACING / 2
+DOOR_CUP_DIAMETER = 1.0
+DOOR_CUP_DEPTH = 0.5
+CARCASS_ROW_INSET = 3.85
+DOOR_PATTERN_OFFSETS = {
+    0: 2.7,  # Blum CLIP top 110 Thin +0
+    1: 3.0,  # Blum CLIP top 110 Thin +3
+}
+# Outermost hole-pair extent from the hinge center: half the pair spacing
+# plus the cup radius. Two hinges must not come closer than twice this.
+HINGE_HALF_EXTENT = PAIR_HALF_SPACING + DOOR_CUP_DIAMETER / 2
+
+
 def run(context, runtime_info: RuntimeInfo):
     global _addin
     _addin = ConcealedHingeNative(runtime_info)
@@ -233,7 +254,7 @@ class ConcealedHingeNative(addin.Addin):
         self._create_cut_extrude(
             door_face,
             door_sketch,
-            depth_expression="5 mm",
+            depth_expression=_mm(DOOR_CUP_DEPTH),
             name="Concealed Hinge - Door Holes",
             parameter_role="doorDepth",
         )
@@ -309,16 +330,34 @@ class ConcealedHingeNative(addin.Addin):
                 "Activate the component that owns both selected bodies, then "
                 "run Concealed Hinge (Native) again."
             )
-        if self.inputs.offset.value <= 0:
-            return "End Margin must be greater than zero."
+        if self.inputs.offset.value < HINGE_HALF_EXTENT:
+            return "End Margin must be at least 21 mm."
         if self.inputs.predrill_diameter.value <= 0:
             return "Predrill Diameter must be greater than zero."
         if self.inputs.predrill_depth.value <= 0:
             return "Predrill Depth must be greater than zero."
 
+        orientation_error = self._orientation_error(
+            door_edge,
+            door_face,
+            carcass_edge,
+            carcass_face,
+        )
+        if orientation_error:
+            return orientation_error
+
         positions = self._hinge_positions(carcass_edge, door_edge)
         if len(positions) != 2:
             return "The Door Edge is too short for this End Margin."
+        hinge_distance = utils.vector.subtract(
+            positions[1],
+            positions[0],
+        ).length
+        if hinge_distance <= 2 * HINGE_HALF_EXTENT + 1e-6:
+            return (
+                "The Door Edge is too short for two non-overlapping hinges "
+                "at this End Margin."
+            )
         door_centers = self._door_hole_centers(
             carcass_edge,
             door_edge,
@@ -341,6 +380,64 @@ class ConcealedHingeNative(addin.Addin):
                 "The resulting carcass holes do not fit on the selected "
                 "carcass face."
             )
+        return None
+
+    def _orientation_error(
+        self,
+        door_edge: adsk.fusion.BRepEdge,
+        door_face: adsk.fusion.BRepFace,
+        carcass_edge: adsk.fusion.BRepEdge,
+        carcass_face: adsk.fusion.BRepFace,
+    ) -> str | None:
+        # Mirrors the plausibility checks of the old auto-detecting version:
+        # the door front must face away from the carcass board, and the two
+        # boards must sit within a hinge-mountable distance of each other.
+        normal_into_door_face = utils.brep.normal_into_face(
+            door_edge,
+            door_face,
+        )
+        normal_into_carcass_body = utils.brep.normal_towards_face(
+            carcass_face,
+            utils.brep.get_opposite_face(carcass_face),
+        )
+        if not utils.vector.is_opposite_direction(
+            normal_into_door_face,
+            normal_into_carcass_body,
+        ):
+            return (
+                "The selected edges are not oriented like a door front and "
+                "a carcass board (the door face must face away from the "
+                "carcass board)."
+            )
+        delta = utils.vector.subtract(
+            door_edge.startVertex.geometry.asVector(),
+            carcass_edge.startVertex.geometry.asVector(),
+        )
+        distance_along_door = normal_into_door_face.dotProduct(delta)
+        normal_into_carcass_face = utils.brep.normal_into_face(
+            carcass_edge,
+            carcass_face,
+        )
+        distance_along_carcass = normal_into_carcass_face.dotProduct(delta)
+        carcass_thickness = utils.brep.get_board_thickness(carcass_face)
+        if distance_along_carcass < 1e-6:
+            # Overlay front (a touching door yields exactly zero): the door
+            # must overlap the carcass board edge.
+            if (
+                distance_along_door < -carcass_thickness - 1e-6
+                or distance_along_door > 1e-6
+            ):
+                return (
+                    "The selected edges are further apart than an overlay "
+                    "door front allows."
+                )
+        else:
+            # Inset front: allow up to a 6 mm gap.
+            if distance_along_door < -1e-6 or distance_along_door > 0.6:
+                return (
+                    "The selected edges are further apart than an inset "
+                    "door front allows."
+                )
         return None
 
     def _hinge_positions(
@@ -385,18 +482,7 @@ class ConcealedHingeNative(addin.Addin):
             carcass_edge.startVertex.geometry.asVector(),
         )
         inset = -normal_into_door_face.dotProduct(edge_delta)
-        if (
-            self.inputs.type.value
-            == ConcealedHingeNativeInputs.Types.BLUM_CLIP_TOP_THIN_0.value
-        ):
-            inset += 2.7
-        elif (
-            self.inputs.type.value
-            == ConcealedHingeNativeInputs.Types.BLUM_CLIP_TOP_THIN_3.value
-        ):
-            inset += 3.0
-        else:
-            raise ValueError("Unsupported hinge type.")
+        inset += self._door_pattern_offset()[0]
         return self._paired_hole_centers(
             door_face,
             door_edge,
@@ -424,7 +510,7 @@ class ConcealedHingeNative(addin.Addin):
             hinge_positions[0],
         )
         gap = -normal_into_carcass_face.dotProduct(gap_vector)
-        inset = 3.7 - (gap - 0.15)
+        inset = CARCASS_ROW_INSET - gap
         return self._paired_hole_centers(
             carcass_face,
             carcass_edge,
@@ -449,7 +535,7 @@ class ConcealedHingeNative(addin.Addin):
                 position,
                 origin.asVector(),
             ).dotProduct(x_axis)
-            for pair_offset in (-1.6, 1.6):
+            for pair_offset in (-PAIR_HALF_SPACING, PAIR_HALF_SPACING):
                 center = origin.asVector()
                 center.add(
                     utils.vector.scaled_by(
@@ -512,7 +598,7 @@ class ConcealedHingeNative(addin.Addin):
         lines = sketch.sketchCurves.sketchLines
         pair_lines: list[adsk.fusion.SketchLine] = []
         circle_centers: list[adsk.fusion.SketchPoint] = []
-        spacing_expression = "32 mm"
+        spacing_expression = _mm(HOLE_PAIR_SPACING)
         margin_expression = self.inputs.offset.expression
 
         for hinge_index in range(2):
@@ -606,8 +692,8 @@ class ConcealedHingeNative(addin.Addin):
         self._add_equal_circles(
             sketch,
             circle_centers,
-            radius=0.5,
-            diameter_expression="10 mm",
+            radius=DOOR_CUP_DIAMETER / 2,
+            diameter_expression=_mm(DOOR_CUP_DIAMETER),
             parameter_role="doorDiameter",
         )
         self._require_fully_constrained(sketch)
@@ -642,8 +728,8 @@ class ConcealedHingeNative(addin.Addin):
             sketch,
             projected_door_edge,
             expected_centers[0],
-            3.85,
-            "38.5 mm",
+            CARCASS_ROW_INSET,
+            _mm(CARCASS_ROW_INSET),
             "carcassPatternOffset",
         )
 
@@ -732,17 +818,10 @@ class ConcealedHingeNative(addin.Addin):
         return line
 
     def _door_pattern_offset(self) -> tuple[float, str]:
-        if (
-            self.inputs.type.value
-            == ConcealedHingeNativeInputs.Types.BLUM_CLIP_TOP_THIN_0.value
-        ):
-            return 2.7, "27 mm"
-        if (
-            self.inputs.type.value
-            == ConcealedHingeNativeInputs.Types.BLUM_CLIP_TOP_THIN_3.value
-        ):
-            return 3.0, "30 mm"
-        raise ValueError("Unsupported hinge type.")
+        offset = DOOR_PATTERN_OFFSETS.get(self.inputs.type.value)
+        if offset is None:
+            raise ValueError("Unsupported hinge type.")
+        return offset, _mm(offset)
 
     def _add_linked_offset_line(
         self,
@@ -1061,7 +1140,11 @@ class ConcealedHingeNative(addin.Addin):
         }
         fallback_index = 1
         for parameter in feature.parentComponent.modelParameters:
-            if parameter.createdBy != feature or parameter == excluded:
+            if parameter.createdBy != feature:
+                continue
+            # Compare by name: proxy object equality is not reliable enough
+            # to guarantee the excluded parameter is skipped.
+            if excluded and parameter.name == excluded.name:
                 continue
             suffix = suffixes.get(parameter.role)
             if not suffix:

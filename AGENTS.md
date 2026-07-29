@@ -66,6 +66,7 @@
 
 - Round holes should generally be created using the hole feature instead of creating a circle in a sketch and then extruding that circle. There are exceptions to this rule though. For example, the hole feature works well for fixed depth holes or holes all the way through a part. For holes that stop short of the opposite face with an offset, the hole feature is not a good fit since it doesn't provide that offset option.
 - Always use the "hole to object" feature for holes that should go through the whole body, instead of specifying a fixed hole depth.
+- Fixed-depth hole features must always be flat-bottomed (tip angle 180 deg) instead of using the default drill point.
 
 
 ## Testing Guidelines

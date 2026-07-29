@@ -11,6 +11,28 @@ from lib.fusionbootstrap.runtime import RuntimeInfo
 _addin: addin.Addin | None = None
 
 
+def _mm(value_cm: float) -> str:
+    """Derive a millimeter expression string from a centimeter value so the
+    sketch dimensions can never drift from the analytic placement math."""
+    return f"{value_cm * 10:g} mm"
+
+
+# Latch drilling specifications (all values in cm).
+EVERLOCK_PILOT_COLUMN_OFFSET = 2.6
+EVERLOCK_LOWER_ROW_INSET = 2.6
+EVERLOCK_MAIN_INSET = 3.0
+EVERLOCK_UPPER_ROW_INSET = 4.2
+EVERLOCK_MAIN_DIAMETER = 2.5
+EVERLOCK_CARCASS_PAIR_OFFSET = 1.4
+EVERLOCK_CARCASS_INSET = 2.5
+PULL_LOCK_MAIN_INSET = 3.4
+PULL_LOCK_DIAMETER = 3.81
+PULL_LOCK_COUNTERBORE_DIAMETER = 4.8
+PULL_LOCK_MIN_REMAINING = 1.0
+PULL_LOCK_CARCASS_PAIR_OFFSET = 0.95
+PULL_LOCK_CARCASS_INSET = 2.9
+
+
 @dataclass(frozen=True)
 class _Hole:
     center: adsk.core.Point3D
@@ -231,6 +253,11 @@ class DoorLatchNative(addin.Addin):
             )
         )
 
+        # Pilot holes reference the first predrill parameters instead of
+        # duplicating the user expressions.
+        predrill_diameter_expression = self.inputs.predrill_diameter.expression
+        predrill_depth_expression = self.inputs.predrill_depth.expression
+
         first_sketch: adsk.fusion.Sketch
         if (
             self.inputs.type.value
@@ -238,8 +265,8 @@ class DoorLatchNative(addin.Addin):
         ):
             (
                 door_layout_sketch,
-                door_pilot_circles,
-                door_main_circles,
+                door_pilot_points,
+                door_main_points,
             ) = self._create_everlock_door_sketch(
                 native_door_face,
                 native_door_edge,
@@ -250,37 +277,35 @@ class DoorLatchNative(addin.Addin):
                 native_door_groups[1],
             )
             first_sketch = door_layout_sketch
-            self._create_distance_cut(
+            door_pilot_holes = self._create_hole_feature(
                 native_door_face,
                 door_layout_sketch,
-                depth_value=self.inputs.predrill_depth.value,
-                depth_expression=self.inputs.predrill_depth.expression,
+                door_pilot_points,
+                diameter_expression=predrill_diameter_expression,
+                depth_expression=predrill_depth_expression,
                 name="Door Latch (Native) - Door Pilot Holes",
-                parameter_role="doorPilotDepth",
-                profiles=self._profiles_for_circles(
-                    door_layout_sketch,
-                    door_pilot_circles,
-                ),
+                parameter_role="doorPilot",
             )
-            self._create_through_cut(
+            predrill_diameter_expression = door_pilot_holes.holeDiameter.name
+            depth_extent = adsk.fusion.DistanceExtentDefinition.cast(
+                door_pilot_holes.extentDefinition
+            )
+            if depth_extent and depth_extent.distance:
+                predrill_depth_expression = depth_extent.distance.name
+            self._create_hole_feature(
                 native_door_face,
                 door_layout_sketch,
+                door_main_points,
+                diameter_expression=_mm(EVERLOCK_MAIN_DIAMETER),
+                depth_expression=None,
                 name="Door Latch (Native) - Finger Holes",
-                parameter_role="fingerHoleCut",
-                profiles=self._profiles_for_circles(
-                    door_layout_sketch,
-                    door_main_circles,
-                ),
+                parameter_role="fingerHole",
             )
-            door_main_points = [
-                circle.centerSketchPoint
-                for circle in door_main_circles
-            ]
         elif (
             self.inputs.type.value
             == DoorLatchNativeInputs.Types.PULL_LOCK_44.value
         ):
-            lock_sketch, lock_circles = self._create_pull_lock_door_sketch(
+            lock_sketch, door_main_points = self._create_pull_lock_door_sketch(
                 native_door_face,
                 native_door_edge,
                 native_carcass_edge,
@@ -289,54 +314,55 @@ class DoorLatchNative(addin.Addin):
                 native_door_groups[0],
             )
             first_sketch = lock_sketch
-            self._create_through_cut(
+            self._create_hole_feature(
                 native_door_face,
                 lock_sketch,
+                door_main_points,
+                diameter_expression=_mm(PULL_LOCK_DIAMETER),
+                depth_expression=None,
                 name="Door Latch (Native) - Pull Lock Through Holes",
-                parameter_role="pullLockThroughCut",
+                parameter_role="pullLockThrough",
             )
-            door_main_points = [
-                circle.centerSketchPoint
-                for circle in lock_circles
-            ]
             if len(native_door_groups) > 1:
                 counterbore_sketch = self._create_projected_circle_sketch(
                     native_door_face,
                     door_occurrence,
                     door_main_points,
-                    diameter_expression="48 mm",
+                    diameter_expression=_mm(PULL_LOCK_COUNTERBORE_DIAMETER),
                     name="Door Latch (Native) - Pull Lock Counterbore Layout",
                     parameter_role="pullLockCounterboreDiameter",
                 )
-                counterbore_depth = (
-                    utils.brep.get_board_thickness(native_door_face) - 1.0
-                )
-                self._create_distance_cut(
+                # Cut to the opposite face with a positive offset so the
+                # remaining material stays parametric instead of baking the
+                # board thickness at add-in runtime.
+                self._create_to_face_offset_cut(
                     native_door_face,
                     counterbore_sketch,
-                    depth_value=counterbore_depth,
-                    depth_expression=None,
+                    remaining_expression=_mm(PULL_LOCK_MIN_REMAINING),
                     name="Door Latch (Native) - Pull Lock Counterbores",
-                    parameter_role="pullLockCounterboreDepth",
+                    parameter_role="pullLockCounterbore",
                 )
         else:
             raise ValueError("Unsupported latch type.")
 
-        carcass_sketch = self._create_carcass_sketch_from_door(
-            native_carcass_face,
-            native_door_edge,
-            carcass_occurrence,
-            door_occurrence,
-            door_main_points,
-            native_carcass_groups[0],
+        carcass_sketch, carcass_pilot_points = (
+            self._create_carcass_sketch_from_door(
+                native_carcass_face,
+                native_door_edge,
+                carcass_occurrence,
+                door_occurrence,
+                door_main_points,
+                native_carcass_groups[0],
+            )
         )
-        carcass_cut = self._create_distance_cut(
+        carcass_cut = self._create_hole_feature(
             native_carcass_face,
             carcass_sketch,
-            depth_value=self.inputs.predrill_depth.value,
-            depth_expression=self.inputs.predrill_depth.expression,
+            carcass_pilot_points,
+            diameter_expression=predrill_diameter_expression,
+            depth_expression=predrill_depth_expression,
             name="Door Latch (Native) - Carcass Pilot Holes",
-            parameter_role="carcassPilotDepth",
+            parameter_role="carcassPilot",
         )
         self._group_features(design, first_sketch, carcass_cut)
 
@@ -415,6 +441,17 @@ class DoorLatchNative(addin.Addin):
             return "Predrill Diameter must be greater than zero."
         if self.inputs.predrill_depth.value <= 0:
             return "Predrill Depth must be greater than zero."
+        maximum_predrill = (
+            EVERLOCK_UPPER_ROW_INSET - EVERLOCK_LOWER_ROW_INSET
+            if self.inputs.type.value
+            == DoorLatchNativeInputs.Types.EVERLOCK.value
+            else 2 * PULL_LOCK_CARCASS_PAIR_OFFSET
+        )
+        if self.inputs.predrill_diameter.value >= maximum_predrill:
+            return (
+                "Predrill Diameter is too large for the latch drilling "
+                "pattern."
+            )
 
         latch_positions = self._latch_positions(door_edge)
         if len(latch_positions) != self.inputs.number.value:
@@ -500,10 +537,10 @@ class DoorLatchNative(addin.Addin):
             == DoorLatchNativeInputs.Types.EVERLOCK.value
         ):
             pilot_offsets = [
-                (-2.6, distance + 2.6),
-                (2.6, distance + 2.6),
-                (-2.6, distance + 4.2),
-                (2.6, distance + 4.2),
+                (-EVERLOCK_PILOT_COLUMN_OFFSET, distance + EVERLOCK_LOWER_ROW_INSET),
+                (EVERLOCK_PILOT_COLUMN_OFFSET, distance + EVERLOCK_LOWER_ROW_INSET),
+                (-EVERLOCK_PILOT_COLUMN_OFFSET, distance + EVERLOCK_UPPER_ROW_INSET),
+                (EVERLOCK_PILOT_COLUMN_OFFSET, distance + EVERLOCK_UPPER_ROW_INSET),
             ]
             return [
                 self._holes_on_face(
@@ -517,8 +554,8 @@ class DoorLatchNative(addin.Addin):
                     door_face,
                     door_edge,
                     positions,
-                    [(0, distance + 3.0)],
-                    2.5,
+                    [(0, distance + EVERLOCK_MAIN_INSET)],
+                    EVERLOCK_MAIN_DIAMETER,
                 ),
             ]
 
@@ -530,16 +567,19 @@ class DoorLatchNative(addin.Addin):
                 door_face,
                 door_edge,
                 positions,
-                [(0, distance + 3.4)],
-                3.81,
+                [(0, distance + PULL_LOCK_MAIN_INSET)],
+                PULL_LOCK_DIAMETER,
             )
-            if utils.brep.get_board_thickness(door_face) > 1.0:
+            if (
+                utils.brep.get_board_thickness(door_face)
+                > PULL_LOCK_MIN_REMAINING
+            ):
                 counterbores = self._holes_on_face(
                     door_face,
                     door_edge,
                     positions,
-                    [(0, distance + 3.4)],
-                    4.8,
+                    [(0, distance + PULL_LOCK_MAIN_INSET)],
+                    PULL_LOCK_COUNTERBORE_DIAMETER,
                 )
                 return [through_holes, counterbores]
             return [through_holes]
@@ -566,12 +606,18 @@ class DoorLatchNative(addin.Addin):
             self.inputs.type.value
             == DoorLatchNativeInputs.Types.EVERLOCK.value
         ):
-            offsets = [(-1.4, 2.5 - gap), (1.4, 2.5 - gap)]
+            offsets = [
+                (-EVERLOCK_CARCASS_PAIR_OFFSET, EVERLOCK_CARCASS_INSET - gap),
+                (EVERLOCK_CARCASS_PAIR_OFFSET, EVERLOCK_CARCASS_INSET - gap),
+            ]
         elif (
             self.inputs.type.value
             == DoorLatchNativeInputs.Types.PULL_LOCK_44.value
         ):
-            offsets = [(-0.95, 2.9 - gap), (0.95, 2.9 - gap)]
+            offsets = [
+                (-PULL_LOCK_CARCASS_PAIR_OFFSET, PULL_LOCK_CARCASS_INSET - gap),
+                (PULL_LOCK_CARCASS_PAIR_OFFSET, PULL_LOCK_CARCASS_INSET - gap),
+            ]
         else:
             raise ValueError("Unsupported latch type.")
         return self._holes_on_face(
@@ -681,8 +727,8 @@ class DoorLatchNative(addin.Addin):
         main_holes: list[_Hole],
     ) -> tuple[
         adsk.fusion.Sketch,
-        list[adsk.fusion.SketchCircle],
-        list[adsk.fusion.SketchCircle],
+        list[adsk.fusion.SketchPoint],
+        list[adsk.fusion.SketchPoint],
     ]:
         if len(pilot_holes) != len(main_holes) * 4:
             raise RuntimeError(
@@ -712,24 +758,21 @@ class DoorLatchNative(addin.Addin):
         )
 
         sketch.isComputeDeferred = True
-        main_circles, placement_lines = self._add_door_main_hole_layout(
+        main_points, placement_lines = self._add_door_main_hole_layout(
             sketch,
             face,
             door_edge,
             projected_door_edge,
             projected_carcass_edge,
             main_holes,
-            offset_value=3.0,
-            offset_expression="30 mm",
+            offset_value=EVERLOCK_MAIN_INSET,
+            offset_expression=_mm(EVERLOCK_MAIN_INSET),
             offset_parameter_role="everlockCarcassOffset",
-            diameter_expression="25 mm",
-            diameter_parameter_role="everlockMainDiameter",
         )
-        pilot_circles: list[adsk.fusion.SketchCircle] = []
+        pilot_points: list[adsk.fusion.SketchPoint] = []
         first_column_line: adsk.fusion.SketchLine | None = None
         first_lower_row_line: adsk.fusion.SketchLine | None = None
         first_upper_row_line: adsk.fusion.SketchLine | None = None
-        first_pilot_circle: adsk.fusion.SketchCircle | None = None
 
         for station_index, placement_line in enumerate(
             placement_lines,
@@ -739,7 +782,7 @@ class DoorLatchNative(addin.Addin):
                 (station_index - 1) * 4:station_index * 4
             ]
             (
-                station_circles,
+                station_points,
                 column_line,
                 lower_row_line,
                 upper_row_line,
@@ -752,19 +795,16 @@ class DoorLatchNative(addin.Addin):
                 first_column_line,
                 first_lower_row_line,
                 first_upper_row_line,
-                first_pilot_circle,
             )
             if not first_column_line:
                 first_column_line = column_line
                 first_lower_row_line = lower_row_line
                 first_upper_row_line = upper_row_line
-            if not first_pilot_circle:
-                first_pilot_circle = station_circles[0]
-            pilot_circles.extend(station_circles)
+            pilot_points.extend(station_points)
 
         sketch.isComputeDeferred = False
         self._require_fully_constrained(sketch)
-        return sketch, pilot_circles, main_circles
+        return sketch, pilot_points, main_points
 
     def _create_pull_lock_door_sketch(
         self,
@@ -776,7 +816,7 @@ class DoorLatchNative(addin.Addin):
         main_holes: list[_Hole],
     ) -> tuple[
         adsk.fusion.Sketch,
-        list[adsk.fusion.SketchCircle],
+        list[adsk.fusion.SketchPoint],
     ]:
         face = self._current_face(face)
         door_edge = self._current_edge(door_edge)
@@ -801,22 +841,20 @@ class DoorLatchNative(addin.Addin):
         )
 
         sketch.isComputeDeferred = True
-        circles, _ = self._add_door_main_hole_layout(
+        center_points, _ = self._add_door_main_hole_layout(
             sketch,
             face,
             door_edge,
             projected_door_edge,
             projected_carcass_edge,
             main_holes,
-            offset_value=3.4,
-            offset_expression="34 mm",
+            offset_value=PULL_LOCK_MAIN_INSET,
+            offset_expression=_mm(PULL_LOCK_MAIN_INSET),
             offset_parameter_role="pullLockCarcassOffset",
-            diameter_expression="38.1 mm",
-            diameter_parameter_role="pullLockDiameter",
         )
         sketch.isComputeDeferred = False
         self._require_fully_constrained(sketch)
-        return sketch, circles
+        return sketch, center_points
 
     def _add_door_main_hole_layout(
         self,
@@ -829,10 +867,8 @@ class DoorLatchNative(addin.Addin):
         offset_value: float,
         offset_expression: str,
         offset_parameter_role: str,
-        diameter_expression: str,
-        diameter_parameter_role: str,
     ) -> tuple[
-        list[adsk.fusion.SketchCircle],
+        list[adsk.fusion.SketchPoint],
         list[adsk.fusion.SketchLine],
     ]:
         station_points = self._door_station_points(
@@ -844,9 +880,8 @@ class DoorLatchNative(addin.Addin):
         )
         first_alignment_line: adsk.fusion.SketchLine | None = None
         first_placement_line: adsk.fusion.SketchLine | None = None
-        first_circle: adsk.fusion.SketchCircle | None = None
         placement_lines: list[adsk.fusion.SketchLine] = []
-        circles: list[adsk.fusion.SketchCircle] = []
+        center_points: list[adsk.fusion.SketchPoint] = []
 
         for station_point, main_hole in zip(station_points, main_holes):
             main_center = sketch.modelToSketchSpace(main_hole.center)
@@ -950,33 +985,10 @@ class DoorLatchNative(addin.Addin):
                 )
                 first_placement_line = placement_line
             placement_lines.append(placement_line)
-
-            circle = sketch.sketchCurves.sketchCircles.addByCenterRadius(
-                placement_line.endSketchPoint,
-                main_hole.diameter / 2,
-            )
-            if not circle:
-                raise RuntimeError(
-                    "Fusion failed to create a latch main hole."
-                )
-            if first_circle:
-                if not sketch.geometricConstraints.addEqual(
-                    first_circle,
-                    circle,
-                ):
-                    raise RuntimeError(
-                        "Fusion failed to equalize the latch main holes."
-                    )
-            else:
-                self._dimension_circle(
-                    sketch,
-                    circle,
-                    diameter_expression,
-                    diameter_parameter_role,
-                )
-                first_circle = circle
-            circles.append(circle)
-        return circles, placement_lines
+            # The main holes themselves are created as Hole features from
+            # these fully constrained center points.
+            center_points.append(placement_line.endSketchPoint)
+        return center_points, placement_lines
 
     def _door_station_points(
         self,
@@ -989,10 +1001,14 @@ class DoorLatchNative(addin.Addin):
         door_origin, door_axis, _, _ = (
             utils.brep.coordinate_system_on_face(face, door_edge)
         )
+        # The station chain must be anchored at the same end that
+        # _latch_positions measures from (the edge's start vertex).
+        # coordinate_system_on_face may flip its origin to the opposite end
+        # depending on the edge orientation.
         door_reference_point = self._line_endpoint_near(
             sketch,
             projected_door_edge,
-            door_origin,
+            door_edge.startVertex.geometry,
         )
         door_end_point = (
             projected_door_edge.endSketchPoint
@@ -1177,9 +1193,8 @@ class DoorLatchNative(addin.Addin):
         first_column_line: adsk.fusion.SketchLine | None,
         first_lower_row_line: adsk.fusion.SketchLine | None,
         first_upper_row_line: adsk.fusion.SketchLine | None,
-        first_pilot_circle: adsk.fusion.SketchCircle | None,
     ) -> tuple[
-        list[adsk.fusion.SketchCircle],
+        list[adsk.fusion.SketchPoint],
         adsk.fusion.SketchLine,
         adsk.fusion.SketchLine,
         adsk.fusion.SketchLine,
@@ -1264,9 +1279,11 @@ class DoorLatchNative(addin.Addin):
             column_dimension = self._add_length_dimension(
                 sketch,
                 left_column_line,
-                2.6,
+                EVERLOCK_PILOT_COLUMN_OFFSET,
             )
-            column_dimension.parameter.expression = "26 mm"
+            column_dimension.parameter.expression = _mm(
+                EVERLOCK_PILOT_COLUMN_OFFSET
+            )
             self._name_parameter(
                 column_dimension.parameter,
                 "everlockPilotColumnOffset",
@@ -1355,9 +1372,11 @@ class DoorLatchNative(addin.Addin):
             lower_dimension = self._add_length_dimension(
                 sketch,
                 lower_left_line,
-                0.4,
+                EVERLOCK_MAIN_INSET - EVERLOCK_LOWER_ROW_INSET,
             )
-            lower_dimension.parameter.expression = "4 mm"
+            lower_dimension.parameter.expression = _mm(
+                EVERLOCK_MAIN_INSET - EVERLOCK_LOWER_ROW_INSET
+            )
             self._name_parameter(
                 lower_dimension.parameter,
                 "everlockLowerPilotRowOffset",
@@ -1374,50 +1393,20 @@ class DoorLatchNative(addin.Addin):
             upper_dimension = self._add_length_dimension(
                 sketch,
                 upper_left_line,
-                1.2,
+                EVERLOCK_UPPER_ROW_INSET - EVERLOCK_MAIN_INSET,
             )
-            upper_dimension.parameter.expression = "12 mm"
+            upper_dimension.parameter.expression = _mm(
+                EVERLOCK_UPPER_ROW_INSET - EVERLOCK_MAIN_INSET
+            )
             self._name_parameter(
                 upper_dimension.parameter,
                 "everlockUpperPilotRowOffset",
             )
 
-        circles: list[adsk.fusion.SketchCircle] = []
-        for center_line, hole in zip(row_lines, pilot_holes):
-            circle = sketch.sketchCurves.sketchCircles.addByCenterRadius(
-                center_line.endSketchPoint,
-                hole.diameter / 2,
-            )
-            if not circle:
-                raise RuntimeError(
-                    "Fusion failed to create an Everlock pilot circle."
-                )
-            if first_pilot_circle:
-                if not sketch.geometricConstraints.addEqual(
-                    first_pilot_circle,
-                    circle,
-                ):
-                    raise RuntimeError(
-                        "Fusion failed to equalize the Everlock pilot holes."
-                    )
-            elif circles:
-                if not sketch.geometricConstraints.addEqual(
-                    circles[0],
-                    circle,
-                ):
-                    raise RuntimeError(
-                        "Fusion failed to equalize the Everlock pilot holes."
-                    )
-            else:
-                self._dimension_circle(
-                    sketch,
-                    circle,
-                    self.inputs.predrill_diameter.expression,
-                    "everlockPilotDiameter",
-                )
-            circles.append(circle)
+        # The pilot holes themselves are created as one Hole feature from
+        # these fully constrained row-line endpoints.
         return (
-            circles,
+            [line.endSketchPoint for line in row_lines],
             left_column_line,
             lower_left_line,
             upper_left_line,
@@ -1431,7 +1420,7 @@ class DoorLatchNative(addin.Addin):
         door_occurrence: adsk.fusion.Occurrence | None,
         door_main_points: list[adsk.fusion.SketchPoint],
         holes: list[_Hole],
-    ) -> adsk.fusion.Sketch:
+    ) -> tuple[adsk.fusion.Sketch, list[adsk.fusion.SketchPoint]]:
         if len(holes) != len(door_main_points) * 2:
             raise RuntimeError(
                 "Each latch station requires two carcass pilot holes."
@@ -1483,7 +1472,7 @@ class DoorLatchNative(addin.Addin):
         sketch.isComputeDeferred = True
         first_inset_line: adsk.fusion.SketchLine | None = None
         first_pair_line: adsk.fusion.SketchLine | None = None
-        first_circle: adsk.fusion.SketchCircle | None = None
+        pilot_points: list[adsk.fusion.SketchPoint] = []
         for station_index, projected_main_point in enumerate(
             projected_main_points,
             start=1,
@@ -1531,22 +1520,17 @@ class DoorLatchNative(addin.Addin):
                         "projected Door Edge."
                     )
                 inset_value = (
-                    2.5
+                    EVERLOCK_CARCASS_INSET
                     if self.inputs.type.value
                     == DoorLatchNativeInputs.Types.EVERLOCK.value
-                    else 2.9
+                    else PULL_LOCK_CARCASS_INSET
                 )
                 inset_dimension = self._add_length_dimension(
                     sketch,
                     inset_line,
                     inset_value,
                 )
-                inset_dimension.parameter.expression = (
-                    "25 mm"
-                    if self.inputs.type.value
-                    == DoorLatchNativeInputs.Types.EVERLOCK.value
-                    else "29 mm"
-                )
+                inset_dimension.parameter.expression = _mm(inset_value)
                 self._name_parameter(
                     inset_dimension.parameter,
                     "carcassPilotInsetFromDoorEdge",
@@ -1603,57 +1587,32 @@ class DoorLatchNative(addin.Addin):
                     )
             else:
                 pair_offset = (
-                    1.4
+                    EVERLOCK_CARCASS_PAIR_OFFSET
                     if self.inputs.type.value
                     == DoorLatchNativeInputs.Types.EVERLOCK.value
-                    else 0.95
+                    else PULL_LOCK_CARCASS_PAIR_OFFSET
                 )
                 pair_dimension = self._add_length_dimension(
                     sketch,
                     left_line,
                     pair_offset,
                 )
-                pair_dimension.parameter.expression = (
-                    "14 mm"
-                    if self.inputs.type.value
-                    == DoorLatchNativeInputs.Types.EVERLOCK.value
-                    else "9.5 mm"
-                )
+                pair_dimension.parameter.expression = _mm(pair_offset)
                 self._name_parameter(
                     pair_dimension.parameter,
                     "carcassPilotPairOffset",
                 )
                 first_pair_line = left_line
 
-            for line in (left_line, right_line):
-                circle = sketch.sketchCurves.sketchCircles.addByCenterRadius(
-                    line.endSketchPoint,
-                    left_hole.diameter / 2,
-                )
-                if not circle:
-                    raise RuntimeError(
-                        "Fusion failed to create a carcass pilot circle."
-                    )
-                if first_circle:
-                    if not sketch.geometricConstraints.addEqual(
-                        first_circle,
-                        circle,
-                    ):
-                        raise RuntimeError(
-                            "Fusion failed to equalize the carcass pilots."
-                        )
-                else:
-                    self._dimension_circle(
-                        sketch,
-                        circle,
-                        self.inputs.predrill_diameter.expression,
-                        "carcassPilotDiameter",
-                    )
-                    first_circle = circle
+            # The pilot holes themselves are created as one Hole feature
+            # from these fully constrained pair-line endpoints.
+            pilot_points.extend(
+                [left_line.endSketchPoint, right_line.endSketchPoint]
+            )
 
         sketch.isComputeDeferred = False
         self._require_fully_constrained(sketch)
-        return sketch
+        return sketch, pilot_points
 
     def _project_line(
         self,
@@ -1770,38 +1729,6 @@ class DoorLatchNative(addin.Addin):
         dimension.parameter.expression = expression
         self._name_parameter(dimension.parameter, parameter_role)
 
-    def _profiles_for_circles(
-        self,
-        sketch: adsk.fusion.Sketch,
-        circles: list[adsk.fusion.SketchCircle],
-    ) -> adsk.core.ObjectCollection:
-        selected: list[adsk.fusion.Profile] = []
-        for circle in circles:
-            matches = [
-                profile
-                for profile in sketch.profiles
-                if any(
-                    profile_curve.sketchEntity == circle
-                    for loop in profile.profileLoops
-                    for profile_curve in loop.profileCurves
-                )
-            ]
-            if len(matches) != 1:
-                raise RuntimeError(
-                    f"Fusion could not identify the profile for a circle in "
-                    f"'{sketch.name}'."
-                )
-            if all(matches[0] != profile for profile in selected):
-                selected.append(matches[0])
-        profiles = adsk.core.ObjectCollection.createWithArray(
-            cast(list[adsk.core.Base], selected)
-        )
-        if profiles.count != len(circles):
-            raise RuntimeError(
-                f"'{sketch.name}' did not produce one profile per hole."
-            )
-        return profiles
-
     def _add_length_dimension(
         self,
         sketch: adsk.fusion.Sketch,
@@ -1828,90 +1755,123 @@ class DoorLatchNative(addin.Addin):
         dimension.parameter.value = value
         return dimension
 
-    def _create_distance_cut(
+    def _create_hole_feature(
         self,
         face: adsk.fusion.BRepFace,
         sketch: adsk.fusion.Sketch,
-        depth_value: float,
+        center_points: list[adsk.fusion.SketchPoint],
+        diameter_expression: str,
         depth_expression: str | None,
         name: str,
         parameter_role: str,
-        profiles: adsk.core.ObjectCollection | None = None,
-    ) -> adsk.fusion.ExtrudeFeature:
-        if depth_value <= 0:
-            raise RuntimeError(f"'{name}' requires a positive depth.")
+    ) -> adsk.fusion.HoleFeature:
+        if not center_points:
+            raise RuntimeError(f"'{name}' requires at least one hole center.")
         face = self._current_face(face)
-        profile_input = (
-            profiles
-            if profiles is not None
-            else self._all_profiles(sketch)
-        )
         component = face.body.parentComponent
-        extrude_input = component.features.extrudeFeatures.createInput(
-            profile_input,
-            adsk.fusion.FeatureOperations.CutFeatureOperation,  # type: ignore
+        hole_features = component.features.holeFeatures
+        hole_input = hole_features.createSimpleInput(
+            adsk.core.ValueInput.createByString(diameter_expression)
         )
-        if not extrude_input:
+        if not hole_input:
             raise RuntimeError(f"Fusion failed to initialize '{name}'.")
-        value_input = (
-            adsk.core.ValueInput.createByString(depth_expression)
-            if depth_expression
-            else adsk.core.ValueInput.createByReal(depth_value)
+        if not hole_input.setPositionBySketchPoints(
+            adsk.core.ObjectCollection.createWithArray(
+                cast(list[adsk.core.Base], center_points)
+            )
+        ):
+            raise RuntimeError(f"Fusion rejected the positions of '{name}'.")
+
+        opposite_face = utils.brep.get_opposite_face(face)
+        normal_into_body = utils.brep.normal_towards_face(
+            face,
+            opposite_face,
         )
-        extent = adsk.fusion.DistanceExtentDefinition.create(value_input)
-        if not extent:
-            raise RuntimeError(f"Fusion failed to define the depth of '{name}'.")
-        self._set_cut_extent(face, sketch, extrude_input, extent, name)
-        extrude = component.features.extrudeFeatures.add(extrude_input)
-        if not extrude:
+        # The natural hole direction is opposite the sketch normal.
+        sketch_normal = sketch.xDirection.crossProduct(sketch.yDirection)
+        natural_direction = sketch_normal.copy()
+        natural_direction.scaleBy(-1)
+        hole_input.isDefaultDirection = (
+            natural_direction.dotProduct(normal_into_body) > 0
+        )
+        if depth_expression is None:
+            # Through hole: always cut to the opposite face instead of a
+            # fixed depth.
+            if not hole_input.setOneSideToExtent(
+                opposite_face,
+                False,
+                normal_into_body,
+            ):
+                raise RuntimeError(
+                    f"Fusion rejected the to-face extent of '{name}'."
+                )
+        else:
+            if not hole_input.setDistanceExtent(
+                adsk.core.ValueInput.createByString(depth_expression)
+            ):
+                raise RuntimeError(f"Fusion rejected the depth of '{name}'.")
+            # Fixed-depth holes are always flat-bottomed to match the
+            # geometry a router or Forstner bit produces.
+            hole_input.tipAngle = adsk.core.ValueInput.createByString(
+                "180 deg"
+            )
+        hole_input.participantBodies = [self._current_body(face.body)]
+
+        hole = hole_features.add(hole_input)
+        if not hole:
             raise RuntimeError(f"Fusion failed to create '{name}'.")
-        extrude.name = name
+        hole.name = name
         sketch.isVisible = False
 
-        final_extent = adsk.fusion.DistanceExtentDefinition.cast(
-            extrude.extentOne
-        )
-        if not final_extent or not final_extent.distance:
-            raise RuntimeError(
-                f"Fusion did not create a distance parameter for '{name}'."
+        if hole.holeDiameter:
+            self._name_parameter(
+                hole.holeDiameter,
+                f"{parameter_role}Diameter",
             )
-        self._name_parameter(final_extent.distance, parameter_role)
-        self._name_feature_parameters(
-            extrude,
-            parameter_role,
-            excluded=final_extent.distance,
+        depth_extent = adsk.fusion.DistanceExtentDefinition.cast(
+            hole.extentDefinition
         )
-        return extrude
+        if depth_extent and depth_extent.distance:
+            self._name_parameter(
+                depth_extent.distance,
+                f"{parameter_role}Depth",
+            )
+        if hole.tipAngle:
+            self._name_parameter(
+                hole.tipAngle,
+                f"{parameter_role}TipAngle",
+            )
+        return hole
 
-    def _create_through_cut(
+    def _create_to_face_offset_cut(
         self,
         face: adsk.fusion.BRepFace,
         sketch: adsk.fusion.Sketch,
+        remaining_expression: str,
         name: str,
         parameter_role: str,
-        profiles: adsk.core.ObjectCollection | None = None,
     ) -> adsk.fusion.ExtrudeFeature:
         face = self._current_face(face)
-        profile_input = (
-            profiles
-            if profiles is not None
-            else self._all_profiles(sketch)
-        )
         component = face.body.parentComponent
         extrude_input = component.features.extrudeFeatures.createInput(
-            profile_input,
+            self._all_profiles(sketch),
             adsk.fusion.FeatureOperations.CutFeatureOperation,  # type: ignore
         )
         if not extrude_input:
             raise RuntimeError(f"Fusion failed to initialize '{name}'.")
         opposite_face = utils.brep.get_opposite_face(face)
+        # A negative to-entity offset stops before the opposite face,
+        # leaving the remaining material parametric.
         extent = adsk.fusion.ToEntityExtentDefinition.create(
             opposite_face,
             False,
+            adsk.core.ValueInput.createByString(
+                f"-({remaining_expression})"
+            ),
         )
         if not extent:
             raise RuntimeError(
-                f"Fusion failed to define the opposite-face extent of '{name}'."
+                f"Fusion failed to define the offset extent of '{name}'."
             )
         extent.directionHint = utils.brep.normal_towards_face(
             face,
@@ -1923,7 +1883,25 @@ class DoorLatchNative(addin.Addin):
             raise RuntimeError(f"Fusion failed to create '{name}'.")
         extrude.name = name
         sketch.isVisible = False
-        self._name_feature_parameters(extrude, parameter_role)
+
+        final_extent = adsk.fusion.ToEntityExtentDefinition.cast(
+            extrude.extentOne
+        )
+        offset_parameter = (
+            adsk.fusion.ModelParameter.cast(final_extent.offset)
+            if final_extent
+            else None
+        )
+        if offset_parameter:
+            self._name_parameter(
+                offset_parameter,
+                f"{parameter_role}Remaining",
+            )
+        self._name_feature_parameters(
+            extrude,
+            parameter_role,
+            excluded=offset_parameter,
+        )
         return extrude
 
     def _set_cut_extent(
@@ -2069,7 +2047,11 @@ class DoorLatchNative(addin.Addin):
         }
         fallback_index = 1
         for parameter in feature.parentComponent.modelParameters:
-            if parameter.createdBy != feature or parameter == excluded:
+            if parameter.createdBy != feature:
+                continue
+            # Compare by name: proxy object equality is not reliable enough
+            # to guarantee the excluded parameter is skipped.
+            if excluded and parameter.name == excluded.name:
                 continue
             suffix = suffixes.get(parameter.role)
             if not suffix:
