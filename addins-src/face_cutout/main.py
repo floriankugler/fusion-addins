@@ -43,6 +43,36 @@ class _BodyCut:
     tool_body_locators: list[_BodyLocator]
 
 
+@dataclass(frozen=True)
+class _SeedRhombus:
+    center: adsk.fusion.SketchPoint
+    horizontal: adsk.fusion.SketchLine
+    vertical: adsk.fusion.SketchLine
+    left_top: adsk.fusion.SketchLine
+    top_right: adsk.fusion.SketchLine
+    right_bottom: adsk.fusion.SketchLine
+    bottom_left: adsk.fusion.SketchLine
+
+
+@dataclass(frozen=True)
+class _PatternBoundary:
+    """The oriented rectangle every pattern is laid out in. It comes either
+    from the offset outer loop of a rectangular face or from the user's
+    Pattern Axis and Bounding Box Points."""
+
+    origin: adsk.fusion.SketchPoint
+    u_direction: adsk.fusion.SketchLine
+    v_direction: adsk.fusion.SketchLine
+    extent_u: float
+    extent_v: float
+    u_parameter: adsk.fusion.ModelParameter
+    v_parameter: adsk.fusion.ModelParameter
+    u_vector: adsk.core.Vector3D
+    v_vector: adsk.core.Vector3D
+    corners: list[adsk.fusion.SketchPoint]
+    boundary_lines: list[adsk.fusion.SketchLine]
+
+
 def run(context, runtime_info: RuntimeInfo):
     global _addin
     _addin = FaceCutout(runtime_info)
@@ -59,6 +89,7 @@ class FaceCutoutInputs(inputs.Inputs):
     FULL_CUTOUT = inputs.DropDownInput.Item("Full Cutout", 0)
     TRIANGLES = inputs.DropDownInput.Item("Triangles", 1)
     CROSS = inputs.DropDownInput.Item("Cross", 2)
+    RHOMBUSES = inputs.DropDownInput.Item("Rhombuses", 3)
 
     def __init__(self, units_manager: adsk.core.UnitsManager):
         units = units_manager.defaultLengthUnits
@@ -115,39 +146,51 @@ class FaceCutoutInputs(inputs.Inputs):
         self.pattern_type = inputs.DropDownInput(
             id="pattern_type",
             name="Pattern",
-            options=[self.FULL_CUTOUT, self.TRIANGLES, self.CROSS],
+            options=[
+                self.FULL_CUTOUT,
+                self.TRIANGLES,
+                self.CROSS,
+                self.RHOMBUSES,
+            ],
             default_value=self.FULL_CUTOUT.value,
             tool_tip=(
-                "Create one full cutout, a triangle pattern, or four cutout "
-                "wedges that leave a diagonal cross."
+                "Create one full cutout, a triangle or rhombus pattern, or "
+                "four cutout wedges that leave a diagonal cross."
             ),
         )
         triangle_input_visible = lambda: (
             self.pattern_type.value == self.TRIANGLES.value
         )
-        self.triangle_axis = inputs.SelectionByEntityTokenInput(
-            id="triangle_axis",
+        # Columns, Rows and Spacing drive both tiled patterns.
+        grid_input_visible = lambda: self.pattern_type.value in (
+            self.TRIANGLES.value,
+            self.RHOMBUSES.value,
+        )
+        self.pattern_axis = inputs.SelectionByEntityTokenInput(
+            id="pattern_axis",
             name="Pattern Axis",
             filter=["LinearEdges", "SketchLines", "ConstructionLines"],
             lower_bound=0,
             upper_bound=1,
             tool_tip=(
-                "Optional direction for a rectangular face. Required with "
-                "Bounding Box Points for a non-rectangular face."
+                "Optional direction the bounding box and pattern are "
+                "aligned to. Without it the box is aligned to the sketch "
+                "axes. Only used together with Bounding Box Points, except "
+                "on a rectangular face, where it picks the pattern "
+                "direction."
             ),
-            update_visibility=triangle_input_visible,
         )
-        self.triangle_bounds = inputs.SelectionByEntityTokenInput(
-            id="triangle_bounds",
+        self.bounding_points = inputs.SelectionByEntityTokenInput(
+            id="bounding_points",
             name="Bounding Box Points",
             filter=["Vertices", "SketchPoints", "ConstructionPoints"],
             lower_bound=0,
             upper_bound=4,
             tool_tip=(
-                "Select two to four points that define the oriented bounding "
-                "box extremes. Point order does not matter."
+                "Optional: select two to four points that define the "
+                "bounding box extremes. The cutout is limited to this box. "
+                "Point order does not matter."
             ),
-            update_visibility=triangle_input_visible,
         )
         self.triangle_columns = inputs.IntegerInput(
             id="triangle_columns",
@@ -155,8 +198,11 @@ class FaceCutoutInputs(inputs.Inputs):
             default_value=8,
             minimum=1,
             maximum=100,
-            tool_tip="Number of triangles along the Pattern Axis.",
-            update_visibility=triangle_input_visible,
+            tool_tip=(
+                "Number of pattern columns along the Pattern Axis. The "
+                "first and last are halved by the boundary."
+            ),
+            update_visibility=grid_input_visible,
         )
         self.triangle_rows = inputs.IntegerInput(
             id="triangle_rows",
@@ -164,16 +210,16 @@ class FaceCutoutInputs(inputs.Inputs):
             default_value=6,
             minimum=1,
             maximum=100,
-            tool_tip="Number of triangle rows perpendicular to the Pattern Axis.",
-            update_visibility=triangle_input_visible,
+            tool_tip="Number of pattern rows perpendicular to the Pattern Axis.",
+            update_visibility=grid_input_visible,
         )
         self.triangle_spacing = inputs.FloatInput(
             id="triangle_spacing",
-            name="Triangle Spacing",
+            name="Spacing",
             default_value=2,
-            tool_tip="True edge-to-edge clearance between adjacent triangles.",
+            tool_tip="True edge-to-edge clearance between adjacent cutouts.",
             units=units,
-            update_visibility=triangle_input_visible,
+            update_visibility=grid_input_visible,
         )
         self.triangle_spacing.minimum_value = 0
         self.triangle_spacing.minimum_inclusive = False
@@ -249,13 +295,13 @@ class FaceCutout(addin.Addin):
         if input.id == self.inputs.face.id:
             face = adsk.fusion.BRepFace.cast(selection)
             return bool(face and face.body.isSolid and utils.brep.is_planar(face))
-        if input.id == self.inputs.triangle_axis.id:
+        if input.id == self.inputs.pattern_axis.id:
             return bool(
                 adsk.fusion.BRepEdge.cast(selection)
                 or adsk.fusion.SketchLine.cast(selection)
                 or adsk.fusion.ConstructionAxis.cast(selection)
             )
-        if input.id == self.inputs.triangle_bounds.id:
+        if input.id == self.inputs.bounding_points.id:
             return bool(
                 adsk.fusion.BRepVertex.cast(selection)
                 or adsk.fusion.SketchPoint.cast(selection)
@@ -308,12 +354,35 @@ class FaceCutout(addin.Addin):
             component,
             reference_face,
         )
+        pattern_type = self.inputs.pattern_type.value
+        # The bounding box clips the cutout so every pattern stays strictly
+        # inside it. The cross wedges are already built on the box, so they
+        # need no extra clipping body.
+        bounds_sketch = (
+            self._create_bounds_sketch(
+                component,
+                reference_face,
+                outer_curves,
+            )
+            if self._has_manual_bounds()
+            and pattern_type != FaceCutoutInputs.CROSS.value
+            else None
+        )
+
         pattern_sketch = None
+        cross_sketch = None
+        cross_profiles: list[adsk.fusion.Profile] = []
+        cross_samples: list[adsk.core.Point3D] = []
+        pattern_quantity_u: int | None = None
+        pattern_quantity_v: int | None = None
+        pattern_multiplier = 2
+        pattern_base_name = "Face Cutout - Triangle Pattern"
+        pattern_role = "triangle"
         u_direction = None
         v_direction = None
         pitch_u_expression = None
         pitch_v_expression = None
-        if self.inputs.pattern_type.value == FaceCutoutInputs.TRIANGLES.value:
+        if pattern_type == FaceCutoutInputs.TRIANGLES.value:
             (
                 pattern_sketch,
                 u_direction,
@@ -321,6 +390,35 @@ class FaceCutout(addin.Addin):
                 pitch_u_expression,
                 pitch_v_expression,
             ) = self._create_triangle_pattern_sketch(
+                component,
+                reference_face,
+                outer_curves,
+            )
+        elif pattern_type == FaceCutoutInputs.RHOMBUSES.value:
+            (
+                pattern_sketch,
+                u_direction,
+                v_direction,
+                pitch_u_expression,
+                pitch_v_expression,
+            ) = self._create_rhombus_pattern_sketch(
+                component,
+                reference_face,
+                outer_curves,
+            )
+            # Both lattice families repeat at the full pitch; the extra
+            # instance past each edge is removed by the clip.
+            pattern_quantity_u = self.inputs.triangle_columns.value + 1
+            pattern_quantity_v = self.inputs.triangle_rows.value + 1
+            pattern_multiplier = 1
+            pattern_base_name = "Face Cutout - Rhombus Pattern"
+            pattern_role = "rhombus"
+        elif pattern_type == FaceCutoutInputs.CROSS.value:
+            (
+                cross_sketch,
+                cross_profiles,
+                cross_samples,
+            ) = self._create_cross_pattern_sketch(
                 component,
                 reference_face,
                 outer_curves,
@@ -347,6 +445,79 @@ class FaceCutout(addin.Addin):
                 utils.fusion.as_list(extrude.bodies),
             )
 
+            if bounds_sketch:
+                bounds_extrude = self._create_pattern_extrude(
+                    component,
+                    bounds_sketch,
+                    target.face,
+                    target.opposite_face,
+                    target.cut_direction,
+                    face_index,
+                    face_count,
+                    base_name="Face Cutout - Bounding Box Tool",
+                    role_prefix="bounds",
+                )
+                if len(tool_bodies) != 1:
+                    raise RuntimeError(
+                        "The full cutout tool for selected face "
+                        f"{face_index} is not a single body "
+                        f"({len(tool_bodies)} bodies found)."
+                    )
+                bounds_intersection = self._create_intersect_combine(
+                    component,
+                    tool_bodies[0],
+                    cast(
+                        list[adsk.fusion.BRepBody],
+                        utils.fusion.as_list(bounds_extrude.bodies),
+                    ),
+                    face_index,
+                    face_count,
+                    base_name="Face Cutout - Bounding Box Intersection",
+                )
+                tool_bodies = cast(
+                    list[adsk.fusion.BRepBody],
+                    utils.fusion.as_list(bounds_intersection.bodies),
+                )
+
+            if cross_sketch:
+                cross_extrude = self._create_pattern_extrude(
+                    component,
+                    cross_sketch,
+                    target.face,
+                    target.opposite_face,
+                    target.cut_direction,
+                    face_index,
+                    face_count,
+                    base_name="Face Cutout - Cross Tool",
+                    role_prefix="cross",
+                    selected_profiles=self._cross_wedge_profiles(
+                        cross_sketch,
+                        cross_samples,
+                        cross_profiles,
+                    ),
+                )
+                if len(tool_bodies) != 1:
+                    raise RuntimeError(
+                        "The full cutout tool for selected face "
+                        f"{face_index} is not a single body "
+                        f"({len(tool_bodies)} bodies found)."
+                    )
+                cross_intersection = self._create_intersect_combine(
+                    component,
+                    tool_bodies[0],
+                    cast(
+                        list[adsk.fusion.BRepBody],
+                        utils.fusion.as_list(cross_extrude.bodies),
+                    ),
+                    face_index,
+                    face_count,
+                    base_name="Face Cutout - Cross Intersection",
+                )
+                tool_bodies = cast(
+                    list[adsk.fusion.BRepBody],
+                    utils.fusion.as_list(cross_intersection.bodies),
+                )
+
             if pattern_sketch:
                 if not (
                     u_direction
@@ -365,6 +536,8 @@ class FaceCutout(addin.Addin):
                     target.cut_direction,
                     face_index,
                     face_count,
+                    base_name=pattern_base_name,
+                    role_prefix=pattern_role,
                 )
                 pattern_bodies = cast(
                     list[adsk.fusion.BRepBody],
@@ -379,6 +552,9 @@ class FaceCutout(addin.Addin):
                     pitch_v_expression,
                     face_index,
                     face_count,
+                    quantity_u=pattern_quantity_u,
+                    quantity_v=pattern_quantity_v,
+                    distance_multiplier=pattern_multiplier,
                 )
                 if pattern_feature:
                     for body in pattern_feature.bodies:
@@ -675,7 +851,36 @@ class FaceCutout(addin.Addin):
             and self.inputs.cross_width.value <= 1e-6
         ):
             return "Cross Width must be greater than zero."
-        if self.inputs.pattern_type.value == FaceCutoutInputs.CROSS.value:
+
+        axis_count = len(self.inputs.pattern_axis.value)
+        bounds_count = len(self.inputs.bounding_points.value)
+        if axis_count > 1:
+            return "Select at most one Pattern Axis."
+        if bounds_count == 1:
+            return (
+                "Select at least two Bounding Box Points, or clear the "
+                "point selection."
+            )
+        if bounds_count > 4:
+            return "Select no more than four Bounding Box Points."
+        needs_oriented_box = self.inputs.pattern_type.value in (
+            FaceCutoutInputs.TRIANGLES.value,
+            FaceCutoutInputs.CROSS.value,
+            FaceCutoutInputs.RHOMBUSES.value,
+        )
+        if (
+            axis_count == 1
+            and bounds_count == 0
+            and not needs_oriented_box
+        ):
+            return (
+                "Pattern Axis has no effect without Bounding Box Points."
+            )
+        if bounds_count >= 2:
+            box_error = self._bounding_box_error(face)
+            if box_error:
+                return box_error
+        if needs_oriented_box and bounds_count == 0:
             outer_loop = next(
                 (loop for loop in face.loops if loop.isOuter),
                 None,
@@ -690,43 +895,156 @@ class FaceCutout(addin.Addin):
             )
             if not rectangular_candidate:
                 return (
-                    "Cross currently requires a rectangular selected face "
-                    "with four straight outer edges."
+                    "For a non-rectangular face, select two to four "
+                    "Bounding Box Points (optionally with a Pattern Axis)."
                 )
-        if self.inputs.pattern_type.value == FaceCutoutInputs.TRIANGLES.value:
-            axis_count = len(self.inputs.triangle_axis.value)
-            bounds_count = len(self.inputs.triangle_bounds.value)
-            if axis_count > 1:
-                return "Select at most one Pattern Axis."
-            if bounds_count == 1:
+        return None
+
+    def _bounding_box_extents(
+        self,
+        face: adsk.fusion.BRepFace,
+    ) -> tuple[float, float] | None:
+        """Measure the manual bounding box analytically, before any sketch
+        exists, so the dialog can validate against it."""
+        plane = adsk.core.Plane.cast(face.geometry)
+        if not plane:
+            return None
+        normal = plane.normal.copy()
+        if not normal.normalize():
+            return None
+
+        axis_entity = (
+            self.inputs.pattern_axis.value[0]
+            if self.inputs.pattern_axis.value
+            else None
+        )
+        u_vector: adsk.core.Vector3D | None = None
+        if axis_entity:
+            direction = self._axis_direction(axis_entity)
+            if direction:
+                # Project the axis onto the face plane.
+                along_normal = normal.copy()
+                along_normal.scaleBy(direction.dotProduct(normal))
+                projected = direction.copy()
+                projected.subtract(along_normal)
+                if projected.normalize():
+                    u_vector = projected
+        if u_vector is None:
+            # Matches the sketch-axis fallback used when no axis is given.
+            reference = (
+                adsk.core.Vector3D.create(1, 0, 0)
+                if abs(normal.x) < 0.9
+                else adsk.core.Vector3D.create(0, 1, 0)
+            )
+            u_vector = normal.crossProduct(reference)
+            if not u_vector.normalize():
+                return None
+        v_vector = normal.crossProduct(u_vector)
+        if not v_vector.normalize():
+            return None
+
+        coordinates: list[tuple[float, float]] = []
+        for entity in self.inputs.bounding_points.value:
+            point = self._point_geometry(entity)
+            if not point:
+                return None
+            offset = plane.origin.vectorTo(point)
+            coordinates.append(
+                (offset.dotProduct(u_vector), offset.dotProduct(v_vector))
+            )
+        if len(coordinates) < 2:
+            return None
+        extent_u = max(item[0] for item in coordinates) - min(
+            item[0] for item in coordinates
+        )
+        extent_v = max(item[1] for item in coordinates) - min(
+            item[1] for item in coordinates
+        )
+        return extent_u, extent_v
+
+    def _axis_direction(
+        self,
+        axis: adsk.core.Base,
+    ) -> adsk.core.Vector3D | None:
+        edge = adsk.fusion.BRepEdge.cast(axis)
+        if edge:
+            line = adsk.core.Line3D.cast(edge.geometry)
+            if not line:
+                return None
+            return line.startPoint.vectorTo(line.endPoint)
+        sketch_line = adsk.fusion.SketchLine.cast(axis)
+        if sketch_line:
+            return sketch_line.worldGeometry.startPoint.vectorTo(
+                sketch_line.worldGeometry.endPoint
+            )
+        construction_axis = adsk.fusion.ConstructionAxis.cast(axis)
+        if construction_axis:
+            line = adsk.core.InfiniteLine3D.cast(construction_axis.geometry)
+            return line.direction.copy() if line else None
+        return None
+
+    def _point_geometry(
+        self,
+        entity: adsk.core.Base,
+    ) -> adsk.core.Point3D | None:
+        vertex = adsk.fusion.BRepVertex.cast(entity)
+        if vertex:
+            return vertex.geometry
+        sketch_point = adsk.fusion.SketchPoint.cast(entity)
+        if sketch_point:
+            return sketch_point.worldGeometry
+        construction_point = adsk.fusion.ConstructionPoint.cast(entity)
+        if construction_point:
+            return construction_point.geometry
+        return None
+
+    def _bounding_box_error(
+        self,
+        face: adsk.fusion.BRepFace,
+    ) -> str | None:
+        extents = self._bounding_box_extents(face)
+        if not extents:
+            return None
+        extent_u, extent_v = extents
+        if extent_u <= 1e-6 or extent_v <= 1e-6:
+            return (
+                "The Bounding Box Points must define non-zero extents in "
+                "both directions."
+            )
+        if self.inputs.pattern_type.value == FaceCutoutInputs.RHOMBUSES.value:
+            try:
+                width, height = self._rhombus_dimensions(
+                    extent_u / self.inputs.triangle_columns.value,
+                    extent_v / self.inputs.triangle_rows.value,
+                    self.inputs.triangle_spacing.value,
+                )
+            except ValueError as exc:
+                return str(exc)
+            if width <= 1e-6 or height <= 1e-6:
                 return (
-                    "Select at least two Bounding Box Points, or clear the "
-                    "point selection."
+                    "Spacing is too large for the requested rhombus rows "
+                    "and columns."
                 )
-            if bounds_count > 4:
-                return "Select no more than four Bounding Box Points."
-            if bounds_count >= 2 and axis_count != 1:
-                return (
-                    "Select one Pattern Axis when using Bounding Box Points."
-                )
-            if bounds_count == 0:
-                outer_loop = next(
-                    (loop for loop in face.loops if loop.isOuter),
-                    None,
-                )
-                rectangular_candidate = bool(
-                    outer_loop
-                    and outer_loop.edges.count == 4
-                    and all(
-                        adsk.core.Line3D.cast(edge.geometry)
-                        for edge in outer_loop.edges
-                    )
-                )
-                if not rectangular_candidate:
-                    return (
-                        "For a non-rectangular face, select one Pattern Axis "
-                        "and two to four Bounding Box Points."
-                    )
+            return None
+        if self.inputs.pattern_type.value != FaceCutoutInputs.CROSS.value:
+            return None
+        # For a rectangle every side midpoint has the same distance to both
+        # diagonals, so the widest usable cross band is w*h/hypot(w, h).
+        maximum_width = (
+            extent_u * extent_v / math.hypot(extent_u, extent_v)
+        )
+        if self.inputs.cross_width.value >= maximum_width - 1e-6:
+            design = cast(adsk.fusion.Design, self.app.activeProduct)
+            units = design.unitsManager
+            formatted = units.formatInternalValue(
+                maximum_width,
+                units.defaultLengthUnits,
+                True,
+            )
+            return (
+                "Cross Width is too large for the Bounding Box Points. It "
+                f"must be smaller than {formatted}."
+            )
         return None
 
     def _create_cutout_sketch(
@@ -802,43 +1120,123 @@ class FaceCutout(addin.Addin):
             self._set_construction(sketch, loop_curves, True)
 
         self._set_construction(sketch, final_curves, False)
-        tab_boundaries: list[list[adsk.fusion.SketchLine]] = []
         if self.inputs.tabs.value:
-            tab_boundaries = self._create_tabs(
+            self._create_tabs(
                 sketch,
                 face,
                 outer_curves,
                 inner_loop_curves,
             )
-        if self.inputs.pattern_type.value == FaceCutoutInputs.CROSS.value:
-            sketch.name = "Face Cutout - Cross Layout"
-            profiles = self._create_cross_layout(
-                sketch,
-                outer_curves,
-                tab_boundaries,
+        profile = (
+            self._profile_bounded_by(sketch, outer_curves)
+            or self._largest_profile(sketch)
+        )
+        if not profile:
+            raise RuntimeError(
+                "The inset curves did not create a usable cutout profile."
             )
-        else:
-            profile = (
-                self._profile_bounded_by(sketch, outer_curves)
-                or self._largest_profile(sketch)
-            )
-            if not profile:
-                raise RuntimeError(
-                    "The inset curves did not create a usable cutout profile."
-                )
-            profiles = [profile]
+        profiles = [profile]
         self._require_fully_constrained(sketch)
         return sketch, profiles, outer_curves
 
-    def _create_cross_layout(
+    def _create_cross_pattern_sketch(
+        self,
+        component: adsk.fusion.Component,
+        face: adsk.fusion.BRepFace,
+        outer_curves: list[adsk.fusion.SketchCurve],
+    ) -> tuple[
+        adsk.fusion.Sketch,
+        list[adsk.fusion.Profile],
+        list[adsk.core.Point3D],
+    ]:
+        """The cross wedges live in their own sketch, laid out inside the
+        pattern boundary. Intersecting them with the full cutout tool then
+        applies the face insets and the tabs automatically."""
+        sketch = component.sketches.addWithoutEdges(face)
+        if not sketch:
+            raise RuntimeError("Fusion failed to create the cross layout sketch.")
+        sketch.name = "Face Cutout - Cross Layout"
+        boundary = self._create_rectangular_pattern_boundary(
+            sketch,
+            outer_curves,
+            role_prefix="crossBoundary",
+        )
+        # The boundary closes the wedge profiles, so it must not stay
+        # construction geometry.
+        self._set_construction(
+            sketch,
+            cast(list[adsk.fusion.SketchCurve], boundary.boundary_lines),
+            False,
+        )
+        profiles, samples = self._add_cross_bands(sketch, boundary)
+        self._require_fully_constrained(sketch)
+        return sketch, profiles, samples
+
+    def _cross_wedge_profiles(
         self,
         sketch: adsk.fusion.Sketch,
-        outer_curves: list[adsk.fusion.SketchCurve],
-        tab_boundaries: list[list[adsk.fusion.SketchLine]],
+        samples: list[adsk.core.Point3D],
+        cached: list[adsk.fusion.Profile] | None = None,
     ) -> list[adsk.fusion.Profile]:
-        corners, boundary = self._ordered_rectangular_boundary(
-            outer_curves
+        # The wedges were already identified while the layout was built, so
+        # reuse them as long as Fusion has not invalidated them.
+        if cached and all(profile.isValid for profile in cached):
+            return cached
+        profiles: list[adsk.fusion.Profile] = []
+        for sample in samples:
+            profile = self._profile_containing_point(sketch, sample)
+            if not profile:
+                raise RuntimeError(
+                    "Fusion could not re-resolve a cross cutout wedge."
+                )
+            if profile not in profiles:
+                profiles.append(profile)
+        if len(profiles) != len(samples):
+            raise RuntimeError(
+                "The cross cutout wedges could not be re-resolved uniquely."
+            )
+        return profiles
+
+    def _create_bounds_sketch(
+        self,
+        component: adsk.fusion.Component,
+        face: adsk.fusion.BRepFace,
+        outer_curves: list[adsk.fusion.SketchCurve],
+    ) -> adsk.fusion.Sketch:
+        """A sketch holding only the bounding-box rectangle. Its extruded
+        body is intersected with the cutout tool so every pattern is
+        strictly limited to the box."""
+        sketch = component.sketches.addWithoutEdges(face)
+        if not sketch:
+            raise RuntimeError(
+                "Fusion failed to create the bounding-box sketch."
+            )
+        sketch.name = "Face Cutout - Bounding Box"
+        boundary = self._create_rectangular_pattern_boundary(
+            sketch,
+            outer_curves,
+            role_prefix="bounds",
         )
+        self._set_construction(
+            sketch,
+            cast(list[adsk.fusion.SketchCurve], boundary.boundary_lines),
+            False,
+        )
+        self._require_fully_constrained(sketch)
+        if sketch.profiles.count != 1:
+            raise RuntimeError(
+                "The bounding box did not create exactly one profile "
+                f"({sketch.profiles.count} found)."
+            )
+        return sketch
+
+    def _add_cross_bands(
+        self,
+        sketch: adsk.fusion.Sketch,
+        pattern_boundary: _PatternBoundary,
+    ) -> tuple[list[adsk.fusion.Profile], list[adsk.core.Point3D]]:
+        corners = pattern_boundary.corners
+        boundary = pattern_boundary.boundary_lines
         lines = sketch.sketchCurves.sketchLines
         constraints = sketch.geometricConstraints
         diagonals = [
@@ -867,7 +1265,7 @@ class FaceCutout(addin.Addin):
                 True,
             )
             raise ValueError(
-                "Cross Width is too large for the inset rectangle. It must "
+                "Cross Width is too large for the pattern boundary. It must "
                 f"be smaller than {formatted_maximum}."
             )
 
@@ -901,7 +1299,7 @@ class FaceCutout(addin.Addin):
                 )
                 if len(intersections) != 2:
                     raise RuntimeError(
-                        "A cross boundary did not intersect the inset "
+                        "A cross boundary did not intersect the pattern "
                         "rectangle twice."
                     )
                 first_point, first_side = intersections[0]
@@ -958,17 +1356,9 @@ class FaceCutout(addin.Addin):
             sum(point.geometry.y for point in corners) / 4,
             0,
         )
-        tab_polygons = [
-            [
-                tab[0].startSketchPoint.geometry,
-                tab[0].endSketchPoint.geometry,
-                tab[1].endSketchPoint.geometry,
-                tab[2].endSketchPoint.geometry,
-            ]
-            for tab in tab_boundaries
-        ]
         sample_offset = min(side.length for side in boundary) * 1e-4
         profiles: list[adsk.fusion.Profile] = []
+        samples: list[adsk.core.Point3D] = []
         for side in boundary:
             start = side.startSketchPoint.geometry
             end = side.endSketchPoint.geometry
@@ -996,24 +1386,22 @@ class FaceCutout(addin.Addin):
                     for diagonal in diagonals
                 ):
                     continue
-                if any(
-                    self._point_in_polygon(sample, polygon)
-                    for polygon in tab_polygons
-                ):
-                    continue
                 profile = self._profile_containing_point(
                     sketch,
                     sample,
                 )
                 if profile and profile not in profiles:
                     profiles.append(profile)
+                    # Keep the probe point: the wedge profiles are
+                    # re-resolved from it for every selected face.
+                    samples.append(sample)
 
         if len(profiles) < 4:
             raise RuntimeError(
                 "The cross layout did not create all four cutout wedges "
                 f"({len(profiles)} profiles found)."
             )
-        return profiles
+        return profiles, samples
 
     def _ordered_rectangular_boundary(
         self,
@@ -1175,29 +1563,6 @@ class FaceCutout(addin.Addin):
             line_x * (line_start.y - point.y)
             - (line_start.x - point.x) * line_y
         ) / length
-
-    def _point_in_polygon(
-        self,
-        point: adsk.core.Point3D,
-        polygon: list[adsk.core.Point3D],
-    ) -> bool:
-        inside = False
-        previous = polygon[-1]
-        for current in polygon:
-            crosses = (
-                (current.y > point.y) != (previous.y > point.y)
-                and point.x
-                < (
-                    (previous.x - current.x)
-                    * (point.y - current.y)
-                    / (previous.y - current.y)
-                    + current.x
-                )
-            )
-            if crosses:
-                inside = not inside
-            previous = current
-        return inside
 
     def _create_tabs(
         self,
@@ -1626,20 +1991,19 @@ class FaceCutout(addin.Addin):
             raise RuntimeError("Fusion failed to create the triangle pattern sketch.")
         sketch.name = "Face Cutout - Triangle Seeds"
 
-        (
-            origin,
-            u_direction,
-            v_direction,
-            extent_u,
-            extent_v,
-            extent_u_parameter,
-            extent_v_parameter,
-            u_vector,
-            v_vector,
-        ) = self._create_rectangular_pattern_boundary(
+        boundary = self._create_rectangular_pattern_boundary(
             sketch,
             outer_curves,
         )
+        origin = boundary.origin
+        u_direction = boundary.u_direction
+        v_direction = boundary.v_direction
+        extent_u = boundary.extent_u
+        extent_v = boundary.extent_v
+        extent_u_parameter = boundary.u_parameter
+        extent_v_parameter = boundary.v_parameter
+        u_vector = boundary.u_vector
+        v_vector = boundary.v_vector
 
         columns = self.inputs.triangle_columns.value
         rows = self.inputs.triangle_rows.value
@@ -1967,41 +2331,341 @@ class FaceCutout(addin.Addin):
             pitch_v_expression,
         )
 
+    def _has_manual_bounds(self) -> bool:
+        return len(self.inputs.bounding_points.value) >= 2
+
+    def _rhombus_dimensions(
+        self,
+        pitch_u: float,
+        pitch_v: float,
+        spacing: float,
+    ) -> tuple[float, float]:
+        """Solve rhombus width and height from the pitches and the true
+        edge-to-edge spacing.
+
+        For a rhombus with diagonals w (along u) and h (along v), the gap
+        measured along u between two neighbours is s*hypot(w, h)/h and the
+        gap along v is s*hypot(w, h)/w. Requiring pitch_u = w + gap_u and
+        pitch_v = h + gap_v forces w/h == pitch_u/pitch_v, which reduces to
+        the closed form below.
+        """
+        if pitch_u <= 0 or pitch_v <= 0:
+            raise ValueError("The pattern boundary has no usable extent.")
+        ratio = pitch_u / pitch_v
+        height = pitch_v - spacing * math.sqrt(1 + ratio * ratio) / ratio
+        width = ratio * height
+        return width, height
+
+    def _create_rhombus_pattern_sketch(
+        self,
+        component: adsk.fusion.Component,
+        face: adsk.fusion.BRepFace,
+        outer_curves: list[adsk.fusion.SketchCurve],
+    ) -> tuple[
+        adsk.fusion.Sketch,
+        adsk.fusion.SketchLine,
+        adsk.fusion.SketchLine,
+        str,
+        str,
+    ]:
+        """Two seed rhombuses form the unit cell of the diamond lattice: one
+        centred on the boundary corner and one at the half-pitch offset. The
+        rectangular pattern repeats both, so every boundary rhombus is
+        halved by the clip and the corner ones quartered."""
+        sketch = component.sketches.addWithoutEdges(face)
+        if not sketch:
+            raise RuntimeError("Fusion failed to create the rhombus sketch.")
+        sketch.name = "Face Cutout - Rhombus Seeds"
+        boundary = self._create_rectangular_pattern_boundary(
+            sketch,
+            outer_curves,
+        )
+        columns = self.inputs.triangle_columns.value
+        rows = self.inputs.triangle_rows.value
+        pitch_u = boundary.extent_u / columns
+        pitch_v = boundary.extent_v / rows
+        width, height = self._rhombus_dimensions(
+            pitch_u,
+            pitch_v,
+            self.inputs.triangle_spacing.value,
+        )
+        if width <= 1e-6 or height <= 1e-6:
+            raise ValueError(
+                "Spacing is too large for the requested rhombus rows and "
+                "columns."
+            )
+
+        sketch.isComputeDeferred = True
+        first = self._add_seed_rhombus(
+            sketch,
+            boundary,
+            center_u=0,
+            center_v=0,
+            width=width,
+            height=height,
+        )
+        constraints = sketch.geometricConstraints
+        constraints.addCoincident(first.center, boundary.origin)
+
+        second = self._add_seed_rhombus(
+            sketch,
+            boundary,
+            center_u=pitch_u / 2,
+            center_v=pitch_v / 2,
+            width=width,
+            height=height,
+        )
+        constraints.addEqual(first.horizontal, second.horizontal)
+        constraints.addEqual(first.vertical, second.vertical)
+        half_pitch_u, half_pitch_v = self._locate_offset_rhombus(
+            sketch,
+            boundary,
+            first.center,
+            second.center,
+            pitch_u,
+            pitch_v,
+            f"({boundary.u_parameter.name}) / {2 * columns}",
+            f"({boundary.v_parameter.name}) / {2 * rows}",
+        )
+
+        # The rhombus proportion follows the lattice: its edge is parallel
+        # to the line joining the two seed centres exactly when
+        # width / height equals pitch_u / pitch_v. That replaces an explicit
+        # size formula with a constraint.
+        lattice_diagonal = sketch.sketchCurves.sketchLines.addByTwoPoints(
+            first.center,
+            second.center,
+        )
+        if not lattice_diagonal:
+            raise RuntimeError(
+                "Fusion failed to create the rhombus lattice diagonal."
+            )
+        lattice_diagonal.isConstruction = True
+        constraints.addParallel(first.left_top, lattice_diagonal)
+
+        # The perpendicular gap between the facing edges of the two seeds is
+        # the true edge-to-edge spacing, so it carries the user's value.
+        self._add_spacing_dimension(sketch, first, second)
+
+        # Reference dimensions so the resulting rhombus size is readable in
+        # the parameter table without driving anything.
+        self._dimension_line_length(
+            sketch,
+            first.horizontal,
+            "",
+            is_driving=False,
+            parameter_role="rhombusWidth",
+        )
+        self._dimension_line_length(
+            sketch,
+            first.vertical,
+            "",
+            is_driving=False,
+            parameter_role="rhombusHeight",
+        )
+
+        sketch.isComputeDeferred = False
+        self._require_fully_constrained(sketch)
+        if sketch.profiles.count != 2:
+            raise RuntimeError(
+                "The rhombus seed sketch did not create two profiles "
+                f"({sketch.profiles.count} found)."
+            )
+        return (
+            sketch,
+            boundary.u_direction,
+            boundary.v_direction,
+            f"2 * {half_pitch_u.name}",
+            f"2 * {half_pitch_v.name}",
+        )
+
+    def _add_spacing_dimension(
+        self,
+        sketch: adsk.fusion.Sketch,
+        first: _SeedRhombus,
+        second: _SeedRhombus,
+    ) -> None:
+        reference = first.top_right
+        facing = second.bottom_left
+        text_point = adsk.core.Point3D.create(
+            (
+                self._line_midpoint(reference).x
+                + self._line_midpoint(facing).x
+            )
+            / 2,
+            (
+                self._line_midpoint(reference).y
+                + self._line_midpoint(facing).y
+            )
+            / 2,
+            0,
+        )
+        dimension = sketch.sketchDimensions.addOffsetDimension(
+            reference,
+            facing,
+            text_point,
+        )
+        if not dimension or not dimension.parameter:
+            raise RuntimeError(
+                "Fusion failed to dimension the rhombus spacing."
+            )
+        dimension.parameter.expression = (
+            self.inputs.triangle_spacing.expression
+        )
+        self._name_parameter(dimension.parameter, "rhombusSpacing")
+
+    def _add_seed_rhombus(
+        self,
+        sketch: adsk.fusion.Sketch,
+        boundary: _PatternBoundary,
+        center_u: float,
+        center_v: float,
+        width: float,
+        height: float,
+    ) -> _SeedRhombus:
+        lines = sketch.sketchCurves.sketchLines
+        constraints = sketch.geometricConstraints
+        origin = boundary.origin.geometry
+
+        def at(u: float, v: float) -> adsk.core.Point3D:
+            point = origin.copy()
+            point.translateBy(
+                adsk.core.Vector3D.create(
+                    boundary.u_vector.x * u + boundary.v_vector.x * v,
+                    boundary.u_vector.y * u + boundary.v_vector.y * v,
+                    0,
+                )
+            )
+            return point
+
+        horizontal = lines.addByTwoPoints(
+            at(center_u - width / 2, center_v),
+            at(center_u + width / 2, center_v),
+        )
+        vertical = lines.addByTwoPoints(
+            at(center_u, center_v - height / 2),
+            at(center_u, center_v + height / 2),
+        )
+        if not horizontal or not vertical:
+            raise RuntimeError("Fusion failed to create a rhombus diagonal.")
+        horizontal.isConstruction = True
+        vertical.isConstruction = True
+        constraints.addParallel(horizontal, boundary.u_direction)
+        constraints.addPerpendicular(vertical, horizontal)
+
+        center = sketch.sketchPoints.add(at(center_u, center_v))
+        if not center:
+            raise RuntimeError("Fusion failed to create a rhombus centre.")
+        constraints.addMidPoint(center, horizontal)
+        constraints.addMidPoint(center, vertical)
+
+        # The outline reuses the diagonal endpoints, so it needs no
+        # constraints of its own.
+        left = horizontal.startSketchPoint
+        right = horizontal.endSketchPoint
+        bottom = vertical.startSketchPoint
+        top = vertical.endSketchPoint
+        sides: list[adsk.fusion.SketchLine] = []
+        for start, end in (
+            (left, top),
+            (top, right),
+            (right, bottom),
+            (bottom, left),
+        ):
+            side = lines.addByTwoPoints(start, end)
+            if not side:
+                raise RuntimeError("Fusion failed to create a rhombus side.")
+            sides.append(side)
+        return _SeedRhombus(
+            center=center,
+            horizontal=horizontal,
+            vertical=vertical,
+            left_top=sides[0],
+            top_right=sides[1],
+            right_bottom=sides[2],
+            bottom_left=sides[3],
+        )
+
+    def _locate_offset_rhombus(
+        self,
+        sketch: adsk.fusion.Sketch,
+        boundary: _PatternBoundary,
+        anchor: adsk.fusion.SketchPoint,
+        center: adsk.fusion.SketchPoint,
+        offset_u: float,
+        offset_v: float,
+        offset_u_expression: str,
+        offset_v_expression: str,
+    ) -> tuple[adsk.fusion.ModelParameter, adsk.fusion.ModelParameter]:
+        lines = sketch.sketchCurves.sketchLines
+        constraints = sketch.geometricConstraints
+        origin = anchor.geometry
+
+        def at(u: float, v: float) -> adsk.core.Point3D:
+            point = origin.copy()
+            point.translateBy(
+                adsk.core.Vector3D.create(
+                    boundary.u_vector.x * u + boundary.v_vector.x * v,
+                    boundary.u_vector.y * u + boundary.v_vector.y * v,
+                    0,
+                )
+            )
+            return point
+
+        along_u = lines.addByTwoPoints(anchor, at(offset_u, 0))
+        if not along_u:
+            raise RuntimeError("Fusion failed to offset a rhombus along u.")
+        along_u.isConstruction = True
+        constraints.addParallel(along_u, boundary.u_direction)
+
+        along_v = lines.addByTwoPoints(along_u.endSketchPoint, center)
+        if not along_v:
+            raise RuntimeError("Fusion failed to offset a rhombus along v.")
+        along_v.isConstruction = True
+        constraints.addPerpendicular(along_v, along_u)
+
+        half_pitch_u = self._dimension_line_length(
+            sketch,
+            along_u,
+            offset_u_expression,
+            parameter_role="rhombusHalfPitchU",
+        )
+        half_pitch_v = self._dimension_line_length(
+            sketch,
+            along_v,
+            offset_v_expression,
+            parameter_role="rhombusHalfPitchV",
+        )
+        if not half_pitch_u.parameter or not half_pitch_v.parameter:
+            raise RuntimeError(
+                "Fusion did not create the rhombus pitch parameters."
+            )
+        return half_pitch_u.parameter, half_pitch_v.parameter
+
     def _create_rectangular_pattern_boundary(
         self,
         sketch: adsk.fusion.Sketch,
         outer_curves: list[adsk.fusion.SketchCurve],
-    ) -> tuple[
-        adsk.fusion.SketchPoint,
-        adsk.fusion.SketchLine,
-        adsk.fusion.SketchLine,
-        float,
-        float,
-        adsk.fusion.ModelParameter,
-        adsk.fusion.ModelParameter,
-        adsk.core.Vector3D,
-        adsk.core.Vector3D,
-    ]:
+        role_prefix: str = "pattern",
+    ) -> _PatternBoundary:
         axis = (
-            self.inputs.triangle_axis.value[0]
-            if self.inputs.triangle_axis.value
+            self.inputs.pattern_axis.value[0]
+            if self.inputs.pattern_axis.value
             else None
         )
-        bounds = self.inputs.triangle_bounds.value
+        bounds = self.inputs.bounding_points.value
         if bounds:
-            if not axis:
-                raise ValueError(
-                    "A Pattern Axis is required with Bounding Box Points."
-                )
             return self._create_manual_pattern_boundary(
                 sketch,
-                cast(adsk.core.Base, axis),
+                cast(adsk.core.Base | None, axis),
                 cast(list[adsk.core.Base], bounds),
+                role_prefix,
             )
         return self._create_automatic_pattern_boundary(
             sketch,
             outer_curves,
             cast(adsk.core.Base | None, axis),
+            role_prefix,
         )
 
     def _create_automatic_pattern_boundary(
@@ -2009,17 +2673,8 @@ class FaceCutout(addin.Addin):
         sketch: adsk.fusion.Sketch,
         outer_curves: list[adsk.fusion.SketchCurve],
         axis: adsk.core.Base | None,
-    ) -> tuple[
-        adsk.fusion.SketchPoint,
-        adsk.fusion.SketchLine,
-        adsk.fusion.SketchLine,
-        float,
-        float,
-        adsk.fusion.ModelParameter,
-        adsk.fusion.ModelParameter,
-        adsk.core.Vector3D,
-        adsk.core.Vector3D,
-    ]:
+        role_prefix: str = "pattern",
+    ) -> _PatternBoundary:
         boundary = [
             line
             for entity in sketch.project2(
@@ -2139,49 +2794,53 @@ class FaceCutout(addin.Addin):
             u_direction,
             "",
             is_driving=False,
-            parameter_role="patternLength",
+            parameter_role=f"{role_prefix}Length",
         )
         v_dimension = self._dimension_line_length(
             sketch,
             v_direction,
             "",
             is_driving=False,
-            parameter_role="patternWidth",
+            parameter_role=f"{role_prefix}Width",
         )
         if not u_dimension.parameter or not v_dimension.parameter:
             raise RuntimeError(
                 "Fusion failed to measure the rectangular pattern boundary."
             )
-        return (
-            origin,
-            u_direction,
-            v_direction,
-            extent_u,
-            extent_v,
-            u_dimension.parameter,
-            v_dimension.parameter,
-            u_vector,
-            v_vector,
+        corners, ordered_boundary = self._ordered_rectangular_boundary(
+            cast(list[adsk.fusion.SketchCurve], boundary)
+        )
+        return _PatternBoundary(
+            origin=origin,
+            u_direction=u_direction,
+            v_direction=v_direction,
+            extent_u=extent_u,
+            extent_v=extent_v,
+            u_parameter=u_dimension.parameter,
+            v_parameter=v_dimension.parameter,
+            u_vector=u_vector,
+            v_vector=v_vector,
+            corners=corners,
+            boundary_lines=ordered_boundary,
         )
 
     def _create_manual_pattern_boundary(
         self,
         sketch: adsk.fusion.Sketch,
-        axis: adsk.core.Base,
+        axis: adsk.core.Base | None,
         bounds: list[adsk.core.Base],
-    ) -> tuple[
-        adsk.fusion.SketchPoint,
-        adsk.fusion.SketchLine,
-        adsk.fusion.SketchLine,
-        float,
-        float,
-        adsk.fusion.ModelParameter,
-        adsk.fusion.ModelParameter,
-        adsk.core.Vector3D,
-        adsk.core.Vector3D,
-    ]:
-        axis_line = self._project_axis_line(sketch, axis)
-        u_vector = self._normalized_line_vector(axis_line)
+        role_prefix: str = "pattern",
+    ) -> _PatternBoundary:
+        # Without a Pattern Axis the box is aligned to the sketch axes and
+        # held there by horizontal/vertical constraints.
+        axis_line = (
+            self._project_axis_line(sketch, axis) if axis else None
+        )
+        u_vector = (
+            self._normalized_line_vector(axis_line)
+            if axis_line
+            else adsk.core.Vector3D.create(1, 0, 0)
+        )
         v_vector = adsk.core.Vector3D.create(
             -u_vector.y,
             u_vector.x,
@@ -2203,7 +2862,11 @@ class FaceCutout(addin.Addin):
                 "selected face."
             )
 
-        reference = axis_line.startSketchPoint.geometry
+        reference = (
+            axis_line.startSketchPoint.geometry
+            if axis_line
+            else adsk.core.Point3D.create(0, 0, 0)
+        )
         coordinates: list[tuple[float, float, adsk.fusion.SketchPoint]] = []
         for point in projected_points:
             offset = reference.vectorTo(point.geometry)
@@ -2255,10 +2918,16 @@ class FaceCutout(addin.Addin):
         )
 
         constraints = sketch.geometricConstraints
-        constraints.addParallel(bottom, axis_line)
-        constraints.addPerpendicular(right, axis_line)
-        constraints.addParallel(top, axis_line)
-        constraints.addPerpendicular(left, axis_line)
+        if axis_line:
+            constraints.addParallel(bottom, axis_line)
+            constraints.addPerpendicular(right, axis_line)
+            constraints.addParallel(top, axis_line)
+            constraints.addPerpendicular(left, axis_line)
+        else:
+            constraints.addHorizontal(bottom)
+            constraints.addHorizontal(top)
+            constraints.addVertical(right)
+            constraints.addVertical(left)
 
         extreme_points = [
             (
@@ -2286,29 +2955,34 @@ class FaceCutout(addin.Addin):
             bottom,
             "",
             is_driving=False,
-            parameter_role="patternLength",
+            parameter_role=f"{role_prefix}Length",
         )
         v_dimension = self._dimension_line_length(
             sketch,
             left,
             "",
             is_driving=False,
-            parameter_role="patternWidth",
+            parameter_role=f"{role_prefix}Width",
         )
         if not u_dimension.parameter or not v_dimension.parameter:
             raise RuntimeError(
                 "Fusion failed to measure the manual pattern boundary."
             )
-        return (
-            bottom.startSketchPoint,
-            bottom,
-            left,
-            extent_u,
-            extent_v,
-            u_dimension.parameter,
-            v_dimension.parameter,
-            u_vector,
-            v_vector,
+        corners, ordered_boundary = self._ordered_rectangular_boundary(
+            cast(list[adsk.fusion.SketchCurve], boundary)
+        )
+        return _PatternBoundary(
+            origin=bottom.startSketchPoint,
+            u_direction=bottom,
+            v_direction=left,
+            extent_u=extent_u,
+            extent_v=extent_v,
+            u_parameter=u_dimension.parameter,
+            v_parameter=v_dimension.parameter,
+            u_vector=u_vector,
+            v_vector=v_vector,
+            corners=corners,
+            boundary_lines=ordered_boundary,
         )
 
     def _project_axis_line(
@@ -2539,15 +3213,20 @@ class FaceCutout(addin.Addin):
         pitch_v_expression: str,
         face_index: int,
         face_count: int,
+        quantity_u: int | None = None,
+        quantity_v: int | None = None,
+        distance_multiplier: int = 2,
     ) -> adsk.fusion.RectangularPatternFeature | None:
-        quantity_u = max(
-            1,
-            math.ceil((self.inputs.triangle_columns.value + 1) / 2),
-        )
-        quantity_v = max(
-            1,
-            math.ceil(self.inputs.triangle_rows.value / 2),
-        )
+        if quantity_u is None:
+            quantity_u = max(
+                1,
+                math.ceil((self.inputs.triangle_columns.value + 1) / 2),
+            )
+        if quantity_v is None:
+            quantity_v = max(
+                1,
+                math.ceil(self.inputs.triangle_rows.value / 2),
+            )
         if quantity_u == 1 and quantity_v == 1:
             return None
         entities = adsk.core.ObjectCollection.createWithArray(
@@ -2559,7 +3238,7 @@ class FaceCutout(addin.Addin):
                 u_direction,
                 adsk.core.ValueInput.createByReal(quantity_u),
                 adsk.core.ValueInput.createByString(
-                    f"2 * ({pitch_u_expression})"
+                    f"{distance_multiplier} * ({pitch_u_expression})"
                 ),
                 adsk.fusion.PatternDistanceType.SpacingPatternDistanceType,
             )
@@ -2572,7 +3251,7 @@ class FaceCutout(addin.Addin):
             v_direction,
             adsk.core.ValueInput.createByReal(quantity_v),
             adsk.core.ValueInput.createByString(
-                f"2 * ({pitch_v_expression})"
+                f"{distance_multiplier} * ({pitch_v_expression})"
             ),
         ):
             raise RuntimeError(
@@ -2716,13 +3395,8 @@ class FaceCutout(addin.Addin):
             raise RuntimeError(
                 "The cutout profiles did not produce any solid tool bodies."
             )
-        base_name = (
-            "Face Cutout - Cross Tool"
-            if self.inputs.pattern_type.value == FaceCutoutInputs.CROSS.value
-            else "Face Cutout - Tool"
-        )
         extrude.name = self._feature_name(
-            base_name,
+            "Face Cutout - Tool",
             face_index,
             face_count,
         )
@@ -2743,12 +3417,19 @@ class FaceCutout(addin.Addin):
         cut_direction: adsk.core.Vector3D,
         face_index: int,
         face_count: int,
+        base_name: str = "Face Cutout - Triangle Pattern",
+        role_prefix: str = "triangle",
+        selected_profiles: list[adsk.fusion.Profile] | None = None,
     ) -> adsk.fusion.ExtrudeFeature:
         profiles = adsk.core.ObjectCollection.create()
-        for profile in sketch.profiles:
+        for profile in (
+            selected_profiles
+            if selected_profiles is not None
+            else sketch.profiles
+        ):
             profiles.add(profile)
         if profiles.count == 0:
-            raise RuntimeError("The triangle sketch does not contain any profiles.")
+            raise RuntimeError(f"'{sketch.name}' does not contain any profiles.")
 
         extrude_input = component.features.extrudeFeatures.createInput(
             profiles,
@@ -2780,15 +3461,15 @@ class FaceCutout(addin.Addin):
 
         extrude = component.features.extrudeFeatures.add(extrude_input)
         if not extrude or extrude.bodies.count == 0:
-            raise RuntimeError("The triangle profiles did not produce tool bodies.")
+            raise RuntimeError(f"'{sketch.name}' did not produce tool bodies.")
         extrude.name = self._feature_name(
-            "Face Cutout - Triangle Pattern",
+            base_name,
             face_index,
             face_count,
         )
         self._name_extrude_parameters(
             extrude,
-            "triangle",
+            role_prefix,
             face_index,
             face_count,
         )
@@ -2865,6 +3546,7 @@ class FaceCutout(addin.Addin):
         tool_bodies: list[adsk.fusion.BRepBody],
         face_index: int,
         face_count: int,
+        base_name: str = "Face Cutout - Pattern Intersection",
     ) -> adsk.fusion.CombineFeature:
         tools = adsk.core.ObjectCollection.createWithArray(
             cast(list[adsk.core.Base], tool_bodies)
@@ -2881,9 +3563,11 @@ class FaceCutout(addin.Addin):
         combine_input.isKeepToolBodies = False
         combine = component.features.combineFeatures.add(combine_input)
         if not combine or combine.bodies.count == 0:
-            raise RuntimeError("The triangles did not intersect the full cutout tool.")
+            raise RuntimeError(
+                "The pattern did not intersect the full cutout tool."
+            )
         combine.name = self._feature_name(
-            "Face Cutout - Pattern Intersection",
+            base_name,
             face_index,
             face_count,
         )
