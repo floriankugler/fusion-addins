@@ -75,7 +75,7 @@ class _PatternBoundary:
 
 def run(context, runtime_info: RuntimeInfo):
     global _addin
-    _addin = FaceCutout(runtime_info)
+    _addin = CutoutsNative(runtime_info)
 
 
 def stop(context):
@@ -85,7 +85,7 @@ def stop(context):
     _addin = None
 
 
-class FaceCutoutInputs(inputs.Inputs):
+class CutoutsNativeInputs(inputs.Inputs):
     FULL_CUTOUT = inputs.DropDownInput.Item("Full Cutout", 0)
     TRIANGLES = inputs.DropDownInput.Item("Triangles", 1)
     CROSS = inputs.DropDownInput.Item("Cross", 2)
@@ -249,14 +249,14 @@ class FaceCutoutInputs(inputs.Inputs):
         super().__init__()
 
 
-class FaceCutout(addin.Addin):
-    inputs: FaceCutoutInputs
+class CutoutsNative(addin.Addin):
+    inputs: CutoutsNativeInputs
     _parameter_prefix: str
     _remainder_parameter_name: str | None = None
 
     @property
     def plugin_name(self) -> str:
-        return "Face Cutout"
+        return "Face Cutout (Native)"
 
     @property
     def plugin_desc(self) -> str:
@@ -283,11 +283,11 @@ class FaceCutout(addin.Addin):
             section=section,
         )
 
-    def create_inputs(self) -> FaceCutoutInputs:
+    def create_inputs(self) -> CutoutsNativeInputs:
         design = adsk.fusion.Design.cast(self.app.activeProduct)
         if not design:
-            raise RuntimeError("Face Cutout requires an active Fusion design.")
-        return FaceCutoutInputs(design.unitsManager)
+            raise RuntimeError("Face Cutout (Native) requires an active Fusion design.")
+        return CutoutsNativeInputs(design.unitsManager)
 
     def pre_select(self, input, selection) -> bool:
         if not self.inputs or not input:
@@ -365,7 +365,7 @@ class FaceCutout(addin.Addin):
                 outer_curves,
             )
             if self._has_manual_bounds()
-            and pattern_type != FaceCutoutInputs.CROSS.value
+            and pattern_type != CutoutsNativeInputs.CROSS.value
             else None
         )
 
@@ -376,13 +376,13 @@ class FaceCutout(addin.Addin):
         pattern_quantity_u: int | None = None
         pattern_quantity_v: int | None = None
         pattern_multiplier = 2
-        pattern_base_name = "Face Cutout - Triangle Pattern"
+        pattern_base_name = "Face Cutout (Native) - Triangle Pattern"
         pattern_role = "triangle"
         u_direction = None
         v_direction = None
         pitch_u_expression = None
         pitch_v_expression = None
-        if pattern_type == FaceCutoutInputs.TRIANGLES.value:
+        if pattern_type == CutoutsNativeInputs.TRIANGLES.value:
             (
                 pattern_sketch,
                 u_direction,
@@ -394,7 +394,7 @@ class FaceCutout(addin.Addin):
                 reference_face,
                 outer_curves,
             )
-        elif pattern_type == FaceCutoutInputs.RHOMBUSES.value:
+        elif pattern_type == CutoutsNativeInputs.RHOMBUSES.value:
             (
                 pattern_sketch,
                 u_direction,
@@ -411,9 +411,9 @@ class FaceCutout(addin.Addin):
             pattern_quantity_u = self.inputs.triangle_columns.value + 1
             pattern_quantity_v = self.inputs.triangle_rows.value + 1
             pattern_multiplier = 1
-            pattern_base_name = "Face Cutout - Rhombus Pattern"
+            pattern_base_name = "Face Cutout (Native) - Rhombus Pattern"
             pattern_role = "rhombus"
-        elif pattern_type == FaceCutoutInputs.CROSS.value:
+        elif pattern_type == CutoutsNativeInputs.CROSS.value:
             (
                 cross_sketch,
                 cross_profiles,
@@ -454,7 +454,7 @@ class FaceCutout(addin.Addin):
                     target.cut_direction,
                     face_index,
                     face_count,
-                    base_name="Face Cutout - Bounding Box Tool",
+                    base_name="Face Cutout (Native) - Bounding Box Tool",
                     role_prefix="bounds",
                 )
                 if len(tool_bodies) != 1:
@@ -472,7 +472,7 @@ class FaceCutout(addin.Addin):
                     ),
                     face_index,
                     face_count,
-                    base_name="Face Cutout - Bounding Box Intersection",
+                    base_name="Face Cutout (Native) - Bounding Box Intersection",
                 )
                 tool_bodies = cast(
                     list[adsk.fusion.BRepBody],
@@ -488,7 +488,7 @@ class FaceCutout(addin.Addin):
                     target.cut_direction,
                     face_index,
                     face_count,
-                    base_name="Face Cutout - Cross Tool",
+                    base_name="Face Cutout (Native) - Cross Tool",
                     role_prefix="cross",
                     selected_profiles=self._cross_wedge_profiles(
                         cross_sketch,
@@ -511,7 +511,7 @@ class FaceCutout(addin.Addin):
                     ),
                     face_index,
                     face_count,
-                    base_name="Face Cutout - Cross Intersection",
+                    base_name="Face Cutout (Native) - Cross Intersection",
                 )
                 tool_bodies = cast(
                     list[adsk.fusion.BRepBody],
@@ -638,7 +638,7 @@ class FaceCutout(addin.Addin):
                 body_cut_count,
             )
         if not last_combine:
-            raise RuntimeError("Face Cutout did not create a final cut.")
+            raise RuntimeError("Face Cutout (Native) did not create a final cut.")
         self._group_features(component, sketch, last_combine)
 
     def _body_locator(
@@ -695,7 +695,7 @@ class FaceCutout(addin.Addin):
         )
         if not candidates or score(candidates[0]) > 1e-5:
             raise RuntimeError(
-                f"Fusion lost a Face Cutout {role} body reference."
+                f"Fusion lost a Face Cutout (Native) {role} body reference."
             )
         return candidates[0]
 
@@ -744,7 +744,7 @@ class FaceCutout(addin.Addin):
             parameter.name
             for parameter in design.allParameters
         }
-        base = "faceCutout"
+        base = "cutoutsNative"
         index = 1
         while True:
             candidate = base if index == 1 else f"{base}{index}"
@@ -772,7 +772,7 @@ class FaceCutout(addin.Addin):
         if not design:
             return "An active Fusion design is required."
         if design.designType != adsk.fusion.DesignTypes.ParametricDesignType:  # type: ignore
-            return "Face Cutout requires Design History (a parametric design)."
+            return "Face Cutout (Native) requires Design History (a parametric design)."
         if not self.inputs or not self.inputs.face.value:
             return "Select at least one planar face."
 
@@ -787,7 +787,7 @@ class FaceCutout(addin.Addin):
             if face.body.parentComponent != design.activeComponent:
                 return (
                     "Activate the component that owns all selected faces, "
-                    "then run Face Cutout again."
+                    "then run Face Cutout (Native) again."
                 )
             faces.append(face)
 
@@ -833,12 +833,12 @@ class FaceCutout(addin.Addin):
                     f"thickness at selected face {index}."
                 )
         if (
-            self.inputs.pattern_type.value == FaceCutoutInputs.TRIANGLES.value
+            self.inputs.pattern_type.value == CutoutsNativeInputs.TRIANGLES.value
             and self.inputs.triangle_spacing.value <= 1e-6
         ):
             return "Triangle Spacing must be greater than zero."
         if (
-            self.inputs.pattern_type.value == FaceCutoutInputs.TRIANGLES.value
+            self.inputs.pattern_type.value == CutoutsNativeInputs.TRIANGLES.value
             and self.inputs.align_triangles.value
             and self.inputs.fillet_radius.value <= 1e-6
         ):
@@ -847,7 +847,7 @@ class FaceCutout(addin.Addin):
                 "is enabled."
             )
         if (
-            self.inputs.pattern_type.value == FaceCutoutInputs.CROSS.value
+            self.inputs.pattern_type.value == CutoutsNativeInputs.CROSS.value
             and self.inputs.cross_width.value <= 1e-6
         ):
             return "Cross Width must be greater than zero."
@@ -864,9 +864,9 @@ class FaceCutout(addin.Addin):
         if bounds_count > 4:
             return "Select no more than four Bounding Box Points."
         needs_oriented_box = self.inputs.pattern_type.value in (
-            FaceCutoutInputs.TRIANGLES.value,
-            FaceCutoutInputs.CROSS.value,
-            FaceCutoutInputs.RHOMBUSES.value,
+            CutoutsNativeInputs.TRIANGLES.value,
+            CutoutsNativeInputs.CROSS.value,
+            CutoutsNativeInputs.RHOMBUSES.value,
         )
         if (
             axis_count == 1
@@ -1011,7 +1011,7 @@ class FaceCutout(addin.Addin):
                 "The Bounding Box Points must define non-zero extents in "
                 "both directions."
             )
-        if self.inputs.pattern_type.value == FaceCutoutInputs.RHOMBUSES.value:
+        if self.inputs.pattern_type.value == CutoutsNativeInputs.RHOMBUSES.value:
             try:
                 width, height = self._rhombus_dimensions(
                     extent_u / self.inputs.triangle_columns.value,
@@ -1026,7 +1026,7 @@ class FaceCutout(addin.Addin):
                     "and columns."
                 )
             return None
-        if self.inputs.pattern_type.value != FaceCutoutInputs.CROSS.value:
+        if self.inputs.pattern_type.value != CutoutsNativeInputs.CROSS.value:
             return None
         # For a rectangle every side midpoint has the same distance to both
         # diagonals, so the widest usable cross band is w*h/hypot(w, h).
@@ -1062,7 +1062,7 @@ class FaceCutout(addin.Addin):
         sketch = component.sketches.addWithoutEdges(face)
         if not sketch:
             raise RuntimeError("Fusion failed to create a sketch on the selected face.")
-        sketch.name = "Face Cutout - Insets"
+        sketch.name = "Face Cutout (Native) - Insets"
 
         final_curves: list[adsk.fusion.SketchCurve] = []
         outer_curves: list[adsk.fusion.SketchCurve] = []
@@ -1155,7 +1155,7 @@ class FaceCutout(addin.Addin):
         sketch = component.sketches.addWithoutEdges(face)
         if not sketch:
             raise RuntimeError("Fusion failed to create the cross layout sketch.")
-        sketch.name = "Face Cutout - Cross Layout"
+        sketch.name = "Face Cutout (Native) - Cross Layout"
         boundary = self._create_rectangular_pattern_boundary(
             sketch,
             outer_curves,
@@ -1211,7 +1211,7 @@ class FaceCutout(addin.Addin):
             raise RuntimeError(
                 "Fusion failed to create the bounding-box sketch."
             )
-        sketch.name = "Face Cutout - Bounding Box"
+        sketch.name = "Face Cutout (Native) - Bounding Box"
         boundary = self._create_rectangular_pattern_boundary(
             sketch,
             outer_curves,
@@ -1989,7 +1989,7 @@ class FaceCutout(addin.Addin):
         sketch = component.sketches.addWithoutEdges(face)
         if not sketch:
             raise RuntimeError("Fusion failed to create the triangle pattern sketch.")
-        sketch.name = "Face Cutout - Triangle Seeds"
+        sketch.name = "Face Cutout (Native) - Triangle Seeds"
 
         boundary = self._create_rectangular_pattern_boundary(
             sketch,
@@ -2375,7 +2375,7 @@ class FaceCutout(addin.Addin):
         sketch = component.sketches.addWithoutEdges(face)
         if not sketch:
             raise RuntimeError("Fusion failed to create the rhombus sketch.")
-        sketch.name = "Face Cutout - Rhombus Seeds"
+        sketch.name = "Face Cutout (Native) - Rhombus Seeds"
         boundary = self._create_rectangular_pattern_boundary(
             sketch,
             outer_curves,
@@ -3265,7 +3265,7 @@ class FaceCutout(addin.Addin):
                 "Fusion failed to create the solid triangle pattern."
             )
         pattern.name = self._feature_name(
-            "Face Cutout - Solid Triangle Pattern",
+            "Face Cutout (Native) - Solid Triangle Pattern",
             face_index,
             face_count,
         )
@@ -3396,7 +3396,7 @@ class FaceCutout(addin.Addin):
                 "The cutout profiles did not produce any solid tool bodies."
             )
         extrude.name = self._feature_name(
-            "Face Cutout - Tool",
+            "Face Cutout (Native) - Tool",
             face_index,
             face_count,
         )
@@ -3417,7 +3417,7 @@ class FaceCutout(addin.Addin):
         cut_direction: adsk.core.Vector3D,
         face_index: int,
         face_count: int,
-        base_name: str = "Face Cutout - Triangle Pattern",
+        base_name: str = "Face Cutout (Native) - Triangle Pattern",
         role_prefix: str = "triangle",
         selected_profiles: list[adsk.fusion.Profile] | None = None,
     ) -> adsk.fusion.ExtrudeFeature:
@@ -3546,7 +3546,7 @@ class FaceCutout(addin.Addin):
         tool_bodies: list[adsk.fusion.BRepBody],
         face_index: int,
         face_count: int,
-        base_name: str = "Face Cutout - Pattern Intersection",
+        base_name: str = "Face Cutout (Native) - Pattern Intersection",
     ) -> adsk.fusion.CombineFeature:
         tools = adsk.core.ObjectCollection.createWithArray(
             cast(list[adsk.core.Base], tool_bodies)
@@ -3602,9 +3602,9 @@ class FaceCutout(addin.Addin):
         )
         for index, fillet in enumerate(fillets, start=1):
             base_name = (
-                "Face Cutout - Fillet"
+                "Face Cutout (Native) - Fillet"
                 if len(fillets) == 1
-                else f"Face Cutout - Fillet Part {index}"
+                else f"Face Cutout (Native) - Fillet Part {index}"
             )
             fillet.name = self._feature_name(
                 base_name,
@@ -3764,9 +3764,9 @@ class FaceCutout(addin.Addin):
         if not combine:
             raise RuntimeError("Fusion failed to cut the target body.")
         combine.name = (
-            "Face Cutout - Cut"
+            "Face Cutout (Native) - Cut"
             if body_count == 1
-            else f"Face Cutout - Cut (Body {body_index})"
+            else f"Face Cutout (Native) - Cut (Body {body_index})"
         )
         return combine
 
@@ -3780,7 +3780,7 @@ class FaceCutout(addin.Addin):
         end_index = combine.timelineObject.index
         group = component.parentDesign.timeline.timelineGroups.add(start_index, end_index)
         if group:
-            group.name = "Face Cutout"
+            group.name = "Face Cutout (Native)"
             group.isCollapsed = True
 
     def _largest_profile(self, sketch: adsk.fusion.Sketch) -> adsk.fusion.Profile | None:
@@ -3842,6 +3842,6 @@ class FaceCutout(addin.Addin):
             for curve in unconstrained
         )
         raise RuntimeError(
-            "Face Cutout generated an under-constrained sketch "
+            "Face Cutout (Native) generated an under-constrained sketch "
             f"({len(unconstrained)} unconstrained curves: {details})."
         )

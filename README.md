@@ -19,7 +19,7 @@ Furthermore, updates to this code might break existing usages of the addins.
   This is a collection of differently shaped pattern cutouts, e.g. triangles, rhombuses etc. The cutouts take existing inner features of the selected faces into account.
 
   The Froli pattern computes the best froli grid for a given rectangular surface and places cutouts accordingly.
-- **Face Cutout**
+- **Face Cutout (Native)**
 
   Creates a full inset cutout, a diagonal Cross, or a true-edge-spacing triangle pattern from one or more parallel planar faces using only native Fusion timeline features. The first selected face defines the shared sketches; each selected face gets its own start-to-opposite-face tool extrusion, while the user is responsible for choosing faces compatible with that shared layout. The Cross cuts four edge wedges and leaves two user-sized diagonal material bands. Existing inner face loops are preserved using a separate inner-feature inset and can be connected to the outer perimeter with material tabs. The triangle layout uses a fully constrained four-triangle seed sketch and a native solid rectangular pattern. An optional Align Triangles mode rounds the seed tips in the sketch and makes them tangent to adjacent baselines before the remaining solid edges are filleted. Rectangular faces can use an optional pattern axis; non-rectangular faces can use an axis plus two to four points that define an oriented pattern bounding box.
 - **Concealed Hinge**

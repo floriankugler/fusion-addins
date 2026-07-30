@@ -166,7 +166,7 @@ class _OptionalFloatInput(inputs.Input):
 
 def run(context, runtime_info: RuntimeInfo):
     global _addin
-    _addin = Connector(runtime_info)
+    _addin = ConnectorsNative(runtime_info)
 
 
 def stop(context):
@@ -176,7 +176,7 @@ def stop(context):
     _addin = None
 
 
-class ConnectorInputs(inputs.Inputs):
+class ConnectorsNativeInputs(inputs.Inputs):
     class Positioning:
         NUMBER = inputs.DropDownInput.Item(
             "Number of Connectors",
@@ -252,20 +252,20 @@ class ConnectorInputs(inputs.Inputs):
             id="size",
             name="Variant",
             options=utils.misc.class_property_values(
-                ConnectorInputs.Types,
+                ConnectorsNativeInputs.Types,
                 inputs.DropDownInput.Item,
             ),
-            default_value=ConnectorInputs.Types.CLAMEX_P10.value,
+            default_value=ConnectorsNativeInputs.Types.CLAMEX_P10.value,
             tool_tip="Variant of the Clamex or Cabineo connector.",
         )
         self.positioning = inputs.DropDownInput(
             id="positioning",
             name="Positioning",
             options=utils.misc.class_property_values(
-                ConnectorInputs.Positioning,
+                ConnectorsNativeInputs.Positioning,
                 inputs.DropDownInput.Item,
             ),
-            default_value=ConnectorInputs.Positioning.NUMBER.value,
+            default_value=ConnectorsNativeInputs.Positioning.NUMBER.value,
             tool_tip=(
                 "Place an exact number of connectors or align connectors "
                 "with selected points."
@@ -336,7 +336,7 @@ class ConnectorInputs(inputs.Inputs):
             id="clamexBoardThickness",
             name="Board Thickness (Optional)",
             tool_tip=(
-                "Optional access-board thickness. When blank, Connector "
+                "Optional access-board thickness. When blank, Connector (Native) "
                 "measures the selected board. The access cut is half this value."
             ),
             units_manager=units_manager,
@@ -353,10 +353,10 @@ class ConnectorInputs(inputs.Inputs):
             id="cabineoSurface",
             name="Surface",
             options=utils.misc.class_property_values(
-                ConnectorInputs.SurfaceTypes,
+                ConnectorsNativeInputs.SurfaceTypes,
                 inputs.DropDownInput.Item,
             ),
-            default_value=ConnectorInputs.SurfaceTypes.NONE.value,
+            default_value=ConnectorsNativeInputs.SurfaceTypes.NONE.value,
             tool_tip="Surface treatment around the Cabineo connector pocket.",
             update_visibility=is_cabineo,
         )
@@ -392,10 +392,10 @@ class ConnectorInputs(inputs.Inputs):
             id="insertType",
             name="Insert Type",
             options=utils.misc.class_property_values(
-                ConnectorInputs.InsertTypes,
+                ConnectorsNativeInputs.InsertTypes,
                 inputs.DropDownInput.Item,
             ),
-            default_value=ConnectorInputs.InsertTypes.THREADED_INSERT.value,
+            default_value=ConnectorsNativeInputs.InsertTypes.THREADED_INSERT.value,
             tool_tip="Opposite-hole variant for the Cabineo 8 M6.",
             update_visibility=is_m6,
         )
@@ -444,14 +444,14 @@ class ConnectorInputs(inputs.Inputs):
         super().__init__()
 
 
-class Connector(addin.Addin):
-    inputs: ConnectorInputs
+class ConnectorsNative(addin.Addin):
+    inputs: ConnectorsNativeInputs
     _parameter_prefix: str
     _target_body_tokens: dict[str, str]
 
     @property
     def plugin_name(self) -> str:
-        return "Connector"
+        return "Connector (Native)"
 
     @property
     def plugin_desc(self) -> str:
@@ -485,11 +485,11 @@ class Connector(addin.Addin):
             section=section,
         )
 
-    def create_inputs(self) -> ConnectorInputs:
+    def create_inputs(self) -> ConnectorsNativeInputs:
         design = adsk.fusion.Design.cast(self.app.activeProduct)
         if not design:
-            raise RuntimeError("Connector requires an active Fusion design.")
-        return ConnectorInputs(design.unitsManager)
+            raise RuntimeError("Connector (Native) requires an active Fusion design.")
+        return ConnectorsNativeInputs(design.unitsManager)
 
     def pre_select(self, input, selection) -> bool:
         if not self.inputs or not input:
@@ -570,7 +570,7 @@ class Connector(addin.Addin):
             component,
             geometry.access_face,
             geometry.edge,
-            "Connector - Access Holes",
+            "Connector (Native) - Access Holes",
             "access",
         )
         access_layout = self._add_access_geometry(
@@ -588,7 +588,7 @@ class Connector(addin.Addin):
                 component,
                 geometry.access_face,
                 geometry.edge,
-                "Connector - Access Relief",
+                "Connector (Native) - Access Relief",
                 "accessRelief",
             )
             relief_station_points = self._project_points(
@@ -609,7 +609,7 @@ class Connector(addin.Addin):
             component,
             geometry.small_face,
             geometry.edge,
-            "Connector - Opposite Holes",
+            "Connector (Native) - Opposite Holes",
             "opposite",
         )
         guide_centers = self._add_guide_geometry(
@@ -635,7 +635,7 @@ class Connector(addin.Addin):
                 component,
                 geometry.small_face,
                 geometry.edge,
-                "Connector - Insert Collars",
+                "Connector (Native) - Insert Collars",
                 "collar",
             )
             self._add_projected_circles(
@@ -689,7 +689,7 @@ class Connector(addin.Addin):
                 ),
                 direction=access_cut_direction,
                 distance=access_depth,
-                name=board_name("Connector - Access Cut", board_index),
+                name=board_name("Connector (Native) - Access Cut", board_index),
                 parameter_role=f"accessDepth{board_suffix(board_index)}",
                 start_face=access_face,
             )
@@ -711,7 +711,7 @@ class Connector(addin.Addin):
                     direction=access_cut_direction,
                     distance=relief_depth,
                     name=board_name(
-                        "Connector - Access Relief Cut",
+                        "Connector (Native) - Access Relief Cut",
                         board_index,
                     ),
                     parameter_role=(
@@ -726,7 +726,7 @@ class Connector(addin.Addin):
             target_body=self._target_body(component, "guide"),
             direction=opposite_cut_direction,
             distance=guide_hole.depth,
-            name="Connector - Opposite Cut",
+            name="Connector (Native) - Opposite Cut",
             parameter_role="oppositeDepth",
         )
 
@@ -737,7 +737,7 @@ class Connector(addin.Addin):
                 target_body=self._target_body(component, "guide"),
                 direction=opposite_cut_direction,
                 distance=guide_hole.collar_depth,
-                name="Connector - Insert Collar Cut",
+                name="Connector (Native) - Insert Collar Cut",
                 parameter_role="collarDepth",
             )
 
@@ -748,7 +748,7 @@ class Connector(addin.Addin):
         if not design:
             return "An active Fusion design is required."
         if design.designType != adsk.fusion.DesignTypes.ParametricDesignType:  # type: ignore
-            return "Connector requires Design History (a parametric design)."
+            return "Connector (Native) requires Design History (a parametric design)."
         if not self.inputs or len(self.inputs.edge.value) < 1:
             return "Select at least one straight edge."
 
@@ -782,11 +782,11 @@ class Connector(addin.Addin):
         if geometry.edge.body.parentComponent != design.activeComponent:
             return (
                 "Activate the component that owns the selected edge, then run "
-                "Connector again."
+                "Connector (Native) again."
             )
         if geometry.guide_face.body.parentComponent != design.activeComponent:
             return (
-                "This first Connector version requires both board bodies in "
+                "This first Connector (Native) version requires both board bodies in "
                 "the active component."
             )
         if geometry.access_face.body == geometry.guide_face.body:
@@ -862,7 +862,7 @@ class Connector(addin.Addin):
                 ):
                     return (
                         "Activate the component that owns all selected "
-                        "edges, then run Connector again."
+                        "edges, then run Connector (Native) again."
                     )
                 for vertex in (
                     board.edge.startVertex,
@@ -2371,7 +2371,7 @@ class Connector(addin.Addin):
         design: adsk.fusion.Design,
     ) -> str:
         parameter_names = {parameter.name for parameter in design.allParameters}
-        base = "connector"
+        base = "connectorsNative"
         index = 1
         while True:
             candidate = base if index == 1 else f"{base}{index}"
@@ -2405,7 +2405,7 @@ class Connector(addin.Addin):
             last_feature.timelineObject.index,
         )
         if group:
-            group.name = "Connector"
+            group.name = "Connector (Native)"
             group.isCollapsed = True
 
     def _require_fully_constrained(

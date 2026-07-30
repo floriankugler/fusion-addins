@@ -1,7 +1,7 @@
 {
   "autodeskProduct": "Fusion360",
   "type": "addin",
-  "id": "com.floriankugler.face-cutout",
+  "id": "com.floriankugler.cutouts-native",
   "author": "",
   "description": {
     "": "Creates an inset cutout using native Fusion timeline features."

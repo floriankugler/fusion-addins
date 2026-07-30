@@ -1,7 +1,7 @@
 {
   "autodeskProduct": "Fusion360",
   "type": "addin",
-  "id": "com.floriankugler.connector",
+  "id": "com.floriankugler.connectors-native",
   "author": "",
   "description": {
     "": "Creates Clamex and Cabineo connector holes using native Fusion timeline features."

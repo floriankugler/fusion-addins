@@ -127,7 +127,7 @@ class _HoleSpec:
 
 def run(context, runtime_info: RuntimeInfo):
     global _addin
-    _addin = Tenons(runtime_info)
+    _addin = TenonsNative(runtime_info)
 
 
 def stop(context):
@@ -137,7 +137,7 @@ def stop(context):
     _addin = None
 
 
-class TenonsInputs(inputs.Inputs):
+class TenonsNativeInputs(inputs.Inputs):
     class Positioning:
         NUMBER = inputs.DropDownInput.Item("Number of Tenons", 1)
         POINTS = inputs.DropDownInput.Item("Custom Points", 2)
@@ -214,10 +214,10 @@ class TenonsInputs(inputs.Inputs):
             id="positioning",
             name="Positioning",
             options=utils.misc.class_property_values(
-                TenonsInputs.Positioning,
+                TenonsNativeInputs.Positioning,
                 inputs.DropDownInput.Item,
             ),
-            default_value=TenonsInputs.Positioning.NUMBER.value,
+            default_value=TenonsNativeInputs.Positioning.NUMBER.value,
             tool_tip="Position an exact number of tenons or use selected sketch points.",
         )
         self.points = inputs.SelectionByEntityTokenInput(
@@ -232,7 +232,7 @@ class TenonsInputs(inputs.Inputs):
             ),
             update_visibility=lambda: (
                 self.positioning.value
-                == TenonsInputs.Positioning.POINTS.value
+                == TenonsNativeInputs.Positioning.POINTS.value
             ),
         )
         self.number_of_tenons = inputs.IntegerInput(
@@ -246,7 +246,7 @@ class TenonsInputs(inputs.Inputs):
             ),
             update_visibility=lambda: (
                 self.positioning.value
-                == TenonsInputs.Positioning.NUMBER.value
+                == TenonsNativeInputs.Positioning.NUMBER.value
             ),
         )
         self.distance_from_edge = inputs.FloatInput(
@@ -259,7 +259,7 @@ class TenonsInputs(inputs.Inputs):
             units=units,
             update_visibility=lambda: (
                 self.positioning.value
-                == TenonsInputs.Positioning.NUMBER.value
+                == TenonsNativeInputs.Positioning.NUMBER.value
                 and self.number_of_tenons.value > 1
             ),
         )
@@ -327,10 +327,10 @@ class TenonsInputs(inputs.Inputs):
             id="connector",
             name="Connector",
             options=utils.misc.class_property_values(
-                TenonsInputs.Connectors,
+                TenonsNativeInputs.Connectors,
                 inputs.DropDownInput.Item,
             ),
-            default_value=TenonsInputs.Connectors.NONE.value,
+            default_value=TenonsNativeInputs.Connectors.NONE.value,
             tool_tip="Optional screw, Clamex, or Cabineo connector holes.",
         )
 
@@ -348,10 +348,10 @@ class TenonsInputs(inputs.Inputs):
             id="mortiseScrew",
             name="Mortise Screw",
             options=utils.misc.class_property_values(
-                TenonsInputs.Screws,
+                TenonsNativeInputs.Screws,
                 inputs.DropDownInput.Item,
             ),
-            default_value=TenonsInputs.Screws.CENTERED.value,
+            default_value=TenonsNativeInputs.Screws.CENTERED.value,
             tool_tip="Screw-hole placement in the mortise board.",
             update_visibility=is_screw,
         )
@@ -359,10 +359,10 @@ class TenonsInputs(inputs.Inputs):
             id="tenonScrew",
             name="Tenon Screw",
             options=utils.misc.class_property_values(
-                TenonsInputs.Screws,
+                TenonsNativeInputs.Screws,
                 inputs.DropDownInput.Item,
             ),
-            default_value=TenonsInputs.Screws.NONE.value,
+            default_value=TenonsNativeInputs.Screws.NONE.value,
             tool_tip="Screw-hole placement through the tenons.",
             update_visibility=is_screw,
         )
@@ -407,10 +407,10 @@ class TenonsInputs(inputs.Inputs):
             id="cabineoSurface",
             name="Surface",
             options=utils.misc.class_property_values(
-                TenonsInputs.SurfaceTypes,
+                TenonsNativeInputs.SurfaceTypes,
                 inputs.DropDownInput.Item,
             ),
-            default_value=TenonsInputs.SurfaceTypes.NONE.value,
+            default_value=TenonsNativeInputs.SurfaceTypes.NONE.value,
             tool_tip="Surface treatment around the Cabineo pocket.",
             update_visibility=is_cabineo,
         )
@@ -448,10 +448,10 @@ class TenonsInputs(inputs.Inputs):
             id="insertType",
             name="Insert Type",
             options=utils.misc.class_property_values(
-                TenonsInputs.InsertTypes,
+                TenonsNativeInputs.InsertTypes,
                 inputs.DropDownInput.Item,
             ),
-            default_value=TenonsInputs.InsertTypes.THREADED_INSERT.value,
+            default_value=TenonsNativeInputs.InsertTypes.THREADED_INSERT.value,
             tool_tip="Opposite-hole variant for Cabineo 8 M6.",
             update_visibility=is_m6,
         )
@@ -500,14 +500,14 @@ class TenonsInputs(inputs.Inputs):
         super().__init__()
 
 
-class Tenons(addin.Addin):
-    inputs: TenonsInputs
+class TenonsNative(addin.Addin):
+    inputs: TenonsNativeInputs
     _parameter_prefix: str
     _body_tokens: dict[str, str]
 
     @property
     def plugin_name(self) -> str:
-        return "Tenons"
+        return "Tenons (Native)"
 
     @property
     def plugin_desc(self) -> str:
@@ -541,11 +541,11 @@ class Tenons(addin.Addin):
             section=section,
         )
 
-    def create_inputs(self) -> TenonsInputs:
+    def create_inputs(self) -> TenonsNativeInputs:
         design = adsk.fusion.Design.cast(self.app.activeProduct)
         if not design:
-            raise RuntimeError("Tenons requires an active Fusion design.")
-        return TenonsInputs(design.unitsManager)
+            raise RuntimeError("Tenons (Native) requires an active Fusion design.")
+        return TenonsNativeInputs(design.unitsManager)
 
     def pre_select(self, input, selection) -> bool:
         if not self.inputs or not input:
@@ -611,7 +611,7 @@ class Tenons(addin.Addin):
             direction=tenon_through_direction,
             offset_expression=None,
             operation=adsk.fusion.FeatureOperations.NewBodyFeatureOperation,  # type: ignore
-            name="Tenons - Tool Bodies",
+            name="Tenons (Native) - Tool Bodies",
             parameter_role="tenonThickness",
         )
         tenon_tools = cast(
@@ -679,7 +679,7 @@ class Tenons(addin.Addin):
             direction=tenon_through_direction,
             offset_expression=None,
             operation=adsk.fusion.FeatureOperations.CutFeatureOperation,  # type: ignore
-            name="Tenons - Root Dog Bone Cut",
+            name="Tenons (Native) - Root Dog Bone Cut",
             parameter_role="rootDogBoneDepth",
         )
         last_feature = self._create_to_entity_extrude(
@@ -693,7 +693,7 @@ class Tenons(addin.Addin):
                 f"({self.inputs.remaining_material.expression})"
             ),
             operation=adsk.fusion.FeatureOperations.CutFeatureOperation,  # type: ignore
-            name="Tenons - Mortise Cut",
+            name="Tenons (Native) - Mortise Cut",
             parameter_role="mortiseDepth",
         )
         for spec in connector_specs:
@@ -739,7 +739,7 @@ class Tenons(addin.Addin):
         if not design:
             return "An active Fusion design is required."
         if design.designType != adsk.fusion.DesignTypes.ParametricDesignType:  # type: ignore
-            return "Tenons requires Design History (a parametric design)."
+            return "Tenons (Native) requires Design History (a parametric design)."
         if not self.inputs or len(self.inputs.edge.value) != 1:
             return "Select one straight edge."
 
@@ -761,7 +761,7 @@ class Tenons(addin.Addin):
         if geometry.tenon_face.body.parentComponent != design.activeComponent:
             return (
                 "Activate the component that owns the selected edge, then run "
-                "Tenons again."
+                "Tenons (Native) again."
             )
         if geometry.mortise_face.body.parentComponent != design.activeComponent:
             return "Both board bodies must be in the active component."
@@ -919,7 +919,7 @@ class Tenons(addin.Addin):
         direction = utils.brep.normal_along_edge(edge)
         if (
             self.inputs.positioning.value
-            == TenonsInputs.Positioning.POINTS.value
+            == TenonsNativeInputs.Positioning.POINTS.value
         ):
             if not self.inputs.points.value:
                 raise ValueError("Select at least one Custom Point.")
@@ -997,13 +997,13 @@ class Tenons(addin.Addin):
             )
         sketch = component.sketches.addWithoutEdges(face)
         if not sketch:
-            raise RuntimeError("Fusion failed to create 'Tenons - Layout'.")
-        sketch.name = "Tenons - Layout"
+            raise RuntimeError("Fusion failed to create 'Tenons (Native) - Layout'.")
+        sketch.name = "Tenons (Native) - Layout"
 
         preprojected_points: list[adsk.fusion.SketchPoint] | None = None
         if (
             self.inputs.positioning.value
-            == TenonsInputs.Positioning.POINTS.value
+            == TenonsNativeInputs.Positioning.POINTS.value
         ):
             preprojected_points = [
                 self._project_point(sketch, point)
@@ -1112,7 +1112,7 @@ class Tenons(addin.Addin):
 
         if (
             self.inputs.positioning.value
-            == TenonsInputs.Positioning.NUMBER.value
+            == TenonsNativeInputs.Positioning.NUMBER.value
             and len(bases) > 1
         ):
             if (
@@ -1185,7 +1185,7 @@ class Tenons(addin.Addin):
         constraints = sketch.geometricConstraints
         if (
             self.inputs.positioning.value
-            == TenonsInputs.Positioning.POINTS.value
+            == TenonsNativeInputs.Positioning.POINTS.value
         ):
             source_points = self._sorted_custom_points(edge)
             if (
@@ -1247,8 +1247,8 @@ class Tenons(addin.Addin):
     ) -> adsk.fusion.Sketch:
         sketch = component.sketches.addWithoutEdges(geometry.small_face)
         if not sketch:
-            raise RuntimeError("Fusion failed to create 'Tenons - Mortises'.")
-        sketch.name = "Tenons - Mortises"
+            raise RuntimeError("Fusion failed to create 'Tenons (Native) - Mortises'.")
+        sketch.name = "Tenons (Native) - Mortises"
         projected_profiles = [
             self._project_tenon_profile(sketch, tool)
             for tool in tenon_tools
@@ -1286,7 +1286,7 @@ class Tenons(addin.Addin):
             geometry.tenon_face,
             geometry.edge,
             layout,
-            "Tenons - Root Dog Bones",
+            "Tenons (Native) - Root Dog Bones",
             "rootDogBone",
         )
         sketch = context.sketch
@@ -1360,7 +1360,7 @@ class Tenons(addin.Addin):
                 geometry.small_face,
                 geometry.edge,
                 layout,
-                "Tenons - Mortise Screws",
+                "Tenons (Native) - Mortise Screws",
                 "mortiseScrew",
             )
             sketch = context.sketch
@@ -1394,7 +1394,7 @@ class Tenons(addin.Addin):
                     center_points=centers,
                     diameter_expression=self.inputs.screw_diameter.expression,
                     depth=None,
-                    name="Tenons - Mortise Screw Holes",
+                    name="Tenons (Native) - Mortise Screw Holes",
                     parameter_role="mortiseScrew",
                 )
             )
@@ -1410,7 +1410,7 @@ class Tenons(addin.Addin):
                 geometry.tenon_face,
                 geometry.edge,
                 layout,
-                "Tenons - Tenon Screws",
+                "Tenons (Native) - Tenon Screws",
                 "tenonScrew",
             )
             sketch = context.sketch
@@ -1442,7 +1442,7 @@ class Tenons(addin.Addin):
                     center_points=centers,
                     diameter_expression=self.inputs.screw_diameter.expression,
                     depth=None,
-                    name="Tenons - Tenon Screw Holes",
+                    name="Tenons (Native) - Tenon Screw Holes",
                     parameter_role="tenonScrew",
                 )
             )
@@ -1471,7 +1471,7 @@ class Tenons(addin.Addin):
             geometry.tenon_face,
             geometry.edge,
             layout,
-            "Tenons - Connector Access",
+            "Tenons (Native) - Connector Access",
             "connectorAccess",
         )
         access_context.sketch.isComputeDeferred = True
@@ -1517,7 +1517,7 @@ class Tenons(addin.Addin):
                     body_role="tenon",
                     direction=access_direction,
                     distance=access_depth,
-                    name="Tenons - Connector Access Cut",
+                    name="Tenons (Native) - Connector Access Cut",
                     parameter_role="connectorAccessDepth",
                 )
             )
@@ -1530,7 +1530,7 @@ class Tenons(addin.Addin):
                     center_points=access_hole_centers,
                     diameter_expression=access_hole_diameter,
                     depth=access_depth,
-                    name="Tenons - Connector Access Holes",
+                    name="Tenons (Native) - Connector Access Holes",
                     parameter_role="connectorAccess",
                 )
             )
@@ -1543,7 +1543,7 @@ class Tenons(addin.Addin):
                     geometry.tenon_face,
                     geometry.edge,
                     layout,
-                    "Tenons - Connector Relief",
+                    "Tenons (Native) - Connector Relief",
                     "connectorRelief",
                 )
             )
@@ -1579,7 +1579,7 @@ class Tenons(addin.Addin):
                         body_role="tenon",
                         direction=access_direction,
                         distance=relief_depth,
-                        name="Tenons - Connector Relief Cut",
+                        name="Tenons (Native) - Connector Relief Cut",
                         parameter_role="connectorReliefDepth",
                     )
                 )
@@ -1592,7 +1592,7 @@ class Tenons(addin.Addin):
                         center_points=relief_hole_centers,
                         diameter_expression=relief_hole_diameter,
                         depth=relief_depth,
-                        name="Tenons - Connector Relief Holes",
+                        name="Tenons (Native) - Connector Relief Holes",
                         parameter_role="connectorRelief",
                     )
                 )
@@ -1604,7 +1604,7 @@ class Tenons(addin.Addin):
                 geometry.small_face,
                 geometry.edge,
                 alignment_points,
-                "Tenons - Connector Opposite Holes",
+                "Tenons (Native) - Connector Opposite Holes",
                 "connectorGuide",
             )
         )
@@ -1639,7 +1639,7 @@ class Tenons(addin.Addin):
                     if self.inputs.through_guide_holes.value
                     else guide_hole.depth
                 ),
-                name="Tenons - Connector Opposite Holes",
+                name="Tenons (Native) - Connector Opposite Holes",
                 parameter_role="connectorGuide",
             )
         )
@@ -1654,7 +1654,7 @@ class Tenons(addin.Addin):
                     geometry.small_face,
                     geometry.edge,
                     guide_centers,
-                    "Tenons - Connector Insert Collars",
+                    "Tenons (Native) - Connector Insert Collars",
                     "connectorCollar",
                 )
             )
@@ -1669,7 +1669,7 @@ class Tenons(addin.Addin):
                         guide_hole.collar_diameter_expression
                     ),
                     depth=guide_hole.collar_depth,
-                    name="Tenons - Connector Insert Collar Holes",
+                    name="Tenons (Native) - Connector Insert Collar Holes",
                     parameter_role="connectorCollar",
                 )
             )
@@ -3120,7 +3120,7 @@ class Tenons(addin.Addin):
         combine = component.features.combineFeatures.add(combine_input)
         if not combine:
             raise RuntimeError("Fusion failed to join the tenons.")
-        combine.name = "Tenons - Join"
+        combine.name = "Tenons (Native) - Join"
         return combine
 
     def _create_to_entity_extrude(
@@ -3358,7 +3358,7 @@ class Tenons(addin.Addin):
         design: adsk.fusion.Design,
     ) -> str:
         names = {parameter.name for parameter in design.allParameters}
-        base = "tenons"
+        base = "tenonsNative"
         index = 1
         while True:
             candidate = base if index == 1 else f"{base}{index}"
@@ -3423,7 +3423,7 @@ class Tenons(addin.Addin):
             last_feature.timelineObject.index,
         )
         if group:
-            group.name = "Tenons"
+            group.name = "Tenons (Native)"
             group.isCollapsed = True
 
     def _distance_from_edge_start(
