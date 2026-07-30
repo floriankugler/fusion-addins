@@ -3424,7 +3424,7 @@ class Tenons(addin.Addin):
         )
         if group:
             group.name = "Tenons"
-            group.isCollapsed = False
+            group.isCollapsed = True
 
     def _distance_from_edge_start(
         self,

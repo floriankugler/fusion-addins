@@ -2406,7 +2406,7 @@ class Connector(addin.Addin):
         )
         if group:
             group.name = "Connector"
-            group.isCollapsed = False
+            group.isCollapsed = True
 
     def _require_fully_constrained(
         self,

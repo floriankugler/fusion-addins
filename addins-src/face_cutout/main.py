@@ -3781,7 +3781,7 @@ class FaceCutout(addin.Addin):
         group = component.parentDesign.timeline.timelineGroups.add(start_index, end_index)
         if group:
             group.name = "Face Cutout"
-            group.isCollapsed = False
+            group.isCollapsed = True
 
     def _largest_profile(self, sketch: adsk.fusion.Sketch) -> adsk.fusion.Profile | None:
         profiles = utils.fusion.as_list(sketch.profiles)

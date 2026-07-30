@@ -2097,4 +2097,4 @@ class DoorLatchNative(addin.Addin):
                 "Fusion created the latch features but could not group them."
             )
         group.name = "Door Latch (Native)"
-        group.isCollapsed = False
+        group.isCollapsed = True

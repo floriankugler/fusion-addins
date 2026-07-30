@@ -1196,4 +1196,4 @@ class ConcealedHingeNative(addin.Addin):
                 "Fusion created the hinge features but could not group them."
             )
         group.name = "Concealed Hinge (Native)"
-        group.isCollapsed = False
+        group.isCollapsed = True

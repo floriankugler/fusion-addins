@@ -1011,7 +1011,7 @@ class DogBonesNative(addin.Addin):
         )
         if group:
             group.name = "Dog Bones (Native)"
-            group.isCollapsed = False
+            group.isCollapsed = True
 
     def _require_fully_constrained(
         self,
