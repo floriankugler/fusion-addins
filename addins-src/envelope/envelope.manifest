@@ -1,0 +1,13 @@
+{
+  "autodeskProduct": "Fusion360",
+  "type": "addin",
+  "id": "com.floriankugler.envelope",
+  "author": "",
+  "description": {
+    "": "Creates a single closed profile from a row of top-aligned rectangles joined by gutters."
+  },
+  "version": "",
+  "runOnStartup": false,
+  "supportedOS": "windows|mac",
+  "editEnabled": true
+}

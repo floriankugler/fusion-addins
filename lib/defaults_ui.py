@@ -63,6 +63,8 @@ class DefaultValueAdapter:
             return 'true' if source.value else 'false'
         if isinstance(source, inp.DropDownInput):
             return str(source.value)
+        if isinstance(source, inp.StringInput):
+            return source.value
         return ''
 
     def parse_new_default(self, source: inp.Input, text: str) -> tuple[Any | None, str | None]:
@@ -113,6 +115,10 @@ class DefaultValueAdapter:
                 return {"expr": text}, None
             return None, "Expression does not evaluate to a dropdown option."
 
+        if isinstance(source, inp.StringInput):
+            # Any text is a valid string default; there is nothing to evaluate.
+            return text, None
+
         return None, "Unsupported input type."
 
     def _extract_expr(self, value: Any) -> str | None:
@@ -123,6 +129,11 @@ class DefaultValueAdapter:
         return None
 
     def _apply_literal_default(self, source: inp.Input, value: Any):
+        if isinstance(source, inp.StringInput):
+            if isinstance(value, str):
+                source.default_value = value
+                source.value = value
+            return
         if isinstance(source, inp.FloatInput):
             if isinstance(value, (int, float)):
                 source.default_value = float(value)
@@ -145,6 +156,11 @@ class DefaultValueAdapter:
                     source.default_value = value
 
     def _apply_expression_default(self, source: inp.Input, expression: str):
+        if isinstance(source, inp.StringInput):
+            # A string default has no expression form; keep the text verbatim.
+            source.default_value = expression
+            source.value = expression
+            return
         if isinstance(source, inp.FloatInput):
             source.default_expression = expression
             return
@@ -402,6 +418,7 @@ class DefaultsUIManager:
             or isinstance(source, inp.IntegerInput)
             or isinstance(source, inp.CheckboxInput)
             or isinstance(source, inp.DropDownInput)
+            or isinstance(source, inp.StringInput)
         )
 
     def _show_error(self, message: str | None):

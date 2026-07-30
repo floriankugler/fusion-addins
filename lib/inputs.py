@@ -96,6 +96,45 @@ class CheckboxInput(Input):
             self.value = val
 
 
+class StringInput(Input):
+    default_value: str
+    value: str
+    input: adsk.core.StringValueCommandInput
+
+    def __init__(self, id, name, default_value: str, tool_tip, update_visibility: Callable[[], bool] = lambda: True):
+        super().__init__(id, name, tool_tip, update_visibility)
+        self.default_value = default_value
+        self.value = default_value
+
+    def create_input(self, inputs: adsk.core.CommandInputs, params: adsk.fusion.CustomFeatureParameters | None):
+        if params is not None:
+            raise errors.InvalidInputError(
+                f"String input '{self.name}' cannot be restored from a custom feature."
+            )
+        self.input = inputs.addStringValueInput(self.id, self.name, self.default_value)
+        self.input.tooltip = self.tool_tip
+
+    def create_in_feature_input(self, feature_input: adsk.fusion.CustomFeatureInput):
+        raise errors.InvalidInputError(
+            f"String input '{self.name}' cannot be stored in a custom feature."
+        )
+
+    def update_in_feature(self, feature: adsk.fusion.CustomFeature):
+        raise errors.InvalidInputError(
+            f"String input '{self.name}' cannot be stored in a custom feature."
+        )
+
+    def update_from_feature(self, feature: adsk.fusion.CustomFeature):
+        raise errors.InvalidInputError(
+            f"String input '{self.name}' cannot be restored from a custom feature."
+        )
+
+    def update_from_input(self):
+        val = self.input.value
+        if val is not None:
+            self.value = val
+
+
 class FloatInput(Input):
     default_value: float
     default_expression: str | None
