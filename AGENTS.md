@@ -29,6 +29,25 @@
 - After refreshing the links, reopen the Scripts and Add-Ins dialog and run the new add-in. Restart Fusion if it does not rescan the AddIns folder.
 - This first-time linking step is required even when the other development add-ins are already linked.
 
+### Dev Cycle: Restarting Add-Ins After Code Changes
+
+- After changing an add-in's code (or shared `lib/` code), restart the add-in programmatically through the Fusion MCP server instead of asking the user to stop/start it in the Scripts and Add-Ins dialog. All add-ins share Fusion's Python interpreter with the MCP server, so a script can drive the bootstrap directly:
+
+  ```python
+  import sys
+  import lib.fusionbootstrap.bootstrap as bootstrap
+
+  ADDIN_ENTRY = ('/Users/florian/Library/Application Support/Autodesk/'
+                 'Autodesk Fusion 360/API/AddIns/<addin>/<addin>.py')
+  if 'fusion_addin_<addin>_main' in sys.modules:
+      bootstrap.stop(None, ADDIN_ENTRY)
+  bootstrap.run(None, ADDIN_ENTRY)
+  ```
+
+- Dev mode (no vendored `lib/__version__.py`) reloads all `lib.*` modules on start, so library changes are picked up too. Verify afterwards that the add-in's command definitions exist again (`ui.commandDefinitions.itemById(...)`).
+- Precondition: the add-in's `Addin` subclasses must override `resource_dir` with an ABSOLUTE path. Fusion resolves the base class's relative `'Resources'` against the caller's context, which fails with "relative resourceFolder path not found" when the restart is triggered from outside Fusion's own add-in launcher.
+- The restart cannot run while a command dialog is open in Fusion (scripts are rejected); close the dialog or retry later. After a Fusion restart, the first add-in launch still happens via the Scripts and Add-Ins dialog.
+
 ## Coding Style & Naming Conventions
 
 - Language: Python 3, 4-space indentation, no tabs.

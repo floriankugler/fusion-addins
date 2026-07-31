@@ -448,6 +448,7 @@ class ConnectorsNative(addin.Addin):
     inputs: ConnectorsNativeInputs
     _parameter_prefix: str
     _target_body_tokens: dict[str, str]
+    _start_face_tokens: dict[str, str]
 
     @property
     def plugin_name(self) -> str:
@@ -544,9 +545,15 @@ class ConnectorsNative(addin.Addin):
             "access0": geometry.access_face.body.entityToken,
             "guide": geometry.guide_face.body.entityToken,
         }
+        self._start_face_tokens = {
+            "access0": geometry.access_face.entityToken,
+        }
         for board_index, board in enumerate(additional_boards, start=1):
             self._target_body_tokens[f"access{board_index}"] = (
                 board.edge.body.entityToken
+            )
+            self._start_face_tokens[f"access{board_index}"] = (
+                board.access_face.entityToken
             )
         connector_type = ConnectorType(self.inputs.size.value)
         surface = CabineoSurface(self.inputs.cabineo_surface.value)
@@ -647,13 +654,10 @@ class ConnectorsNative(addin.Addin):
             )
             self._require_fully_constrained(collar_context.sketch)
 
-        access_faces = [geometry.access_face] + [
-            board.access_face for board in additional_boards
-        ]
         access_thicknesses = [geometry.access_thickness] + [
             board.access_thickness for board in additional_boards
         ]
-        board_count = len(access_faces)
+        board_count = len(access_thicknesses)
 
         def board_suffix(index: int) -> str:
             return "" if index == 0 else str(index + 1)
@@ -666,9 +670,7 @@ class ConnectorsNative(addin.Addin):
             )
 
         last_feature: adsk.fusion.Feature | None = None
-        for board_index, (access_face, access_thickness) in enumerate(
-            zip(access_faces, access_thicknesses)
-        ):
+        for board_index, access_thickness in enumerate(access_thicknesses):
             access_depth: float | str = (
                 (
                     f"({self.inputs.clamex_board_thickness.expression}) / 2"
@@ -691,7 +693,10 @@ class ConnectorsNative(addin.Addin):
                 distance=access_depth,
                 name=board_name("Connector (Native) - Access Cut", board_index),
                 parameter_role=f"accessDepth{board_suffix(board_index)}",
-                start_face=access_face,
+                start_face=self._start_face(
+                    component,
+                    f"access{board_index}",
+                ),
             )
 
         if relief_context:
@@ -700,7 +705,7 @@ class ConnectorsNative(addin.Addin):
                 if surface == CabineoSurface.FLUSH
                 else self.inputs.cabineo_anti_break_depth.expression
             )
-            for board_index, access_face in enumerate(access_faces):
+            for board_index in range(board_count):
                 last_feature = self._create_cut_extrude(
                     component=component,
                     sketch=relief_context.sketch,
@@ -717,7 +722,10 @@ class ConnectorsNative(addin.Addin):
                     parameter_role=(
                         f"accessReliefDepth{board_suffix(board_index)}"
                     ),
-                    start_face=access_face,
+                    start_face=self._start_face(
+                        component,
+                        f"access{board_index}",
+                    ),
                 )
 
         last_feature = self._create_cut_extrude(
@@ -2277,6 +2285,30 @@ class ConnectorsNative(addin.Addin):
                 f"Fusion could not re-resolve the connector {role} body."
             )
         return body
+
+    def _start_face(
+        self,
+        component: adsk.fusion.Component,
+        role: str,
+    ) -> adsk.fusion.BRepFace:
+        # Re-resolve via entity token: every cut that starts from this face
+        # also modifies it, which invalidates a direct face reference.
+        entities = component.parentDesign.findEntityByToken(
+            self._start_face_tokens[role]
+        )
+        face = next(
+            (
+                candidate
+                for entity in entities
+                if (candidate := adsk.fusion.BRepFace.cast(entity))
+            ),
+            None,
+        )
+        if not face:
+            raise RuntimeError(
+                f"Fusion could not re-resolve the connector {role} face."
+            )
+        return face
 
     def _create_cut_extrude(
         self,

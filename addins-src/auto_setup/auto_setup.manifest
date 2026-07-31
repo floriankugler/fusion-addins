@@ -1,0 +1,13 @@
+{
+  "autodeskProduct": "Fusion360",
+  "type": "addin",
+  "id": "com.floriankugler.auto-setup",
+  "author": "",
+  "description": {
+    "": "Automatically creates a manufacturing setup with operations derived from the geometry of the selected bodies."
+  },
+  "version": "",
+  "runOnStartup": false,
+  "supportedOS": "windows|mac",
+  "editEnabled": true
+}
