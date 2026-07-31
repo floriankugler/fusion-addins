@@ -95,6 +95,7 @@ class Cutout:
     """Interior through opening, machined as an inside contour."""
     edges: list[adsk.fusion.BRepEdge]  # closed loop at the body bottom
     body: adsk.fusion.BRepBody
+    depth: float = 0.0  # stock thickness at this feature
 
 
 @dataclass
@@ -104,6 +105,7 @@ class Contour:
     # Outer loop of the bottom face (used for tab placement); empty if the
     # body has no planar bottom face.
     edges: list[adsk.fusion.BRepEdge] = field(default_factory=list)
+    depth: float = 0.0  # stock thickness
 
 
 @dataclass
@@ -166,7 +168,8 @@ def _recognize_body(body: adsk.fusion.BRepBody, frame: Frame) -> RecognitionResu
                 continue
             if _loop_matches_hole(loop, result.holes, frame):
                 continue
-            result.cutouts.append(Cutout(edges=list(loop.edges), body=body))
+            result.cutouts.append(Cutout(edges=list(loop.edges), body=body,
+                                         depth=z_max - z_min))
 
     outer_edges: list[adsk.fusion.BRepEdge] = []
     if bottom_faces:
@@ -174,7 +177,7 @@ def _recognize_body(body: adsk.fusion.BRepBody, frame: Frame) -> RecognitionResu
             if loop.isOuter:
                 outer_edges = list(loop.edges)
                 break
-    result.contours.append(Contour(body=body, edges=outer_edges))
+    result.contours.append(Contour(body=body, edges=outer_edges, depth=z_max - z_min))
     return result
 
 

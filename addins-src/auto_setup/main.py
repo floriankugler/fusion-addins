@@ -152,17 +152,8 @@ class AutoSetupInputs(inputs.Inputs):
             default_value=4,
             minimum=1,
             maximum=50,
-            tool_tip='Minimum number of tabs on each tabbed contour. Only kicks in on small or '
-                     'curvy contours; tab density is otherwise governed by the tab spacing.',
-            update_visibility=tabs_active,
-        )
-        self.tab_min_spacing = inputs.FloatInput(
-            id='tabMinSpacing',
-            name='Min tab spacing',
-            default_value=10.0,
-            tool_tip='Minimum distance between tabs along the contour. Straight edges receive as '
-                     'many centered tabs as this spacing allows.',
-            units=units,
+            tool_tip='Minimum number of tabs on each tabbed contour, so even small parts are '
+                     'held safely.',
             update_visibility=tabs_active,
         )
         super().__init__()
@@ -299,7 +290,6 @@ class AutoSetup(addin.Addin):
             mode=self.inputs.tabs_mode.value,
             selection=list(self.inputs.tab_contours.value),
             min_count=self.inputs.tab_min_count.value,
-            min_spacing=self.inputs.tab_min_spacing.value,
         )
         jobs, warnings = rules.plan(result, self.inputs.registry, assignments, tab_policy)
         summary = builder.create_setup(

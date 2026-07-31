@@ -143,7 +143,7 @@ def _apply_tabs(operation: adsk.cam.Operation, job: rules.Job, tab_policy: rules
     points: list[adsk.core.Point3D] = []
     for edges, label in job.tab_loops:
         points.extend(tabs.compute_tab_points(
-            edges, tab_width, tab_policy.min_spacing, tab_policy.min_count, warnings, label))
+            edges, tab_width, tab_policy.min_count, warnings, label))
     if not points:
         group.value.value = False
         warnings.append(f'{operation.name}: no tab positions could be placed; tabs disabled.')

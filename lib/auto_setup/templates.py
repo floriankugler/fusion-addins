@@ -107,25 +107,40 @@ def load(variant: TemplateVariant) -> adsk.cam.CAMTemplate:
     return template
 
 
-def tool_diameters(variant: TemplateVariant) -> list[float]:
-    """The tool diameters (cm) of all operations in the template.
+def tool_dimensions(variant: TemplateVariant) -> list[tuple[float | None, float | None]]:
+    """(diameter, flute length) in cm for every operation in the template.
 
     The tool of a template operation is serialized into its parameters
     (CAMTemplateOperationInput.tool itself is None for loaded templates).
+    The flute length is treated as the tool's maximum milling depth.
     """
     template = load(variant)
     operations = template.operations
-    diameters: list[float] = []
+    dimensions: list[tuple[float | None, float | None]] = []
     for idx in range(operations.count):
-        parameter = operations.get(idx).parameters.itemByName('tool_diameter')
-        if parameter:
-            diameters.append(parameter.value.value)
-    return diameters
+        parameters = operations.get(idx).parameters
+        diameter = parameters.itemByName('tool_diameter')
+        flute = parameters.itemByName('tool_fluteLength')
+        dimensions.append((
+            diameter.value.value if diameter else None,
+            flute.value.value if flute else None,
+        ))
+    return dimensions
 
 
-def primary_tool_diameter(variant: TemplateVariant) -> float | None:
-    diameters = tool_diameters(variant)
-    return diameters[0] if diameters else None
+def primary_tool(variant: TemplateVariant) -> tuple[float | None, float | None]:
+    """(diameter, flute length) of the template's first operation."""
+    dimensions = tool_dimensions(variant)
+    return dimensions[0] if dimensions else (None, None)
+
+
+def min_tool_dimensions(variant: TemplateVariant) -> tuple[float | None, float | None]:
+    """(smallest diameter, shortest flute) across the template's operations."""
+    dimensions = tool_dimensions(variant)
+    diameters = [d for d, _ in dimensions if d is not None]
+    flutes = [f for _, f in dimensions if f is not None]
+    return (min(diameters) if diameters else None,
+            min(flutes) if flutes else None)
 
 
 def export_document_setups(templates_dir: str) -> tuple[list[str], list[str]]:

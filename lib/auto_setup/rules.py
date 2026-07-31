@@ -34,6 +34,10 @@ BORE_CLEARANCE = 0.002
 FIT_TOL = 0.005
 # Through holes larger than this are machined as inner contours, not bores (cm).
 BIG_HOLE_LIMIT = 3.0
+# Tolerance when checking a tool's flute length against a feature depth (cm).
+DEPTH_TOL = 0.005
+# Extra depth required for through cuts (breakthrough below the stock, cm).
+THROUGH_ALLOWANCE = 0.02
 
 FINISH_NONE = 0
 FINISH_OUTER = 1
@@ -68,11 +72,13 @@ class Job:
 @dataclass
 class TabPolicy:
     """Tab placement policy from the command UI: a global mode plus an additive
-    selection of individual contours (edges/faces of outer contours or cutouts)."""
+    selection of individual contours (edges/faces of outer contours or cutouts).
+
+    The tab count per contour follows from the contour length with degressive
+    density (see tabs.tab_count); min_count is the floor."""
     mode: int = TAB_NONE
     selection: list = field(default_factory=list)  # entities (additive)
     min_count: int = 4
-    min_spacing: float = 10.0  # cm
 
 
 @dataclass
@@ -220,7 +226,8 @@ def plan(result: recognition.RecognitionResult, registry: dict[str, list[templat
             small_holes.append(hole)
         elif hole.is_through and hole.diameter > BIG_HOLE_LIMIT:
             if hole.bottom_edge:
-                cutouts.append(recognition.Cutout(edges=[hole.bottom_edge], body=hole.body))
+                cutouts.append(recognition.Cutout(edges=[hole.bottom_edge], body=hole.body,
+                                                  depth=hole.depth))
             else:
                 warnings.append(
                     f'{hole.body.name}: large hole ⌀{hole.diameter * 10:.1f}mm has no bottom edge; skipped.')
@@ -256,13 +263,27 @@ def plan(result: recognition.RecognitionResult, registry: dict[str, list[templat
         else:
             cutout_overrides[feature[1]] = label
 
+    min_dims = _min_dims_cache()
     jobs: list[Job] = []
     jobs += _plan_holes(small_holes, drills, bores, warnings)
-    jobs += _plan_pockets(pockets, registry, assignments, finish_pockets, warnings)
+    jobs += _plan_pockets(pockets, registry, assignments, finish_pockets, min_dims, warnings)
     jobs += _plan_contours(result, cutouts, registry, assignments, tab_policy.mode,
                            tab_outer, tab_cutouts,
-                           finish_outer, finish_cutouts, outer_overrides, cutout_overrides, warnings)
+                           finish_outer, finish_cutouts, outer_overrides, cutout_overrides,
+                           min_dims, warnings)
     return jobs, warnings
+
+
+def _min_dims_cache():
+    """Cached (min diameter, min flute length) lookup per template variant."""
+    cache: dict[str, tuple[float | None, float | None]] = {}
+
+    def min_dims(variant: templates.TemplateVariant) -> tuple[float | None, float | None]:
+        if variant.name not in cache:
+            cache[variant.name] = templates.min_tool_dimensions(variant)
+        return cache[variant.name]
+
+    return min_dims
 
 
 def _drill_match(diameter: float, drills: dict[float, templates.TemplateVariant]) -> bool:
@@ -308,7 +329,8 @@ def _plan_holes(holes, drills, bores, warnings: list[str]) -> list[Job]:
 
     groups: dict[tuple[str, float, bool], Job] = {}
     for hole in holes:
-        picked = _pick_hole_template(hole.diameter, drills, bores)
+        required_depth = hole.depth + (THROUGH_ALLOWANCE if hole.is_through else 0.0)
+        picked = _pick_hole_template(hole, required_depth, drills, bores, warnings)
         if not picked:
             warnings.append(
                 f'{hole.body.name}: hole ⌀{hole.diameter * 10:.2f}mm has no matching '
@@ -328,41 +350,78 @@ def _plan_holes(holes, drills, bores, warnings: list[str]) -> list[Job]:
     return [groups[key] for key in sorted(groups.keys(), key=order)]
 
 
-def _pick_hole_template(diameter, drills, bores):
-    for tool_dia, variant in drills.items():
+def _pick_hole_template(hole, required_depth, drills, bores, warnings):
+    diameter = hole.diameter
+
+    def depth_ok(flute):
+        return flute is None or flute >= required_depth - DEPTH_TOL
+
+    for tool_dia, (variant, flute) in drills.items():
         if abs(diameter - tool_dia) < DRILL_MATCH_TOL:
+            if depth_ok(flute):
+                return variant, tool_dia
+            bore_pick = _pick_bore(diameter, required_depth, bores, require_depth=True)
+            if bore_pick:
+                warnings.append(
+                    f'{hole.body.name}: hole ⌀{diameter * 10:.2f}mm is deeper '
+                    f'({required_depth * 10:.1f}mm) than the drill tool allows '
+                    f'({flute * 10:.1f}mm); boring with "{bore_pick[0].display_label}" instead.')
+                return bore_pick
+            warnings.append(
+                f'{hole.body.name}: hole ⌀{diameter * 10:.2f}mm depth '
+                f'{required_depth * 10:.1f}mm exceeds the drill tool\'s maximum '
+                f'({flute * 10:.1f}mm) and no bore tool can reach it; check the operation.')
             return variant, tool_dia
-    fitting = [t for t in bores if t <= diameter - BORE_CLEARANCE]
-    # Smallest tool that leaves no standing core (tool > hole/2)...
-    no_core = [t for t in fitting if 2 * t > diameter]
-    if no_core:
-        tool_dia = min(no_core)
-        return bores[tool_dia], tool_dia
-    # ...otherwise the largest tool (core is accepted / falls out on through holes).
-    if fitting:
-        tool_dia = max(fitting)
-        return bores[tool_dia], tool_dia
+
+    bore_pick = _pick_bore(diameter, required_depth, bores, require_depth=True)
+    if bore_pick:
+        return bore_pick
+    bore_pick = _pick_bore(diameter, required_depth, bores, require_depth=False)
+    if bore_pick:
+        variant, tool_dia = bore_pick
+        flute = bores[tool_dia][1]
+        warnings.append(
+            f'{hole.body.name}: hole ⌀{diameter * 10:.2f}mm depth '
+            f'{required_depth * 10:.1f}mm exceeds every bore tool\'s maximum '
+            f'(using "{variant.display_label}", {flute * 10:.1f}mm); check the operation.')
+        return bore_pick
     return None
 
 
+def _pick_bore(diameter, required_depth, bores, require_depth):
+    candidates = []
+    for tool_dia, (variant, flute) in bores.items():
+        if tool_dia > diameter - BORE_CLEARANCE:
+            continue
+        if require_depth and flute is not None and flute < required_depth - DEPTH_TOL:
+            continue
+        candidates.append(tool_dia)
+    if not candidates:
+        return None
+    # Smallest tool that leaves no standing core (tool > hole/2), otherwise the
+    # largest tool (core is accepted / falls out on through holes).
+    no_core = [t for t in candidates if 2 * t > diameter]
+    tool_dia = min(no_core) if no_core else max(candidates)
+    return bores[tool_dia][0], tool_dia
+
+
 def _plan_pockets(pockets, registry, assignments: Assignments, finish_pockets: set[int],
-                  warnings: list[str]) -> list[Job]:
+                  min_dims, warnings: list[str]) -> list[Job]:
     if not pockets:
         return []
 
-    min_diameters: dict[str, float | None] = {}
-
-    def min_tool_dia(variant: templates.TemplateVariant) -> float | None:
-        if variant.name not in min_diameters:
-            diameters = templates.tool_diameters(variant)
-            min_diameters[variant.name] = min(diameters) if diameters else None
-        return min_diameters[variant.name]
-
-    def fits(variant: templates.TemplateVariant, pocket: recognition.Pocket) -> bool:
+    def fits_radius(variant: templates.TemplateVariant, pocket: recognition.Pocket) -> bool:
         if pocket.min_corner_radius is None:
             return True
-        diameter = min_tool_dia(variant)
+        diameter = min_dims(variant)[0]
         return diameter is None or diameter / 2 <= pocket.min_corner_radius + FIT_TOL
+
+    def fits_depth(variant: templates.TemplateVariant, pocket: recognition.Pocket) -> bool:
+        flute = min_dims(variant)[1]
+        return flute is None or flute >= pocket.depth - DEPTH_TOL
+
+    def fits(variant, pocket):
+        return fits_radius(variant, pocket) and fits_depth(variant, pocket)
 
     groups: dict[str, Job] = {}
     for index, pocket in enumerate(pockets):
@@ -378,24 +437,30 @@ def _plan_pockets(pockets, registry, assignments: Assignments, finish_pockets: s
         if variant is None:
             warnings.append(f'No pocket template found for "{label}"; pocket skipped.')
             continue
-        if not fits(variant, pocket):
-            radius_mm = pocket.min_corner_radius * 10
+
+        problems = []
+        if not fits_radius(variant, pocket):
+            problems.append(f'corner radius {pocket.min_corner_radius * 10:.1f}mm')
+        if not fits_depth(variant, pocket):
+            problems.append(f'depth {pocket.depth * 10:.1f}mm')
+        if problems:
+            reason = ' and '.join(problems)
             if is_override:
                 warnings.append(
-                    f'{pocket.body.name}: pocket corner radius {radius_mm:.1f}mm is too small for '
-                    f'the assigned "{variant.display_label}" tool; corners will be left unmachined.')
+                    f'{pocket.body.name}: pocket {reason} does not suit the assigned '
+                    f'"{variant.display_label}" tool; check the operation.')
             else:
                 eligible = [v for v in registry['pocket'] if v.matches_cutter(assignments.cutter)]
-                replacement = _best_fitting_variant(eligible, variant, pocket, fits, min_tool_dia)
+                replacement = _best_fitting_variant(eligible, variant, pocket, fits, min_dims)
                 if replacement:
                     warnings.append(
-                        f'{pocket.body.name}: pocket corner radius {radius_mm:.1f}mm is too small '
-                        f'for "{variant.display_label}"; using "{replacement.display_label}" instead.')
+                        f'{pocket.body.name}: pocket {reason} does not suit '
+                        f'"{variant.display_label}"; using "{replacement.display_label}" instead.')
                     variant = replacement
                 else:
                     warnings.append(
-                        f'{pocket.body.name}: pocket corner radius {radius_mm:.1f}mm is too small '
-                        f'for every pocket template; corners will be left unmachined.')
+                        f'{pocket.body.name}: pocket {reason} does not suit any pocket '
+                        f'template; keeping "{variant.display_label}", check the operation.')
         if variant.name not in groups:
             groups[variant.name] = Job(
                 variant=variant, display_name=f'Pockets ({variant.display_label})')
@@ -403,7 +468,7 @@ def _plan_pockets(pockets, registry, assignments: Assignments, finish_pockets: s
     return list(groups.values())
 
 
-def _best_fitting_variant(variants, chosen, pocket, fits, min_tool_dia):
+def _best_fitting_variant(variants, chosen, pocket, fits, min_dims):
     """Among fitting variants prefer the chosen finishing flag and similar labels,
     then the largest tool."""
     candidates = [v for v in variants if fits(v, pocket)]
@@ -411,15 +476,43 @@ def _best_fitting_variant(variants, chosen, pocket, fits, min_tool_dia):
         return None
     def rank(variant):
         prefix = len(os.path.commonprefix([variant.label, chosen.label]))
-        return (variant.has_finish == chosen.has_finish, prefix, min_tool_dia(variant) or 0.0)
+        return (variant.has_finish == chosen.has_finish, prefix, min_dims(variant)[0] or 0.0)
     return max(candidates, key=rank)
+
+
+def _contour_depth_check(registry, variant, feature_depth, cutter, min_dims,
+                         context: str, warnings: list[str]) -> templates.TemplateVariant:
+    """Ensure the contour template's tool can cut through the stock; substitute
+    a depth-capable variant (same finish flag) or warn."""
+    required = feature_depth + THROUGH_ALLOWANCE
+    flute = min_dims(variant)[1]
+    if flute is None or flute >= required - DEPTH_TOL:
+        return variant
+    candidates = [
+        v for v in registry['contour']
+        if v.matches_cutter(cutter) and v.has_finish == variant.has_finish
+        and (min_dims(v)[1] is None or min_dims(v)[1] >= required - DEPTH_TOL)
+    ]
+    if candidates:
+        def rank(v):
+            prefix = len(os.path.commonprefix([v.label, variant.label]))
+            return (prefix, min_dims(v)[0] or 0.0)
+        replacement = max(candidates, key=rank)
+        warnings.append(
+            f'{context}: cut depth {required * 10:.1f}mm exceeds the "{variant.display_label}" '
+            f'tool ({flute * 10:.1f}mm); using "{replacement.display_label}" instead.')
+        return replacement
+    warnings.append(
+        f'{context}: cut depth {required * 10:.1f}mm exceeds every contour template '
+        f'(keeping "{variant.display_label}", {flute * 10:.1f}mm); check the operation.')
+    return variant
 
 
 def _plan_contours(result, cutouts, registry, assignments: Assignments, tab_mode: int,
                    tab_outer: set[str], tab_cutouts: set[int],
                    finish_outer: set[str], finish_cutouts: set[int],
                    outer_overrides: dict[str, str], cutout_overrides: dict[int, str],
-                   warnings: list[str]) -> list[Job]:
+                   min_dims, warnings: list[str]) -> list[Job]:
     if not cutouts and not result.contours:
         return []
     if assignments.contour_default is None and not outer_overrides and not cutout_overrides:
@@ -450,6 +543,9 @@ def _plan_contours(result, cutouts, registry, assignments: Assignments, tab_mode
         if variant is None:
             warnings.append(f'No contour template found for "{label}"; cutout skipped.')
             continue
+        variant = _contour_depth_check(
+            registry, variant, cutout.depth, assignments.cutter, min_dims,
+            f'{cutout.body.name} cutout', warnings)
         tabbed = tab_mode in (TAB_INNER, TAB_ALL) or index in tab_cutouts
         key = (variant.name, tabbed)
         if key not in cutout_groups:
@@ -474,6 +570,9 @@ def _plan_contours(result, cutouts, registry, assignments: Assignments, tab_mode
         if variant is None:
             warnings.append(f'No contour template found for "{label}"; outer contour skipped.')
             continue
+        variant = _contour_depth_check(
+            registry, variant, contour.depth, assignments.cutter, min_dims,
+            f'{contour.body.name} outer contour', warnings)
         tabbed = tab_mode in (TAB_OUTER, TAB_ALL) or body_token in tab_outer
         if tabbed and not contour.edges:
             warnings.append(
@@ -494,21 +593,22 @@ def _plan_contours(result, cutouts, registry, assignments: Assignments, tab_mode
 
 def _variants_by_tool_diameter(
         variants: list[templates.TemplateVariant], cutter: str | None,
-        warnings: list[str]) -> dict[float, templates.TemplateVariant]:
+        warnings: list[str]) -> dict[float, tuple[templates.TemplateVariant, float | None]]:
+    """Diameter -> (variant, flute length) for the eligible hole templates."""
     eligible = [v for v in variants if v.matches_cutter(cutter)]
     # Prefer cutter-tagged templates over untagged ones at the same diameter.
     eligible.sort(key=lambda v: v.cutter is None)
-    result: dict[float, templates.TemplateVariant] = {}
+    result: dict[float, tuple[templates.TemplateVariant, float | None]] = {}
     for variant in eligible:
-        diameter = templates.primary_tool_diameter(variant)
+        diameter, flute = templates.primary_tool(variant)
         if diameter is None:
             continue
         existing = result.get(diameter)
         if existing:
-            if existing.cutter is not None and variant.cutter is not None:
+            if existing[0].cutter is not None and variant.cutter is not None:
                 warnings.append(
                     f'Multiple {variant.kind} templates share tool diameter {diameter * 10:.2f}mm; '
-                    f'using "{existing.display_label}", ignoring "{variant.display_label}".')
+                    f'using "{existing[0].display_label}", ignoring "{variant.display_label}".')
             continue
-        result[diameter] = variant
+        result[diameter] = (variant, flute)
     return result
