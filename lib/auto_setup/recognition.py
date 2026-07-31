@@ -24,15 +24,14 @@ class Frame:
     z: adsk.core.Vector3D
 
     @staticmethod
-    def from_x_edge(x_edge: adsk.fusion.BRepEdge,
-                    top_normal: adsk.core.Vector3D) -> 'Frame':
-        """Build the machining frame from the X axis edge and the top face
-        normal (Z); Y follows right-handed."""
-        x = edge_direction(x_edge)
+    def from_x_axis(x_axis, top_normal: adsk.core.Vector3D) -> 'Frame':
+        """Build the machining frame from the X axis (linear edge or
+        construction axis) and the top face normal (Z); Y follows right-handed."""
+        x = axis_direction(x_axis)
         z = top_normal.copy()
         z.normalize()
         if abs(x.dotProduct(z)) > DIRECTION_TOL:
-            raise RecognitionError('The selected X axis edge is not parallel to the top face.')
+            raise RecognitionError('The selected X axis is not parallel to the top face.')
         y = z.crossProduct(x)
         return Frame(x=x, y=y, z=z)
 
@@ -45,27 +44,17 @@ def face_normal(face: adsk.fusion.BRepFace) -> adsk.core.Vector3D:
     return normal
 
 
-# Selected top faces may deviate from a common plane by at most this much (cm).
-TOP_FACE_TOL = 0.01
-
-
-def validate_top_faces(faces: list[adsk.fusion.BRepFace], frame: Frame):
-    """All selected top faces must lie on one plane perpendicular to Z."""
-    reference_height = frame.height(faces[0].pointOnFace)
-    for face in faces:
-        alignment = face_normal(face).dotProduct(frame.z)
-        if alignment < -(1 - DIRECTION_TOL):
-            raise RecognitionError(
-                f'The selected face on "{face.body.name}" faces away from the other '
-                'top faces (did you select a bottom face?).')
-        if alignment < 1 - DIRECTION_TOL:
-            raise RecognitionError(
-                f'The selected top face on "{face.body.name}" is not parallel to the '
-                'other top faces.')
-        if abs(frame.height(face.pointOnFace) - reference_height) > TOP_FACE_TOL:
-            raise RecognitionError(
-                f'The selected top faces are not on the same plane '
-                f'("{face.body.name}" differs).')
+def axis_direction(entity) -> adsk.core.Vector3D:
+    """Direction of an X axis selection: a linear edge or a construction axis."""
+    edge = adsk.fusion.BRepEdge.cast(entity)
+    if edge:
+        return edge_direction(edge)
+    axis = adsk.fusion.ConstructionAxis.cast(entity)
+    if axis:
+        direction = axis.geometry.direction
+        direction.normalize()
+        return direction
+    raise RecognitionError('The X axis selection must be a linear edge or a construction axis.')
 
 
 @dataclass

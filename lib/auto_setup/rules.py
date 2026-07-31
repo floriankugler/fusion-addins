@@ -39,11 +39,6 @@ DEPTH_TOL = 0.005
 # Extra depth required for through cuts (breakthrough below the stock, cm).
 THROUGH_ALLOWANCE = 0.02
 
-FINISH_NONE = 0
-FINISH_OUTER = 1
-FINISH_OUTER_CUTOUTS = 2
-FINISH_ALL = 3  # includes pockets
-
 TAB_NONE = 0
 TAB_OUTER = 1
 TAB_INNER = 2
@@ -87,7 +82,9 @@ class Assignments:
     cutter: str | None = None            # 'dc' | 'udc' | None
     pocket_default: str | None = None    # label
     contour_default: str | None = None   # label
-    finishing_mode: int = FINISH_NONE
+    finish_outer_all: bool = False       # finishing pass on all outer contours
+    finish_cutouts_all: bool = False     # ... on all inner contours (cutouts)
+    finish_pockets_all: bool = False     # ... on all pockets
     finish_selection: list = field(default_factory=list)  # entities (additive)
     # entityToken of a pocket bottom face -> label
     pocket_overrides: dict[str, str] = field(default_factory=dict)
@@ -431,7 +428,7 @@ def _plan_pockets(pockets, registry, assignments: Assignments, finish_pockets: s
         if label is None:
             warnings.append('No pocket template available; pockets skipped.')
             return []
-        finish = assignments.finishing_mode == FINISH_ALL or index in finish_pockets
+        finish = assignments.finish_pockets_all or index in finish_pockets
         variant = _resolve_with_finish_fallback(
             registry, 'pocket', label, finish, assignments.cutter, warnings)
         if variant is None:
@@ -522,11 +519,7 @@ def _plan_contours(result, cutouts, registry, assignments: Assignments, tab_mode
     def finish_wanted(is_outer: bool, selected: bool) -> bool:
         if selected:
             return True
-        if assignments.finishing_mode in (FINISH_OUTER_CUTOUTS, FINISH_ALL):
-            return True
-        if assignments.finishing_mode == FINISH_OUTER:
-            return is_outer
-        return False
+        return assignments.finish_outer_all if is_outer else assignments.finish_cutouts_all
 
     # Tabbed and untabbed features cannot share an operation: explicit tab
     # positions suppress automatic placement only for contours that have

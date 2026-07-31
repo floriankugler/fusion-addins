@@ -28,6 +28,11 @@ def run(context, runtime_info: RuntimeInfo):
     global _addin, _export_addin
     _addin = AutoSetup(runtime_info)
     _export_addin = AutoSetupExport(runtime_info)
+    # Dev support: allow external tooling to restart this add-in by firing the
+    # custom event '<id>_reload' (see lib/fusionbootstrap/reloader.py).
+    from lib.fusionbootstrap import reloader
+    entry = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'auto_setup.py')
+    reloader.ensure(runtime_info.id + '_reload', entry)
 
 
 def stop(context):
@@ -45,24 +50,31 @@ class AutoSetupInputs(inputs.Inputs):
         self.pocket_options = rules.pocket_options(registry)
         self.contour_options = rules.contour_options(registry)
 
-        self.top_faces = inputs.SelectionByEntityTokenInput(
-            id='topFaces',
-            name='Top Faces',
-            filter=['PlanarFaces'],
+        self.bodies = inputs.SelectionByEntityTokenInput(
+            id='bodies',
+            name='Bodies',
+            filter=['Bodies'],
             lower_bound=1,
             upper_bound=0,
-            tool_tip='Select the top face of every body to include in the setup. '
-                     'The faces define which side of the stock faces up and must all '
-                     'lie on the same plane.',
+            tool_tip='Select the bodies to include in the setup.',
+        )
+        self.top_face = inputs.SelectionByEntityTokenInput(
+            id='topFace',
+            name='Top Face',
+            filter=['PlanarFaces'],
+            lower_bound=1,
+            upper_bound=1,
+            tool_tip='Select the top face of one of the bodies. It defines which side of the '
+                     'stock faces up.',
         )
         self.x_axis = inputs.SelectionByEntityTokenInput(
             id='xAxis',
             name='X Axis',
-            filter=['LinearEdges'],
+            filter=['LinearEdges', 'ConstructionLines'],
             lower_bound=1,
             upper_bound=1,
-            tool_tip='Select a linear edge defining the X axis of the setup. '
-                     'Y follows from the top faces and the X axis.',
+            tool_tip='Select a linear edge or a construction axis defining the X axis of the '
+                     'setup. Y follows from the top face and the X axis.',
         )
         self.setup_name = inputs.StringInput(
             id='setupName',
@@ -101,27 +113,32 @@ class AutoSetupInputs(inputs.Inputs):
             'instead of the default.')
         self._register_buckets('contour', self.contour_buckets)
 
-        self.finishing = inputs.DropDownInput(
-            id='finishing',
-            name='Finishing',
-            options=[
-                inputs.DropDownInput.Item('None', rules.FINISH_NONE),
-                inputs.DropDownInput.Item('Outer contours', rules.FINISH_OUTER),
-                inputs.DropDownInput.Item('Outer + cutouts', rules.FINISH_OUTER_CUTOUTS),
-                inputs.DropDownInput.Item('All', rules.FINISH_ALL),
-            ],
-            default_value=rules.FINISH_NONE,
-            tool_tip='Which contours get the template variant with a finishing pass. '
-                     '"All" includes pockets.',
+        self.finish_outer = inputs.CheckboxInput(
+            id='finishOuter',
+            name='Finish outer contours',
+            default_value=False,
+            tool_tip='Use the finishing-pass template variant for all outer contours.',
+        )
+        self.finish_cutouts = inputs.CheckboxInput(
+            id='finishCutouts',
+            name='Finish inner contours',
+            default_value=False,
+            tool_tip='Use the finishing-pass template variant for all interior cutouts.',
+        )
+        self.finish_pockets = inputs.CheckboxInput(
+            id='finishPockets',
+            name='Finish pockets',
+            default_value=False,
+            tool_tip='Use the finishing-pass template variant for all pockets.',
         )
         self.finish_selection = inputs.SelectionByEntityTokenInput(
             id='finishSelection',
-            name='↳ Finish contours',
+            name='Finish contours',
             filter=['Edges', 'Faces'],
             lower_bound=0,
             upper_bound=0,
             tool_tip='Additionally apply a finishing pass to these contours or pockets '
-                     '(select edges or side faces), regardless of the dropdown above.',
+                     '(select edges or side faces), regardless of the checkboxes above.',
         )
 
         self.tabs_mode = inputs.DropDownInput(
@@ -263,25 +280,20 @@ class AutoSetup(addin.Addin):
         return AutoSetupInputs(templates.scan(TEMPLATES_DIR), units)
 
     def execute(self):
-        top_faces = cast(list[adsk.fusion.BRepFace], self.inputs.top_faces.value)
-        x_edge = cast(adsk.fusion.BRepEdge, self.inputs.x_axis.value[0])
+        bodies = cast(list[adsk.fusion.BRepBody], self.inputs.bodies.value)
+        top_face = cast(adsk.fusion.BRepFace, self.inputs.top_face.value[0])
+        x_axis = self.inputs.x_axis.value[0]
 
-        frame = recognition.Frame.from_x_edge(
-            x_edge, recognition.face_normal(top_faces[0]))
-        recognition.validate_top_faces(top_faces, frame)
-        bodies: list[adsk.fusion.BRepBody] = []
-        seen: set[str] = set()
-        for face in top_faces:
-            token = face.body.entityToken
-            if token not in seen:
-                seen.add(token)
-                bodies.append(face.body)
+        frame = recognition.Frame.from_x_axis(
+            x_axis, recognition.face_normal(top_face))
         result = recognition.recognize(bodies, frame)
         assignments = rules.Assignments(
             cutter=self.inputs.selected_cutter,
             pocket_default=self.inputs.default_pocket(),
             contour_default=self.inputs.default_contour(),
-            finishing_mode=self.inputs.finishing.value,
+            finish_outer_all=self.inputs.finish_outer.value,
+            finish_cutouts_all=self.inputs.finish_cutouts.value,
+            finish_pockets_all=self.inputs.finish_pockets.value,
             finish_selection=list(self.inputs.finish_selection.value),
             pocket_overrides=self.inputs.pocket_override_tokens(),
             contour_overrides=self.inputs.contour_override_entities(),
@@ -294,7 +306,7 @@ class AutoSetup(addin.Addin):
         jobs, warnings = rules.plan(result, self.inputs.registry, assignments, tab_policy)
         summary = builder.create_setup(
             self.inputs.setup_name.value, bodies, jobs, warnings, tab_policy,
-            x_edge=x_edge, top_face=top_faces[0], frame=frame)
+            x_axis=x_axis, top_face=top_face, frame=frame)
 
         if summary.warnings:
             self.ui.messageBox(

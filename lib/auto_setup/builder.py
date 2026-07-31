@@ -22,7 +22,7 @@ class BuildSummary:
 def create_setup(name: str, bodies: list[adsk.fusion.BRepBody],
                  jobs: list[rules.Job], warnings: list[str],
                  tab_policy: rules.TabPolicy | None = None,
-                 x_edge: adsk.fusion.BRepEdge | None = None,
+                 x_axis=None,
                  top_face: adsk.fusion.BRepFace | None = None,
                  frame: recognition.Frame | None = None) -> BuildSummary:
     cam = _cam_product()
@@ -35,8 +35,8 @@ def create_setup(name: str, bodies: list[adsk.fusion.BRepBody],
     parameters = setup_input.parameters
     parameters.itemByName('job_stockOffsetMode').expression = "'simple'"
     parameters.itemByName('job_stockOffsetSides').value.value = STOCK_SIDE_OFFSET
-    if x_edge and top_face and frame:
-        _apply_wcs_orientation(parameters, x_edge, top_face, frame)
+    if x_axis and top_face and frame:
+        _apply_wcs_orientation(parameters, x_axis, top_face, frame)
     setup = cam.setups.add(setup_input)
 
     summary = BuildSummary(setup=setup, warnings=list(warnings))
@@ -80,17 +80,18 @@ def _tab_sketch_factory(setup_name: str):
     return get
 
 
-def _apply_wcs_orientation(parameters, x_edge: adsk.fusion.BRepEdge,
-                           top_face: adsk.fusion.BRepFace, frame: recognition.Frame):
-    """Orient the setup WCS: Z plane from the top face, X from the axis edge.
+def _apply_wcs_orientation(parameters, x_axis, top_face: adsk.fusion.BRepFace,
+                           frame: recognition.Frame):
+    """Orient the setup WCS: Z plane from the top face, X from the axis
+    selection (linear edge or construction axis).
 
-    Fusion takes the face normal and the edge's parametric direction; the flip
-    flags align them with the machining frame."""
+    Fusion takes the face normal and the axis' own direction; the flip flags
+    align them with the machining frame."""
     parameters.itemByName('wcs_orientation_mode').expression = "'axesZX'"
     parameters.itemByName('wcs_orientation_axisZ').value.value = [top_face]
-    parameters.itemByName('wcs_orientation_axisX').value.value = [x_edge]
+    parameters.itemByName('wcs_orientation_axisX').value.value = [x_axis]
     flip_z = recognition.face_normal(top_face).dotProduct(frame.z) < 0
-    flip_x = recognition.edge_direction(x_edge).dotProduct(frame.x) < 0
+    flip_x = recognition.axis_direction(x_axis).dotProduct(frame.x) < 0
     parameters.itemByName('wcs_orientation_flipZ').value.value = flip_z
     parameters.itemByName('wcs_orientation_flipX').value.value = flip_x
 

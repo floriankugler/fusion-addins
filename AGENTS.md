@@ -31,22 +31,27 @@
 
 ### Dev Cycle: Restarting Add-Ins After Code Changes
 
-- After changing an add-in's code (or shared `lib/` code), restart the add-in programmatically through the Fusion MCP server instead of asking the user to stop/start it in the Scripts and Add-Ins dialog. All add-ins share Fusion's Python interpreter with the MCP server, so a script can drive the bootstrap directly:
+- After changing an add-in's code (or shared `lib/` code), restart the add-in programmatically through the Fusion MCP server instead of asking the user to stop/start it in the Scripts and Add-Ins dialog.
+- IMPORTANT: do NOT call `bootstrap.stop`/`bootstrap.run` directly from an MCP script. Event handlers registered during an MCP script execution are torn down when the execution ends — the add-in's commands re-register but their buttons silently do nothing afterwards. Instead, fire the add-in's self-reload custom event; the reload then runs inside the add-in's own (persistent) handler:
 
   ```python
-  import sys
-  import lib.fusionbootstrap.bootstrap as bootstrap
+  import sys, time
+  import adsk, adsk.core
 
-  ADDIN_ENTRY = ('/Users/florian/Library/Application Support/Autodesk/'
-                 'Autodesk Fusion 360/API/AddIns/<addin>/<addin>.py')
-  if 'fusion_addin_<addin>_main' in sys.modules:
-      bootstrap.stop(None, ADDIN_ENTRY)
-  bootstrap.run(None, ADDIN_ENTRY)
+  EVENT_ID = 'com_floriankugler_<addin>_reload'  # '<runtime id>_reload'
+  reloader = sys.modules['lib.fusionbootstrap.reloader']
+  before = reloader.last_result(EVENT_ID)
+  adsk.core.Application.get().fireCustomEvent(EVENT_ID)
+  deadline = time.time() + 30
+  while time.time() < deadline and reloader.last_result(EVENT_ID) == before:
+      adsk.doEvents()
+  print('reload result:', reloader.last_result(EVENT_ID))  # expect 'ok #n'
   ```
 
-- Dev mode (no vendored `lib/__version__.py`) reloads all `lib.*` modules on start, so library changes are picked up too. Verify afterwards that the add-in's command definitions exist again (`ui.commandDefinitions.itemById(...)`).
+- The self-reload event is provided by `lib/fusionbootstrap/reloader.py`; an add-in opts in by calling `reloader.ensure(runtime_info.id + '_reload', <entry .py path>)` in its `main.run()`. The event is only registered when Fusion itself starts the add-in — after adding reloader support (or after a Fusion restart), the add-in must be started once via the Scripts and Add-Ins dialog before scripted reloads work.
+- Dev mode (no vendored `lib/__version__.py`) reloads all `lib.*` modules (except `fusionbootstrap`) on start, so library changes are picked up too. Verify afterwards that the add-in's command definitions exist again (`ui.commandDefinitions.itemById(...)`).
 - Precondition: the add-in's `Addin` subclasses must override `resource_dir` with an ABSOLUTE path. Fusion resolves the base class's relative `'Resources'` against the caller's context, which fails with "relative resourceFolder path not found" when the restart is triggered from outside Fusion's own add-in launcher.
-- The restart cannot run while a command dialog is open in Fusion (scripts are rejected); close the dialog or retry later. After a Fusion restart, the first add-in launch still happens via the Scripts and Add-Ins dialog.
+- The reload cannot run while a command dialog is open in Fusion (scripts are rejected); close the dialog or retry later.
 
 ## Coding Style & Naming Conventions
 
