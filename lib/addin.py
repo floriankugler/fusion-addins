@@ -199,12 +199,19 @@ class Addin(ABC):
     def showError(self, message: str | None):
         if not self._error_field:
             return
+        # Only write when something actually changes: every write to a command
+        # input fires an inputChanged event, and each of those triggers a full
+        # preview-rollback cycle in the command.
         if message:
-            self._error_field.isVisible = True
-            self._error_field.formattedText = f"<font color=\"red\">{message}</font><br>"
+            text = f"<font color=\"red\">{message}</font><br>"
+            if not self._error_field.isVisible:
+                self._error_field.isVisible = True
+            if self._error_field.formattedText != text:
+                self._error_field.formattedText = text
         else:
-            self._error_field.isVisible = False
-            self._error_field.formattedText = ''
+            if self._error_field.isVisible:
+                self._error_field.isVisible = False
+                self._error_field.formattedText = ''
 
     def log_exception_traceback(self, context: str, error: Exception):
         utils.fusion.log(

@@ -20,9 +20,14 @@ _counters: dict[str, int] = {}
 
 
 def ensure(event_id: str, addin_entry: str):
-    """Register the reload custom event for an add-in (idempotent)."""
-    if event_id in _registrations:
-        return
+    """Register the reload custom event for an add-in.
+
+    Always re-registers: stopping an add-in via the Scripts and Add-Ins dialog
+    makes Fusion unregister its custom events, so a surviving _registrations
+    entry does not mean the event is still alive. Skipping re-registration here
+    left dead events behind after a manual stop/start cycle.
+    """
+    _registrations.pop(event_id, None)
     app = adsk.core.Application.get()
     try:
         app.unregisterCustomEvent(event_id)

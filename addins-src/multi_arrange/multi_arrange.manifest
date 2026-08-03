@@ -1,0 +1,13 @@
+{
+  "autodeskProduct": "Fusion360",
+  "type": "addin",
+  "id": "com.floriankugler.multi_arrange",
+  "author": "",
+  "description": {
+    "": "Grain- and group-aware nesting on multi-sheet envelope profiles, built on Fusion's Arrange solver."
+  },
+  "version": "",
+  "runOnStartup": false,
+  "supportedOS": "windows|mac",
+  "editEnabled": true
+}

@@ -107,11 +107,18 @@ def _reload_lib_modules():
     # Compute depth based on number of dots (more dots = deeper child)
     lib_modules.sort(key=lambda name: name.count('.'), reverse=True)
 
-    for name in lib_modules:
-        module = sys.modules.get(name)
-        if module is not None:
-            try:
-                importlib.reload(module)
-                print(f"[DEV_MODE] Reloaded {name}")
-            except Exception as e:
-                print(f"[DEV_MODE] Failed to reload {name}: {e}")
+    # Two passes: a single pass can leave a class inheriting from a base of a
+    # module that was reloaded later (e.g. a table input subclassing
+    # lib.inputs.Input while lib.inputs reloads after it), which breaks
+    # isinstance checks. The second pass re-executes every module against the
+    # fully reloaded set, rebinding all cross-module bases.
+    for pass_index in range(2):
+        for name in lib_modules:
+            module = sys.modules.get(name)
+            if module is not None:
+                try:
+                    importlib.reload(module)
+                    if pass_index == 1:
+                        print(f"[DEV_MODE] Reloaded {name}")
+                except Exception as e:
+                    print(f"[DEV_MODE] Failed to reload {name} (pass {pass_index + 1}): {e}")

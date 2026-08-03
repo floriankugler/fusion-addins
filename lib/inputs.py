@@ -149,6 +149,11 @@ class FloatInput(Input):
         super().__init__(id, name, tool_tip, update_visibility)
         self.default_value = default_value
         self.default_expression = None
+        self.value = default_value
+        # Reading the expression from the UI input can fail (e.g. before the
+        # dialog is fully built), in which case update_from_input keeps the
+        # previous value — so there must always be one.
+        self.expression = ''
         self.units = units
 
     def create_input(self, inputs: adsk.core.CommandInputs, params: adsk.fusion.CustomFeatureParameters | None):
@@ -365,7 +370,16 @@ class Inputs(ABC):
     def __init__(self):
         self.inputs = []
         for _, value in vars(self).items():
-            if isinstance(value, Input):
+            # Duck-typed on top of isinstance: after a dev-mode module reload,
+            # an Input subclass defined in another lib module can still inherit
+            # from the pre-reload Input class, which fails the isinstance check
+            # even though the object is perfectly usable. Dropping it here
+            # silently removes the input from the dialog.
+            if isinstance(value, Input) or (
+                hasattr(value, 'create_input')
+                and hasattr(value, 'update_from_input')
+                and hasattr(value, 'id')
+            ):
                 self.inputs.append(value)
 
     def update_visibilities(self):
