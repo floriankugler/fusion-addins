@@ -112,39 +112,42 @@ def part_frame(part: model.Part) -> adsk.core.Matrix3D:
     normal, z along the top face normal, x along the grain direction."""
     z_axis = face_normal(part.top_face)
 
+    # Grain candidates, most authoritative first: a stored explicit reference,
+    # the appearance texture's grain axis (only meaningful when it lies in the
+    # face plane, i.e. the user oriented the wood texture), the longest
+    # straight edge of the top face, the parent component's X axis, then any
+    # world axis. Parts without straight edges (e.g. discs) always end up with
+    # a usable, stable direction.
+    candidates = []
     if part.grain is not None:
-        # An explicitly referenced grain direction must be usable; falling back
-        # silently would nest the part with the wrong grain.
-        x_axis = project_onto_plane(part.grain, z_axis)
-        if x_axis.length < 1e-6:
-            raise MultiArrangeError(
-                f"The grain direction of part '{part.body.name}' is perpendicular to its top face."
-            )
-    else:
-        # No reference: longest straight edge of the top face, then the parent
-        # component's X axis, then any world axis. Parts without straight edges
-        # (e.g. discs) always end up with a usable, stable direction.
-        candidates = []
-        edge_direction = longest_linear_edge_direction(part.top_face)
-        if edge_direction is not None:
-            candidates.append(edge_direction)
-        candidates.append(component_x_direction(part.body))
-        candidates.append(adsk.core.Vector3D.create(1.0, 0.0, 0.0))
-        candidates.append(adsk.core.Vector3D.create(0.0, 1.0, 0.0))
-        candidates.append(adsk.core.Vector3D.create(0.0, 0.0, 1.0))
-        x_axis = None
-        for candidate in candidates:
-            projected = project_onto_plane(candidate, z_axis)
-            if projected.length > 1e-6:
-                x_axis = projected
-                break
-        if x_axis is None:
-            raise MultiArrangeError(
-                f"Could not derive a grain direction for part '{part.body.name}'."
-            )
+        candidates.append(part.grain)
+    texture_direction = model.texture_grain_direction(part.body)
+    if texture_direction is not None:
+        candidates.append(texture_direction)
+    edge_direction = longest_linear_edge_direction(part.top_face)
+    if edge_direction is not None:
+        candidates.append(edge_direction)
+    candidates.append(component_x_direction(part.body))
+    candidates.append(adsk.core.Vector3D.create(1.0, 0.0, 0.0))
+    candidates.append(adsk.core.Vector3D.create(0.0, 1.0, 0.0))
+    candidates.append(adsk.core.Vector3D.create(0.0, 0.0, 1.0))
+    x_axis = None
+    for candidate in candidates:
+        projected = project_onto_plane(candidate, z_axis)
+        if projected.length > 1e-2:
+            x_axis = projected
+            break
+    if x_axis is None:
+        raise MultiArrangeError(
+            f"Could not derive a grain direction for part '{part.body.name}'."
+        )
     x_axis.normalize()
-    y_axis = z_axis.crossProduct(x_axis)
-    y_axis.normalize()
+    # Grain runs along the sheet's Y axis (its height): the solver aligns a
+    # proxy's local X with the envelope X, so the grain goes into the frame's
+    # Y axis and the across-grain direction into X.
+    y_axis = x_axis
+    x_axis = y_axis.crossProduct(z_axis)
+    x_axis.normalize()
 
     # Drop the origin to the body's lowest bounding-box corner along the
     # normal, so the proxy body sits on z >= 0 and the solver keeps it upright.
@@ -396,7 +399,7 @@ def run(design: adsk.fusion.Design, faces: list[adsk.fusion.BRepFace],
         envelope_profile: adsk.fusion.Profile, options: Options,
         timeline_start: int | None = None,
         settings_list: list[model.PartSettings] | None = None,
-        result_component: adsk.fusion.Component | None = None) -> int:
+        result_occurrence: adsk.fusion.Occurrence | None = None) -> int:
     """Runs the whole pipeline. Returns the number of placed parts.
 
     Pass timeline_start to extend the resulting timeline group backwards over
@@ -421,7 +424,7 @@ def run(design: adsk.fusion.Design, faces: list[adsk.fusion.BRepFace],
 
         solve(root, proxies, envelope_profile, options)
 
-        placed = place_results(design, root, proxies, options, result_component)
+        placed = place_results(design, root, proxies, options, result_occurrence)
     finally:
         for proxy in proxies:
             if proxy.occurrence.isValid:
@@ -461,11 +464,27 @@ def create_arrange_feature(root: adsk.fusion.Component, proxies: list[Proxy],
         return arrange_features.add(solver_input)
     except RuntimeError as error:
         if 'NO_ROOM' in str(error):
-            raise MultiArrangeError(
-                'Not enough room on the envelope to arrange all parts. '
-                'Add sheets or enlarge the envelope.'
-            ) from error
+            raise MultiArrangeError(no_room_message(proxies, envelope_profile)) from error
         raise
+
+
+def no_room_message(proxies: list[Proxy], envelope_profile: adsk.fusion.Profile) -> str:
+    """A no-room error that says how much material is actually needed."""
+    part_count = sum(len(proxy.parts) for proxy in proxies)
+    details = ''
+    try:
+        parts_area = sum(part.top_face.area for proxy in proxies for part in proxy.parts)
+        sheet_area = envelope_profile.areaProperties().area
+        details = (
+            f' The {part_count} parts cover {parts_area / 10000:.2f} m² of the '
+            f'{sheet_area / 10000:.2f} m² of sheet (before spacing and offcuts).'
+        )
+    except RuntimeError:
+        details = f' ({part_count} parts.)'
+    return (
+        'Not enough room on the sheets to arrange all parts.' + details +
+        ' Add sheets, enlarge them, or reduce the spacing.'
+    )
 
 
 def _allowed_rotation_modulus(rotation_type: int) -> float | None:
@@ -504,7 +523,17 @@ def solve(root: adsk.fusion.Component, proxies: list[Proxy],
     the per-component rotation offset, both of which act as clean offsets on
     the solver's default. The solver is deterministic, so this converges —
     typically in a single extra pass, and only when a part deviates at all.
+
+    Deviations are measured in the ENVELOPE SKETCH's coordinate frame, not the
+    world frame: for a compliant placement, the proxy's local axes map onto
+    the sheet's axes (grain along sheet Y), whatever plane the sheet lies on.
+    Measuring against world axes silently assumed an X-Y sheet — on other
+    planes it misread flips (no convergence) and angles (wrong grain).
     """
+    # Rigid inverse of the sketch orientation: for rigid transforms the
+    # rotation cells of plane_inverse @ W are translation-independent.
+    plane_inverse = inverted(envelope_profile.parentSketch.transform)
+
     for _attempt in range(3):
         feature = create_arrange_feature(root, proxies, envelope_profile, options)
         try:
@@ -519,7 +548,7 @@ def solve(root: adsk.fusion.Component, proxies: list[Proxy],
 
         compliant = True
         for proxy in proxies:
-            placement = proxy.placement
+            placement = multiply(plane_inverse, proxy.placement)
             if placement.getCell(2, 2) < 0:
                 # Placed upside-down: toggle the flip compensation first; the
                 # in-plane angle is re-measured on the next pass.
@@ -598,15 +627,16 @@ def read_placements(root: adsk.fusion.Component, proxies: list[Proxy]):
 
 def place_results(design: adsk.fusion.Design, root: adsk.fusion.Component,
                   proxies: list[Proxy], options: Options,
-                  result_component: adsk.fusion.Component | None = None) -> int:
+                  result_occurrence: adsk.fusion.Occurrence | None = None) -> int:
     temp_manager = adsk.fusion.TemporaryBRepManager.get()
     placed = 0
 
     if options.create_copies:
-        if result_component is None:
-            occurrence = root.occurrences.addNewComponent(adsk.core.Matrix3D.create())
-            result_component = occurrence.component
-            result_component.name = RESULT_COMPONENT_NAME
+        if result_occurrence is None:
+            result_occurrence = root.occurrences.addNewComponent(adsk.core.Matrix3D.create())
+            result_occurrence.component.name = RESULT_COMPONENT_NAME
+        result_component = result_occurrence.component
+        to_result_space = inverted(result_occurrence.transform2)
         for proxy in proxies:
             delta = multiply(proxy.placement, inverted(proxy.frame))
             for part in proxy.parts:
@@ -616,7 +646,9 @@ def place_results(design: adsk.fusion.Design, root: adsk.fusion.Component,
                 # Re-fetch the body: the reference returned from inside the
                 # base-feature edit does not accept a name reliably.
                 bodies = result_component.bRepBodies
-                bodies.item(bodies.count - 1).name = part.body.name
+                added = bodies.item(bodies.count - 1)
+                added.name = part.body.name
+                apply_appearance(part.body, added, delta, to_result_space)
                 placed += 1
         return placed
 
@@ -633,3 +665,50 @@ def place_results(design: adsk.fusion.Design, root: adsk.fusion.Component,
             move_features.add(move_input)
             placed += 1
     return placed
+
+
+def apply_appearance(source: adsk.fusion.BRepBody, target: adsk.fusion.BRepBody,
+                     delta: adsk.core.Matrix3D, to_target_space: adsk.core.Matrix3D):
+    """Gives the arranged copy the source part's appearance and grain mapping.
+
+    Carrying the texture mapping over means the wood grain of a nested part is
+    drawn in the direction it was actually nested, so a wrong grain becomes
+    visible on screen instead of only in the numbers. Texture transforms are
+    stored in component space, so the source mapping is lifted to world space,
+    moved by the part's placement, and pushed into the result component's
+    space.
+    """
+    appearance = source.appearance
+    if appearance is None:
+        return
+    try:
+        target.appearance = appearance
+    except RuntimeError:
+        return
+
+    source_control = source.textureMapControl
+    target_control = target.textureMapControl
+    if source_control is None or target_control is None:
+        return
+    source_transform = getattr(source_control, 'transform', None)
+    if source_transform is None or not hasattr(target_control, 'transform'):
+        return
+
+    # Projection style (planar/box/cylindrical/spherical) before the transform,
+    # since changing the type resets the mapping.
+    source_type = getattr(source_control, 'projectedTextureMapType', None)
+    if source_type is not None and hasattr(target_control, 'projectedTextureMapType'):
+        try:
+            target_control.projectedTextureMapType = source_type
+            target_control.isCapped = source_control.isCapped
+        except RuntimeError:
+            pass
+
+    world = source_transform
+    context = source.assemblyContext
+    if context is not None:
+        world = multiply(context.transform2, source_transform)
+    try:
+        target_control.transform = multiply(to_target_space, multiply(delta, world))
+    except RuntimeError:
+        pass

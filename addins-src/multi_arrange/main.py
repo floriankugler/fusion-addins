@@ -21,6 +21,17 @@ _addin: addin.Addin | None = None
 
 RESOURCE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'Resources')
 
+# Opacity applied to the source parts of an arrangement, so it is obvious at a
+# glance which parts are already covered. The dim is deliberately strong: while
+# the dialog is open these very parts are also selection-highlighted, and a
+# milder value is invisible underneath that highlight.
+#
+# It is applied while the dialog is open AND kept once the arrangement is
+# created, so the marker survives into the model; only cancelling the dialog or
+# taking a part out of the arrangement restores full opacity.
+DIMMED_OPACITY = 0.15
+FULL_OPACITY = 1.0
+
 
 def run(context, runtime_info: RuntimeInfo):
     global _addin
@@ -96,7 +107,11 @@ class ArrangeInputs(inputs.Inputs):
             id='faces',
             name='Parts (top faces)',
             filter=['PlanarFaces'],
-            lower_bound=1,
+            # No lower bound: an empty parts list is how an existing
+            # arrangement is deleted (see MultiArrange._input_error). The
+            # "at least one part" rule is enforced there instead, so that the
+            # delete case can opt out of it.
+            lower_bound=0,
             upper_bound=0,
             tool_tip='Select the top face of every part to nest.',
         )
@@ -106,19 +121,6 @@ class ArrangeInputs(inputs.Inputs):
             tool_tip=(
                 'Rotation, grain and grouping per part. Rows are prefilled from '
                 'the settings saved on each body and are saved back on OK.'
-            ),
-        )
-        self.direction = inputs.SelectionByEntityTokenInput(
-            id='direction',
-            name='Grain direction',
-            filter=['LinearEdges', 'SketchLines', 'ConstructionLines'],
-            lower_bound=0,
-            upper_bound=1,
-            tool_tip=(
-                'Assigns a grain direction to the highlighted table row: select '
-                'the row, then pick a linear edge, sketch line or construction '
-                'axis. Without a reference the longest edge of the top face is '
-                'used.'
             ),
         )
         self.plane = inputs.SelectionByEntityTokenInput(
@@ -181,16 +183,6 @@ class ArrangeInputs(inputs.Inputs):
             default_value=True,
             tool_tip='Allow parts to be nested inside cutouts of other parts.',
         )
-        self.create_copies = inputs.CheckboxInput(
-            id='create_copies',
-            name='Create copies',
-            default_value=True,
-            tool_tip=(
-                'Checked: the original parts stay in place and copies are placed '
-                'on the envelope in a new "Multi-Arrange" component. Unchecked: '
-                'the original bodies are moved onto the envelope.'
-            ),
-        )
         self.preview = ButtonInput(
             id='preview',
             name='Preview',
@@ -238,6 +230,25 @@ class MultiArrange(addin.Addin):
             command=command,
         )
 
+    def get_ui_placements(self) -> list[ui_placement.UIPlacement]:
+        # Everywhere Fusion's own Arrange lives: the Design workspace's solid
+        # and assembly Modify panels, plus their same-id twins in the
+        # manufacturing model editing environment (product
+        # 'MfgWorkingModelToolbar' — panel ids are only unique per product).
+        command = ui_placement.PlacementSpec(
+            id=self.create_command_id,
+            anchor_id='ArrangeCommand',
+            insert_before=False,
+        )
+        placements = [self.get_ui_placement()]
+        placements.append(ui_placement.UIPlacement(
+            panel_id='AssemblyModifyPanel', command=command))
+        for panel_id in ('SolidModifyPanel', 'AssemblyModifyPanel'):
+            placements.append(ui_placement.UIPlacement(
+                panel_id=panel_id, command=command,
+                workspace_id='MfgWorkingModelEnv'))
+        return placements
+
     def _initialize_inputs(self, command, params):
         self._ui_ready = False
         super()._initialize_inputs(command, params)
@@ -247,8 +258,21 @@ class MultiArrange(addin.Addin):
         self._preview_graphics: adsk.fusion.CustomGraphicsGroup | None = None
         self._pending_preview = None
         self._preview_fingerprint = None
+        self._notice: str | None = None
+        self._notice_fingerprint = None
         self._did_execute = False
-        self._hidden_occurrence: adsk.fusion.Occurrence | None = None
+        self._update_token: str | None = None
+        self._update_was_visible = True
+        # Opacity each part had when this dialog first saw it, so cancelling can
+        # put it back. Written once per part and never dropped: a part that
+        # leaves the table and comes back would otherwise have our own dim
+        # recorded as its original, and cancel would leave it dimmed.
+        self._original_opacity: dict[str, float] = {}
+        # Parts currently dimmed by this dialog.
+        self._dimmed: set[str] = set()
+        # Face tokens of the arrangement being replaced, so execute can un-dim
+        # the parts that were dropped from it.
+        self._recipe_face_tokens: list[str] = []
         self._destroy_hooked = False
         design = self.app.activeDocument.products.itemByProductType('DesignProductType')
         units = design.unitsManager.defaultLengthUnits if design else 'mm'
@@ -303,6 +327,7 @@ class MultiArrange(addin.Addin):
             return
         self.inputs.rectangles.handle_input_changed(input)
         if self.inputs.parts_table.handle_input_changed(input):
+            self._set_notice(self.inputs.parts_table.message)
             if (self.inputs.faces.input and
                     self.inputs.faces.input.selectionCount != len(self.inputs.parts_table.records)):
                 self._rebuild_faces_from_table()
@@ -311,12 +336,8 @@ class MultiArrange(addin.Addin):
             self.inputs.parts_table.sync(
                 [cast(adsk.fusion.BRepFace, face) for face in self.inputs.faces.value])
             self._restore_selections(snapshot)
-        if (self.inputs.direction.input and input.id == self.inputs.direction.input.id
-                and self.inputs.direction.value):
-            entity = self.inputs.direction.value[0]
-            message = self.inputs.parts_table.assign_direction(entity.entityToken)
-            self.showError(message)
-            self.inputs.direction.input.clearSelection()
+        if getattr(self, '_ui_ready', False):
+            self._hook_destroy(input.parentCommand)
         if self.inputs.update.input and input.id == self.inputs.update.input.id:
             self._handle_update_selection(input)
         if self.inputs.preview.input and input.id == self.inputs.preview.input.id:
@@ -329,8 +350,12 @@ class MultiArrange(addin.Addin):
             self._hook_destroy(input.parentCommand)
             try:
                 error = self._input_error()
+                if not error and not self.inputs.parts_table.records:
+                    # An empty list is valid input (it deletes the selected
+                    # arrangement on OK), but there is nothing to preview.
+                    error = 'Nothing to preview: the parts list is empty.'
                 if error:
-                    self.showError(error)
+                    self._set_notice(error)
                 else:
                     # Only compute here; drawing happens in _execute_preview.
                     # The compute's model churn (creating and deleting the
@@ -344,13 +369,19 @@ class MultiArrange(addin.Addin):
                     self._pending_preview = self._compute_preview_data()
                     self._restore_selections(snapshot)
                     self._preview_fingerprint = self._inputs_fingerprint()
-                    self.showError(None)
+                    self._set_notice(None)
             except Exception as error:
+                # Failures like "not enough room" belong in the dialog, not
+                # only in the console.
                 self.log_exception_traceback('preview', error)
-                self.showError(str(error) or error.__class__.__name__)
-        elif self._pending_preview is not None or self._preview_graphics is not None:
+                self._set_notice(str(error) or error.__class__.__name__)
+        elif (self._pending_preview is not None or self._preview_graphics is not None
+                or self._notice is not None):
             fingerprint = self._inputs_fingerprint()
-            if fingerprint != self._preview_fingerprint:
+            if self._notice is not None and fingerprint != self._notice_fingerprint:
+                self._set_notice(None)
+            if ((self._pending_preview is not None or self._preview_graphics is not None)
+                    and fingerprint != self._preview_fingerprint):
                 # A real change: retire the preview like native previews do.
                 utils.fusion.log(f'[MA] preview: cleared by real change of {input.id}')
                 self._pending_preview = None
@@ -358,10 +389,25 @@ class MultiArrange(addin.Addin):
             else:
                 utils.fusion.log(f'[MA] preview: ignoring spurious change of {input.id}')
 
+    def _set_notice(self, message: str | None):
+        """Shows a message until the inputs genuinely change.
+
+        validateInputs runs after every input event and would otherwise
+        overwrite the field immediately, and writing the field is itself an
+        input event — so the message is pinned to the input fingerprint it was
+        raised for.
+        """
+        self._notice = message
+        self._notice_fingerprint = self._inputs_fingerprint()
+        self.showError(self._input_error() or message)
+
     # ------------------------------------------------------- update existing
 
     def _handle_update_selection(self, input):
         if not self.inputs.update.value:
+            # Selection cleared: give the previously selected arrangement its
+            # visibility back and stop tracking it.
+            self._restore_update_visibility()
             return
         occurrence = cast(adsk.fusion.Occurrence, self.inputs.update.value[0])
         recipe = model.load_recipe(occurrence.component)
@@ -369,18 +415,211 @@ class MultiArrange(addin.Addin):
             self.showError('The selected component holds no Multi-Arrange arrangement.')
             self.inputs.update.input.clearSelection()
             return
+        # Restore a previously selected arrangement first, in case the user
+        # switches the update selection mid-dialog.
+        self._restore_update_visibility()
         self._apply_recipe(recipe)
-        # Hide the old arrangement so previews and the new result are not
-        # obscured by it; restored on cancel, deleted on OK.
-        self._hidden_occurrence = occurrence
+        # The arrangement is tracked by its entity token, not by the occurrence
+        # reference or a document attribute: references get invalidated by the
+        # preview's model churn, and attributes written during input handling
+        # are rolled back by the preview cycle before execute ever sees them.
+        self._update_token = occurrence.entityToken
+        self._update_was_visible = occurrence.isLightBulbOn
         occurrence.isLightBulbOn = False
         self._hook_destroy(input.parentCommand)
+
+    def _resolve_update_occurrence(self) -> adsk.fusion.Occurrence | None:
+        """Fresh occurrence for the tracked arrangement, or None."""
+        if not self._update_token:
+            return None
+        design = adsk.fusion.Design.cast(self.app.activeProduct)
+        if design is None:
+            return None
+        try:
+            entities = design.findEntityByToken(self._update_token)
+        except RuntimeError:
+            return None
+        for entity in entities or []:
+            occurrence = adsk.fusion.Occurrence.cast(entity)
+            if occurrence:
+                return occurrence
+        return None
+
+    def _restore_update_visibility(self):
+        occurrence = self._resolve_update_occurrence()
+        if occurrence is not None:
+            try:
+                occurrence.isLightBulbOn = self._update_was_visible
+            except RuntimeError:
+                pass
+        self._update_token = None
+        self._update_was_visible = True
+
+    def _reapply_update_hidden(self):
+        """Re-hides the arrangement being updated.
+
+        Every preview cycle starts by rolling the document back to the state
+        before the dialog's edits, which switches the light bulb back on. The
+        hide is therefore re-applied on each cycle, the same self-healing
+        approach the preview graphics use.
+        """
+        occurrence = self._resolve_update_occurrence()
+        if occurrence is not None and occurrence.isLightBulbOn:
+            try:
+                occurrence.isLightBulbOn = False
+            except RuntimeError:
+                pass
+
+    def _reapply_display_state(self):
+        """Restores the dialog's display changes, on every preview cycle.
+
+        The hidden arrangement and the dimmed parts are both document state,
+        so each preview cycle's rollback undoes them and both are re-applied
+        here.
+
+        This is the ONLY place the open dialog dims from. Doing it from
+        `input_changed` as well churned the document while Fusion was handling
+        a selection, which silently CLEARED the parts selection input —
+        picking a second top face just replaced the first. Writing from the
+        preview cycle instead is the same self-healing pattern the light-bulb
+        hide has always used safely.
+        """
+        self._reapply_update_hidden()
+        self._sync_dimming()
+
+    # ---------------------------------------------------------------- dimming
+
+    def _resolve_body(self, token: str) -> adsk.fusion.BRepBody | None:
+        design = adsk.fusion.Design.cast(self.app.activeProduct)
+        if design is None:
+            return None
+        try:
+            entities = design.findEntityByToken(token)
+        except RuntimeError:
+            return None
+        for entity in entities or []:
+            body = adsk.fusion.BRepBody.cast(entity)
+            if body:
+                return body
+        return None
+
+    def _record_body(self, record) -> adsk.fusion.BRepBody | None:
+        """The record's body, re-resolved when its proxy went stale."""
+        body = record.body
+        try:
+            if body is not None and body.isValid:
+                return body
+        except RuntimeError:
+            pass
+        return self._resolve_body(record.token)
+
+    def _set_opacity(self, body: adsk.fusion.BRepBody, opacity: float):
+        try:
+            if abs(body.opacity - opacity) > 1e-6:
+                body.opacity = opacity
+        except RuntimeError:
+            pass
+
+    def _sync_dimming(self):
+        """Dims the parts of the arrangement, restores those that left it.
+
+        Only ever called from the preview cycle — see _reapply_display_state.
+        """
+        if self.inputs is None:
+            return
+        wanted: dict[str, adsk.fusion.BRepBody] = {}
+        for record in self.inputs.parts_table.records:
+            body = self._record_body(record)
+            if body is not None:
+                wanted[record.token] = body
+
+        for token in list(self._dimmed):
+            if token not in wanted:
+                self._restore_opacity(token, undim=True)
+
+        for token, body in wanted.items():
+            try:
+                if token not in self._original_opacity:
+                    # Every cycle starts rolled back to the pre-dialog state,
+                    # so a part's first sighting shows its true opacity.
+                    self._original_opacity[token] = body.opacity
+            except RuntimeError:
+                continue
+            self._set_opacity(body, DIMMED_OPACITY)
+            self._dimmed.add(token)
+
+    def _restore_opacity(self, token: str, undim: bool = False):
+        """Puts a part's opacity back.
+
+        `undim` marks the "taken out of the arrangement" case: a part that was
+        already dimmed when the dialog opened belongs to an earlier
+        arrangement, and dropping it from this one means it is not arranged at
+        all any more, so it goes back to fully visible instead of to the dim it
+        arrived with. Cancelling must NOT do that — there the point is to leave
+        the model exactly as it was found, dim included.
+        """
+        self._dimmed.discard(token)
+        original = self._original_opacity.get(token)
+        if original is None:
+            return
+        body = self._resolve_body(token)
+        if body is None:
+            return
+        if undim and abs(original - DIMMED_OPACITY) < 1e-6:
+            original = FULL_OPACITY
+        self._set_opacity(body, original)
+
+    def _restore_all_opacity(self):
+        for token in list(self._dimmed):
+            self._restore_opacity(token)
+
+    def _persist_dimming(self):
+        """Marks the arranged source parts by dimming them, from execute.
+
+        Called from execute so the dim lands in execute's own transaction and
+        becomes part of the model; it deliberately outlives the dialog, so the
+        parts an arrangement already covers stay recognizable. Parts dropped
+        from an arrangement that is being replaced are un-dimmed in the same
+        pass, since they are no longer covered by anything.
+        """
+        if self.inputs is None:
+            return
+        arranged = set()
+        for record in self.inputs.parts_table.records:
+            body = self._record_body(record)
+            if body is None:
+                continue
+            arranged.add(body.entityToken)
+            self._set_opacity(body, DIMMED_OPACITY)
+
+        for token in self._recipe_face_tokens:
+            body = self._resolve_face_body(token)
+            if body is None or body.entityToken in arranged:
+                continue
+            # Was part of the arrangement being replaced, is not part of the
+            # new one: nothing covers it any more.
+            self._set_opacity(body, FULL_OPACITY)
+
+    def _resolve_face_body(self, face_token: str) -> adsk.fusion.BRepBody | None:
+        design = adsk.fusion.Design.cast(self.app.activeProduct)
+        if design is None:
+            return None
+        try:
+            entities = design.findEntityByToken(face_token)
+        except RuntimeError:
+            return None
+        for entity in entities or []:
+            face = adsk.fusion.BRepFace.cast(entity)
+            if face:
+                return face.body
+        return None
 
     def _apply_recipe(self, recipe: dict):
         design = _active_design(self.app)
         ins = self.inputs
 
         ins.faces.input.clearSelection()
+        self._recipe_face_tokens = list(recipe.get('faces', []))
         missing = 0
         for token in recipe.get('faces', []):
             entities = design.findEntityByToken(token)
@@ -413,12 +652,12 @@ class MultiArrange(addin.Addin):
             if expression and target.input:
                 target.input.expression = expression
                 target.update_from_input()
-        for key, target in (('part_in_part', ins.part_in_part), ('create_copies', ins.create_copies)):
+        for key, target in (('part_in_part', ins.part_in_part),):
             if key in recipe and target.input:
                 target.input.value = bool(recipe[key])
                 target.update_from_input()
 
-        self.showError(
+        self._set_notice(
             f'{missing} part(s) of the stored arrangement no longer exist and were skipped.'
             if missing else None)
 
@@ -434,15 +673,13 @@ class MultiArrange(addin.Addin):
     def _on_destroy(self, args):
         self._pending_preview = None
         self._clear_preview_graphics()
-        occurrence = self._hidden_occurrence
-        self._hidden_occurrence = None
-        if occurrence is None or self._did_execute:
+        if self._did_execute:
+            # The dim stays on as a permanent marker of what is arranged;
+            # execute wrote it inside its own transaction.
             return
-        try:
-            if occurrence.isValid:
-                occurrence.isLightBulbOn = True
-        except RuntimeError:
-            pass
+        # Cancelled: undo both display changes the dialog made.
+        self._restore_all_opacity()
+        self._restore_update_visibility()
 
     # ---------------------------------------------------------------- preview
 
@@ -501,7 +738,7 @@ class MultiArrange(addin.Addin):
                 frame_width=self.inputs.frame.value,
                 placement_clearance=0.0,
                 part_in_part=self.inputs.part_in_part.value,
-                create_copies=self.inputs.create_copies.value,
+                create_copies=True,
             )
             layout = engine.compute_layout(design, faces, sketch.profiles.item(0), options,
                                            settings_list=settings_list)
@@ -516,6 +753,7 @@ class MultiArrange(addin.Addin):
         # eats the previous graphics), and the compute's model churn causes
         # several such cycles right after the button click. Stale previews are
         # retired in input_changed when an input genuinely changes.
+        self._reapply_display_state()
         pending = self._pending_preview
         if pending is None:
             return
@@ -544,12 +782,10 @@ class MultiArrange(addin.Addin):
         ins = self.inputs
         try:
             # Read the live records (not the .value snapshot, which may lag one
-            # event behind) and include the grain token itself so changing the
-            # reference edge also registers as a change.
+            # event behind).
             parts = tuple(
                 (record.rotation_cell.selectedItem.name if record.rotation_cell.selectedItem else '',
-                 record.group_cell.value,
-                 record.direction_token or '')
+                 record.group_cell.value)
                 for record in ins.parts_table.records)
             sheets = tuple(
                 (spec.width_expression, spec.height_expression, spec.count)
@@ -563,7 +799,6 @@ class MultiArrange(addin.Addin):
                 round(ins.spacing.value, 6),
                 round(ins.frame.value, 6),
                 ins.part_in_part.value,
-                ins.create_copies.value,
                 sheets,
                 parts,
             )
@@ -575,11 +810,20 @@ class MultiArrange(addin.Addin):
             return
         self.update_inputs_from_ui()
         message = self._input_error()
-        self.showError(message)
+        # Keep a pending notice (preview failure, table hint) visible; only a
+        # genuine input problem takes precedence over it.
+        self.showError(message or self._notice)
         args.areInputsValid = message is None
 
     def _input_error(self) -> str | None:
-        return envelope_builder.validate_specs(self.inputs.rectangles.value)
+        if self.inputs.parts_table.records:
+            return envelope_builder.validate_specs(self.inputs.rectangles.value)
+        # An empty parts list together with a selected arrangement means
+        # "delete that arrangement": OK is allowed, and the sheet sizes do not
+        # matter because nothing is going to be nested.
+        if self._resolve_update_occurrence() is not None:
+            return None
+        return 'Select the top face of at least one part.'
 
     def execute(self):
         error = self._input_error()
@@ -588,12 +832,19 @@ class MultiArrange(addin.Addin):
         self._did_execute = True
         self._pending_preview = None
         self._clear_preview_graphics()
-        if self.inputs.update.value:
-            old = cast(adsk.fusion.Occurrence, self.inputs.update.value[0])
-            self._hidden_occurrence = None
-            if old.isValid:
-                old.deleteMe()
-        self._run_arrangement()
+        # Delete the arrangement being updated, resolved from its entity token
+        # (references and attributes from selection time do not survive the
+        # dialog's preview cycles).
+        old = self._resolve_update_occurrence()
+        self._update_token = None
+        if old is not None:
+            old.deleteMe()
+        # An empty parts list deletes the selected arrangement without building
+        # a replacement. _persist_dimming then finds nothing arranged and puts
+        # every part of the deleted arrangement back to full opacity.
+        if self.inputs.parts_table.records:
+            self._run_arrangement()
+        self._persist_dimming()
 
     def _run_arrangement(self):
         design = _active_design(self.app)
@@ -636,11 +887,11 @@ class MultiArrange(addin.Addin):
             frame_width=self.inputs.frame.value,
             placement_clearance=0.0,
             part_in_part=self.inputs.part_in_part.value,
-            create_copies=self.inputs.create_copies.value,
+            create_copies=True,
         )
         engine.run(design, faces, profile, options,
                    timeline_start=timeline_start, settings_list=settings_list,
-                   result_component=result_component)
+                   result_occurrence=result_occurrence)
 
         model.save_recipe(result_component, {
                 'faces': [face.entityToken for face in faces],
@@ -654,7 +905,6 @@ class MultiArrange(addin.Addin):
                 'spacing': getattr(self.inputs.spacing, 'expression', ''),
                 'frame': getattr(self.inputs.frame, 'expression', ''),
                 'part_in_part': self.inputs.part_in_part.value,
-                'create_copies': self.inputs.create_copies.value,
             })
 
     def _save_settings(self):
@@ -667,7 +917,7 @@ class MultiArrange(addin.Addin):
         """
         for body, part_settings in self.inputs.parts_table.body_settings():
             is_default = (
-                part_settings.rotation == model.ROTATION_FREE
+                part_settings.rotation == model.ROTATION_GRAIN
                 and part_settings.direction_token is None
                 and part_settings.group is None
             )

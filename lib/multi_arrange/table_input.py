@@ -1,10 +1,12 @@
 """The per-part settings table of the Multi-Arrange dialog.
 
-One row per selected part with rotation, group, and grain-direction controls,
-like the component table in Fusion's own Arrange dialog. Selection inputs
-cannot live inside table cells, so the grain direction is assigned through a
-single global selection input that applies to the highlighted row (see
-main.py); the table shows the assignment state per row.
+One row per selected part with a check box, its rotation mode and its rigid
+group, like the component table in Fusion's own Arrange dialog.
+
+Rigid groups are formed by checking rows and pressing the group button rather
+than by typing a name into every row: a Fusion table only ever reports a
+single highlighted row (`selectedRow`), so the check boxes are what makes a
+multi-row command possible at all.
 
 Rows are prefilled from the settings stored on each body (document
 attributes), and the values entered here are written back to those attributes
@@ -21,11 +23,9 @@ from . import model
 ROTATION_NAMES = {
     model.ROTATION_FREE: 'Free',
     model.ROTATION_GRAIN: 'Grain',
-    model.ROTATION_GRAIN_ONE_WAY: 'Grain one-way',
 }
 
-GRAIN_AUTO = 'auto'
-GRAIN_SET = 'edge'
+GROUP_PREFIX = 'Group '
 
 
 @dataclass
@@ -33,11 +33,10 @@ class PartRecord:
     token: str
     body: adsk.fusion.BRepBody
     face: adsk.fusion.BRepFace
-    direction_token: str | None
+    select_cell: adsk.core.BoolValueCommandInput
     name_cell: adsk.core.StringValueCommandInput
     rotation_cell: adsk.core.DropDownCommandInput
     group_cell: adsk.core.StringValueCommandInput
-    grain_cell: adsk.core.StringValueCommandInput
 
 
 class PartTableInput(inputs.Input):
@@ -49,11 +48,15 @@ class PartTableInput(inputs.Input):
     def __init__(self, id: str, name: str, tool_tip: str, update_visibility=lambda: True):
         super().__init__(id, name, tool_tip, update_visibility)
         self.value = {}
+        # Message from the last button press, for the dialog to display.
+        self.message: str | None = None
         self._records: list[PartRecord] = []
         # Cell inputs need ids that are unique for the lifetime of the dialog.
         self._next_row_key = 0
-        self._clear_grain_button: adsk.core.BoolValueCommandInput | None = None
         self._remove_button: adsk.core.BoolValueCommandInput | None = None
+        self._remove_all_button: adsk.core.BoolValueCommandInput | None = None
+        self._group_button: adsk.core.BoolValueCommandInput | None = None
+        self._ungroup_button: adsk.core.BoolValueCommandInput | None = None
 
     @property
     def records(self) -> list[PartRecord]:
@@ -62,7 +65,7 @@ class PartTableInput(inputs.Input):
     def create_input(self, command_inputs: adsk.core.CommandInputs, params: adsk.fusion.CustomFeatureParameters | None):
         if params is not None:
             raise RuntimeError('The parts table cannot be restored from a custom feature.')
-        table = command_inputs.addTableCommandInput(self.id, self.name, 4, '3:3:2:1')
+        table = command_inputs.addTableCommandInput(self.id, self.name, 4, '1:4:3:3')
         table.minimumVisibleRows = 3
         table.maximumVisibleRows = 12
         table.hasGrid = False
@@ -71,17 +74,29 @@ class PartTableInput(inputs.Input):
         self._add_header_row()
 
         children = table.commandInputs
+        self._group_button = children.addBoolValueInput(
+            f'{self.id}_group', 'Make group', False, '', False)
+        self._group_button.tooltip = (
+            'Nests the checked parts as one rigid unit, keeping their current '
+            'relative positions.'
+        )
+        table.addToolbarCommandInput(self._group_button)
+        self._ungroup_button = children.addBoolValueInput(
+            f'{self.id}_ungroup', 'Clear group', False, '', False)
+        self._ungroup_button.tooltip = 'Removes the checked parts from their group.'
+        table.addToolbarCommandInput(self._ungroup_button)
         self._remove_button = children.addBoolValueInput(
             f'{self.id}_remove', 'Remove', False, '', False)
-        self._remove_button.tooltip = 'Removes the selected part from the arrangement.'
+        self._remove_button.tooltip = 'Removes the checked parts from the arrangement.'
         table.addToolbarCommandInput(self._remove_button)
-        self._clear_grain_button = children.addBoolValueInput(
-            f'{self.id}_clear_grain', 'Clear grain direction', False, '', False)
-        self._clear_grain_button.tooltip = (
-            'Removes the grain direction reference of the selected row, falling '
-            'back to the longest edge of its top face.'
+        self._remove_all_button = children.addBoolValueInput(
+            f'{self.id}_remove_all', 'Remove all', False, '', False)
+        self._remove_all_button.tooltip = (
+            'Empties the parts list. With an existing arrangement selected '
+            'above, clicking OK on an empty list deletes that arrangement and '
+            'restores its parts to full opacity.'
         )
-        table.addToolbarCommandInput(self._clear_grain_button)
+        table.addToolbarCommandInput(self._remove_all_button)
 
     # ------------------------------------------------------------------- sync
 
@@ -110,43 +125,88 @@ class PartTableInput(inputs.Input):
     def handle_input_changed(self, changed_input: adsk.core.CommandInput) -> bool:
         if not changed_input or self.input is None:
             return False
-        if self._clear_grain_button and changed_input.id == self._clear_grain_button.id:
-            self._clear_grain_button.value = False
-            record = self._selected_record()
-            if record:
-                record.direction_token = None
-                record.grain_cell.value = GRAIN_AUTO
+        self.message = None
+        if self._group_button and changed_input.id == self._group_button.id:
+            self._group_button.value = False
+            self.message = self.group_checked()
+            return True
+        if self._ungroup_button and changed_input.id == self._ungroup_button.id:
+            self._ungroup_button.value = False
+            self.message = self.ungroup_checked()
             return True
         if self._remove_button and changed_input.id == self._remove_button.id:
             self._remove_button.value = False
-            self.remove_selected()
+            self.message = self.remove_checked()
+            return True
+        if self._remove_all_button and changed_input.id == self._remove_all_button.id:
+            self._remove_all_button.value = False
+            self.message = self.remove_all()
             return True
         return False
 
-    def remove_selected(self) -> bool:
-        """Removes the highlighted row (or the only row). The caller must
-        rebuild the faces selection input from `records` afterwards, otherwise
-        the next selection sync re-adds the part."""
-        record = self._selected_record()
-        if record is None:
-            return False
-        index = self._records.index(record)
-        self.input.deleteRow(index + 1)
-        del self._records[index]
+    # ------------------------------------------------------------- commands
+
+    def group_checked(self) -> str | None:
+        """Puts the checked parts into a new rigid group."""
+        targets = self._checked_records()
+        if len(targets) < 2:
+            return 'Check at least two parts to group them.'
+        name = self._next_group_name()
+        for record in targets:
+            record.group_cell.value = name
+            record.select_cell.value = False
         self.update_from_input()
-        return True
-
-    def assign_direction(self, direction_token: str) -> str | None:
-        """Assigns a picked direction reference to the highlighted row.
-
-        Returns an error message when no row can be determined.
-        """
-        record = self._selected_record()
-        if record is None:
-            return 'Select the part row the grain direction belongs to, then pick the direction.'
-        record.direction_token = direction_token
-        record.grain_cell.value = GRAIN_SET
         return None
+
+    def ungroup_checked(self) -> str | None:
+        targets = self._checked_records()
+        if not targets:
+            return 'Check the parts whose group should be cleared.'
+        for record in targets:
+            record.group_cell.value = ''
+            record.select_cell.value = False
+        self.update_from_input()
+        return None
+
+    def remove_all(self) -> str | None:
+        """Empties the table. Like remove_checked, the caller must rebuild the
+        faces selection input from `records` afterwards."""
+        if not self._records:
+            return 'The parts list is already empty.'
+        for index in range(len(self._records) - 1, -1, -1):
+            self.input.deleteRow(index + 1)
+        self._records.clear()
+        self.update_from_input()
+        return None
+
+    def remove_checked(self) -> str | None:
+        """Removes the checked parts. The caller must rebuild the faces
+        selection input from `records` afterwards, otherwise the next selection
+        sync re-adds them."""
+        targets = self._checked_records()
+        if not targets:
+            return 'Check the parts to remove.'
+        for record in targets:
+            index = self._records.index(record)
+            self.input.deleteRow(index + 1)
+            del self._records[index]
+        self.update_from_input()
+        return None
+
+    def _checked_records(self) -> list[PartRecord]:
+        """The checked rows, falling back to the highlighted row."""
+        checked = [record for record in self._records if record.select_cell.value]
+        if checked:
+            return checked
+        record = self._selected_record()
+        return [record] if record is not None else []
+
+    def _next_group_name(self) -> str:
+        existing = {record.group_cell.value.strip() for record in self._records}
+        index = 1
+        while f'{GROUP_PREFIX}{index}' in existing:
+            index += 1
+        return f'{GROUP_PREFIX}{index}'
 
     def _selected_record(self) -> PartRecord | None:
         if len(self._records) == 1:
@@ -192,7 +252,7 @@ class PartTableInput(inputs.Input):
                         rotation = value
             result[record.token] = model.PartSettings(
                 rotation=rotation,
-                direction_token=record.direction_token,
+                direction_token=None,
                 group=record.group_cell.value.strip() or None,
             )
         self.value = result
@@ -210,7 +270,7 @@ class PartTableInput(inputs.Input):
 
     def _add_header_row(self):
         children = self.input.commandInputs
-        for column, title in enumerate(('Part', 'Rotation', 'Group', 'Grain')):
+        for column, title in enumerate(('', 'Part', 'Rotation', 'Group')):
             header = children.addStringValueInput(f'{self.id}_header_{column}', '', title)
             header.isReadOnly = True
             self.input.addCommandInput(header, 0, column, 0, 0)
@@ -218,9 +278,14 @@ class PartTableInput(inputs.Input):
     def _append_row(self, face: adsk.fusion.BRepFace):
         body = face.body
         stored = model.load_settings(body)
+        # Settings saved by older versions may use rotation modes that no
+        # longer exist in the dropdown; treat them as Grain.
+        stored_rotation = stored.rotation if stored.rotation in ROTATION_NAMES else model.ROTATION_GRAIN
         key = self._next_row_key
         self._next_row_key += 1
         children = self.input.commandInputs
+
+        select_cell = children.addBoolValueInput(f'{self.id}_select_{key}', '', True, '', False)
 
         name_cell = children.addStringValueInput(f'{self.id}_name_{key}', '', body.name)
         name_cell.isReadOnly = True
@@ -228,26 +293,23 @@ class PartTableInput(inputs.Input):
         rotation_cell = children.addDropDownCommandInput(
             f'{self.id}_rotation_{key}', '', adsk.core.DropDownStyles.TextListDropDownStyle)  # type: ignore
         for value, name in ROTATION_NAMES.items():
-            rotation_cell.listItems.add(name, value == stored.rotation)
+            rotation_cell.listItems.add(name, value == stored_rotation)
 
+        # Group names come from the group buttons, so the cell only reports.
         group_cell = children.addStringValueInput(f'{self.id}_group_{key}', '', stored.group or '')
-
-        grain_cell = children.addStringValueInput(
-            f'{self.id}_grain_{key}', '', GRAIN_SET if stored.direction_token else GRAIN_AUTO)
-        grain_cell.isReadOnly = True
+        group_cell.isReadOnly = True
 
         row_index = self.input.rowCount
-        self.input.addCommandInput(name_cell, row_index, 0, 0, 0)
-        self.input.addCommandInput(rotation_cell, row_index, 1, 0, 0)
-        self.input.addCommandInput(group_cell, row_index, 2, 0, 0)
-        self.input.addCommandInput(grain_cell, row_index, 3, 0, 0)
+        self.input.addCommandInput(select_cell, row_index, 0, 0, 0)
+        self.input.addCommandInput(name_cell, row_index, 1, 0, 0)
+        self.input.addCommandInput(rotation_cell, row_index, 2, 0, 0)
+        self.input.addCommandInput(group_cell, row_index, 3, 0, 0)
         self._records.append(PartRecord(
             token=body.entityToken,
             body=body,
             face=face,
-            direction_token=stored.direction_token,
+            select_cell=select_cell,
             name_cell=name_cell,
             rotation_cell=rotation_cell,
             group_cell=group_cell,
-            grain_cell=grain_cell,
         ))

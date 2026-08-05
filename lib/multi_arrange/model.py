@@ -23,8 +23,9 @@ ROTATION_GRAIN_ONE_WAY = 2  # 0 deg only: directional grain (e.g. cathedral figu
 
 @dataclass
 class PartSettings:
-    """The stored per-body settings."""
-    rotation: int = ROTATION_FREE
+    """The stored per-body settings. Grain is the default: for sheet goods,
+    respecting the grain is the norm and free rotation the exception."""
+    rotation: int = ROTATION_GRAIN
     direction_token: str | None = None  # entity token of the grain reference
     group: str | None = None            # rigid group name, None = ungrouped
 
@@ -39,7 +40,7 @@ class PartSettings:
     def from_json(raw: str) -> 'PartSettings':
         data = json.loads(raw)
         return PartSettings(
-            rotation=int(data.get('rotation', ROTATION_FREE)),
+            rotation=int(data.get('rotation', ROTATION_GRAIN)),
             direction_token=data.get('direction_token') or None,
             group=data.get('group') or None,
         )
@@ -115,6 +116,38 @@ def resolve_direction(design: adsk.fusion.Design, token: str) -> adsk.core.Vecto
     if not entities:
         return None
     return direction_of(entities[0])
+
+
+def texture_grain_direction(body: adsk.fusion.BRepBody) -> adsk.core.Vector3D | None:
+    """World-space grain direction from the body's appearance texture mapping.
+
+    Only 3D textures ("3D Cherry", "3D Mahogany", …) are used: their control
+    defines the wood grain along the transform's Z axis, and Fusion renders
+    that orientation, so what the user sees is what gets nested. For
+    image-based projected textures Z is the projection axis (normally the face
+    normal, i.e. no grain information at all), and Fusion ignores the mapping
+    when rendering — reading those would silently invent a direction.
+    """
+    try:
+        control = body.textureMapControl
+    except RuntimeError:
+        return None
+    if not isinstance(control, adsk.core.TextureMapControl3D):
+        return None
+    transform = getattr(control, 'transform', None)
+    if transform is None:
+        return None
+    grain = adsk.core.Vector3D.create(
+        transform.getCell(0, 2), transform.getCell(1, 2), transform.getCell(2, 2))
+    if grain.length < 1e-6:
+        return None
+    grain.normalize()
+    context = body.assemblyContext
+    if context is not None:
+        # The texture transform is stored in component space.
+        grain.transformBy(context.transform2)
+        grain.normalize()
+    return grain
 
 
 def direction_of(entity) -> adsk.core.Vector3D | None:

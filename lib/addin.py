@@ -30,6 +30,12 @@ class Addin(ABC):
     def get_ui_placement(self) -> plc.UIPlacement:
         pass
 
+    def get_ui_placements(self) -> list[plc.UIPlacement]:
+        """All UI placements of the create command; override to place the
+        button in more than one panel (e.g. Design and manufacturing model
+        environments)."""
+        return [self.get_ui_placement()]
+
     @property
     @abstractmethod
     def plugin_name(self) -> str:
@@ -74,9 +80,9 @@ class Addin(ABC):
                 self.resource_dir,
             )        
 
-            # Add the create button in the Modify panel of the SOLID tab.
-            placement = self.get_ui_placement()
-            plc.add_command_to_ui(self.ui, placement, create_cmd_def, self.create_command_id)
+            # Add the create button to its panel(s).
+            for placement in self.get_ui_placements():
+                plc.add_command_to_ui(self.ui, placement, create_cmd_def, self.create_command_id)
 
             # Connect to the command created event for the create command.
             create_command_created = new_event_handler(self._create_ui, adsk.core.CommandCreatedEventHandler)
@@ -95,8 +101,8 @@ class Addin(ABC):
             return
         try:
             utils.fusion.log(f"[ADDIN] Shutdown id={self.runtime_info.id}")
-            placement = self.get_ui_placement()
-            plc.remove_command_from_ui(self.ui, placement, self.create_command_id)
+            for placement in self.get_ui_placements():
+                plc.remove_command_from_ui(self.ui, placement, self.create_command_id)
             cmd_def = self.ui.commandDefinitions.itemById(self.create_command_id)
             if cmd_def:
                 cmd_def.deleteMe()

@@ -322,6 +322,17 @@ class TenonsNativeInputs(inputs.Inputs):
             tool_tip="Extra diameter added to every dog-bone relief.",
             units=units,
         )
+        self.hide_dogbones = inputs.CheckboxInput(
+            id="hideDogbones",
+            name="Hide dogbones",
+            default_value=False,
+            tool_tip=(
+                "Place every dog bone on the short edge instead of the corner "
+                "bisector, so it breaks out along the joint only: the mortise "
+                "grows past its short edge and the relief bites into the tenon "
+                "instead of the board shoulder."
+            ),
+        )
 
         self.connector = inputs.DropDownInput(
             id="connector",
@@ -790,6 +801,37 @@ class TenonsNative(addin.Addin):
             return "Mortise Length Offset must be greater than zero."
         if self.inputs.mortise_width_offset.value <= 0:
             return "Mortise Width Offset must be greater than zero."
+        if self.inputs.hide_dogbones.value:
+            # Every hidden relief sits one radius away from the corner along
+            # the short edge and bites that far into the mating profile.
+            radius = (
+                self.inputs.tool_diameter.value
+                + self.inputs.dog_bone_offset.value
+            ) / 2
+            if self.inputs.width.value <= 2 * radius:
+                return (
+                    "Hidden dog bones cut one relief radius into each end of "
+                    "a tenon: Tenon Width must exceed Tool Diameter plus Dog "
+                    "Bone Offset."
+                )
+            if (
+                geometry.tenon_thickness
+                + self.inputs.mortise_width_offset.value
+                < radius
+            ):
+                return (
+                    "Hidden dog bones would reach past the far side of the "
+                    "mortise: reduce Tool Diameter."
+                )
+            if (
+                geometry.mortise_thickness
+                - self.inputs.remaining_material.value
+                < radius
+            ):
+                return (
+                    "Hidden dog bones would reach past the end of the tenon: "
+                    "reduce Tool Diameter or Remaining Material."
+                )
 
         intervals = sorted(
             self._distance_from_edge_start(geometry.edge, point)
@@ -2278,7 +2320,8 @@ class TenonsNative(addin.Addin):
         into_body: adsk.core.Vector3D,
     ) -> None:
         constraints = sketch.geometricConstraints
-        offset = self.inputs.tool_diameter.value / (2 * math.sqrt(2))
+        hidden = self.inputs.hide_dogbones.value
+        offset = self._dogbone_center_offset()
         first_circle: adsk.fusion.SketchCircle | None = None
         first_offset: adsk.fusion.SketchLine | None = None
         for rectangle_index, (lower, right, upper, left, _) in enumerate(
@@ -2327,48 +2370,59 @@ class TenonsNative(addin.Addin):
                     # can enter from the open side and no relief is needed.
                     # Cutting one anyway would notch the mating surface.
                     continue
-                step_point = self._translated(
-                    corner.geometry,
-                    x_in,
-                    offset,
-                )
-                center_point = self._translated(
-                    step_point,
-                    y_in,
-                    offset,
-                )
-                x_step = sketch.sketchCurves.sketchLines.addByTwoPoints(
-                    corner,
-                    step_point,
-                )
-                y_step = sketch.sketchCurves.sketchLines.addByTwoPoints(
-                    x_step.endSketchPoint,
-                    center_point,
-                )
-                if not x_step or not y_step:
+                lines = sketch.sketchCurves.sketchLines
+                if hidden:
+                    # Hidden layout: the center sits on the short edge, one
+                    # circle radius away from the long edge, so the relief
+                    # stays tangent to the long edge and only breaks out
+                    # past the short edge - where the mating board covers it.
+                    steps = [
+                        lines.addByTwoPoints(
+                            corner,
+                            self._translated(corner.geometry, y_in, offset),
+                        )
+                    ]
+                else:
+                    step_point = self._translated(
+                        corner.geometry,
+                        x_in,
+                        offset,
+                    )
+                    x_step = lines.addByTwoPoints(corner, step_point)
+                    if not x_step:
+                        raise RuntimeError(
+                            "Fusion failed to create a mortise dog-bone center."
+                        )
+                    steps = [
+                        x_step,
+                        lines.addByTwoPoints(
+                            x_step.endSketchPoint,
+                            self._translated(step_point, y_in, offset),
+                        ),
+                    ]
+                if not all(steps):
                     raise RuntimeError(
                         "Fusion failed to create a mortise dog-bone center."
                     )
-                x_step.isConstruction = True
-                y_step.isConstruction = True
-                constraints.addParallel(x_step, edge_line)
-                constraints.addPerpendicular(y_step, edge_line)
-                if first_offset is None:
-                    first_offset = x_step
-                    self._add_line_length_dimension(
-                        sketch,
-                        x_step,
-                        (
-                            f"({self.inputs.tool_diameter.expression}) / "
-                            f"(2 * sqrt(2))"
-                        ),
-                        f"{parameter_role}CenterOffset",
-                    )
-                else:
-                    constraints.addEqual(first_offset, x_step)
-                constraints.addEqual(first_offset, y_step)
+                for step_index, step in enumerate(steps):
+                    step.isConstruction = True
+                    if step_index == len(steps) - 1:
+                        constraints.addPerpendicular(step, edge_line)
+                    else:
+                        constraints.addParallel(step, edge_line)
+                    if first_offset is None:
+                        first_offset = step
+                        self._add_line_length_dimension(
+                            sketch,
+                            step,
+                            self._dogbone_center_offset_expression(),
+                            f"{parameter_role}CenterOffset",
+                        )
+                    else:
+                        constraints.addEqual(first_offset, step)
+                center = steps[-1].endSketchPoint
                 circle = sketch.sketchCurves.sketchCircles.addByCenterRadius(
-                    y_step.endSketchPoint.geometry,
+                    center.geometry,
                     (
                         self.inputs.tool_diameter.value
                         + self.inputs.dog_bone_offset.value
@@ -2381,7 +2435,7 @@ class TenonsNative(addin.Addin):
                     )
                 constraints.addCoincident(
                     circle.centerSketchPoint,
-                    y_step.endSketchPoint,
+                    center,
                 )
                 if first_circle is None:
                     first_circle = circle
@@ -2396,6 +2450,27 @@ class TenonsNative(addin.Addin):
                     )
                 else:
                     constraints.addEqual(first_circle, circle)
+
+    def _dogbone_center_offset(self) -> float:
+        # Standard layout: the center sits on the corner bisector, half a
+        # tool diameter away from the corner, which is a step of
+        # d / (2 * sqrt(2)) along each edge. Hidden layout: a single step
+        # along the short edge, one circle radius long, which keeps the
+        # circle tangent to the long edge.
+        if self.inputs.hide_dogbones.value:
+            return (
+                self.inputs.tool_diameter.value
+                + self.inputs.dog_bone_offset.value
+            ) / 2
+        return self.inputs.tool_diameter.value / (2 * math.sqrt(2))
+
+    def _dogbone_center_offset_expression(self) -> str:
+        if self.inputs.hide_dogbones.value:
+            return (
+                f"(({self.inputs.tool_diameter.expression}) + "
+                f"({self.inputs.dog_bone_offset.expression})) / 2"
+            )
+        return f"({self.inputs.tool_diameter.expression}) / (2 * sqrt(2))"
 
     def _corner_needs_dogbone(
         self,
@@ -2446,56 +2521,72 @@ class TenonsNative(addin.Addin):
         parameter_role: str,
     ) -> None:
         constraints = sketch.geometricConstraints
-        offset = self.inputs.tool_diameter.value / (2 * math.sqrt(2))
+        hidden = self.inputs.hide_dogbones.value
+        offset = self._dogbone_center_offset()
         first_circle: adsk.fusion.SketchCircle | None = None
         first_offset: adsk.fusion.SketchLine | None = None
+        lines = sketch.sketchCurves.sketchLines
         for index, (corner, model_point, along) in enumerate(corners, start=1):
-            step_model = self._translated(model_point, along, offset)
-            center_model = self._translated(step_model, inward, offset)
-            along_step = sketch.sketchCurves.sketchLines.addByTwoPoints(
-                corner.geometry,
-                sketch.modelToSketchSpace(step_model),
-            )
-            if not along_step:
-                raise RuntimeError(
-                    "Fusion failed to create a root dog-bone edge offset."
+            if hidden:
+                # Hidden layout: the center sits on the tenon's short edge,
+                # one circle radius out from the board, so the relief stays
+                # tangent to the board edge and bites into the tenon only.
+                steps = [
+                    lines.addByTwoPoints(
+                        corner.geometry,
+                        sketch.modelToSketchSpace(
+                            self._translated(model_point, inward, offset)
+                        ),
+                    )
+                ]
+            else:
+                step_model = self._translated(model_point, along, offset)
+                along_step = lines.addByTwoPoints(
+                    corner.geometry,
+                    sketch.modelToSketchSpace(step_model),
                 )
-            inward_step = sketch.sketchCurves.sketchLines.addByTwoPoints(
-                along_step.endSketchPoint.geometry,
-                sketch.modelToSketchSpace(center_model),
-            )
-            if not inward_step:
+                if not along_step:
+                    raise RuntimeError(
+                        "Fusion failed to create a root dog-bone edge offset."
+                    )
+                steps = [
+                    along_step,
+                    lines.addByTwoPoints(
+                        along_step.endSketchPoint.geometry,
+                        sketch.modelToSketchSpace(
+                            self._translated(step_model, inward, offset)
+                        ),
+                    ),
+                ]
+            if not all(steps):
                 raise RuntimeError(
                     "Fusion failed to create a root dog-bone center."
                 )
-            along_step.isConstruction = True
-            inward_step.isConstruction = True
-            constraints.addCoincident(
-                along_step.startSketchPoint,
-                corner,
-            )
-            constraints.addCoincident(
-                inward_step.startSketchPoint,
-                along_step.endSketchPoint,
-            )
-            constraints.addParallel(along_step, edge_line)
-            constraints.addPerpendicular(inward_step, edge_line)
-            if first_offset is None:
-                first_offset = along_step
-                self._add_line_length_dimension(
-                    sketch,
-                    along_step,
-                    (
-                        f"({self.inputs.tool_diameter.expression}) / "
-                        f"(2 * sqrt(2))"
-                    ),
-                    f"{parameter_role}CenterOffset",
-                )
-            else:
-                constraints.addEqual(first_offset, along_step)
-            constraints.addEqual(first_offset, inward_step)
+            constraints.addCoincident(steps[0].startSketchPoint, corner)
+            for step_index, step in enumerate(steps):
+                step.isConstruction = True
+                if step_index > 0:
+                    constraints.addCoincident(
+                        step.startSketchPoint,
+                        steps[step_index - 1].endSketchPoint,
+                    )
+                if step_index == len(steps) - 1:
+                    constraints.addPerpendicular(step, edge_line)
+                else:
+                    constraints.addParallel(step, edge_line)
+                if first_offset is None:
+                    first_offset = step
+                    self._add_line_length_dimension(
+                        sketch,
+                        step,
+                        self._dogbone_center_offset_expression(),
+                        f"{parameter_role}CenterOffset",
+                    )
+                else:
+                    constraints.addEqual(first_offset, step)
+            center = steps[-1].endSketchPoint
             circle = sketch.sketchCurves.sketchCircles.addByCenterRadius(
-                inward_step.endSketchPoint.geometry,
+                center.geometry,
                 (
                     self.inputs.tool_diameter.value
                     + self.inputs.dog_bone_offset.value
@@ -2508,7 +2599,7 @@ class TenonsNative(addin.Addin):
                 )
             constraints.addCoincident(
                 circle.centerSketchPoint,
-                inward_step.endSketchPoint,
+                center,
             )
             if first_circle is None:
                 first_circle = circle

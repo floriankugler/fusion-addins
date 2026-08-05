@@ -15,6 +15,20 @@ class UIPlacement:
     panel_id: str
     command: PlacementSpec
     section: PlacementSpec | None = None
+    # Panel ids are only unique per environment: e.g. 'SolidModifyPanel' also
+    # exists in the manufacturing model editing workspace, and those twins are
+    # NOT listed in ui.allToolbarPanels — they are only reachable through
+    # their workspace's own toolbarPanels collection.
+    workspace_id: str | None = None
+
+
+def _find_panel(ui: adsk.core.UserInterface, placement: UIPlacement):
+    if placement.workspace_id is None:
+        return ui.allToolbarPanels.itemById(placement.panel_id)
+    workspace = ui.workspaces.itemById(placement.workspace_id)
+    if workspace is None:
+        return None
+    return workspace.toolbarPanels.itemById(placement.panel_id)
 
 
 def add_command_to_ui(
@@ -28,7 +42,7 @@ def add_command_to_ui(
             f"UI placement command id mismatch: {placement.command.id} != {command_id}"
         )
 
-    panel = ui.allToolbarPanels.itemById(placement.panel_id)
+    panel = _find_panel(ui, placement)
     if not panel:
         raise RuntimeError(f"UI panel not found: {placement.panel_id}")
 
@@ -52,7 +66,7 @@ def remove_command_from_ui(
     placement: UIPlacement,
     command_id: str,
 ) -> None:
-    panel = ui.allToolbarPanels.itemById(placement.panel_id)
+    panel = _find_panel(ui, placement)
     if panel:
         panel_ctrl = panel.controls.itemById(command_id)
         if panel_ctrl:
