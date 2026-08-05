@@ -222,7 +222,7 @@
     <parameter expression="tolerance-totalSurfaceTolerance" name="calculationTolerance"/>
     <parameter expression="0.01*calculationTolerance" name="thinningTolerance"/>
     <parameter expression="0.01mm" name="chainingTolerance"/>
-    <parameter expression="tool_diameter * 0.5" name="optimalLoad"/>
+    <parameter expression="tool_diameter * 0.4" name="optimalLoad"/>
     <parameter expression="0" name="optimalLoadWeight"/>
     <parameter expression="0" name="speedWeight"/>
     <parameter expression="0" name="feedWeight"/>
@@ -236,7 +236,7 @@
     <parameter expression="false" name="useSlotClearing"/>
     <parameter expression="1.25 * tool_diameter" name="slotClearingWidth"/>
     <parameter expression="'conventional'" name="direction"/>
-    <parameter expression="true" name="doMultipleDepths"/>
+    <parameter expression="false" name="doMultipleDepths"/>
     <parameter expression="tool_diameter " name="maximumStepdown"/>
     <parameter expression="tool_taperAngle" name="slopeAngle"/>
     <parameter expression="true" name="useEvenStepdowns"/>
@@ -277,12 +277,12 @@
     <parameter expression="Math.max(tool_feedCutting; Math.max(tool_feedEntry; tool_feedExit))" name="noEngagementFeedrate"/>
     <parameter expression="0mm" name="leadRadius"/>
     <parameter expression="0mm" name="verticalLeadRadius"/>
-    <parameter expression="'plunge'" name="rampType"/>
+    <parameter expression="'helix'" name="rampType"/>
     <parameter expression="tool_rampAngle" name="rampAngle"/>
     <parameter expression="1deg" name="rampTaperAngle"/>
     <parameter expression="2.5mm" name="rampClearanceHeight"/>
     <parameter expression="Math.max((tool_diameter - 2 * tool_cornerRadius) * 0.95; tool_diameter * 0.25)" name="helicalRampDiameter"/>
-    <parameter expression="Math.max((tool_diameter - 2 * tool_cornerRadius) * 0.5; tool_diameter * 0.25)" name="minimumRampDiameter"/>
+    <parameter expression="2mm" name="minimumRampDiameter"/>
     <parameter expression="false" name="predrillPositions"/>
     <parameter expression="false" name="entryPositions"/>
     <parameter expression="false" name="exitPositions"/>

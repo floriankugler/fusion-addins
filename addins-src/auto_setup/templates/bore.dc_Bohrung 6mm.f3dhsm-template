@@ -21,7 +21,7 @@
       <coolant mode="disabled"/>
       <material name="hss"/>
       <body assembly-gauge-length="30" body-length="30" coolant-support="no" diameter="6" flute-length="24" number-of-flutes="4" overall-length="60" shaft-diameter="6" shoulder-diameter="6" shoulder-length="30" thread-pitch="0" thread-profile-angle="60"/>
-      <motion clockwise="yes" cutting-feedrate="3500" entry-feedrate="1500" exit-feedrate="1750" feed-mode="per-minute" plunge-feedrate="1200" ramp-angle="8" ramp-feedrate="1200" ramp-spindle-rpm="23000" retract-feedrate="0" spindle-rpm="23000" transition-feedrate="3500"/>
+      <motion clockwise="yes" cutting-feedrate="600" entry-feedrate="1500" exit-feedrate="1750" feed-mode="per-minute" plunge-feedrate="1200" ramp-angle="8" ramp-feedrate="1200" ramp-spindle-rpm="23000" retract-feedrate="0" spindle-rpm="23000" transition-feedrate="600"/>
       <presets>
         <preset description="" id="{f1053da6-49db-48de-b69d-5aeed4de4b11}" name="Default preset">
           <parameter expression="'disabled'" key="tool_coolant" value="disabled"/>
@@ -114,7 +114,7 @@
     <parameter expression="tool_isTurning ? (tool_unit == 'millimeters' ? 25mm : 1.0in) : tool_diameter" name="tool_stockDiameter"/>
     <parameter expression="tool_diameter * Math.PI * tool_spindleSpeed" name="tool_surfaceSpeed"/>
     <parameter expression="tool_spindleSpeed" name="tool_rampSpindleSpeed"/>
-    <parameter expression="3500." name="tool_feedCutting"/>
+    <parameter expression="600.00 mm/min" name="tool_feedCutting"/>
     <parameter expression="tool_spindleSpeed > 0 ? tool_feedCutting/(tool_spindleSpeed * tool_numberOfFlutes) : 0.0" name="tool_feedPerTooth"/>
     <parameter expression="1500.00 mm/min" name="tool_feedEntry"/>
     <parameter expression="1750." name="tool_feedExit"/>

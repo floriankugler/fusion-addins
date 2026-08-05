@@ -277,12 +277,12 @@
     <parameter expression="Math.max(tool_feedCutting; Math.max(tool_feedEntry; tool_feedExit))" name="noEngagementFeedrate"/>
     <parameter expression="0mm" name="leadRadius"/>
     <parameter expression="0mm" name="verticalLeadRadius"/>
-    <parameter expression="'plunge'" name="rampType"/>
+    <parameter expression="'helix'" name="rampType"/>
     <parameter expression="tool_rampAngle" name="rampAngle"/>
     <parameter expression="1deg" name="rampTaperAngle"/>
     <parameter expression="2.5mm" name="rampClearanceHeight"/>
     <parameter expression="Math.max((tool_diameter - 2 * tool_cornerRadius) * 0.95; tool_diameter * 0.25)" name="helicalRampDiameter"/>
-    <parameter expression="Math.max((tool_diameter - 2 * tool_cornerRadius) * 0.5; tool_diameter * 0.25)" name="minimumRampDiameter"/>
+    <parameter expression="1.5mm" name="minimumRampDiameter"/>
     <parameter expression="false" name="predrillPositions"/>
     <parameter expression="false" name="entryPositions"/>
     <parameter expression="false" name="exitPositions"/>
