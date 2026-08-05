@@ -134,12 +134,17 @@ def primary_tool(variant: TemplateVariant) -> tuple[float | None, float | None]:
     return dimensions[0] if dimensions else (None, None)
 
 
-def min_tool_dimensions(variant: TemplateVariant) -> tuple[float | None, float | None]:
-    """(smallest diameter, shortest flute) across the template's operations."""
+def limiting_tool_dimensions(variant: TemplateVariant) -> tuple[float | None, float | None]:
+    """(largest diameter, shortest flute) across the template's operations.
+
+    The dimensions that decide whether a template can machine a feature: every
+    operation of the template runs, so the widest tool has to fit into the
+    feature and the shortest flute has to reach its bottom.
+    """
     dimensions = tool_dimensions(variant)
     diameters = [d for d, _ in dimensions if d is not None]
     flutes = [f for _, f in dimensions if f is not None]
-    return (min(diameters) if diameters else None,
+    return (max(diameters) if diameters else None,
             min(flutes) if flutes else None)
 
 

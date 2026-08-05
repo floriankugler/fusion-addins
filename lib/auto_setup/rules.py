@@ -5,8 +5,9 @@ Holes are handled automatically from the available drill/bore templates
 - A hole matching a drill template's tool diameter exactly is drilled with it.
 - Through holes larger than BIG_HOLE_LIMIT are machined as inner contours.
 - Other holes are bored with the smallest tool that leaves no standing core
-  (tool diameter > hole diameter / 2); holes too big for that use the largest
-  bore tool. Holes smaller than every tool are skipped with a warning.
+  (tool diameter > hole diameter / 2) and is at least TOOL_CLEARANCE smaller
+  than the hole; holes too big for that use the largest bore tool. Holes
+  smaller than every tool are skipped with a warning.
 
 Pockets and contours are chosen by label in the UI; the selected cutter
 variant (dc / udc) picks the concrete template file (untagged templates are
@@ -14,7 +15,8 @@ valid for any cutter). Finishing: a global mode (none / outer contours / all
 contours) plus an additive selection of individual contours or pockets that
 get the '.finish' template variant regardless of the mode. Pocket templates
 are validated against the pocket's minimum concave corner radius using the
-smallest tool in the template; on a misfit the best fitting variant is
+widest tool in the template (which must be TOOL_CLEARANCE smaller than the
+corner it has to reach into); on a misfit the best fitting variant is
 substituted with a warning.
 
 Tabs are opt-in per contour: the tab selection accepts edges or faces of an
@@ -28,10 +30,10 @@ from . import recognition, templates
 
 # A hole this close to a drill template's tool diameter is drilled (cm).
 DRILL_MATCH_TOL = 0.005
-# A bored hole must be at least this much larger than the boring tool (cm).
-BORE_CLEARANCE = 0.002
-# Tolerance when checking a tool radius against a pocket corner radius (cm).
-FIT_TOL = 0.005
+# A tool must be at least this much smaller than the narrowest part of the
+# feature it machines (cm): a 6mm cutter cannot machine a 6mm wide pocket
+# corner or bore a 6mm hole, it has to leave material to remove.
+TOOL_CLEARANCE = 0.01
 # Through holes larger than this are machined as inner contours, not bores (cm).
 BIG_HOLE_LIMIT = 3.0
 # Tolerance when checking a tool's flute length against a feature depth (cm).
@@ -260,27 +262,27 @@ def plan(result: recognition.RecognitionResult, registry: dict[str, list[templat
         else:
             cutout_overrides[feature[1]] = label
 
-    min_dims = _min_dims_cache()
+    limit_dims = _limit_dims_cache()
     jobs: list[Job] = []
     jobs += _plan_holes(small_holes, drills, bores, warnings)
-    jobs += _plan_pockets(pockets, registry, assignments, finish_pockets, min_dims, warnings)
+    jobs += _plan_pockets(pockets, registry, assignments, finish_pockets, limit_dims, warnings)
     jobs += _plan_contours(result, cutouts, registry, assignments, tab_policy.mode,
                            tab_outer, tab_cutouts,
                            finish_outer, finish_cutouts, outer_overrides, cutout_overrides,
-                           min_dims, warnings)
+                           limit_dims, warnings)
     return jobs, warnings
 
 
-def _min_dims_cache():
-    """Cached (min diameter, min flute length) lookup per template variant."""
+def _limit_dims_cache():
+    """Cached (max diameter, min flute length) lookup per template variant."""
     cache: dict[str, tuple[float | None, float | None]] = {}
 
-    def min_dims(variant: templates.TemplateVariant) -> tuple[float | None, float | None]:
+    def limit_dims(variant: templates.TemplateVariant) -> tuple[float | None, float | None]:
         if variant.name not in cache:
-            cache[variant.name] = templates.min_tool_dimensions(variant)
+            cache[variant.name] = templates.limiting_tool_dimensions(variant)
         return cache[variant.name]
 
-    return min_dims
+    return limit_dims
 
 
 def _drill_match(diameter: float, drills: dict[float, templates.TemplateVariant]) -> bool:
@@ -388,7 +390,7 @@ def _pick_hole_template(hole, required_depth, drills, bores, warnings):
 def _pick_bore(diameter, required_depth, bores, require_depth):
     candidates = []
     for tool_dia, (variant, flute) in bores.items():
-        if tool_dia > diameter - BORE_CLEARANCE:
+        if tool_dia > diameter - TOOL_CLEARANCE:
             continue
         if require_depth and flute is not None and flute < required_depth - DEPTH_TOL:
             continue
@@ -403,18 +405,20 @@ def _pick_bore(diameter, required_depth, bores, require_depth):
 
 
 def _plan_pockets(pockets, registry, assignments: Assignments, finish_pockets: set[int],
-                  min_dims, warnings: list[str]) -> list[Job]:
+                  limit_dims, warnings: list[str]) -> list[Job]:
     if not pockets:
         return []
 
     def fits_radius(variant: templates.TemplateVariant, pocket: recognition.Pocket) -> bool:
         if pocket.min_corner_radius is None:
             return True
-        diameter = min_dims(variant)[0]
-        return diameter is None or diameter / 2 <= pocket.min_corner_radius + FIT_TOL
+        diameter = limit_dims(variant)[0]
+        # The tool has to fit into the corner with room to cut: its diameter
+        # must stay below the corner's diameter by at least TOOL_CLEARANCE.
+        return diameter is None or diameter <= 2 * pocket.min_corner_radius - TOOL_CLEARANCE
 
     def fits_depth(variant: templates.TemplateVariant, pocket: recognition.Pocket) -> bool:
-        flute = min_dims(variant)[1]
+        flute = limit_dims(variant)[1]
         return flute is None or flute >= pocket.depth - DEPTH_TOL
 
     def fits(variant, pocket):
@@ -448,7 +452,7 @@ def _plan_pockets(pockets, registry, assignments: Assignments, finish_pockets: s
                     f'"{variant.display_label}" tool; check the operation.')
             else:
                 eligible = [v for v in registry['pocket'] if v.matches_cutter(assignments.cutter)]
-                replacement = _best_fitting_variant(eligible, variant, pocket, fits, min_dims)
+                replacement = _best_fitting_variant(eligible, variant, pocket, fits, limit_dims)
                 if replacement:
                     warnings.append(
                         f'{pocket.body.name}: pocket {reason} does not suit '
@@ -465,7 +469,7 @@ def _plan_pockets(pockets, registry, assignments: Assignments, finish_pockets: s
     return list(groups.values())
 
 
-def _best_fitting_variant(variants, chosen, pocket, fits, min_dims):
+def _best_fitting_variant(variants, chosen, pocket, fits, limit_dims):
     """Among fitting variants prefer the chosen finishing flag and similar labels,
     then the largest tool."""
     candidates = [v for v in variants if fits(v, pocket)]
@@ -473,27 +477,27 @@ def _best_fitting_variant(variants, chosen, pocket, fits, min_dims):
         return None
     def rank(variant):
         prefix = len(os.path.commonprefix([variant.label, chosen.label]))
-        return (variant.has_finish == chosen.has_finish, prefix, min_dims(variant)[0] or 0.0)
+        return (variant.has_finish == chosen.has_finish, prefix, limit_dims(variant)[0] or 0.0)
     return max(candidates, key=rank)
 
 
-def _contour_depth_check(registry, variant, feature_depth, cutter, min_dims,
+def _contour_depth_check(registry, variant, feature_depth, cutter, limit_dims,
                          context: str, warnings: list[str]) -> templates.TemplateVariant:
     """Ensure the contour template's tool can cut through the stock; substitute
     a depth-capable variant (same finish flag) or warn."""
     required = feature_depth + THROUGH_ALLOWANCE
-    flute = min_dims(variant)[1]
+    flute = limit_dims(variant)[1]
     if flute is None or flute >= required - DEPTH_TOL:
         return variant
     candidates = [
         v for v in registry['contour']
         if v.matches_cutter(cutter) and v.has_finish == variant.has_finish
-        and (min_dims(v)[1] is None or min_dims(v)[1] >= required - DEPTH_TOL)
+        and (limit_dims(v)[1] is None or limit_dims(v)[1] >= required - DEPTH_TOL)
     ]
     if candidates:
         def rank(v):
             prefix = len(os.path.commonprefix([v.label, variant.label]))
-            return (prefix, min_dims(v)[0] or 0.0)
+            return (prefix, limit_dims(v)[0] or 0.0)
         replacement = max(candidates, key=rank)
         warnings.append(
             f'{context}: cut depth {required * 10:.1f}mm exceeds the "{variant.display_label}" '
@@ -509,7 +513,7 @@ def _plan_contours(result, cutouts, registry, assignments: Assignments, tab_mode
                    tab_outer: set[str], tab_cutouts: set[int],
                    finish_outer: set[str], finish_cutouts: set[int],
                    outer_overrides: dict[str, str], cutout_overrides: dict[int, str],
-                   min_dims, warnings: list[str]) -> list[Job]:
+                   limit_dims, warnings: list[str]) -> list[Job]:
     if not cutouts and not result.contours:
         return []
     if assignments.contour_default is None and not outer_overrides and not cutout_overrides:
@@ -537,7 +541,7 @@ def _plan_contours(result, cutouts, registry, assignments: Assignments, tab_mode
             warnings.append(f'No contour template found for "{label}"; cutout skipped.')
             continue
         variant = _contour_depth_check(
-            registry, variant, cutout.depth, assignments.cutter, min_dims,
+            registry, variant, cutout.depth, assignments.cutter, limit_dims,
             f'{cutout.body.name} cutout', warnings)
         tabbed = tab_mode in (TAB_INNER, TAB_ALL) or index in tab_cutouts
         key = (variant.name, tabbed)
@@ -564,7 +568,7 @@ def _plan_contours(result, cutouts, registry, assignments: Assignments, tab_mode
             warnings.append(f'No contour template found for "{label}"; outer contour skipped.')
             continue
         variant = _contour_depth_check(
-            registry, variant, contour.depth, assignments.cutter, min_dims,
+            registry, variant, contour.depth, assignments.cutter, limit_dims,
             f'{contour.body.name} outer contour', warnings)
         tabbed = tab_mode in (TAB_OUTER, TAB_ALL) or body_token in tab_outer
         if tabbed and not contour.edges:
