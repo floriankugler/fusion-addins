@@ -116,6 +116,12 @@ class Envelope(addin.Addin):
         return os.path.join(os.path.dirname(os.path.abspath(__file__)), 'Resources')
 
     @property
+    def preview_enabled(self) -> bool:
+        # execute() builds a single native sketch, so Fusion's executePreview
+        # transaction can run it as a live preview and roll it back again.
+        return True
+
+    @property
     def plugin_name(self) -> str:
         return 'Envelope'
 
@@ -156,10 +162,7 @@ class Envelope(addin.Addin):
     def _validate(self, args: adsk.core.ValidateInputsEventArgs):
         if self.inputs is None:
             return
-        self.update_inputs_from_ui()
-        message = self._input_error()
-        self.showError(message)
-        args.areInputsValid = message is None
+        self._apply_validation(args, self._input_error)
 
     def _input_error(self) -> str | None:
         message = builder.validate_specs(self.inputs.rectangles.value)

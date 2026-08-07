@@ -462,9 +462,6 @@ class ConnectorsNative(addin.Addin):
     _parameter_prefix: str
     _target_body_tokens: dict[str, str]
     _start_face_tokens: dict[str, str]
-    #: Verdict of the last _validation_error run against a clean model;
-    #: reused while an applied preview makes geometry checks impossible.
-    _last_validation_error: str | None = None
 
     @property
     def plugin_name(self) -> str:
@@ -512,7 +509,6 @@ class ConnectorsNative(addin.Addin):
         design = adsk.fusion.Design.cast(self.app.activeProduct)
         if not design:
             raise RuntimeError("Connector (Native) requires an active Fusion design.")
-        self._last_validation_error = None
         return ConnectorsNativeInputs(design.unitsManager)
 
     def pre_select(self, input, selection) -> bool:
@@ -546,24 +542,7 @@ class ConnectorsNative(addin.Addin):
         return True
 
     def _validate(self, args: adsk.core.ValidateInputsEventArgs):
-        try:
-            self.update_inputs_from_ui()
-            if self._model_is_previewed():
-                # The applied preview modified the selected geometry (e.g.
-                # the cuts shorten the selected edge), so the geometry checks
-                # would judge the preview instead of the clean document.
-                # Reuse the verdict from the last clean state; execute() (in
-                # both preview and OK) re-validates against a clean model.
-                error = self._last_validation_error
-            else:
-                error = self._validation_error()
-                self._last_validation_error = error
-        except Exception as exc:
-            error = str(exc)
-        args.areInputsValid = error is None
-        # Keep a preview failure visible: validateInputs runs after every
-        # input event and would otherwise erase the message immediately.
-        self.showError(error or self._preview_error)
+        self._apply_validation(args, self._validation_error)
 
     def execute(self):
         error = self._validation_error()

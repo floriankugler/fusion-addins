@@ -1,6 +1,7 @@
 from lib import addin, inputs, ui_placement
 from lib.fusionbootstrap.runtime import RuntimeInfo
 import adsk.core, adsk.fusion
+import os
 from typing import cast
 
 _addin: addin.Addin | None = None
@@ -9,6 +10,14 @@ _addin: addin.Addin | None = None
 def run(context, runtime_info: RuntimeInfo):
     global _addin
     _addin = MultiCombine(runtime_info)
+    # Dev support: allow external tooling to restart this add-in by firing the
+    # custom event '<id>_reload' (see lib/fusionbootstrap/reloader.py).
+    from lib.fusionbootstrap import reloader
+    entry = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "multi_combine.py",
+    )
+    reloader.ensure(runtime_info.id + "_reload", entry)
 
 
 def stop(context):
@@ -57,6 +66,18 @@ class MultiCombineInputs(inputs.Inputs):
 
 class MultiCombine(addin.Addin):
     inputs: MultiCombineInputs
+
+    @property
+    def resource_dir(self) -> str:
+        # Absolute path so the command can also be (re)registered from outside
+        # Fusion's add-in launcher (e.g. a scripted restart during development).
+        return os.path.join(os.path.dirname(os.path.abspath(__file__)), "Resources")
+
+    @property
+    def preview_enabled(self) -> bool:
+        # execute() builds native features only, so Fusion's executePreview
+        # transaction can run it as a live preview and roll it back again.
+        return True
 
     @property
     def plugin_name(self) -> str:

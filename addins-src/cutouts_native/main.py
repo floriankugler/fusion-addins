@@ -1,4 +1,5 @@
 import math
+import os
 from dataclasses import dataclass
 from typing import cast
 
@@ -76,6 +77,14 @@ class _PatternBoundary:
 def run(context, runtime_info: RuntimeInfo):
     global _addin
     _addin = CutoutsNative(runtime_info)
+    # Dev support: allow external tooling to restart this add-in by firing the
+    # custom event '<id>_reload' (see lib/fusionbootstrap/reloader.py).
+    from lib.fusionbootstrap import reloader
+    entry = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "cutouts_native.py",
+    )
+    reloader.ensure(runtime_info.id + "_reload", entry)
 
 
 def stop(context):
@@ -255,6 +264,18 @@ class CutoutsNative(addin.Addin):
     _remainder_parameter_name: str | None = None
 
     @property
+    def resource_dir(self) -> str:
+        # Absolute path so the command can also be (re)registered from outside
+        # Fusion's add-in launcher (e.g. a scripted restart during development).
+        return os.path.join(os.path.dirname(os.path.abspath(__file__)), "Resources")
+
+    @property
+    def preview_enabled(self) -> bool:
+        # execute() builds native features only, so Fusion's executePreview
+        # transaction can run it as a live preview and roll it back again.
+        return True
+
+    @property
     def plugin_name(self) -> str:
         return "Face Cutout (Native)"
 
@@ -310,13 +331,7 @@ class CutoutsNative(addin.Addin):
         return True
 
     def _validate(self, args: adsk.core.ValidateInputsEventArgs):
-        try:
-            self.update_inputs_from_ui()
-            error = self._validation_error()
-        except Exception as exc:
-            error = str(exc)
-        args.areInputsValid = error is None
-        self.showError(error)
+        self._apply_validation(args, self._validation_error)
 
     def execute(self):
         error = self._validation_error()

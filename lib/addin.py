@@ -1,5 +1,5 @@
 import adsk.core, adsk.fusion
-from typing import cast
+from typing import Callable, cast
 from abc import ABC, abstractmethod
 import traceback
 from . import defaults_store
@@ -19,6 +19,7 @@ class Addin(ABC):
     _shutdown: bool
     _preview_error: str | None
     _base_timeline_count: int | None
+    _last_validation_error: str | None
 
     @property
     def create_command_id(self) -> str:
@@ -78,6 +79,7 @@ class Addin(ABC):
             self._shutdown = False
             self._preview_error = None
             self._base_timeline_count = None
+            self._last_validation_error = None
             self._defaults_ui = defaults_ui.DefaultsUIManager(
                 self.app,
                 self.defaults_file,
@@ -143,6 +145,42 @@ class Addin(ABC):
     def _validate(self, args: adsk.core.ValidateInputsEventArgs):
         pass
 
+    def _apply_validation(
+        self,
+        args: adsk.core.ValidateInputsEventArgs,
+        compute_error: Callable[[], str | None],
+    ) -> None:
+        """Standard validateInputs handling for add-ins with a preview.
+
+        `compute_error` returns the add-in's validation message, or None when
+        the inputs are valid. It is only called while the model is clean:
+        once a preview is applied, the selected entities resolve to the
+        geometry the preview modified (a cut shortens the selected edge, a
+        join thickens the selected board), so measuring them would judge the
+        preview instead of the document. The verdict from the last clean
+        state is reused for as long as the preview is up; execute() re-runs
+        the full validation against a clean model on every preview cycle and
+        again on OK, so nothing invalid slips through.
+
+        This also keeps the error field stable, which matters more than it
+        looks: writing the field fires an input event, which makes Fusion
+        abort and recompute the preview. Recomputing validation against the
+        previewed model flip-flopped the message and drove an endless
+        preview loop.
+        """
+        try:
+            self.update_inputs_from_ui()
+            if self._model_is_previewed():
+                error = self._last_validation_error
+            else:
+                error = compute_error()
+                self._last_validation_error = error
+        except Exception as exc:
+            error = str(exc)
+        args.areInputsValid = error is None
+        # A preview failure stays visible until validation itself objects.
+        self.showError(error or self._preview_error)
+
     def _input_changed(self, args: adsk.core.InputChangedEventArgs):
         self.update_inputs_from_ui()
         if self.inputs:
@@ -204,6 +242,7 @@ class Addin(ABC):
 
     def _initialize_inputs(self, command: adsk.core.Command, params: adsk.fusion.CustomFeatureParameters | None) -> None:
         self._preview_error = None
+        self._last_validation_error = None
         # Timeline length of the clean document, taken at dialog open. While
         # an executePreview result is applied the count is higher; it drops
         # back when Fusion aborts the preview transaction. Used by
