@@ -167,6 +167,14 @@ class _OptionalFloatInput(inputs.Input):
 def run(context, runtime_info: RuntimeInfo):
     global _addin
     _addin = ConnectorsNative(runtime_info)
+    # Dev support: allow external tooling to restart this add-in by firing the
+    # custom event '<id>_reload' (see lib/fusionbootstrap/reloader.py).
+    from lib.fusionbootstrap import reloader
+    entry = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "connectors_native.py",
+    )
+    reloader.ensure(runtime_info.id + "_reload", entry)
 
 
 def stop(context):
@@ -238,7 +246,12 @@ class ConnectorsNativeInputs(inputs.Inputs):
             id="edge",
             name="Edges",
             filter=["LinearEdges"],
-            lower_bound=1,
+            # No lower bound: the preview's cuts can consume the selected
+            # edges, which silently clears the selection input, and a
+            # required selection would then disable OK and stop preview
+            # updates. The "at least one edge" rule lives in
+            # _validation_error, checked against the cached selection.
+            lower_bound=0,
             upper_bound=0,
             tool_tip=(
                 "Select one or more parallel edges lying in one plane. The "
@@ -449,6 +462,9 @@ class ConnectorsNative(addin.Addin):
     _parameter_prefix: str
     _target_body_tokens: dict[str, str]
     _start_face_tokens: dict[str, str]
+    #: Verdict of the last _validation_error run against a clean model;
+    #: reused while an applied preview makes geometry checks impossible.
+    _last_validation_error: str | None = None
 
     @property
     def plugin_name(self) -> str:
@@ -468,6 +484,12 @@ class ConnectorsNative(addin.Addin):
     @property
     def resource_dir(self) -> str:
         return os.path.join(os.path.dirname(__file__), "Resources")
+
+    @property
+    def preview_enabled(self) -> bool:
+        # All of execute() is native features (sketches + cut extrudes), so
+        # the shared executePreview support can run it as a live preview.
+        return True
 
     def get_ui_placement(self) -> ui_placement.UIPlacement:
         section = ui_placement.PlacementSpec(
@@ -490,6 +512,7 @@ class ConnectorsNative(addin.Addin):
         design = adsk.fusion.Design.cast(self.app.activeProduct)
         if not design:
             raise RuntimeError("Connector (Native) requires an active Fusion design.")
+        self._last_validation_error = None
         return ConnectorsNativeInputs(design.unitsManager)
 
     def pre_select(self, input, selection) -> bool:
@@ -525,11 +548,22 @@ class ConnectorsNative(addin.Addin):
     def _validate(self, args: adsk.core.ValidateInputsEventArgs):
         try:
             self.update_inputs_from_ui()
-            error = self._validation_error()
+            if self._model_is_previewed():
+                # The applied preview modified the selected geometry (e.g.
+                # the cuts shorten the selected edge), so the geometry checks
+                # would judge the preview instead of the clean document.
+                # Reuse the verdict from the last clean state; execute() (in
+                # both preview and OK) re-validates against a clean model.
+                error = self._last_validation_error
+            else:
+                error = self._validation_error()
+                self._last_validation_error = error
         except Exception as exc:
             error = str(exc)
         args.areInputsValid = error is None
-        self.showError(error)
+        # Keep a preview failure visible: validateInputs runs after every
+        # input event and would otherwise erase the message immediately.
+        self.showError(error or self._preview_error)
 
     def execute(self):
         error = self._validation_error()

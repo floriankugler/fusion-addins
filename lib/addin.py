@@ -17,6 +17,8 @@ class Addin(ABC):
     _error_field: adsk.core.TextBoxCommandInput | None
     _defaults_ui: defaults_ui.DefaultsUIManager
     _shutdown: bool
+    _preview_error: str | None
+    _base_timeline_count: int | None
 
     @property
     def create_command_id(self) -> str:
@@ -55,6 +57,17 @@ class Addin(ABC):
     def has_command_ui(self) -> bool:
         return True
 
+    @property
+    def preview_enabled(self) -> bool:
+        """Opt-in for a live preview while the dialog is open.
+
+        When True, every valid input change re-runs execute() inside Fusion's
+        executePreview transaction. This only suits add-ins whose execute()
+        creates native features: Fusion rolls those back automatically before
+        the next preview and before the final execute on OK.
+        """
+        return False
+
     def __init__(self, runtime_info: RuntimeInfo):
         try:
             self.runtime_info = runtime_info
@@ -63,6 +76,8 @@ class Addin(ABC):
             self._handlers = []
             self.inputs = None
             self._shutdown = False
+            self._preview_error = None
+            self._base_timeline_count = None
             self._defaults_ui = defaults_ui.DefaultsUIManager(
                 self.app,
                 self.defaults_file,
@@ -140,6 +155,11 @@ class Addin(ABC):
         try:
             if self.inputs is not None:
                 self.update_inputs_from_ui()
+                if self.preview_enabled:
+                    # The preview shown until OK was clicked is rolled back
+                    # right before this event; re-resolve selections it had
+                    # invalidated.
+                    self._refresh_stale_selections()
             self.execute()
         except Exception as error:
             self.log_exception_traceback("execute", error)
@@ -149,13 +169,52 @@ class Addin(ABC):
             self.inputs = None
 
     def _execute_preview(self, args: adsk.core.CommandEventArgs):
-        pass
+        # Fusion only fires this event after validateInputs approved the
+        # inputs, and it rolls the preview's model changes back on its own.
+        # args.isValidResult stays False so OK always re-runs execute() from
+        # the clean pre-preview state.
+        if not self.preview_enabled or self.inputs is None:
+            return
+        try:
+            self.update_inputs_from_ui()
+            # Fusion aborted the previous preview transaction right before
+            # this event, so the model is clean again — but selections the
+            # previous preview invalidated (e.g. a cut splitting the selected
+            # edge) are only cached as entity tokens now. Re-resolve them
+            # before building the new preview. The selection input's UI is
+            # deliberately left alone: writing selections from here would
+            # fire input events that trigger further preview cycles.
+            self._refresh_stale_selections()
+            self.execute()
+            self._preview_error = None
+            self.showError(None)
+        except Exception as error:
+            # Preview failures (e.g. geometry that cannot be built yet) belong
+            # in the dialog; the command itself stays open. Subclasses that
+            # write the error field from _validate must include
+            # _preview_error there, or the next validation pass erases the
+            # message again.
+            self.log_exception_traceback("preview", error)
+            self._preview_error = str(error) or error.__class__.__name__
+            self.showError(self._preview_error)
     
     def _pre_select(self, args: adsk.core.EventArgs):
         event_args = adsk.core.SelectionEventArgs.cast(args)
         event_args.isSelectable = self.pre_select(event_args.activeInput, event_args.selection.entity)
 
     def _initialize_inputs(self, command: adsk.core.Command, params: adsk.fusion.CustomFeatureParameters | None) -> None:
+        self._preview_error = None
+        # Timeline length of the clean document, taken at dialog open. While
+        # an executePreview result is applied the count is higher; it drops
+        # back when Fusion aborts the preview transaction. Used by
+        # _model_is_previewed.
+        self._base_timeline_count = None
+        design = adsk.fusion.Design.cast(self.app.activeProduct)
+        if design is not None:
+            try:
+                self._base_timeline_count = design.timeline.count
+            except RuntimeError:
+                pass
         self.inputs = self.create_inputs()
         if params is None:
             self._defaults_ui.apply_defaults(self.inputs)
@@ -197,6 +256,42 @@ class Addin(ABC):
             raise RuntimeError("Add-in inputs are not initialized.")
         for input in self.inputs.inputs:
             input.update_from_input()
+
+    def _selection_inputs(self) -> list[inp.SelectionByEntityTokenInput]:
+        if self.inputs is None:
+            return []
+        # Duck-typed like Inputs.__init__: after a dev-mode reload isinstance
+        # can fail against a stale class object.
+        return [
+            input for input in self.inputs.inputs
+            if isinstance(input, inp.SelectionByEntityTokenInput)
+            or hasattr(input, 'refresh_stale_value')
+        ]
+
+    def _model_is_previewed(self) -> bool:
+        """True while an executePreview result is applied to the model.
+
+        Selected entities can stay valid but resolve to modified geometry in
+        that state (e.g. a cut shortens the selected edge), so validation
+        code must not do geometry work against the model then — it would
+        produce verdicts about the preview instead of the clean document.
+        """
+        if not self.preview_enabled or self._base_timeline_count is None:
+            return False
+        design = adsk.fusion.Design.cast(self.app.activeProduct)
+        if design is None:
+            return False
+        try:
+            return design.timeline.count != self._base_timeline_count
+        except RuntimeError:
+            return False
+
+    def _refresh_stale_selections(self):
+        design = adsk.fusion.Design.cast(self.app.activeProduct)
+        if design is None:
+            return
+        for input in self._selection_inputs():
+            input.refresh_stale_value(design)
 
     @property
     def component(self) -> adsk.fusion.Component:

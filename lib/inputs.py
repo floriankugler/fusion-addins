@@ -290,6 +290,20 @@ class DropDownInput(Input):
         )
 
 
+def _entity_is_valid(entity) -> bool:
+    try:
+        return bool(entity.isValid)
+    except Exception:
+        return False
+
+
+def _entity_token(entity) -> str | None:
+    try:
+        return entity.entityToken
+    except Exception:
+        return None
+
+
 class SelectionByEntityTokenInput(Input):
     input: adsk.core.SelectionCommandInput
     value: list[
@@ -301,6 +315,9 @@ class SelectionByEntityTokenInput(Input):
         | adsk.fusion.SketchLine
         | adsk.fusion.SketchPoint
     ]
+    #: Entity tokens parallel to `value`, captured while the entities were
+    #: valid, so stale references can be re-resolved after a preview rollback.
+    tokens: list[str | None]
 
     def __init__(self, id, name, filter: list[str], lower_bound: int, upper_bound: int, tool_tip: str, update_visibility: Callable[[], bool] = lambda: True):
         super().__init__(id, name, tool_tip, update_visibility)
@@ -335,6 +352,7 @@ class SelectionByEntityTokenInput(Input):
 
     def update_from_feature(self, feature: adsk.fusion.CustomFeature):
         result = []
+        result_tokens = []
         if self.input: self.input.clearSelection()
         deps = [d for d in feature.dependencies if d.id.startswith(self.dependency_id_prefix)]
         for idx in range(len(deps)):
@@ -345,14 +363,74 @@ class SelectionByEntityTokenInput(Input):
                 raise errors.ReferenceLostError()
             entity = entities[0]
             result.append(entity)
+            result_tokens.append(token)
             if self.input: self.input.addSelection(entity)
         self.value = result
+        self.tokens = result_tokens
         
     def update_from_input(self):
-        result = []
+        ui_entities = []
+        read_failed = False
         for idx in range(self.input.selectionCount):
-            result.append(self.input.selection(idx).entity)
-        self.value = result
+            try:
+                ui_entities.append(self.input.selection(idx).entity)
+            except RuntimeError:
+                # A selection that references a consumed entity can throw on
+                # access; treat it like model churn below.
+                read_failed = True
+
+        if not self.has_stale_value() and not read_failed:
+            # Clean model: the selection input is authoritative.
+            self.value = ui_entities
+            self.tokens = [_entity_token(entity) for entity in ui_entities]
+            return
+
+        # Some cached entities are currently invalid: the model is in a
+        # previewed state whose changes consumed the selected entities (e.g.
+        # a cut that splits the selected edge), and Fusion silently dropped
+        # them from the selection input. Keep the cached selections — they
+        # resolve again once the preview is rolled back — and merge in
+        # anything newly selected on top of the preview.
+        known = set(token for token in self.tokens if token)
+        for entity in ui_entities:
+            token = _entity_token(entity)
+            if token in known:
+                continue
+            self.value.append(entity)
+            self.tokens.append(token)
+
+    def has_stale_value(self) -> bool:
+        """True while a cached selection references an invalid entity —
+        i.e. an applied preview has modified the selected bodies."""
+        return any(not _entity_is_valid(entity) for entity in self.value)
+
+    def refresh_stale_value(self, design: adsk.fusion.Design):
+        """Re-resolves stale cached selections via their entity tokens.
+
+        Meant for the moment right after a preview rollback: the original
+        entities exist again, but references cached before the preview can
+        stay invalid. Entities whose token no longer resolves are dropped.
+        """
+        if not self.has_stale_value():
+            return
+        fresh = []
+        fresh_tokens = []
+        for entity, token in zip(self.value, self.tokens):
+            if _entity_is_valid(entity):
+                fresh.append(entity)
+                fresh_tokens.append(token)
+                continue
+            if not token:
+                continue
+            try:
+                entities = design.findEntityByToken(token)
+            except RuntimeError:
+                continue
+            if entities:
+                fresh.append(entities[0])
+                fresh_tokens.append(token)
+        self.value = fresh
+        self.tokens = fresh_tokens
 
     @property
     def dependency_id_prefix(self):
