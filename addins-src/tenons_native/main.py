@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from enum import Enum, unique
 import math
 import os
+import re
 from typing import cast
 
 import adsk.core
@@ -1299,10 +1300,7 @@ class TenonsNative(addin.Addin):
         if not sketch:
             raise RuntimeError("Fusion failed to create 'Tenons (Native) - Mortises'.")
         sketch.name = "Tenons (Native) - Mortises"
-        projected_profiles = [
-            self._project_tenon_profile(sketch, tool)
-            for tool in tenon_tools
-        ]
+        projected_profiles = self._project_tenon_profiles(sketch, tenon_tools)
         context = self._finish_edge_context(
             sketch,
             geometry.edge,
@@ -2050,14 +2048,16 @@ class TenonsNative(addin.Addin):
             raise RuntimeError(f"Fusion failed to create '{name}'.")
         sketch.name = name
 
-        projected_base_lines = [
-            self._project_line(sketch, line)
-            for line in layout.bases
-        ]
-        projected_outer_lines = [
-            self._project_line(sketch, line)
-            for line in layout.outers
-        ]
+        # One project2 call for all of them: a projection cannot run on a
+        # compute-deferred sketch, so each one is a document update costing
+        # ~0.5 s on a large assembly. Six calls become one.
+        projected = self._project_lines(
+            sketch,
+            [*layout.bases, *layout.outers],
+        )
+        base_count = len(layout.bases)
+        projected_base_lines = projected[:base_count]
+        projected_outer_lines = projected[base_count:]
         for line in [*projected_base_lines, *projected_outer_lines]:
             line.isConstruction = True
         context = self._finish_edge_context(
@@ -2111,24 +2111,51 @@ class TenonsNative(addin.Addin):
         )
         return context, projected_points
 
-    def _project_tenon_profile(
+    def _project_tenon_profiles(
         self,
         sketch: adsk.fusion.Sketch,
-        tool_body: adsk.fusion.BRepBody,
-    ) -> list[adsk.fusion.SketchLine]:
-        projected = sketch.projectCutEdges(tool_body)
-        lines = [
-            line
-            for entity in projected
-            if (line := adsk.fusion.SketchLine.cast(entity))
-        ]
-        if len(lines) != 4:
-            raise RuntimeError(
-                "A native tenon did not project as a four-sided profile."
-            )
-        for line in lines:
+        tool_bodies: list[adsk.fusion.BRepBody],
+    ) -> list[list[adsk.fusion.SketchLine]]:
+        """Projects every tenon's profile, grouped per tenon, in ONE call.
+
+        projectCutEdges only accepts a single body, so it cost one document
+        update per tenon (~1.1 s each on a large assembly). This sketch is
+        built on the same small face the tenons start from, so each tool
+        body's base rectangle consists of real edges lying in the sketch
+        plane, and all of them can go through a single project2 call.
+        """
+        edges_by_body: list[list[adsk.core.Base]] = []
+        for body in tool_bodies:
+            on_plane = [
+                edge
+                for index in range(body.edges.count)
+                if utils.brep.is_linear(edge := body.edges.item(index))
+                and self._is_on_sketch_plane(sketch, edge.startVertex.geometry)
+                and self._is_on_sketch_plane(sketch, edge.endVertex.geometry)
+            ]
+            if len(on_plane) != 4:
+                raise RuntimeError(
+                    "A native tenon did not project as a four-sided profile."
+                )
+            edges_by_body.append(cast(list[adsk.core.Base], on_plane))
+
+        flattened = [edge for edges in edges_by_body for edge in edges]
+        projected = self._project_in_one_call(sketch, flattened)
+        for line in projected:
             line.isConstruction = True
-        return lines
+        grouped: list[list[adsk.fusion.SketchLine]] = []
+        start = 0
+        for edges in edges_by_body:
+            grouped.append(projected[start:start + len(edges)])
+            start += len(edges)
+        return grouped
+
+    def _is_on_sketch_plane(
+        self,
+        sketch: adsk.fusion.Sketch,
+        point: adsk.core.Point3D,
+    ) -> bool:
+        return abs(sketch.modelToSketchSpace(point).z) <= 1e-6
 
     def _add_offset_mortise_rectangles(
         self,
@@ -3396,6 +3423,80 @@ class TenonsNative(addin.Addin):
             raise RuntimeError("A projected reference is not a straight line.")
         return result
 
+    def _project_lines(
+        self,
+        sketch: adsk.fusion.Sketch,
+        lines: list[adsk.fusion.SketchLine],
+    ) -> list[adsk.fusion.SketchLine]:
+        """Projects several lines in ONE call, returned in the input order.
+
+        project2 does NOT guarantee that it returns its results in the order
+        the entities were passed (verified on a nine-loop face elsewhere in
+        this repo, where a flat call scrambled the grouping), so every
+        projection is matched back to its source by geometry. That is worth
+        the trouble here because each project2 call is a separate document
+        update, which costs ~0.5 s on a large assembly.
+        """
+        return self._project_in_one_call(
+            sketch,
+            cast(list[adsk.core.Base], list(lines)),
+        )
+
+    def _project_in_one_call(
+        self,
+        sketch: adsk.fusion.Sketch,
+        entities: list[adsk.core.Base],
+    ) -> list[adsk.fusion.SketchLine]:
+        """Projects straight entities in one call, returned in input order.
+
+        Sketch lines and BRep edges are both accepted. The results are
+        matched back to their sources by geometry rather than by position,
+        because project2 does NOT guarantee that it returns them in the
+        order the entities were passed - verified elsewhere in this repo,
+        where a flat call silently scrambled a face's loops.
+        """
+        if not entities:
+            return []
+        projected = [
+            line
+            for entity in sketch.project2(entities, True)
+            if (line := adsk.fusion.SketchLine.cast(entity))
+        ]
+        if len(projected) != len(entities):
+            raise RuntimeError("Fusion failed to project the reference lines.")
+
+        def distance(candidate: adsk.fusion.SketchLine, source: adsk.core.Base) -> float:
+            a = candidate.worldGeometry
+            start, end = self._straight_endpoints(source)
+            forward = (a.startPoint.distanceTo(start) + a.endPoint.distanceTo(end))
+            reversed_ = (a.startPoint.distanceTo(end) + a.endPoint.distanceTo(start))
+            return min(forward, reversed_)
+
+        remaining = list(projected)
+        ordered: list[adsk.fusion.SketchLine] = []
+        for source in entities:
+            match = min(remaining, key=lambda candidate: distance(candidate, source))
+            if distance(match, source) > self.app.pointTolerance * 100:
+                raise RuntimeError(
+                    "A projected reference could not be matched to its source."
+                )
+            remaining.remove(match)
+            ordered.append(match)
+        return ordered
+
+    def _straight_endpoints(
+        self,
+        entity: adsk.core.Base,
+    ) -> tuple[adsk.core.Point3D, adsk.core.Point3D]:
+        line = adsk.fusion.SketchLine.cast(entity)
+        if line:
+            geometry = line.worldGeometry
+            return geometry.startPoint, geometry.endPoint
+        edge = adsk.fusion.BRepEdge.cast(entity)
+        if edge:
+            return edge.startVertex.geometry, edge.endVertex.geometry
+        raise RuntimeError("Only straight lines and edges can be projected here.")
+
     def _project_point(
         self,
         sketch: adsk.fusion.Sketch,
@@ -3490,6 +3591,50 @@ class TenonsNative(addin.Addin):
             ):
                 return candidate
             index += 1
+
+    def _set_parameter_expression(
+        self,
+        parameter: adsk.fusion.ModelParameter,
+        expression: str,
+    ) -> None:
+        """Overrides the shared helper: writes only expressions that carry a
+        parametric link.
+
+        Every dimension here is created on geometry that was already placed
+        at the intended value, so for a pure literal the write changes
+        nothing except the displayed text - swapping the literal Fusion
+        computed ("0.005 cm") for the authored one ("(0.01 cm) / 2"). The
+        geometry and the fully-constrained state are identical either way,
+        and each write is a document update costing ~0.5 s on a large
+        assembly.
+
+        An expression that NAMES a parameter is different: that reference is
+        the link that makes the model update later, and it cannot be
+        recovered from the geometry. Those are always written - both
+        references to the user's own parameters (a value typed as
+        "boardThickness / 3") and to parameters created earlier in this same
+        run, which is how the repeated mortise offsets stay tied to one
+        value.
+        """
+        if self._expression_references_parameter(expression):
+            parameter.expression = expression
+
+    def _expression_references_parameter(self, expression: str) -> bool:
+        """True when the expression names a parameter of this design.
+
+        Identifiers that are units ('mm') or functions ('sqrt') resolve to
+        nothing and are ignored, so only real references count.
+        """
+        if not expression:
+            return False
+        design = adsk.fusion.Design.cast(self.app.activeProduct)
+        if design is None:
+            # Cannot tell - keep the expression rather than lose a link.
+            return True
+        for token in set(re.findall(r"[A-Za-z_][A-Za-z_0-9]*", expression)):
+            if design.allParameters.itemByName(token):
+                return True
+        return False
 
     def _name_parameter(
         self,
