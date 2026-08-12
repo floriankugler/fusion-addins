@@ -2161,6 +2161,9 @@ class TenonsNative(addin.Addin):
 
         length_reference: str | None = None
         width_reference: str | None = None
+        # The first rectangle's sides, which the later ones are constrained to.
+        first_lower: adsk.fusion.SketchLine | None = None
+        first_upper: adsk.fusion.SketchLine | None = None
         rectangles = []
         for index, projected in enumerate(projected_profiles, start=1):
             parallel: list[adsk.fusion.SketchLine] = []
@@ -2234,48 +2237,65 @@ class TenonsNative(addin.Addin):
             constraints.addPerpendicular(right, lower)
             constraints.addParallel(upper, lower)
             constraints.addPerpendicular(left, lower)
-            length_expression = (
-                f"({self.inputs.mortise_length_offset.expression}) / 2"
-                if length_reference is None
-                else length_reference
-            )
-            left_dimension = self._add_offset_dimension(
-                sketch,
-                perpendicular[0],
-                left,
-                length_expression,
-                f"mortise{index}LeftOffset",
-            )
-            if length_reference is None:
+            # Only the first rectangle carries dimensions; the rest are tied
+            # to it with geometric constraints, exactly as the tenon layout
+            # does with its own repeats. All tenons are identical there
+            # (addEqual on the base, addCollinear on the outer edge), so
+            # every mortise rectangle has the same extents and only its
+            # position along the edge differs.
+            #
+            # This is worth doing because a dimension is not just a
+            # constraint: it creates a parameter, and writing that
+            # parameter's expression triggers a document update costing
+            # ~0.5 s in a large assembly, against ~1 ms for a constraint.
+            if first_lower is None or first_upper is None:
+                left_dimension = self._add_offset_dimension(
+                    sketch,
+                    perpendicular[0],
+                    left,
+                    f"({self.inputs.mortise_length_offset.expression}) / 2",
+                    f"mortise{index}LeftOffset",
+                )
                 length_reference = left_dimension.parameter.name
-            self._add_offset_dimension(
-                sketch,
-                perpendicular[1],
-                right,
-                length_reference,
-                f"mortise{index}RightOffset",
-            )
-            width_expression = (
-                f"({self.inputs.mortise_width_offset.expression}) / 2"
-                if width_reference is None
-                else width_reference
-            )
-            lower_dimension = self._add_offset_dimension(
-                sketch,
-                parallel[0],
-                lower,
-                width_expression,
-                f"mortise{index}LowerOffset",
-            )
-            if width_reference is None:
+                self._add_offset_dimension(
+                    sketch,
+                    perpendicular[1],
+                    right,
+                    length_reference,
+                    f"mortise{index}RightOffset",
+                )
+                lower_dimension = self._add_offset_dimension(
+                    sketch,
+                    parallel[0],
+                    lower,
+                    f"({self.inputs.mortise_width_offset.expression}) / 2",
+                    f"mortise{index}LowerOffset",
+                )
                 width_reference = lower_dimension.parameter.name
-            self._add_offset_dimension(
-                sketch,
-                parallel[1],
-                upper,
-                width_reference,
-                f"mortise{index}UpperOffset",
-            )
+                self._add_offset_dimension(
+                    sketch,
+                    parallel[1],
+                    upper,
+                    width_reference,
+                    f"mortise{index}UpperOffset",
+                )
+                first_lower = lower
+                first_upper = upper
+            else:
+                # Collinear fixes this rectangle across the edge (position
+                # and height), equal fixes its length, and the one remaining
+                # dimension places it along the edge relative to its OWN
+                # tenon profile - which is the only thing that differs.
+                constraints.addCollinear(first_lower, lower)
+                constraints.addCollinear(first_upper, upper)
+                constraints.addEqual(first_lower, lower)
+                self._add_offset_dimension(
+                    sketch,
+                    perpendicular[0],
+                    left,
+                    length_reference,
+                    f"mortise{index}LeftOffset",
+                )
             center = sketch.sketchPoints.add(
                 self._sketch_line_midpoint(diagonal)
             )
@@ -3476,18 +3496,23 @@ class TenonsNative(addin.Addin):
         parameter: adsk.fusion.ModelParameter,
         role: str,
     ) -> None:
-        # Nothing reads the assigned names back (later references use
-        # parameter.name live, which stays valid for auto-generated names);
-        # the preview is rolled back, so the renames (~300 ms each in large
-        # documents) only matter on OK.
-        if self.is_previewing:
-            return
-        name = f"{self._parameter_prefix}_{role}"
-        parameter.name = name
-        if parameter.name != name:
-            raise RuntimeError(
-                f"Fusion did not accept the parameter name '{name}'."
-            )
+        """Renaming is disabled: it is pure cosmetics and it dominates the
+        runtime on large assemblies.
+
+        Nothing depends on the names. Every cross-reference between the
+        dimensions created here reads `parameter.name` live, so Fusion's own
+        auto-generated names (d123) carry the parametric links just as well.
+
+        The cost is not the number of parameters but the size of the
+        document: a rename measures 0.2 ms in an empty design, 2.4 ms with
+        4500 parameters, but ~99 ms at 800 timeline features and ~460 ms in
+        a 1750-feature assembly, because each write triggers a document
+        update that scales with the model. Twenty-five renames were 11.5 s
+        of a 43 s run.
+
+        To restore human-readable names, delete this early return.
+        """
+        return
 
     def _require_fully_constrained(
         self,
