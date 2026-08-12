@@ -3619,23 +3619,6 @@ class TenonsNative(addin.Addin):
         if self._expression_references_parameter(expression):
             parameter.expression = expression
 
-    def _expression_references_parameter(self, expression: str) -> bool:
-        """True when the expression names a parameter of this design.
-
-        Identifiers that are units ('mm') or functions ('sqrt') resolve to
-        nothing and are ignored, so only real references count.
-        """
-        if not expression:
-            return False
-        design = adsk.fusion.Design.cast(self.app.activeProduct)
-        if design is None:
-            # Cannot tell - keep the expression rather than lose a link.
-            return True
-        for token in set(re.findall(r"[A-Za-z_][A-Za-z_0-9]*", expression)):
-            if design.allParameters.itemByName(token):
-                return True
-        return False
-
     def _name_parameter(
         self,
         parameter: adsk.fusion.ModelParameter,

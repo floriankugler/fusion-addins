@@ -1,6 +1,7 @@
 import adsk.core, adsk.fusion
 from typing import Callable, cast
 from abc import ABC, abstractmethod
+import re
 import traceback
 from . import defaults_store
 from . import defaults_ui
@@ -368,6 +369,35 @@ class Addin(ABC):
     def component(self) -> adsk.fusion.Component:
         return cast(adsk.fusion.Design, self.app.activeProduct).activeComponent
     
+    def _expression_references_parameter(self, expression: str) -> bool:
+        """True when the expression names a parameter of this design.
+
+        Add-ins use this to decide whether writing a dimension's expression
+        is worth its cost. A dimension is always created on geometry that
+        already sits at the intended value, so writing a pure literal only
+        swaps the literal Fusion computed for the authored one - whereas an
+        expression that NAMES a parameter carries a link that cannot be
+        recovered from the geometry and must be written.
+
+        That distinction matters because a parameter write is a document
+        update, and those scale with the size of the design: sub-millisecond
+        in a small file, ~0.5 s in a 1700-feature assembly.
+
+        Identifiers that are units ('mm') or functions ('sqrt') resolve to
+        no parameter and are ignored. Returns True when the design cannot be
+        resolved, so the failure mode is a redundant write, never a lost
+        link.
+        """
+        if not expression:
+            return False
+        design = adsk.fusion.Design.cast(self.app.activeProduct)
+        if design is None:
+            return True
+        for token in set(re.findall(r"[A-Za-z_][A-Za-z_0-9]*", expression)):
+            if design.allParameters.itemByName(token):
+                return True
+        return False
+
     def _set_parameter_expression(
         self,
         parameter: adsk.fusion.ModelParameter,

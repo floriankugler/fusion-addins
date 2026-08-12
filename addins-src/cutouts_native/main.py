@@ -380,14 +380,15 @@ class CutoutsNative(addin.Addin):
                 )
             target_body_indices.append(body_index)
 
-        sketch, profiles, outer_curves = self._create_cutout_sketch(
+        sketch, profiles, outer_curves, bounded_by_box = self._create_cutout_sketch(
             component,
             reference_face,
         )
         pattern_type = self.inputs.pattern_type.value
         # The bounding box clips the cutout so every pattern stays strictly
         # inside it. The cross wedges are already built on the box, so they
-        # need no extra clipping body.
+        # need no extra clipping body - and neither does a cutout whose own
+        # outline already IS the box.
         bounds_sketch = (
             self._create_bounds_sketch(
                 component,
@@ -396,6 +397,7 @@ class CutoutsNative(addin.Addin):
             )
             if self._has_manual_bounds()
             and pattern_type != CutoutsNativeInputs.CROSS.value
+            and not bounded_by_box
             else None
         )
 
@@ -785,23 +787,48 @@ class CutoutsNative(addin.Addin):
                 return candidate
             index += 1
 
+    def _set_parameter_expression(
+        self,
+        parameter: adsk.fusion.ModelParameter,
+        expression: str,
+    ) -> None:
+        """Overrides the shared helper: writes only expressions that carry a
+        parametric link.
+
+        Every dimension here is created on geometry already placed at the
+        intended value, so writing a pure literal changes nothing but the
+        displayed text. An expression that names a parameter is different -
+        that link cannot be recovered from the geometry - so those are
+        always written, including references to parameters created earlier
+        in this same run (which is how the repeated inner-loop insets stay
+        tied to one value).
+
+        See Addin._expression_references_parameter for why this is worth
+        doing: a parameter write costs ~0.5 s on a large assembly.
+        """
+        if self._expression_references_parameter(expression):
+            parameter.expression = expression
+
     def _name_parameter(
         self,
         parameter: adsk.fusion.ModelParameter,
         role: str,
     ) -> None:
-        # Nothing reads the assigned names back (later references use
-        # parameter.name live, which stays valid for auto-generated names);
-        # the preview is rolled back, so the renames (~300 ms each in large
-        # documents) only matter on OK.
-        if self.is_previewing:
-            return
-        name = f"{self._parameter_prefix}_{role}"
-        parameter.name = name
-        if parameter.name != name:
-            raise RuntimeError(
-                f"Fusion did not accept the parameter name '{name}'."
-            )
+        """Renaming is disabled: it is pure cosmetics and it dominates the
+        runtime on large assemblies.
+
+        Nothing depends on the names. Every cross-reference between the
+        dimensions created here reads `parameter.name` live, so Fusion's
+        auto-generated names (d123) carry the parametric links just as well.
+
+        The cost is set by the size of the document, not by the number of
+        parameters: a rename measures 0.2 ms in an empty design but ~460 ms
+        in a 1750-feature assembly, because each write triggers a document
+        update that scales with the model.
+
+        To restore human-readable names, delete this early return.
+        """
+        return
 
     def _validation_error(self) -> str | None:
         design = adsk.fusion.Design.cast(self.app.activeProduct)
@@ -936,12 +963,16 @@ class CutoutsNative(addin.Addin):
                 )
         return None
 
-    def _bounding_box_extents(
+    def _bounding_box_measurements(
         self,
         face: adsk.fusion.BRepFace,
-    ) -> tuple[float, float] | None:
-        """Measure the manual bounding box analytically, before any sketch
-        exists, so the dialog can validate against it."""
+    ) -> tuple[tuple[float, float], list[adsk.core.Point3D]] | None:
+        """Measures the manual bounding box analytically, before any sketch
+        exists, so the dialog can validate against it.
+
+        Returns its extents along and across the pattern axis, together with
+        its four corners in world space.
+        """
         plane = adsk.core.Plane.cast(face.geometry)
         if not plane:
             return None
@@ -990,13 +1021,115 @@ class CutoutsNative(addin.Addin):
             )
         if len(coordinates) < 2:
             return None
-        extent_u = max(item[0] for item in coordinates) - min(
-            item[0] for item in coordinates
+        min_u = min(item[0] for item in coordinates)
+        max_u = max(item[0] for item in coordinates)
+        min_v = min(item[1] for item in coordinates)
+        max_v = max(item[1] for item in coordinates)
+
+        def corner(u: float, v: float) -> adsk.core.Point3D:
+            point = plane.origin.copy()
+            point.translateBy(
+                adsk.core.Vector3D.create(
+                    u_vector.x * u + v_vector.x * v,
+                    u_vector.y * u + v_vector.y * v,
+                    u_vector.z * u + v_vector.z * v,
+                )
+            )
+            return point
+
+        corners = [
+            corner(min_u, min_v),
+            corner(max_u, min_v),
+            corner(max_u, max_v),
+            corner(min_u, max_v),
+        ]
+        return (max_u - min_u, max_v - min_v), corners
+
+    def _bounding_box_extents(
+        self,
+        face: adsk.fusion.BRepFace,
+    ) -> tuple[float, float] | None:
+        measured = self._bounding_box_measurements(face)
+        return measured[0] if measured else None
+
+    def _use_bounding_box_outline(self, face: adsk.fusion.BRepFace) -> bool:
+        """Whether the cutout can be built straight from the bounding box.
+
+        With a manual bounding box that is inset, the box already describes
+        the region to cut, so insetting the face's own outer contour and
+        then intersecting the two is redundant work: it costs an offset in
+        this sketch plus a whole extra sketch, extrude and boolean per
+        selected face.
+
+        Only taken when the box lies on the face, so that the box - which is
+        inset by exactly the Outer Inset - still leaves that much material at
+        the face border. Otherwise the face contour is the binding limit and
+        the ordinary path has to run.
+        """
+        if not self._has_manual_bounds():
+            return False
+        if not self.inputs.inset_bounding_box.value:
+            return False
+        if self.inputs.pattern_type.value == CutoutsNativeInputs.CROSS.value:
+            # The cross wedges are already built on the boundary.
+            return False
+        measured = self._bounding_box_measurements(face)
+        if not measured:
+            return False
+        corners = measured[1]
+        centre = adsk.core.Point3D.create(
+            sum(corner.x for corner in corners) / len(corners),
+            sum(corner.y for corner in corners) / len(corners),
+            sum(corner.z for corner in corners) / len(corners),
         )
-        extent_v = max(item[1] for item in coordinates) - min(
-            item[1] for item in coordinates
+        # The corners are tested slightly nudged towards the box centre, so
+        # a box that shares an edge (or a corner) with the face - corners
+        # exactly ON the face boundary - still passes, without depending on
+        # how isPointOnFace treats boundary points. A box that genuinely
+        # overhangs the face is off by far more than the nudge and still
+        # fails.
+        tolerance = self.app.pointTolerance * 100
+        for corner in corners:
+            inward = corner.vectorTo(centre)
+            test = corner
+            if inward.length > tolerance and inward.normalize():
+                inward.scaleBy(tolerance)
+                test = corner.copy()
+                test.translateBy(inward)
+            if not face.isPointOnFace(test, tolerance):
+                return False
+        return True
+
+    def _sketch_bounds(
+        self,
+        curves: list[adsk.fusion.SketchCurve],
+    ) -> tuple[float, float, float, float] | None:
+        """Extent of a curve set in sketch space."""
+        xs: list[float] = []
+        ys: list[float] = []
+        for curve in curves:
+            if not curve or not curve.isValid:
+                continue
+            box = curve.boundingBox
+            xs.extend((box.minPoint.x, box.maxPoint.x))
+            ys.extend((box.minPoint.y, box.maxPoint.y))
+        if not xs:
+            return None
+        return (min(xs), min(ys), max(xs), max(ys))
+
+    def _bounds_overlap(
+        self,
+        first: tuple[float, float, float, float] | None,
+        second: tuple[float, float, float, float] | None,
+    ) -> bool:
+        if first is None or second is None:
+            return True
+        return not (
+            first[2] < second[0]
+            or first[0] > second[2]
+            or first[3] < second[1]
+            or first[1] > second[3]
         )
-        return extent_u, extent_v
 
     def _axis_direction(
         self,
@@ -1098,7 +1231,15 @@ class CutoutsNative(addin.Addin):
         adsk.fusion.Sketch,
         list[adsk.fusion.Profile],
         list[adsk.fusion.SketchCurve],
+        bool,
     ]:
+        """Builds the cutout outline.
+
+        The last element of the result says whether the outline came from
+        the manual bounding box rather than the face contour; when it did,
+        the caller does not need to build and intersect a separate
+        bounding-box tool.
+        """
         # Sketches.add projects every edge of a BRep face automatically. That
         # would mix all face loops into each per-loop area probe below and can
         # make a valid inner offset look like it has the wrong direction.
@@ -1116,16 +1257,52 @@ class CutoutsNative(addin.Addin):
         # Batch the edits: without this, every projection, construction
         # toggle, offset and tab entity triggers its own full compute cycle.
         sketch.isComputeDeferred = True
+        bounded_by_box = False
+        box_bounds: tuple[float, float, float, float] | None = None
         try:
             loops = utils.fusion.as_list(face.loops)
             projected_by_loop = self._project_face_loops(sketch, loops)
+
+            if self._use_bounding_box_outline(face):
+                # The inset bounding box IS the outline to cut, so the face's
+                # own outer contour is not needed - and neither is the
+                # separate bounding-box tool that would otherwise be built
+                # and intersected with this one for every selected face.
+                boundary = self._create_rectangular_pattern_boundary(
+                    sketch,
+                    [],
+                    role_prefix="cutout",
+                )
+                box_lines = cast(
+                    list[adsk.fusion.SketchCurve], boundary.boundary_lines
+                )
+                self._set_construction(sketch, box_lines, False)
+                outer_curves.extend(box_lines)
+                final_curves.extend(box_lines)
+                box_bounds = self._sketch_bounds(box_lines)
+                bounded_by_box = True
+
             for loop, projected in zip(loops, projected_by_loop):
                 self._set_construction(sketch, projected, True)
                 if loop.isOuter:
+                    if bounded_by_box:
+                        # The box already limits the cutout, and it sits on
+                        # the face, so the contour cannot bind.
+                        continue
                     input_value = self.inputs.outer_inset
                     parameter_role = "outerInset"
                     expression = input_value.expression
                 else:
+                    if bounded_by_box and not self._bounds_overlap(
+                        self._sketch_bounds(projected),
+                        box_bounds,
+                    ):
+                        # The hole itself lies outside the box, so it is
+                        # ignored. Deliberately judged on the hole's own
+                        # extent, not grown by the inner inset: the box is
+                        # the user's explicit limit, and a hole beside it
+                        # should not carve its clearance ring into the box.
+                        continue
                     inner_loop_index += 1
                     input_value = self.inputs.inner_feature_inset
                     parameter_role = f"innerInset{inner_loop_index}"
@@ -1176,7 +1353,7 @@ class CutoutsNative(addin.Addin):
             )
         profiles = [profile]
         self._require_fully_constrained(sketch)
-        return sketch, profiles, outer_curves
+        return sketch, profiles, outer_curves, bounded_by_box
 
     def _create_cross_pattern_sketch(
         self,
@@ -4015,29 +4192,126 @@ class CutoutsNative(addin.Addin):
         sketch: adsk.fusion.Sketch,
         loops: list[adsk.fusion.BRepLoop],
     ) -> list[list[adsk.fusion.SketchCurve]]:
-        """Projects every loop of a face, grouped per loop.
+        """Projects every loop of a face, grouped per loop, in ONE call.
 
-        One call per loop, which costs one sketch compute per loop, because
-        projecting is the one part of building these sketches that cannot run
-        compute-deferred. Passing every loop's edges to a single project2 call
-        would cost only one compute, but project2 does NOT guarantee that it
-        returns curves in the order the entities were passed: on a nine-loop
-        face it silently returned them in an order that put a stray line in a
-        hole's group. There is no order to slice a flat result apart by, so
-        the loops are asked for one at a time.
+        Projecting is the one part of building these sketches that cannot
+        run compute-deferred, so each call is a document update - ~0.5 s on
+        a large assembly. All loops therefore go through a single project2.
+
+        The catch is that project2 does NOT return its results in the order
+        the entities were passed: on a nine-loop face it silently interleaved
+        them, which put a stray line in a hole's group and left the inset
+        direction undecidable. The results are therefore regrouped by
+        geometry rather than by position. That is exact here, because this
+        sketch is built on the very face being projected, so each projection
+        lands precisely on its source edge.
         """
+        edges_by_loop = [
+            cast(list[adsk.core.Base], utils.fusion.as_list(loop.edges))
+            for loop in loops
+        ]
+        flattened = [edge for edges in edges_by_loop for edge in edges]
+        if not flattened:
+            raise RuntimeError("The selected face has no edges to project.")
+        projected = [
+            curve
+            for entity in self._project_into_sketch(sketch, flattened)
+            if (curve := adsk.fusion.SketchCurve.cast(entity))
+        ]
+        if len(projected) != len(flattened):
+            raise RuntimeError("Fusion failed to project the face loops.")
+
+        ordered = self._match_projected_curves(projected, flattened)
         grouped: list[list[adsk.fusion.SketchCurve]] = []
-        for loop in loops:
-            edges = cast(list[adsk.core.Base], utils.fusion.as_list(loop.edges))
-            curves = [
-                curve
-                for entity in self._project_into_sketch(sketch, edges)
-                if (curve := adsk.fusion.SketchCurve.cast(entity))
-            ]
-            if not curves:
-                raise RuntimeError("Fusion failed to project one of the face loops.")
-            grouped.append(curves)
+        start = 0
+        for edges in edges_by_loop:
+            grouped.append(ordered[start:start + len(edges)])
+            start += len(edges)
         return grouped
+
+    def _match_projected_curves(
+        self,
+        projected: list[adsk.fusion.SketchCurve],
+        sources: list[adsk.core.Base],
+    ) -> list[adsk.fusion.SketchCurve]:
+        """Reorders projected curves to match the entities they came from."""
+        signatures = [
+            (curve, self._curve_signature(curve)) for curve in projected
+        ]
+        tolerance = self.app.pointTolerance * 100
+        ordered: list[adsk.fusion.SketchCurve] = []
+        for source in sources:
+            anchor, length = self._curve_signature(source)
+
+            def difference(entry) -> float:
+                point, size = entry[1]
+                return point.distanceTo(anchor) + abs(size - length)
+
+            index = min(range(len(signatures)), key=lambda i: difference(signatures[i]))
+            if difference(signatures[index]) > tolerance:
+                raise RuntimeError(
+                    "A projected curve could not be matched to its source edge."
+                )
+            ordered.append(signatures[index][0])
+            del signatures[index]
+        return ordered
+
+    def _curve_signature(
+        self,
+        entity: adsk.core.Base,
+    ) -> tuple[adsk.core.Point3D, float]:
+        """A centre point and a length identifying a curve in world space.
+
+        Deliberately independent of parameterisation: a projected circle
+        does not start at the same angle as the edge it came from, so a
+        mid-parameter point does not correspond between the two. A centre
+        (or a chord midpoint for a line) plus the arc length does.
+        """
+        curve = adsk.fusion.SketchCurve.cast(entity)
+        if curve:
+            geometry = cast(adsk.core.Curve3D, curve.worldGeometry)
+        else:
+            edge = adsk.fusion.BRepEdge.cast(entity)
+            if not edge:
+                raise RuntimeError("Only curves and edges can be matched.")
+            geometry = edge.geometry
+        evaluator = geometry.evaluator
+        length = 0.0
+        success, start, end = evaluator.getParameterExtents()
+        if success:
+            measured, value = evaluator.getLengthAtParameter(start, end)
+            if measured:
+                length = value
+
+        circle = adsk.core.Circle3D.cast(geometry)
+        if circle:
+            return circle.center, length
+        arc = adsk.core.Arc3D.cast(geometry)
+        if arc:
+            return arc.center, length
+        ellipse = adsk.core.Ellipse3D.cast(geometry)
+        if ellipse:
+            return ellipse.center, length
+        line = adsk.core.Line3D.cast(geometry)
+        if line:
+            first, second = line.startPoint, line.endPoint
+            return (
+                adsk.core.Point3D.create(
+                    (first.x + second.x) / 2,
+                    (first.y + second.y) / 2,
+                    (first.z + second.z) / 2,
+                ),
+                length,
+            )
+        # Anything else (splines): the midpoint by arc length, which at
+        # least matches for curves that share a start point.
+        if success and length:
+            found, middle = evaluator.getParameterAtLength(start, length / 2)
+            if found:
+                evaluated, point = evaluator.getPointAtParameter(middle)
+                if evaluated:
+                    return point, length
+        raise RuntimeError("Fusion could not evaluate a projected curve.")
 
     def _project_into_sketch(
         self,

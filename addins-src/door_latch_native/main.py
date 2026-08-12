@@ -32,6 +32,17 @@ PULL_LOCK_COUNTERBORE_DIAMETER = 4.8
 PULL_LOCK_MIN_REMAINING = 1.0
 PULL_LOCK_CARCASS_PAIR_OFFSET = 0.95
 PULL_LOCK_CARCASS_INSET = 2.9
+# Sugatsune LL-66 one-touch latch. The latch body mounts on the inside of the
+# door, the counter plate under the carcass board.
+#   - Body mounting holes are 56 mm apart, 6.5 mm below the body's top edge;
+#     the body top sits 3.5 mm below the carcass face, so the hole line runs
+#     10 mm below it (the datasheet's mounting drawing dimensions both).
+#   - Counter plate holes are 20 mm apart, 24 mm from the door's inner face
+#     (19 mm + 5 mm when a gasket is used; the gap variant is not modeled).
+LL66_DOOR_PILOT_HALF_SPACING = 2.8
+LL66_DOOR_PILOT_INSET = 1.0
+LL66_CARCASS_PAIR_OFFSET = 1.0
+LL66_CARCASS_INSET = 2.4
 
 
 @dataclass(frozen=True)
@@ -64,6 +75,7 @@ class DoorLatchNativeInputs(inputs.Inputs):
     class Types:
         EVERLOCK = inputs.DropDownInput.Item("Everlock", 0)
         PULL_LOCK_44 = inputs.DropDownInput.Item("Pull Lock 44mm", 1)
+        SUGATSUNE_LL66 = inputs.DropDownInput.Item("Sugatsune LL-66", 2)
 
     def __init__(self, units_manager: adsk.core.UnitsManager):
         units = units_manager.defaultLengthUnits
@@ -343,6 +355,7 @@ class DoorLatchNative(addin.Addin):
                     native_door_face,
                     door_occurrence,
                     door_main_points,
+                    diameter_value=PULL_LOCK_COUNTERBORE_DIAMETER,
                     diameter_expression=_mm(PULL_LOCK_COUNTERBORE_DIAMETER),
                     name="Door Latch (Native) - Pull Lock Counterbore Layout",
                     parameter_role="pullLockCounterboreDiameter",
@@ -357,6 +370,39 @@ class DoorLatchNative(addin.Addin):
                     name="Door Latch (Native) - Pull Lock Counterbores",
                     parameter_role="pullLockCounterbore",
                 )
+        elif (
+            self.inputs.type.value
+            == DoorLatchNativeInputs.Types.SUGATSUNE_LL66.value
+        ):
+            (
+                door_layout_sketch,
+                door_pilot_points,
+                door_main_points,
+            ) = self._create_ll66_door_sketch(
+                native_door_face,
+                native_door_edge,
+                native_carcass_edge,
+                door_occurrence,
+                carcass_occurrence,
+                native_door_groups[0],
+                native_door_groups[1],
+            )
+            first_sketch = door_layout_sketch
+            door_pilot_holes = self._create_hole_feature(
+                native_door_face,
+                door_layout_sketch,
+                door_pilot_points,
+                diameter_expression=predrill_diameter_expression,
+                depth_expression=predrill_depth_expression,
+                name="Door Latch (Native) - Door Pilot Holes",
+                parameter_role="doorPilot",
+            )
+            predrill_diameter_expression = door_pilot_holes.holeDiameter.name
+            depth_extent = adsk.fusion.DistanceExtentDefinition.cast(
+                door_pilot_holes.extentDefinition
+            )
+            if depth_extent and depth_extent.distance:
+                predrill_depth_expression = depth_extent.distance.name
         else:
             raise ValueError("Unsupported latch type.")
 
@@ -460,7 +506,7 @@ class DoorLatchNative(addin.Addin):
             EVERLOCK_UPPER_ROW_INSET - EVERLOCK_LOWER_ROW_INSET
             if self.inputs.type.value
             == DoorLatchNativeInputs.Types.EVERLOCK.value
-            else 2 * PULL_LOCK_CARCASS_PAIR_OFFSET
+            else 2 * self._carcass_pattern()[0]
         )
         if self.inputs.predrill_diameter.value >= maximum_predrill:
             return (
@@ -599,6 +645,31 @@ class DoorLatchNative(addin.Addin):
                 return [through_holes, counterbores]
             return [through_holes]
 
+        if (
+            self.inputs.type.value
+            == DoorLatchNativeInputs.Types.SUGATSUNE_LL66.value
+        ):
+            pilots = self._holes_on_face(
+                door_face,
+                door_edge,
+                positions,
+                [
+                    (-LL66_DOOR_PILOT_HALF_SPACING, distance + LL66_DOOR_PILOT_INSET),
+                    (LL66_DOOR_PILOT_HALF_SPACING, distance + LL66_DOOR_PILOT_INSET),
+                ],
+                predrill_diameter,
+            )
+            # The station centers between each pilot pair; not drilled, they
+            # anchor the layout sketch and the carcass projection.
+            centers = self._holes_on_face(
+                door_face,
+                door_edge,
+                positions,
+                [(0, distance + LL66_DOOR_PILOT_INSET)],
+                predrill_diameter,
+            )
+            return [pilots, centers]
+
         raise ValueError("Unsupported latch type.")
 
     def _carcass_holes(
@@ -617,24 +688,11 @@ class DoorLatchNative(addin.Addin):
         )
         gap = normal_into_carcass_face.dotProduct(gap_vector)
 
-        if (
-            self.inputs.type.value
-            == DoorLatchNativeInputs.Types.EVERLOCK.value
-        ):
-            offsets = [
-                (-EVERLOCK_CARCASS_PAIR_OFFSET, EVERLOCK_CARCASS_INSET - gap),
-                (EVERLOCK_CARCASS_PAIR_OFFSET, EVERLOCK_CARCASS_INSET - gap),
-            ]
-        elif (
-            self.inputs.type.value
-            == DoorLatchNativeInputs.Types.PULL_LOCK_44.value
-        ):
-            offsets = [
-                (-PULL_LOCK_CARCASS_PAIR_OFFSET, PULL_LOCK_CARCASS_INSET - gap),
-                (PULL_LOCK_CARCASS_PAIR_OFFSET, PULL_LOCK_CARCASS_INSET - gap),
-            ]
-        else:
-            raise ValueError("Unsupported latch type.")
+        pair_offset, inset = self._carcass_pattern()
+        offsets = [
+            (-pair_offset, inset - gap),
+            (pair_offset, inset - gap),
+        ]
         return self._holes_on_face(
             carcass_face,
             carcass_edge,
@@ -642,6 +700,26 @@ class DoorLatchNative(addin.Addin):
             offsets,
             self.inputs.predrill_diameter.value,
         )
+
+    def _carcass_pattern(self) -> tuple[float, float]:
+        """The carcass pilot pair's half spacing and its inset from the
+        door's inner face, for the selected latch type."""
+        if (
+            self.inputs.type.value
+            == DoorLatchNativeInputs.Types.EVERLOCK.value
+        ):
+            return EVERLOCK_CARCASS_PAIR_OFFSET, EVERLOCK_CARCASS_INSET
+        if (
+            self.inputs.type.value
+            == DoorLatchNativeInputs.Types.PULL_LOCK_44.value
+        ):
+            return PULL_LOCK_CARCASS_PAIR_OFFSET, PULL_LOCK_CARCASS_INSET
+        if (
+            self.inputs.type.value
+            == DoorLatchNativeInputs.Types.SUGATSUNE_LL66.value
+        ):
+            return LL66_CARCASS_PAIR_OFFSET, LL66_CARCASS_INSET
+        raise ValueError("Unsupported latch type.")
 
     def _holes_on_face(
         self,
@@ -870,6 +948,142 @@ class DoorLatchNative(addin.Addin):
         sketch.isComputeDeferred = False
         self._require_fully_constrained(sketch)
         return sketch, center_points
+
+    def _create_ll66_door_sketch(
+        self,
+        face: adsk.fusion.BRepFace,
+        door_edge: adsk.fusion.BRepEdge,
+        carcass_edge: adsk.fusion.BRepEdge,
+        door_occurrence: adsk.fusion.Occurrence | None,
+        carcass_occurrence: adsk.fusion.Occurrence | None,
+        pilot_holes: list[_Hole],
+        center_holes: list[_Hole],
+    ) -> tuple[
+        adsk.fusion.Sketch,
+        list[adsk.fusion.SketchPoint],
+        list[adsk.fusion.SketchPoint],
+    ]:
+        """The LL-66 body needs only its two mounting pilots per station:
+        one pair straddling a station center that sits
+        LL66_DOOR_PILOT_INSET below the carcass face."""
+        if len(pilot_holes) != len(center_holes) * 2:
+            raise RuntimeError(
+                "Each LL-66 station requires two door pilot holes."
+            )
+        face = self._current_face(face)
+        door_edge = self._current_edge(door_edge)
+        carcass_edge = self._current_edge(carcass_edge)
+        sketch = face.body.parentComponent.sketches.addWithoutEdges(face)
+        if not sketch:
+            raise RuntimeError(
+                "Fusion failed to create the LL-66 door layout."
+            )
+        sketch.name = "Door Latch (Native) - LL-66 Door Layout"
+        projected_door_edge = self._project_line(
+            sketch,
+            door_edge,
+            "Door Edge",
+        )
+        projected_carcass_edge = self._project_line(
+            sketch,
+            carcass_edge,
+            "Carcass Edge",
+            sketch_occurrence=door_occurrence,
+            entity_occurrence=carcass_occurrence,
+        )
+
+        sketch.isComputeDeferred = True
+        center_points, placement_lines = self._add_door_main_hole_layout(
+            sketch,
+            face,
+            door_edge,
+            projected_door_edge,
+            projected_carcass_edge,
+            center_holes,
+            offset_value=LL66_DOOR_PILOT_INSET,
+            offset_expression=_mm(LL66_DOOR_PILOT_INSET),
+            offset_parameter_role="ll66CarcassOffset",
+        )
+
+        pilot_points: list[adsk.fusion.SketchPoint] = []
+        first_pair_line: adsk.fusion.SketchLine | None = None
+        for station_index, (center_point, placement_line) in enumerate(
+            zip(center_points, placement_lines),
+            start=1,
+        ):
+            left_hole, right_hole = pilot_holes[
+                (station_index - 1) * 2:station_index * 2
+            ]
+            left_center = sketch.modelToSketchSpace(left_hole.center)
+            right_center = sketch.modelToSketchSpace(right_hole.center)
+            left_center.z = 0
+            right_center.z = 0
+            left_line = sketch.sketchCurves.sketchLines.addByTwoPoints(
+                center_point,
+                left_center,
+            )
+            right_line = sketch.sketchCurves.sketchLines.addByTwoPoints(
+                center_point,
+                right_center,
+            )
+            if not left_line or not right_line:
+                raise RuntimeError(
+                    "Fusion failed to create the LL-66 pilot references."
+                )
+            left_line.isConstruction = True
+            right_line.isConstruction = True
+            if not sketch.geometricConstraints.addPerpendicular(
+                placement_line,
+                left_line,
+            ):
+                raise RuntimeError(
+                    "Fusion failed to align the LL-66 pilot pair with the "
+                    "Door Edge."
+                )
+            if not sketch.geometricConstraints.addCollinear(
+                left_line,
+                right_line,
+            ):
+                raise RuntimeError(
+                    "Fusion failed to align the LL-66 pilot pair."
+                )
+            if not sketch.geometricConstraints.addEqual(
+                left_line,
+                right_line,
+            ):
+                raise RuntimeError(
+                    "Fusion failed to make the LL-66 pilot pair symmetric."
+                )
+            if first_pair_line:
+                if not sketch.geometricConstraints.addEqual(
+                    first_pair_line,
+                    left_line,
+                ):
+                    raise RuntimeError(
+                        "Fusion failed to equalize the LL-66 pilot spacing."
+                    )
+            else:
+                pair_dimension = self._add_length_dimension(
+                    sketch,
+                    left_line,
+                    LL66_DOOR_PILOT_HALF_SPACING,
+                )
+                self._set_parameter_expression(
+                    pair_dimension.parameter,
+                    _mm(LL66_DOOR_PILOT_HALF_SPACING),
+                )
+                self._name_parameter(
+                    pair_dimension.parameter,
+                    "ll66PilotPairOffset",
+                )
+                first_pair_line = left_line
+            pilot_points.extend(
+                [left_line.endSketchPoint, right_line.endSketchPoint]
+            )
+
+        sketch.isComputeDeferred = False
+        self._require_fully_constrained(sketch)
+        return sketch, pilot_points, center_points
 
     def _add_door_main_hole_layout(
         self,
@@ -1135,6 +1349,7 @@ class DoorLatchNative(addin.Addin):
         face: adsk.fusion.BRepFace,
         occurrence: adsk.fusion.Occurrence | None,
         source_points: list[adsk.fusion.SketchPoint],
+        diameter_value: float,
         diameter_expression: str,
         name: str,
         parameter_role: str,
@@ -1165,9 +1380,12 @@ class DoorLatchNative(addin.Addin):
         sketch.isComputeDeferred = True
         first_circle: adsk.fusion.SketchCircle | None = None
         for projected_point in projected_points:
+            # Created at the FINAL radius: _set_parameter_expression only
+            # writes expressions that reference parameters, so the geometry
+            # must already sit at the dimensioned value.
             circle = sketch.sketchCurves.sketchCircles.addByCenterRadius(
                 projected_point,
-                1.0,
+                diameter_value / 2,
             )
             if not circle:
                 raise RuntimeError(
@@ -1523,12 +1741,7 @@ class DoorLatchNative(addin.Addin):
                         "Fusion failed to orient the carcass inset from the "
                         "projected Door Edge."
                     )
-                inset_value = (
-                    EVERLOCK_CARCASS_INSET
-                    if self.inputs.type.value
-                    == DoorLatchNativeInputs.Types.EVERLOCK.value
-                    else PULL_LOCK_CARCASS_INSET
-                )
+                _, inset_value = self._carcass_pattern()
                 inset_dimension = self._add_length_dimension(
                     sketch,
                     inset_line,
@@ -1593,12 +1806,7 @@ class DoorLatchNative(addin.Addin):
                         "Fusion failed to equalize the carcass pilot spacing."
                     )
             else:
-                pair_offset = (
-                    EVERLOCK_CARCASS_PAIR_OFFSET
-                    if self.inputs.type.value
-                    == DoorLatchNativeInputs.Types.EVERLOCK.value
-                    else PULL_LOCK_CARCASS_PAIR_OFFSET
-                )
+                pair_offset, _ = self._carcass_pattern()
                 pair_dimension = self._add_length_dimension(
                     sketch,
                     left_line,
@@ -2032,23 +2240,48 @@ class DoorLatchNative(addin.Addin):
                 return candidate
             index += 1
 
+    def _set_parameter_expression(
+        self,
+        parameter: adsk.fusion.ModelParameter,
+        expression: str,
+    ) -> None:
+        """Overrides the shared helper: writes only expressions that carry a
+        parametric link.
+
+        Every dimension here is created on geometry already placed at the
+        intended value, so writing a pure literal changes nothing but the
+        displayed text. An expression that names a parameter is different -
+        that link cannot be recovered from the geometry - so those are
+        always written (e.g. the carcass pilots referencing the door pilot
+        hole's diameter parameter).
+
+        See Addin._expression_references_parameter for why this is worth
+        doing: a parameter write costs ~0.5 s on a large assembly.
+        """
+        if self._expression_references_parameter(expression):
+            parameter.expression = expression
+
     def _name_parameter(
         self,
         parameter: adsk.fusion.ModelParameter,
         role: str,
     ) -> None:
-        # Nothing reads the assigned names back (later references use
-        # parameter.name live, which stays valid for auto-generated names);
-        # the preview is rolled back, so the renames (~300 ms each in large
-        # documents) only matter on OK.
-        if self.is_previewing:
-            return
-        name = f"{self._parameter_prefix}_{role}"
-        parameter.name = name
-        if parameter.name != name:
-            raise RuntimeError(
-                f"Fusion did not accept the parameter name '{name}'."
-            )
+        """Renaming is disabled: it is pure cosmetics and it dominates the
+        runtime on large assemblies.
+
+        Nothing depends on the names. Every cross-reference here reads
+        `parameter.name` live (e.g. the carcass pilots reusing the door
+        pilot diameter), so Fusion's auto-generated names (d123) carry the
+        parametric links just as well.
+
+        The cost is set by the size of the document, not by the number of
+        parameters: a rename measures 0.2 ms in an empty design but ~460 ms
+        in a 1750-feature assembly, because each write triggers a document
+        update that scales with the model.
+
+        To restore human-readable names, delete this early return.
+        """
+        return
 
     def _name_feature_parameters(
         self,
@@ -2056,6 +2289,9 @@ class DoorLatchNative(addin.Addin):
         base_role: str,
         excluded: adsk.fusion.ModelParameter | None = None,
     ) -> None:
+        # With _name_parameter disabled this would only scan the component's
+        # model parameters (itself slow in large documents) to do nothing.
+        return
         suffixes = {
             "AlongDistance": "distance",
             "Side1Offset": "endOffset",

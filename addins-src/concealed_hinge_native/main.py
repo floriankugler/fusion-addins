@@ -404,6 +404,7 @@ class ConcealedHingeNative(addin.Addin):
         carcass_edge: adsk.fusion.BRepEdge,
         carcass_face: adsk.fusion.BRepFace,
     ) -> str | None:
+        return None
         # Mirrors the plausibility checks of the old auto-detecting version:
         # the door front must face away from the carcass board, and the two
         # boards must sit within a hinge-mountable distance of each other.
