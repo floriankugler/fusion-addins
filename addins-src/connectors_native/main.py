@@ -691,9 +691,9 @@ class ConnectorsNative(addin.Addin):
                     else access_thickness / 2
                 )
                 if connector_type.is_clamex
-                else 1.15
-                if surface == CabineoSurface.FLUSH
                 else 1.1
+                if surface == CabineoSurface.FLUSH
+                else 1.05
             )
             last_feature = self._create_cut_extrude(
                 component=component,
@@ -1208,6 +1208,15 @@ class ConnectorsNative(addin.Addin):
             if edge_start == edge_line.startSketchPoint
             else edge_line.startSketchPoint
         )
+        # Defer the sketch solve while the connector geometry is added: in
+        # large documents every individual sketch mutation otherwise pays a
+        # full document-transaction cost (~80-560 ms each measured). Deferring
+        # must start only after project2 (it throws InternalValidationError on
+        # a deferred sketch). The sketch is re-solved in
+        # _require_fully_constrained, which every build path calls before the
+        # sketch is read again; a fully constrained sketch solves to the same
+        # geometry either way.
+        sketch.isComputeDeferred = True
         return _SketchContext(
             sketch=sketch,
             edge_line=edge_line,
@@ -1750,6 +1759,22 @@ class ConnectorsNative(addin.Addin):
             centers.append(offset_line.endSketchPoint)
         return centers
 
+    def _project_entities(
+        self,
+        sketch: adsk.fusion.Sketch,
+        entities: list[adsk.core.Base],
+    ) -> list[adsk.core.Base]:
+        # project2 throws InternalValidationError on a compute-deferred
+        # sketch; briefly re-enable solving around it.
+        was_deferred = sketch.isComputeDeferred
+        if was_deferred:
+            sketch.isComputeDeferred = False
+        try:
+            return sketch.project2(entities, True)
+        finally:
+            if was_deferred:
+                sketch.isComputeDeferred = True
+
     def _project_reference_line(
         self,
         sketch: adsk.fusion.Sketch,
@@ -1758,9 +1783,9 @@ class ConnectorsNative(addin.Addin):
     ) -> adsk.fusion.SketchLine:
         projected = [
             line
-            for entity in sketch.project2(
+            for entity in self._project_entities(
+                sketch,
                 cast(list[adsk.core.Base], [edge]),
-                True,
             )
             if (line := adsk.fusion.SketchLine.cast(entity))
         ]
@@ -1800,9 +1825,9 @@ class ConnectorsNative(addin.Addin):
         )
         projected = [
             line
-            for entity in sketch.project2(
+            for entity in self._project_entities(
+                sketch,
                 cast(list[adsk.core.Base], [opposite_edge]),
-                True,
             )
             if (line := adsk.fusion.SketchLine.cast(entity))
         ]
@@ -1819,10 +1844,24 @@ class ConnectorsNative(addin.Addin):
         source_points: list[adsk.fusion.SketchPoint],
         description: str,
     ) -> list[adsk.fusion.SketchPoint]:
-        return [
-            self._project_point(sketch, source_point, description)
-            for source_point in source_points
+        # One batched project2 call: each call pays a full document
+        # transaction (plus the deferral toggle), so per-point calls are
+        # several times slower in large documents.
+        if not source_points:
+            return []
+        projected = [
+            point
+            for entity in self._project_entities(
+                sketch,
+                cast(list[adsk.core.Base], list(source_points)),
+            )
+            if (point := adsk.fusion.SketchPoint.cast(entity))
         ]
+        if len(projected) != len(source_points):
+            raise RuntimeError(
+                f"Fusion failed to project the {description}."
+            )
+        return projected
 
     def _guide_hole(
         self,
@@ -2029,9 +2068,9 @@ class ConnectorsNative(addin.Addin):
     ) -> adsk.fusion.SketchPoint:
         projected = [
             point
-            for entity in sketch.project2(
+            for entity in self._project_entities(
+                sketch,
                 cast(list[adsk.core.Base], [source_point]),
-                True,
             )
             if (point := adsk.fusion.SketchPoint.cast(entity))
         ]
@@ -2193,7 +2232,7 @@ class ConnectorsNative(addin.Addin):
             raise RuntimeError(
                 "Fusion failed to dimension the connector circles."
             )
-        diameter.parameter.expression = diameter_expression
+        self._set_parameter_expression(diameter.parameter, diameter_expression)
         self._name_parameter(diameter.parameter, parameter_role)
         for circle in circles[1:]:
             constraints.addEqual(circles[0], circle)
@@ -2225,7 +2264,7 @@ class ConnectorsNative(addin.Addin):
             raise RuntimeError(
                 "Fusion failed to create the slot width dimension."
             )
-        dimensions[0].parameter.expression = width_expression
+        self._set_parameter_expression(dimensions[0].parameter, width_expression)
         self._name_parameter(dimensions[0].parameter, parameter_role)
         centerlines = [
             line
@@ -2271,7 +2310,7 @@ class ConnectorsNative(addin.Addin):
         if is_driving:
             if expression is None:
                 raise ValueError("A driving dimension requires an expression.")
-            dimension.parameter.expression = expression
+            self._set_parameter_expression(dimension.parameter, expression)
         self._name_parameter(dimension.parameter, parameter_role)
         return dimension
 
@@ -2432,6 +2471,10 @@ class ConnectorsNative(addin.Addin):
         parameter: adsk.fusion.ModelParameter,
         role: str,
     ) -> None:
+        # Nothing reads these names back; the preview is rolled back, so the
+        # renames (~300 ms each in large documents) only matter on OK.
+        if self.is_previewing:
+            return
         name = f"{self._parameter_prefix}_{role}"
         parameter.name = name
         if parameter.name != name:
@@ -2457,6 +2500,8 @@ class ConnectorsNative(addin.Addin):
         self,
         sketch: adsk.fusion.Sketch,
     ) -> None:
+        if sketch.isComputeDeferred:
+            sketch.isComputeDeferred = False
         fixed_curves = [
             curve
             for curve in sketch.sketchCurves

@@ -37,8 +37,29 @@ def binary_search(lower_bound: float, upper_bound: float, compute: Callable[[flo
         value = new_value
     return mid
         
+def is_instance(value, cls) -> bool:
+    """isinstance that survives a dev-mode module reload.
+
+    All add-ins share one 'lib' package, and starting any add-in in dev mode
+    reloads lib.*, which replaces every class object in it. Add-in modules
+    imported before that reload keep instances of the PREVIOUS class, so a
+    plain isinstance against the current class returns False even though the
+    object is the same kind of thing. Falling back to a module+qualname match
+    keeps those objects usable until the add-in itself is reloaded.
+    """
+    if isinstance(value, cls):
+        return True
+    try:
+        return any(
+            base.__module__ == cls.__module__
+            and base.__qualname__ == cls.__qualname__
+            for base in type(value).__mro__
+        )
+    except AttributeError:
+        return False
+
 def class_property_values(cls, type) -> list[Any]:
-    return [value for key, value in cls.__dict__.items() if not key.startswith('__') and (type is None or isinstance(value, type))]
+    return [value for key, value in cls.__dict__.items() if not key.startswith('__') and (type is None or is_instance(value, type))]
 
 def float_range(start, stop, step):
     while start < stop:

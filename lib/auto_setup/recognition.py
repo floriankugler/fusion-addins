@@ -203,7 +203,10 @@ def _hole_from_face(
         return None
     axis = cylinder.axis
     axis.normalize()
-    if not axis.isParallelTo(frame.z):
+    # Compared with a tolerance, not Vector3D.isParallelTo: that compares
+    # exactly, and modelled geometry carries rounding noise, so a vertical
+    # hole would be skipped over an angle of ~1e-11 rad.
+    if abs(abs(axis.dotProduct(frame.z)) - 1) > DIRECTION_TOL:
         warnings.append(f'{body.name}: cylindrical face with non-vertical axis skipped.')
         return None
 

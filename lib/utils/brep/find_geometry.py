@@ -102,10 +102,48 @@ def find_mating_faces_at_edge(edge: adsk.fusion.BRepEdge) -> tuple[adsk.fusion.B
                 return True
         return False
 
-    other_face = find_perpendicular_face_containing_edge(edge, surface, check_face)
+    other_face = _mating_face_at_test_points(edge, surface, test_points, check_face) \
+        or find_perpendicular_face_containing_edge(edge, surface, check_face)
     if not other_face:
         return None
     return surface, rim, other_face
+
+def _mating_face_at_test_points(
+    edge: adsk.fusion.BRepEdge,
+    reference_face: adsk.fusion.BRepFace,
+    test_points: list[adsk.core.Point3D],
+    condition: Callable[[adsk.fusion.BRepFace], bool],
+) -> adsk.fusion.BRepFace | None:
+    """Fast path for the mating-face search: the sought face contains the
+    test points, so ask the component's spatial index for the faces at those
+    points instead of walking every face in the design. Only valid for native
+    (non-proxy) edges, where the test points are in the owning component's
+    coordinate space; the caller falls back to the tree walk when this finds
+    nothing (e.g. the mating body lives in a different component)."""
+    if edge.assemblyContext is not None:
+        return None
+    component = edge.body.parentComponent
+    for point in test_points:
+        try:
+            found = component.findBRepUsingPoint(
+                point,
+                adsk.fusion.BRepEntityTypes.BRepFaceEntityType,
+                0.01,
+                False,
+            )
+        except RuntimeError:
+            return None
+        for entity in found:
+            face = adsk.fusion.BRepFace.cast(entity)
+            if (
+                face
+                and face.body != reference_face.body
+                and rel.is_perpendicular(face, reference_face)
+                and rel.face_contains_edge(face, edge)
+                and condition(face)
+            ):
+                return face
+    return None
 
 def find_carcass_edge_for_front_edge(front_edge: adsk.fusion.BRepEdge, front_face: adsk.fusion.BRepFace) -> adsk.fusion.BRepEdge | None:
     normal_into_door_face = norm.normal_into_face(front_edge, front_face)

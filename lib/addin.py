@@ -20,6 +20,14 @@ class Addin(ABC):
     _preview_error: str | None
     _base_timeline_count: int | None
     _last_validation_error: str | None
+    #: True while execute() runs for an executePreview event. Lets add-ins
+    #: skip work whose result the preview rollback discards anyway (e.g.
+    #: cosmetic parameter renames, ~300 ms each in large documents).
+    is_previewing: bool = False
+    #: The "Preview" checkbox at the bottom of the dialog. Previews are
+    #: opt-in per command invocation: in large documents building the
+    #: preview costs many seconds per input change.
+    _preview_checkbox: adsk.core.BoolValueCommandInput | None = None
 
     @property
     def create_command_id(self) -> str:
@@ -213,6 +221,12 @@ class Addin(ABC):
         # the clean pre-preview state.
         if not self.preview_enabled or self.inputs is None:
             return
+        # Previews are opt-in: only build one while the Preview checkbox is
+        # ticked. Fusion has already rolled back the previous preview
+        # transaction before this event, so returning here leaves the clean
+        # model visible.
+        if not self._preview_checkbox or not self._preview_checkbox.value:
+            return
         try:
             self.update_inputs_from_ui()
             # Fusion aborted the previous preview transaction right before
@@ -223,7 +237,11 @@ class Addin(ABC):
             # deliberately left alone: writing selections from here would
             # fire input events that trigger further preview cycles.
             self._refresh_stale_selections()
-            self.execute()
+            self.is_previewing = True
+            try:
+                self.execute()
+            finally:
+                self.is_previewing = False
             self._preview_error = None
             self.showError(None)
         except Exception as error:
@@ -268,6 +286,20 @@ class Addin(ABC):
         self._defaults_ui.create_ui(defaults_inputs, self.inputs)
         self._error_field = values_inputs.addTextBoxCommandInput('errorMessage', 'Error', '', 3, True)
         self._error_field.isVisible = False
+        self._preview_checkbox = None
+        if self.preview_enabled:
+            self._preview_checkbox = values_inputs.addBoolValueInput(
+                'addinPreviewEnabled',
+                'Preview',
+                True,
+                '',
+                False,
+            )
+            self._preview_checkbox.tooltip = (
+                'Build a live preview of the result on every input change. '
+                'Off by default: in large documents each preview can take '
+                'several seconds.'
+            )
         self.update_inputs_from_ui()
         self.inputs.update_visibilities()
         for input in self.inputs.inputs:
@@ -299,11 +331,11 @@ class Addin(ABC):
     def _selection_inputs(self) -> list[inp.SelectionByEntityTokenInput]:
         if self.inputs is None:
             return []
-        # Duck-typed like Inputs.__init__: after a dev-mode reload isinstance
-        # can fail against a stale class object.
+        # misc.is_instance like Inputs.__init__: after a dev-mode reload a
+        # plain isinstance fails against a stale class object.
         return [
             input for input in self.inputs.inputs
-            if isinstance(input, inp.SelectionByEntityTokenInput)
+            if utils.misc.is_instance(input, inp.SelectionByEntityTokenInput)
             or hasattr(input, 'refresh_stale_value')
         ]
 
@@ -336,6 +368,33 @@ class Addin(ABC):
     def component(self) -> adsk.fusion.Component:
         return cast(adsk.fusion.Design, self.app.activeProduct).activeComponent
     
+    def _set_parameter_expression(
+        self,
+        parameter: adsk.fusion.ModelParameter,
+        expression: str,
+    ) -> None:
+        """Write a dimension parameter's expression.
+
+        During preview, the write is skipped when it would not move any
+        geometry: each expression write costs ~300 ms in large documents,
+        and the preview rollback discards the expression text anyway. On OK
+        (and whenever the value would actually change) the write happens.
+        """
+        if self.is_previewing:
+            design = adsk.fusion.Design.cast(self.app.activeProduct)
+            if design:
+                units = design.unitsManager
+                try:
+                    target = units.evaluateExpression(
+                        expression,
+                        units.defaultLengthUnits,
+                    )
+                except Exception:
+                    target = None
+                if target is not None and abs(target - parameter.value) < 1e-9:
+                    return
+        parameter.expression = expression
+
     def showError(self, message: str | None):
         if not self._error_field:
             return

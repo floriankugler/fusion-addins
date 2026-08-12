@@ -23,19 +23,22 @@ def is_perpendicular(a: adsk.fusion.BRepFace | adsk.fusion.BRepEdge, b: adsk.fus
         case (adsk.fusion.BRepFace(), adsk.fusion.BRepFace()):
             if not isinstance(a.geometry, adsk.core.Plane) or not isinstance(b.geometry, adsk.core.Plane):
                 return False
-            return a.geometry.normal.isPerpendicularTo(b.geometry.normal)
+            return vector.is_perpendicular_direction(a.geometry.normal, b.geometry.normal)
         case (adsk.fusion.BRepEdge(), adsk.fusion.BRepEdge()):
             if not is_linear(a) or not is_linear(b):
                 return False
-            return norm.normal_along_edge(a).isPerpendicularTo(norm.normal_along_edge(b))
+            return vector.is_perpendicular_direction(
+                norm.normal_along_edge(a), norm.normal_along_edge(b))
         case (adsk.fusion.BRepFace(), adsk.fusion.BRepEdge()):
             if not is_planar(a) or not is_linear(b):
                 return False
-            return norm.normal_away_from_body(a).isParallelTo(norm.normal_along_edge(b))
+            return vector.is_parallel_direction(
+                norm.normal_away_from_body(a), norm.normal_along_edge(b))
         case (adsk.fusion.BRepEdge(), adsk.fusion.BRepFace()):
             if not is_linear(a) or not is_planar(b):
                 return False
-            return norm.normal_away_from_body(b).isParallelTo(norm.normal_along_edge(a))
+            return vector.is_parallel_direction(
+                norm.normal_away_from_body(b), norm.normal_along_edge(a))
         case _:
             raise TypeError(f"Unsupported type: {type(a)}, {type(b)}")
 
@@ -44,12 +47,12 @@ def is_parallel(a: adsk.fusion.BRepFace | adsk.fusion.BRepEdge | Vector3D, b: ad
         case (adsk.fusion.BRepFace(), adsk.fusion.BRepFace()):
             if not isinstance(a.geometry, adsk.core.Plane) or not isinstance(b.geometry, adsk.core.Plane):
                 return False
-            return a.geometry.normal.isParallelTo(b.geometry.normal)
+            return vector.is_parallel_direction(a.geometry.normal, b.geometry.normal)
         case (adsk.fusion.BRepEdge(), Vector3D()):
             if not is_linear(a):
                 return False
             v1 = vector.subtract(a.endVertex.geometry.asVector(), a.startVertex.geometry.asVector())
-            return v1.isParallelTo(b)
+            return vector.is_parallel_direction(v1, b)
         case (Vector3D(), adsk.fusion.BRepEdge()):
             return is_parallel(b, a)
         case (adsk.fusion.BRepEdge(), adsk.fusion.BRepEdge()):
@@ -57,7 +60,7 @@ def is_parallel(a: adsk.fusion.BRepFace | adsk.fusion.BRepEdge | Vector3D, b: ad
                 return False
             v1 = vector.subtract(a.endVertex.geometry.asVector(), a.startVertex.geometry.asVector())
             v2 = vector.subtract(b.endVertex.geometry.asVector(), b.startVertex.geometry.asVector())
-            return v1.isParallelTo(v2)
+            return vector.is_parallel_direction(v1, v2)
         case _:
             raise TypeError(f"Unsupported type: {type(a)}, {type(b)}")
 
@@ -82,7 +85,7 @@ def is_smooth_edge(edge: adsk.fusion.BRepEdge) -> bool:
     p = edge.startVertex.geometry
     _, n1 = edge.faces[0].evaluator.getNormalAtPoint(p)
     _, n2 = edge.faces[1].evaluator.getNormalAtPoint(p)
-    return n1.isParallelTo(n2)
+    return vector.is_parallel_direction(n1, n2)
 
 def is_co_planar(face1: adsk.fusion.BRepFace, face2: adsk.fusion.BRepFace) -> bool:
     if not is_parallel(face1, face2):

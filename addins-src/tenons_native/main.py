@@ -3100,7 +3100,10 @@ class TenonsNative(addin.Addin):
         ]
         if len(dimensions) != 1 or not dimensions[0].parameter:
             raise RuntimeError("Fusion failed to dimension a connector slot.")
-        dimensions[0].parameter.expression = width_expression
+        self._set_parameter_expression(
+            dimensions[0].parameter,
+            width_expression,
+        )
         self._name_parameter(dimensions[0].parameter, parameter_role)
         centerlines = [
             line
@@ -3149,7 +3152,7 @@ class TenonsNative(addin.Addin):
         )
         if not dimension or not dimension.parameter:
             raise RuntimeError("Fusion failed to create an offset dimension.")
-        dimension.parameter.expression = expression
+        self._set_parameter_expression(dimension.parameter, expression)
         self._name_parameter(dimension.parameter, parameter_role)
         return dimension
 
@@ -3174,7 +3177,7 @@ class TenonsNative(addin.Addin):
         )
         if not dimension or not dimension.parameter:
             raise RuntimeError("Fusion failed to create a distance dimension.")
-        dimension.parameter.expression = expression
+        self._set_parameter_expression(dimension.parameter, expression)
         self._name_parameter(dimension.parameter, parameter_role)
         return dimension
 
@@ -3194,7 +3197,7 @@ class TenonsNative(addin.Addin):
         )
         if not dimension or not dimension.parameter:
             raise RuntimeError("Fusion failed to dimension a circle.")
-        dimension.parameter.expression = expression
+        self._set_parameter_expression(dimension.parameter, expression)
         self._name_parameter(dimension.parameter, parameter_role)
 
     def _create_join_combine(
@@ -3473,6 +3476,12 @@ class TenonsNative(addin.Addin):
         parameter: adsk.fusion.ModelParameter,
         role: str,
     ) -> None:
+        # Nothing reads the assigned names back (later references use
+        # parameter.name live, which stays valid for auto-generated names);
+        # the preview is rolled back, so the renames (~300 ms each in large
+        # documents) only matter on OK.
+        if self.is_previewing:
+            return
         name = f"{self._parameter_prefix}_{role}"
         parameter.name = name
         if parameter.name != name:

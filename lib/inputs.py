@@ -3,6 +3,7 @@ from typing import Any, Callable
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from . import errors
+from .utils import misc
 
 
 class Input(ABC):
@@ -448,12 +449,12 @@ class Inputs(ABC):
     def __init__(self):
         self.inputs = []
         for _, value in vars(self).items():
-            # Duck-typed on top of isinstance: after a dev-mode module reload,
-            # an Input subclass defined in another lib module can still inherit
-            # from the pre-reload Input class, which fails the isinstance check
-            # even though the object is perfectly usable. Dropping it here
-            # silently removes the input from the dialog.
-            if isinstance(value, Input) or (
+            # misc.is_instance, not isinstance: after a dev-mode module reload
+            # an Input subclass can still inherit from the pre-reload Input
+            # class, which fails a plain isinstance even though the object is
+            # perfectly usable. Dropping it here would silently remove the
+            # input from the dialog.
+            if misc.is_instance(value, Input) or (
                 hasattr(value, 'create_input')
                 and hasattr(value, 'update_from_input')
                 and hasattr(value, 'id')

@@ -516,7 +516,7 @@ class SheetGoodTenons(custom_compute_feature.CustomComputeFeature):
         tenon_dog_bones = [
             cast(adsk.fusion.BRepBody, utils.brep.create_dogbone_for_edge(e, self.inputs.tool_diameter.value, self.inputs.dog_bone_offset.value, negative=False))
             for e in tenon_board.edges if utils.brep.is_linear(e) and
-            utils.brep.normal_along_edge(e).isParallelTo(tenon_dog_bone_axis) and 
+            utils.vector.is_parallel_direction(utils.brep.normal_along_edge(e), tenon_dog_bone_axis) and
             tenons.pointContainment(e.startVertex.geometry) == adsk.fusion.PointContainment.PointOnPointContainment and 
             tenon_face.isPointOnFace(e.startVertex.geometry, 1e-6)
         ]
@@ -526,7 +526,9 @@ class SheetGoodTenons(custom_compute_feature.CustomComputeFeature):
         for m in mortises:
             center = m.physicalProperties.centerOfMass.asVector()
             for e in m.edges:
-                if not utils.brep.normal_along_edge(e).isParallelTo(mortise_dog_bone_axis):
+                if not utils.vector.is_parallel_direction(
+                    utils.brep.normal_along_edge(e), mortise_dog_bone_axis
+                ):
                     continue
                 test_point = utils.brep.edge_middle_point(e).asVector()
                 test_point.add(utils.vector.scaled_by(utils.vector.normalized(utils.vector.subtract(test_point, center)), 0.1))

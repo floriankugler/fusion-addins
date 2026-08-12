@@ -42,6 +42,33 @@ def compute_points_along_vector(origin: Point3D, direction: Vector3D, positions:
     normal = normalized(direction)
     return [add(origin.asVector(), scaled_by(normal, x)) for x in positions]
 
+# Angular slack, in radians, for the parallel/perpendicular tests below.
+#
+# Fusion's own Vector3D.isParallelTo/isPerpendicularTo compare exactly, so
+# they report False for real modelled geometry: normals carry rounding noise
+# from the modelling history, and a face normal of (1, 1.3e-11, 0) is not
+# exactly perpendicular to (0, -1, 0). Observed noise in production designs
+# is around 1e-11 rad; this leaves five orders of magnitude of headroom while
+# staying far below any intentional angle (1e-6 rad is 6e-5 degrees).
+ANGLE_TOLERANCE = 1e-6
+
+def is_parallel_direction(v1: Vector3D, v2: Vector3D, tolerance: float = ANGLE_TOLERANCE) -> bool:
+    """True when the vectors point along the same line, either way round.
+
+    Uses the cross product rather than the dot product: near parallel the
+    cross product grows linearly with the angle, so the tolerance means the
+    same thing here as in is_perpendicular_direction, whereas |dot| - 1 goes
+    quadratic and would make the tolerance angle-dependent.
+    """
+    a = normalized(v1)
+    b = normalized(v2)
+    return a.crossProduct(b).length <= tolerance
+
+def is_perpendicular_direction(v1: Vector3D, v2: Vector3D, tolerance: float = ANGLE_TOLERANCE) -> bool:
+    a = normalized(v1)
+    b = normalized(v2)
+    return abs(a.dotProduct(b)) <= tolerance
+
 def is_equal_direction(v1: Vector3D, v2: Vector3D, tolerance: float = 1e-6) -> bool:
     v1n = normalized(v1)
     v2n = normalized(v2)

@@ -589,6 +589,12 @@ class ConcealedHingeNative(addin.Addin):
             carcass_edge,
             "carcass edge",
         )
+        # Defer the sketch solve while the hinge geometry is added: in large
+        # documents every individual sketch mutation otherwise pays a full
+        # document-transaction cost. The sketch is re-solved in
+        # _require_fully_constrained before it is read again; a fully
+        # constrained sketch solves to the same geometry either way.
+        sketch.isComputeDeferred = True
         door_pattern_offset, door_pattern_expression = (
             self._door_pattern_offset()
         )
@@ -739,6 +745,9 @@ class ConcealedHingeNative(addin.Addin):
             door_edge,
             "door edge",
         )
+        # See _create_door_sketch: batch the sketch solve; the in-loop
+        # projections below briefly re-enable it themselves.
+        sketch.isComputeDeferred = True
         hole_row = self._add_linked_offset_line(
             sketch,
             projected_door_edge,
@@ -812,10 +821,19 @@ class ConcealedHingeNative(addin.Addin):
         source: adsk.core.Base,
         description: str,
     ) -> adsk.fusion.SketchLine:
-        projected = sketch.project2(
-            cast(list[adsk.core.Base], [source]),
-            True,
-        )
+        # project2 throws InternalValidationError on a compute-deferred
+        # sketch; briefly re-enable solving around it.
+        was_deferred = sketch.isComputeDeferred
+        if was_deferred:
+            sketch.isComputeDeferred = False
+        try:
+            projected = sketch.project2(
+                cast(list[adsk.core.Base], [source]),
+                True,
+            )
+        finally:
+            if was_deferred:
+                sketch.isComputeDeferred = True
         line = next(
             (
                 candidate
@@ -984,7 +1002,7 @@ class ConcealedHingeNative(addin.Addin):
             raise RuntimeError(
                 f"Fusion failed to dimension circles in '{sketch.name}'."
             )
-        diameter.parameter.expression = diameter_expression
+        self._set_parameter_expression(diameter.parameter, diameter_expression)
         self._name_parameter(diameter.parameter, parameter_role)
         for circle in circles[1:]:
             if not constraints.addEqual(circles[0], circle):
@@ -1018,7 +1036,7 @@ class ConcealedHingeNative(addin.Addin):
             raise RuntimeError(
                 f"Fusion failed to create a distance in '{sketch.name}'."
             )
-        dimension.parameter.expression = expression
+        self._set_parameter_expression(dimension.parameter, expression)
         self._name_parameter(dimension.parameter, parameter_role)
         return dimension
 
@@ -1135,6 +1153,12 @@ class ConcealedHingeNative(addin.Addin):
         parameter: adsk.fusion.ModelParameter,
         role: str,
     ) -> None:
+        # Nothing reads the assigned names back (later references use
+        # parameter.name live, which stays valid for auto-generated names);
+        # the preview is rolled back, so the renames (~300 ms each in large
+        # documents) only matter on OK.
+        if self.is_previewing:
+            return
         name = f"{self._parameter_prefix}_{role}"
         parameter.name = name
         if parameter.name != name:
@@ -1171,6 +1195,8 @@ class ConcealedHingeNative(addin.Addin):
         self,
         sketch: adsk.fusion.Sketch,
     ) -> None:
+        if sketch.isComputeDeferred:
+            sketch.isComputeDeferred = False
         fixed_geometry = [
             entity
             for entity in [

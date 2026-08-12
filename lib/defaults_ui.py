@@ -42,7 +42,7 @@ class DefaultValueAdapter:
         expr = self._extract_expr(value)
         if expr is not None:
             return f"expr: {expr}"
-        if isinstance(source, inp.DropDownInput) and isinstance(value, int) and not isinstance(value, bool):
+        if utils.misc.is_instance(source, inp.DropDownInput) and isinstance(value, int) and not isinstance(value, bool):
             option = next((item for item in source.options if item.value == value), None)
             if option:
                 return f"{value} ({option.name})"
@@ -51,24 +51,24 @@ class DefaultValueAdapter:
         return str(value)
 
     def current_value_text(self, source: inp.Input) -> str:
-        if isinstance(source, inp.FloatInput):
+        if utils.misc.is_instance(source, inp.FloatInput):
             expression = getattr(source, 'expression', None)
             if isinstance(expression, str) and expression:
                 return expression
             value = getattr(source, 'value', None)
             return '' if value is None else str(value)
-        if isinstance(source, inp.IntegerInput):
+        if utils.misc.is_instance(source, inp.IntegerInput):
             return str(source.value)
-        if isinstance(source, inp.CheckboxInput):
+        if utils.misc.is_instance(source, inp.CheckboxInput):
             return 'true' if source.value else 'false'
-        if isinstance(source, inp.DropDownInput):
+        if utils.misc.is_instance(source, inp.DropDownInput):
             return str(source.value)
-        if isinstance(source, inp.StringInput):
+        if utils.misc.is_instance(source, inp.StringInput):
             return source.value
         return ''
 
     def parse_new_default(self, source: inp.Input, text: str) -> tuple[Any | None, str | None]:
-        if isinstance(source, inp.FloatInput):
+        if utils.misc.is_instance(source, inp.FloatInput):
             numeric = self._parse_number(text)
             if numeric is not None:
                 return numeric, None
@@ -77,7 +77,7 @@ class DefaultValueAdapter:
                 return None, "Invalid expression."
             return {"expr": text}, None
 
-        if isinstance(source, inp.IntegerInput):
+        if utils.misc.is_instance(source, inp.IntegerInput):
             literal = self._parse_int(text)
             if literal is not None:
                 if source.minimum_value <= literal <= source.maximum_value:
@@ -91,7 +91,7 @@ class DefaultValueAdapter:
                 return {"expr": text}, None
             return None, f"Expression out of range [{source.minimum_value}, {source.maximum_value}]."
 
-        if isinstance(source, inp.CheckboxInput):
+        if utils.misc.is_instance(source, inp.CheckboxInput):
             parsed_bool = self._parse_bool(text)
             if parsed_bool is not None:
                 return parsed_bool, None
@@ -100,7 +100,7 @@ class DefaultValueAdapter:
                 return None, "Invalid expression."
             return {"expr": text}, None
 
-        if isinstance(source, inp.DropDownInput):
+        if utils.misc.is_instance(source, inp.DropDownInput):
             literal = self._parse_int(text)
             allowed = {item.value for item in source.options}
             if literal is not None:
@@ -115,7 +115,7 @@ class DefaultValueAdapter:
                 return {"expr": text}, None
             return None, "Expression does not evaluate to a dropdown option."
 
-        if isinstance(source, inp.StringInput):
+        if utils.misc.is_instance(source, inp.StringInput):
             # Any text is a valid string default; there is nothing to evaluate.
             return text, None
 
@@ -129,42 +129,42 @@ class DefaultValueAdapter:
         return None
 
     def _apply_literal_default(self, source: inp.Input, value: Any):
-        if isinstance(source, inp.StringInput):
+        if utils.misc.is_instance(source, inp.StringInput):
             if isinstance(value, str):
                 source.default_value = value
                 source.value = value
             return
-        if isinstance(source, inp.FloatInput):
+        if utils.misc.is_instance(source, inp.FloatInput):
             if isinstance(value, (int, float)):
                 source.default_value = float(value)
             elif isinstance(value, str):
                 source.default_expression = value
             return
-        if isinstance(source, inp.IntegerInput):
+        if utils.misc.is_instance(source, inp.IntegerInput):
             if isinstance(value, int) and not isinstance(value, bool):
                 if source.minimum_value <= value <= source.maximum_value:
                     source.default_value = value
             return
-        if isinstance(source, inp.CheckboxInput):
+        if utils.misc.is_instance(source, inp.CheckboxInput):
             if isinstance(value, bool):
                 source.default_value = value
             return
-        if isinstance(source, inp.DropDownInput):
+        if utils.misc.is_instance(source, inp.DropDownInput):
             if isinstance(value, int) and not isinstance(value, bool):
                 allowed = {item.value for item in source.options}
                 if value in allowed:
                     source.default_value = value
 
     def _apply_expression_default(self, source: inp.Input, expression: str):
-        if isinstance(source, inp.StringInput):
+        if utils.misc.is_instance(source, inp.StringInput):
             # A string default has no expression form; keep the text verbatim.
             source.default_value = expression
             source.value = expression
             return
-        if isinstance(source, inp.FloatInput):
+        if utils.misc.is_instance(source, inp.FloatInput):
             source.default_expression = expression
             return
-        if isinstance(source, inp.IntegerInput):
+        if utils.misc.is_instance(source, inp.IntegerInput):
             value = self._evaluate_expression(expression, '')
             if value is None:
                 return
@@ -172,7 +172,7 @@ class DefaultValueAdapter:
             if source.minimum_value <= parsed <= source.maximum_value:
                 source.default_value = parsed
             return
-        if isinstance(source, inp.CheckboxInput):
+        if utils.misc.is_instance(source, inp.CheckboxInput):
             parsed = self._parse_bool(expression)
             if parsed is not None:
                 source.default_value = parsed
@@ -182,7 +182,7 @@ class DefaultValueAdapter:
                 return
             source.default_value = abs(value) > 1e-9
             return
-        if isinstance(source, inp.DropDownInput):
+        if utils.misc.is_instance(source, inp.DropDownInput):
             value = self._evaluate_expression(expression, '')
             if value is None:
                 return
@@ -363,7 +363,7 @@ class DefaultsUIManager:
 
     def _set_new_default_tooltip(self, source: inp.Input, input: adsk.core.StringValueCommandInput):
         input.tooltip = 'Enter a literal value or an expression.'
-        if isinstance(source, inp.DropDownInput):
+        if utils.misc.is_instance(source, inp.DropDownInput):
             options = [f"{item.value} = {item.name}" for item in source.options]
             input.tooltipDescription = f"Dropdown ids: {', '.join(options)}"
 
@@ -399,7 +399,7 @@ class DefaultsUIManager:
 
         comment: dict[str, Any] = {}
         for source in (row.source_input for row in self._controls.rows):
-            if isinstance(source, inp.DropDownInput):
+            if utils.misc.is_instance(source, inp.DropDownInput):
                 comment[source.id] = {
                     "type": "dropdown",
                     "options": [{"name": option.name, "value": option.value} for option in source.options],
@@ -414,11 +414,11 @@ class DefaultsUIManager:
 
     def _is_savable_input(self, source: inp.Input) -> bool:
         return (
-            isinstance(source, inp.FloatInput)
-            or isinstance(source, inp.IntegerInput)
-            or isinstance(source, inp.CheckboxInput)
-            or isinstance(source, inp.DropDownInput)
-            or isinstance(source, inp.StringInput)
+            utils.misc.is_instance(source, inp.FloatInput)
+            or utils.misc.is_instance(source, inp.IntegerInput)
+            or utils.misc.is_instance(source, inp.CheckboxInput)
+            or utils.misc.is_instance(source, inp.DropDownInput)
+            or utils.misc.is_instance(source, inp.StringInput)
         )
 
     def _show_error(self, message: str | None):

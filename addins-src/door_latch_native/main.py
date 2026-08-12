@@ -993,7 +993,10 @@ class DoorLatchNative(addin.Addin):
                     placement_line,
                     offset_value,
                 )
-                placement_dimension.parameter.expression = offset_expression
+                self._set_parameter_expression(
+                    placement_dimension.parameter,
+                    offset_expression,
+                )
                 self._name_parameter(
                     placement_dimension.parameter,
                     offset_parameter_role,
@@ -1098,8 +1101,9 @@ class DoorLatchNative(addin.Addin):
             leading_segment,
             self.inputs.offset.value,
         )
-        end_offset_dimension.parameter.expression = (
-            self.inputs.offset.expression
+        self._set_parameter_expression(
+            end_offset_dimension.parameter,
+            self.inputs.offset.expression,
         )
         self._name_parameter(
             end_offset_dimension.parameter,
@@ -1140,32 +1144,23 @@ class DoorLatchNative(addin.Addin):
         if not sketch:
             raise RuntimeError(f"Fusion failed to create '{name}'.")
         sketch.name = name
-        projected_points: list[adsk.fusion.SketchPoint] = []
-        for source_point in source_points:
-            projected = self._project_entities(
+        # One batched project2 call: each call pays a full document
+        # transaction, so per-point calls are several times slower in large
+        # documents.
+        projected_points = [
+            adsk.fusion.SketchPoint.cast(candidate.nativeObject or candidate)
+            for entity in self._project_entities(
                 sketch,
-                [source_point],
+                cast(list[adsk.core.Base], list(source_points)),
                 sketch_occurrence=occurrence,
                 entity_occurrence=occurrence,
             )
-            projected_point = next(
-                (
-                    adsk.fusion.SketchPoint.cast(
-                        candidate.nativeObject or candidate
-                    )
-                    for entity in projected
-                    if (
-                        candidate
-                        := adsk.fusion.SketchPoint.cast(entity)
-                    )
-                ),
-                None,
+            if (candidate := adsk.fusion.SketchPoint.cast(entity))
+        ]
+        if len(projected_points) != len(source_points):
+            raise RuntimeError(
+                f"Fusion failed to project a hole center into '{name}'."
             )
-            if not projected_point:
-                raise RuntimeError(
-                    f"Fusion failed to project a hole center into '{name}'."
-                )
-            projected_points.append(projected_point)
 
         sketch.isComputeDeferred = True
         first_circle: adsk.fusion.SketchCircle | None = None
@@ -1296,8 +1291,9 @@ class DoorLatchNative(addin.Addin):
                 left_column_line,
                 EVERLOCK_PILOT_COLUMN_OFFSET,
             )
-            column_dimension.parameter.expression = _mm(
-                EVERLOCK_PILOT_COLUMN_OFFSET
+            self._set_parameter_expression(
+                column_dimension.parameter,
+                _mm(EVERLOCK_PILOT_COLUMN_OFFSET),
             )
             self._name_parameter(
                 column_dimension.parameter,
@@ -1389,8 +1385,9 @@ class DoorLatchNative(addin.Addin):
                 lower_left_line,
                 EVERLOCK_MAIN_INSET - EVERLOCK_LOWER_ROW_INSET,
             )
-            lower_dimension.parameter.expression = _mm(
-                EVERLOCK_MAIN_INSET - EVERLOCK_LOWER_ROW_INSET
+            self._set_parameter_expression(
+                lower_dimension.parameter,
+                _mm(EVERLOCK_MAIN_INSET - EVERLOCK_LOWER_ROW_INSET),
             )
             self._name_parameter(
                 lower_dimension.parameter,
@@ -1410,8 +1407,9 @@ class DoorLatchNative(addin.Addin):
                 upper_left_line,
                 EVERLOCK_UPPER_ROW_INSET - EVERLOCK_MAIN_INSET,
             )
-            upper_dimension.parameter.expression = _mm(
-                EVERLOCK_UPPER_ROW_INSET - EVERLOCK_MAIN_INSET
+            self._set_parameter_expression(
+                upper_dimension.parameter,
+                _mm(EVERLOCK_UPPER_ROW_INSET - EVERLOCK_MAIN_INSET),
             )
             self._name_parameter(
                 upper_dimension.parameter,
@@ -1456,33 +1454,24 @@ class DoorLatchNative(addin.Addin):
             entity_occurrence=door_occurrence,
         )
 
-        projected_main_points: list[adsk.fusion.SketchPoint] = []
-        for point in door_main_points:
-            projected = self._project_entities(
+        # One batched project2 call: each call pays a full document
+        # transaction, so per-point calls are several times slower in large
+        # documents.
+        projected_main_points = [
+            adsk.fusion.SketchPoint.cast(candidate.nativeObject or candidate)
+            for entity in self._project_entities(
                 sketch,
-                [point],
+                cast(list[adsk.core.Base], list(door_main_points)),
                 sketch_occurrence=carcass_occurrence,
                 entity_occurrence=door_occurrence,
             )
-            projected_point = next(
-                (
-                    adsk.fusion.SketchPoint.cast(
-                        candidate.nativeObject or candidate
-                    )
-                    for entity in projected
-                    if (
-                        candidate
-                        := adsk.fusion.SketchPoint.cast(entity)
-                    )
-                ),
-                None,
+            if (candidate := adsk.fusion.SketchPoint.cast(entity))
+        ]
+        if len(projected_main_points) != len(door_main_points):
+            raise RuntimeError(
+                "Fusion failed to project a door latch center into the "
+                "carcass sketch."
             )
-            if not projected_point:
-                raise RuntimeError(
-                    "Fusion failed to project a door latch center into the "
-                    "carcass sketch."
-                )
-            projected_main_points.append(projected_point)
 
         sketch.isComputeDeferred = True
         first_inset_line: adsk.fusion.SketchLine | None = None
@@ -1545,7 +1534,10 @@ class DoorLatchNative(addin.Addin):
                     inset_line,
                     inset_value,
                 )
-                inset_dimension.parameter.expression = _mm(inset_value)
+                self._set_parameter_expression(
+                    inset_dimension.parameter,
+                    _mm(inset_value),
+                )
                 self._name_parameter(
                     inset_dimension.parameter,
                     "carcassPilotInsetFromDoorEdge",
@@ -1612,7 +1604,10 @@ class DoorLatchNative(addin.Addin):
                     left_line,
                     pair_offset,
                 )
-                pair_dimension.parameter.expression = _mm(pair_offset)
+                self._set_parameter_expression(
+                    pair_dimension.parameter,
+                    _mm(pair_offset),
+                )
                 self._name_parameter(
                     pair_dimension.parameter,
                     "carcassPilotPairOffset",
@@ -1741,7 +1736,7 @@ class DoorLatchNative(addin.Addin):
             raise RuntimeError(
                 "Fusion failed to dimension a latch-hole circle."
             )
-        dimension.parameter.expression = expression
+        self._set_parameter_expression(dimension.parameter, expression)
         self._name_parameter(dimension.parameter, parameter_role)
 
     def _add_length_dimension(
@@ -2042,6 +2037,12 @@ class DoorLatchNative(addin.Addin):
         parameter: adsk.fusion.ModelParameter,
         role: str,
     ) -> None:
+        # Nothing reads the assigned names back (later references use
+        # parameter.name live, which stays valid for auto-generated names);
+        # the preview is rolled back, so the renames (~300 ms each in large
+        # documents) only matter on OK.
+        if self.is_previewing:
+            return
         name = f"{self._parameter_prefix}_{role}"
         parameter.name = name
         if parameter.name != name:

@@ -201,6 +201,17 @@ class CutoutsNativeInputs(inputs.Inputs):
                 "Point order does not matter."
             ),
         )
+        self.inset_bounding_box = inputs.CheckboxInput(
+            id="inset_bounding_box",
+            name="Inset Bounding Box",
+            default_value=False,
+            tool_tip=(
+                "Apply the Outer Inset to the rectangle defined by the "
+                "Bounding Box Points as well, instead of only to the outer "
+                "contour of the selected face."
+            ),
+            update_visibility=lambda: len(self.bounding_points.value) >= 2,
+        )
         self.triangle_columns = inputs.IntegerInput(
             id="triangle_columns",
             name="Columns",
@@ -262,6 +273,9 @@ class CutoutsNative(addin.Addin):
     inputs: CutoutsNativeInputs
     _parameter_prefix: str
     _remainder_parameter_name: str | None = None
+    #: Parameter of the outer-contour inset, so the optional bounding-box
+    #: inset can be driven by the same value instead of a duplicate.
+    _outer_inset_parameter: adsk.fusion.ModelParameter | None = None
 
     @property
     def resource_dir(self) -> str:
@@ -345,6 +359,7 @@ class CutoutsNative(addin.Addin):
             component.parentDesign
         )
         self._remainder_parameter_name = None
+        self._outer_inset_parameter = None
         target_bodies: list[adsk.fusion.BRepBody] = []
         target_body_locators: list[_BodyLocator] = []
         target_body_indices: list[int] = []
@@ -775,6 +790,12 @@ class CutoutsNative(addin.Addin):
         parameter: adsk.fusion.ModelParameter,
         role: str,
     ) -> None:
+        # Nothing reads the assigned names back (later references use
+        # parameter.name live, which stays valid for auto-generated names);
+        # the preview is rolled back, so the renames (~300 ms each in large
+        # documents) only matter on OK.
+        if self.is_previewing:
+            return
         name = f"{self._parameter_prefix}_{role}"
         parameter.name = name
         if parameter.name != name:
@@ -1026,6 +1047,13 @@ class CutoutsNative(addin.Addin):
                 "The Bounding Box Points must define non-zero extents in "
                 "both directions."
             )
+        inset = self._bounding_box_inset()
+        if inset > 1e-9:
+            # The pattern checks below must judge the effective (inset) box.
+            extent_u -= 2 * inset
+            extent_v -= 2 * inset
+            if extent_u <= 1e-6 or extent_v <= 1e-6:
+                return "Outer Inset is too large to inset the bounding box."
         if self.inputs.pattern_type.value == CutoutsNativeInputs.RHOMBUSES.value:
             try:
                 width, height = self._rhombus_dimensions(
@@ -1085,63 +1113,59 @@ class CutoutsNative(addin.Addin):
         inner_loop_index = 0
         inner_inset_reference: str | None = None
 
-        for loop in face.loops:
-            edges = cast(list[adsk.core.Base], utils.fusion.as_list(loop.edges))
-            projected = [
-                curve
-                for entity in sketch.project2(edges, True)
-                if (curve := adsk.fusion.SketchCurve.cast(entity))
-            ]
-            if not projected:
-                raise RuntimeError("Fusion failed to project one of the face loops.")
+        # Batch the edits: without this, every projection, construction
+        # toggle, offset and tab entity triggers its own full compute cycle.
+        sketch.isComputeDeferred = True
+        try:
+            loops = utils.fusion.as_list(face.loops)
+            projected_by_loop = self._project_face_loops(sketch, loops)
+            for loop, projected in zip(loops, projected_by_loop):
+                self._set_construction(sketch, projected, True)
+                if loop.isOuter:
+                    input_value = self.inputs.outer_inset
+                    parameter_role = "outerInset"
+                    expression = input_value.expression
+                else:
+                    inner_loop_index += 1
+                    input_value = self.inputs.inner_feature_inset
+                    parameter_role = f"innerInset{inner_loop_index}"
+                    # Later inner loops reference the first inner-inset parameter
+                    # instead of duplicating the user expression.
+                    expression = inner_inset_reference or input_value.expression
+                if input_value.value <= 1e-9:
+                    loop_curves = projected
+                else:
+                    loop_curves, offset_parameter = self._offset_loop(
+                        sketch=sketch,
+                        source_curves=projected,
+                        expression=expression,
+                        should_be_smaller=loop.isOuter,
+                        parameter_role=parameter_role,
+                    )
+                    if loop.isOuter:
+                        self._outer_inset_parameter = offset_parameter
+                    elif inner_inset_reference is None:
+                        inner_inset_reference = offset_parameter.name
 
-            original_profile = self._largest_profile(sketch)
-            if not original_profile:
-                raise RuntimeError("A projected face loop did not create a closed profile.")
-            original_area = original_profile.areaProperties().area
+                final_curves.extend(loop_curves)
+                if loop.isOuter:
+                    outer_curves.extend(loop_curves)
+                else:
+                    inner_loop_curves.append(loop_curves)
+                self._set_construction(sketch, loop_curves, True)
 
-            self._set_construction(sketch, projected, True)
-            if loop.isOuter:
-                input_value = self.inputs.outer_inset
-                parameter_role = "outerInset"
-                expression = input_value.expression
-            else:
-                inner_loop_index += 1
-                input_value = self.inputs.inner_feature_inset
-                parameter_role = f"innerInset{inner_loop_index}"
-                # Later inner loops reference the first inner-inset parameter
-                # instead of duplicating the user expression.
-                expression = inner_inset_reference or input_value.expression
-            if input_value.value <= 1e-9:
-                loop_curves = projected
-            else:
-                loop_curves, offset_parameter = self._offset_loop(
-                    sketch=sketch,
-                    source_curves=projected,
-                    distance=input_value.value,
-                    expression=expression,
-                    original_area=original_area,
-                    should_be_smaller=loop.isOuter,
-                    parameter_role=parameter_role,
+            self._set_construction(sketch, final_curves, False)
+            if self.inputs.tabs.value:
+                # The tab layout measures the solved offset curves.
+                self._solve_deferred(sketch)
+                self._create_tabs(
+                    sketch,
+                    face,
+                    outer_curves,
+                    inner_loop_curves,
                 )
-                if not loop.isOuter and inner_inset_reference is None:
-                    inner_inset_reference = offset_parameter.name
-
-            final_curves.extend(loop_curves)
-            if loop.isOuter:
-                outer_curves.extend(loop_curves)
-            else:
-                inner_loop_curves.append(loop_curves)
-            self._set_construction(sketch, loop_curves, True)
-
-        self._set_construction(sketch, final_curves, False)
-        if self.inputs.tabs.value:
-            self._create_tabs(
-                sketch,
-                face,
-                outer_curves,
-                inner_loop_curves,
-            )
+        finally:
+            sketch.isComputeDeferred = False
         profile = (
             self._profile_bounded_by(sketch, outer_curves)
             or self._largest_profile(sketch)
@@ -1171,19 +1195,25 @@ class CutoutsNative(addin.Addin):
         if not sketch:
             raise RuntimeError("Fusion failed to create the cross layout sketch.")
         sketch.name = "Face Cutout (Native) - Cross Layout"
-        boundary = self._create_rectangular_pattern_boundary(
-            sketch,
-            outer_curves,
-            role_prefix="crossBoundary",
-        )
-        # The boundary closes the wedge profiles, so it must not stay
-        # construction geometry.
-        self._set_construction(
-            sketch,
-            cast(list[adsk.fusion.SketchCurve], boundary.boundary_lines),
-            False,
-        )
-        profiles, samples = self._add_cross_bands(sketch, boundary)
+        # Batch the edits; _add_cross_bands solves once before it probes the
+        # wedge profiles.
+        sketch.isComputeDeferred = True
+        try:
+            boundary = self._create_rectangular_pattern_boundary(
+                sketch,
+                outer_curves,
+                role_prefix="crossBoundary",
+            )
+            # The boundary closes the wedge profiles, so it must not stay
+            # construction geometry.
+            self._set_construction(
+                sketch,
+                cast(list[adsk.fusion.SketchCurve], boundary.boundary_lines),
+                False,
+            )
+            profiles, samples = self._add_cross_bands(sketch, boundary)
+        finally:
+            sketch.isComputeDeferred = False
         self._require_fully_constrained(sketch)
         return sketch, profiles, samples
 
@@ -1227,16 +1257,21 @@ class CutoutsNative(addin.Addin):
                 "Fusion failed to create the bounding-box sketch."
             )
         sketch.name = "Face Cutout (Native) - Bounding Box"
-        boundary = self._create_rectangular_pattern_boundary(
-            sketch,
-            outer_curves,
-            role_prefix="bounds",
-        )
-        self._set_construction(
-            sketch,
-            cast(list[adsk.fusion.SketchCurve], boundary.boundary_lines),
-            False,
-        )
+        # Batch the edits; the profile check below runs on the solved sketch.
+        sketch.isComputeDeferred = True
+        try:
+            boundary = self._create_rectangular_pattern_boundary(
+                sketch,
+                outer_curves,
+                role_prefix="bounds",
+            )
+            self._set_construction(
+                sketch,
+                cast(list[adsk.fusion.SketchCurve], boundary.boundary_lines),
+                False,
+            )
+        finally:
+            sketch.isComputeDeferred = False
         self._require_fully_constrained(sketch)
         if sketch.profiles.count != 1:
             raise RuntimeError(
@@ -1354,7 +1389,10 @@ class CutoutsNative(addin.Addin):
                 raise RuntimeError(
                     "Fusion failed to dimension a cross boundary."
                 )
-            dimension.parameter.expression = half_width_expression
+            self._set_parameter_expression(
+                dimension.parameter,
+                half_width_expression,
+            )
             self._name_parameter(
                 dimension.parameter,
                 (
@@ -1366,6 +1404,8 @@ class CutoutsNative(addin.Addin):
             if parameter_index == 1:
                 half_width_expression = dimension.parameter.name
 
+        # The wedge probes below read profiles, which need a solved sketch.
+        self._solve_deferred(sketch)
         center = adsk.core.Point3D.create(
             sum(point.geometry.x for point in corners) / 4,
             sum(point.geometry.y for point in corners) / 4,
@@ -1483,13 +1523,16 @@ class CutoutsNative(addin.Addin):
             self._normalized_line_vector(line)
             for line in ordered
         ]
+        # Tolerant comparisons: these directions come from curves projected
+        # off real BRep geometry, whose normals carry rounding noise, and
+        # Vector3D.isPerpendicularTo/isParallelTo compare exactly.
         if (
-            not directions[0].isPerpendicularTo(directions[1])
-            or not directions[1].isPerpendicularTo(directions[2])
-            or not directions[2].isPerpendicularTo(directions[3])
-            or not directions[3].isPerpendicularTo(directions[0])
-            or not directions[0].isParallelTo(directions[2])
-            or not directions[1].isParallelTo(directions[3])
+            not utils.vector.is_perpendicular_direction(directions[0], directions[1])
+            or not utils.vector.is_perpendicular_direction(directions[1], directions[2])
+            or not utils.vector.is_perpendicular_direction(directions[2], directions[3])
+            or not utils.vector.is_perpendicular_direction(directions[3], directions[0])
+            or not utils.vector.is_parallel_direction(directions[0], directions[2])
+            or not utils.vector.is_parallel_direction(directions[1], directions[3])
         ):
             raise ValueError(
                 "Cross requires a rectangular inset outer loop."
@@ -1914,54 +1957,99 @@ class CutoutsNative(addin.Addin):
         self,
         sketch: adsk.fusion.Sketch,
         source_curves: list[adsk.fusion.SketchCurve],
-        distance: float,
         expression: str,
-        original_area: float,
         should_be_smaller: bool,
         parameter_role: str,
     ) -> tuple[list[adsk.fusion.SketchCurve], adsk.fusion.ModelParameter]:
-        direction_sign: int | None = None
+        """Offsets a closed loop, inwards or outwards as asked.
 
-        for sign in (1, -1):
-            probe = self._add_offset_constraint(
+        Which sign of the offset goes inwards depends on the loop's
+        orientation, which Fusion does not expose, so the direction is
+        established by measuring the offset that was built. Both the
+        measurement and the correction are free of sketch computes: an
+        offset's child curves carry their final geometry as soon as they
+        exist, and rewriting the dimension's expression moves them, neither
+        of which needs the sketch solved. That matters because this runs
+        inside the builders' deferred-compute batches — measuring profile
+        areas instead would force a solve per loop.
+
+        The sign lives in the expression rather than in a value: `expression`
+        may reference a parameter that is itself negative, since every offset
+        bakes its own direction into its own expression.
+
+        Both signs are attempted because neither is reliably the inward one,
+        and because the wrong one frequently cannot be built at all: on a
+        real face, offsetting a small hole the wrong way collapses it and
+        Fusion refuses outright. Building and discarding an offset is cheap
+        here precisely because no solve is involved.
+        """
+        source_extent = self._loop_extent(source_curves)
+        for candidate_expression in (expression, f"-({expression})"):
+            constraint = self._add_offset_constraint(
                 sketch,
                 source_curves,
-                adsk.core.ValueInput.createByReal(sign * distance),
+                adsk.core.ValueInput.createByString(candidate_expression),
             )
-            if not probe:
+            if not constraint:
+                # This direction collapses the loop; Fusion rejected it.
                 continue
-            probe_curves = cast(list[adsk.fusion.SketchCurve], list(probe.childCurves))
-            candidate = self._largest_profile(sketch)
-            candidate_area = candidate.areaProperties().area if candidate else None
-            is_smaller = candidate_area is not None and candidate_area < original_area
-            is_correct = candidate_area is not None and is_smaller == should_be_smaller
-            self._delete_probe(probe, probe_curves)
-            if is_correct:
-                direction_sign = sign
-                break
-
-        if direction_sign is None:
-            boundary = "outer" if should_be_smaller else "inner"
-            raise RuntimeError(f"Could not determine a valid offset direction for an {boundary} loop.")
-
-        signed_expression = expression if direction_sign > 0 else f"-({expression})"
-        constraint = self._add_offset_constraint(
-            sketch,
-            source_curves,
-            adsk.core.ValueInput.createByString(signed_expression),
-        )
-        if not constraint:
-            raise RuntimeError("Fusion failed to create the final parametric loop offset.")
-        dimension = constraint.dimension
-        if not dimension or not dimension.parameter:
-            raise RuntimeError(
-                "Fusion did not create a parameter for the loop offset."
+            child_curves = cast(
+                list[adsk.fusion.SketchCurve], list(constraint.childCurves)
             )
-        self._name_parameter(dimension.parameter, parameter_role)
-        return (
-            cast(list[adsk.fusion.SketchCurve], list(constraint.childCurves)),
-            dimension.parameter,
+            dimension = constraint.dimension
+            if (
+                dimension
+                and dimension.parameter
+                and self._offset_is_on_expected_side(
+                    child_curves, source_extent, should_be_smaller
+                )
+            ):
+                self._name_parameter(dimension.parameter, parameter_role)
+                return child_curves, dimension.parameter
+            self._discard_offset(constraint, child_curves)
+
+        boundary = "outer" if should_be_smaller else "inner"
+        raise RuntimeError(
+            f"Could not determine a valid offset direction for an {boundary} loop."
         )
+
+    def _loop_extent(
+        self,
+        curves: list[adsk.fusion.SketchCurve],
+    ) -> float | None:
+        """Bounding-box area of a curve set, in sketch space.
+
+        Read straight off the curves, so unlike a profile area it is
+        available without computing the sketch.
+        """
+        xs: list[float] = []
+        ys: list[float] = []
+        for curve in curves:
+            if not curve or not curve.isValid:
+                continue
+            box = curve.boundingBox
+            xs.extend((box.minPoint.x, box.maxPoint.x))
+            ys.extend((box.minPoint.y, box.maxPoint.y))
+        if not xs:
+            return None
+        return (max(xs) - min(xs)) * (max(ys) - min(ys))
+
+    def _offset_is_on_expected_side(
+        self,
+        child_curves: list[adsk.fusion.SketchCurve],
+        source_extent: float | None,
+        should_be_smaller: bool,
+    ) -> bool:
+        extent = self._loop_extent(child_curves)
+        if extent is None or source_extent is None:
+            return False
+        if extent <= 1e-9:
+            # The offset collapsed onto itself; not a usable loop whichever
+            # side it nominally landed on.
+            return False
+        if abs(extent - source_extent) <= 1e-9:
+            return False
+        return (extent < source_extent) == should_be_smaller
 
     def _add_offset_constraint(
         self,
@@ -1978,7 +2066,7 @@ class CutoutsNative(addin.Addin):
         except Exception:
             return None
 
-    def _delete_probe(
+    def _discard_offset(
         self,
         constraint: adsk.fusion.OffsetConstraint,
         curves: list[adsk.fusion.SketchCurve],
@@ -2006,6 +2094,8 @@ class CutoutsNative(addin.Addin):
             raise RuntimeError("Fusion failed to create the triangle pattern sketch.")
         sketch.name = "Face Cutout (Native) - Triangle Seeds"
 
+        # Batch the edits from here on; the solve happens once at the end.
+        sketch.isComputeDeferred = True
         boundary = self._create_rectangular_pattern_boundary(
             sketch,
             outer_curves,
@@ -2041,7 +2131,6 @@ class CutoutsNative(addin.Addin):
             else triangle_height
         )
 
-        sketch.isComputeDeferred = True
         pitch_u_expression = (
             f"({extent_u_parameter.name}) / {columns}"
         )
@@ -2140,7 +2229,10 @@ class CutoutsNative(addin.Addin):
                 "triangle sides."
             )
         spacing_parameter = spacing_dimension.parameter
-        spacing_parameter.expression = self.inputs.triangle_spacing.expression
+        self._set_parameter_expression(
+            spacing_parameter,
+            self.inputs.triangle_spacing.expression,
+        )
         self._name_parameter(spacing_parameter, "triangleSpacing")
 
         height_expression = (
@@ -2148,7 +2240,10 @@ class CutoutsNative(addin.Addin):
             f"{rows - 1} * ({spacing_parameter.name})) / {rows}"
         )
         if height_dimension:
-            height_dimension.parameter.expression = height_expression
+            self._set_parameter_expression(
+                height_dimension.parameter,
+                height_expression,
+            )
         else:
             height_dimension = self._dimension_line_length(
                 sketch,
@@ -2217,7 +2312,10 @@ class CutoutsNative(addin.Addin):
                 "Fusion failed to dimension the spacing between triangle rows."
             )
         row_spacing_parameter = row_spacing_dimension.parameter
-        row_spacing_parameter.expression = spacing_parameter.name
+        self._set_parameter_expression(
+            row_spacing_parameter,
+            spacing_parameter.name,
+        )
         self._name_parameter(
             row_spacing_parameter,
             "triangleRowSpacing",
@@ -2303,8 +2401,9 @@ class CutoutsNative(addin.Addin):
                 raise RuntimeError(
                     "Fusion failed to dimension the aligned triangle tip."
                 )
-            radius_dimension.parameter.expression = (
-                self.inputs.fillet_radius.expression
+            self._set_parameter_expression(
+                radius_dimension.parameter,
+                self.inputs.fillet_radius.expression,
             )
             self._name_parameter(
                 radius_dimension.parameter,
@@ -2391,6 +2490,8 @@ class CutoutsNative(addin.Addin):
         if not sketch:
             raise RuntimeError("Fusion failed to create the rhombus sketch.")
         sketch.name = "Face Cutout (Native) - Rhombus Seeds"
+        # Batch the edits from here on; the solve happens once at the end.
+        sketch.isComputeDeferred = True
         boundary = self._create_rectangular_pattern_boundary(
             sketch,
             outer_curves,
@@ -2410,7 +2511,6 @@ class CutoutsNative(addin.Addin):
                 "columns."
             )
 
-        sketch.isComputeDeferred = True
         first = self._add_seed_rhombus(
             sketch,
             boundary,
@@ -2524,8 +2624,9 @@ class CutoutsNative(addin.Addin):
             raise RuntimeError(
                 "Fusion failed to dimension the rhombus spacing."
             )
-        dimension.parameter.expression = (
-            self.inputs.triangle_spacing.expression
+        self._set_parameter_expression(
+            dimension.parameter,
+            self.inputs.triangle_spacing.expression,
         )
         self._name_parameter(dimension.parameter, "rhombusSpacing")
 
@@ -2692,9 +2793,9 @@ class CutoutsNative(addin.Addin):
     ) -> _PatternBoundary:
         boundary = [
             line
-            for entity in sketch.project2(
+            for entity in self._project_into_sketch(
+                sketch,
                 cast(list[adsk.core.Base], outer_curves),
-                True,
             )
             if (line := adsk.fusion.SketchLine.cast(entity))
         ]
@@ -2868,7 +2969,7 @@ class CutoutsNative(addin.Addin):
 
         projected_points = [
             point
-            for entity in sketch.project2(bounds, True)
+            for entity in self._project_into_sketch(sketch, bounds)
             if (point := adsk.fusion.SketchPoint.cast(entity))
         ]
         if len(projected_points) != len(bounds):
@@ -2965,6 +3066,51 @@ class CutoutsNative(addin.Addin):
         for point, line in extreme_points:
             constraints.addCoincident(point, line)
 
+        origin = bottom.startSketchPoint
+        # Optionally shrink the box by the outer inset. A single offset
+        # constraint driven by the outer-contour inset parameter keeps the
+        # two insets one user-editable value; the box built from the points
+        # stays behind as construction geometry.
+        inset = self._bounding_box_inset()
+        if inset > 1e-9:
+            if 2 * inset >= min(extent_u, extent_v) - 1e-6:
+                raise ValueError(
+                    "Outer Inset is too large to inset the bounding box."
+                )
+            expression = (
+                self._outer_inset_parameter.name
+                if self._outer_inset_parameter
+                else self.inputs.outer_inset.expression
+            )
+            inset_curves, _ = self._offset_loop(
+                sketch=sketch,
+                source_curves=cast(list[adsk.fusion.SketchCurve], boundary),
+                expression=expression,
+                should_be_smaller=True,
+                parameter_role=f"{role_prefix}Inset",
+            )
+            self._set_construction(sketch, inset_curves, True)
+            inset_lines = [
+                line
+                for curve in inset_curves
+                if (line := adsk.fusion.SketchLine.cast(curve))
+            ]
+            if len(inset_lines) != 4:
+                raise RuntimeError(
+                    "The bounding box inset did not produce four lines."
+                )
+            bottom = self._nearest_parallel_line(inset_lines, bottom)
+            left = self._nearest_parallel_line(inset_lines, left)
+            boundary = inset_lines
+            extent_u -= 2 * inset
+            extent_v -= 2 * inset
+            # The inset corner next to the outer box's origin corner takes
+            # over the origin role.
+            origin = min(
+                (bottom.startSketchPoint, bottom.endSketchPoint),
+                key=lambda point: point.geometry.distanceTo(lower_left),
+            )
+
         u_dimension = self._dimension_line_length(
             sketch,
             bottom,
@@ -2987,7 +3133,7 @@ class CutoutsNative(addin.Addin):
             cast(list[adsk.fusion.SketchCurve], boundary)
         )
         return _PatternBoundary(
-            origin=bottom.startSketchPoint,
+            origin=origin,
             u_direction=bottom,
             v_direction=left,
             extent_u=extent_u,
@@ -3007,7 +3153,7 @@ class CutoutsNative(addin.Addin):
     ) -> adsk.fusion.SketchLine:
         projected = [
             line
-            for entity in sketch.project2([axis], True)
+            for entity in self._project_into_sketch(sketch, [axis])
             if (line := adsk.fusion.SketchLine.cast(entity))
         ]
         if len(projected) != 1 or projected[0].length <= 1e-6:
@@ -3017,6 +3163,42 @@ class CutoutsNative(addin.Addin):
             )
         projected[0].isConstruction = True
         return projected[0]
+
+    def _bounding_box_inset(self) -> float:
+        """Inset applied to the manual bounding box, in internal units."""
+        if not self.inputs.inset_bounding_box.value:
+            return 0.0
+        return self.inputs.outer_inset.value
+
+    def _nearest_parallel_line(
+        self,
+        candidates: list[adsk.fusion.SketchLine],
+        reference: adsk.fusion.SketchLine,
+    ) -> adsk.fusion.SketchLine:
+        """The candidate parallel to `reference` that lies closest to it —
+        e.g. the inset counterpart of an outer boundary side."""
+        reference_direction = self._normalized_line_vector(reference)
+        reference_midpoint = self._line_midpoint(reference)
+        parallels = [
+            line
+            for line in candidates
+            if abs(
+                self._normalized_line_vector(line).dotProduct(
+                    reference_direction
+                )
+            )
+            > 1 - 1e-5
+        ]
+        if not parallels:
+            raise RuntimeError(
+                "The bounding box inset lost a boundary direction."
+            )
+        return min(
+            parallels,
+            key=lambda line: self._line_midpoint(line).distanceTo(
+                reference_midpoint
+            ),
+        )
 
     def _normalized_line_vector(
         self,
@@ -3213,7 +3395,7 @@ class CutoutsNative(addin.Addin):
                 "Fusion failed to create a triangle seed dimension."
             )
         if is_driving:
-            dimension.parameter.expression = expression
+            self._set_parameter_expression(dimension.parameter, expression)
         if parameter_role:
             self._name_parameter(dimension.parameter, parameter_role)
         return dimension
@@ -3827,6 +4009,69 @@ class CutoutsNative(addin.Addin):
         if not candidates:
             return None
         return max(candidates, key=lambda profile: profile.areaProperties().area)
+
+    def _project_face_loops(
+        self,
+        sketch: adsk.fusion.Sketch,
+        loops: list[adsk.fusion.BRepLoop],
+    ) -> list[list[adsk.fusion.SketchCurve]]:
+        """Projects every loop of a face, grouped per loop.
+
+        One call per loop, which costs one sketch compute per loop, because
+        projecting is the one part of building these sketches that cannot run
+        compute-deferred. Passing every loop's edges to a single project2 call
+        would cost only one compute, but project2 does NOT guarantee that it
+        returns curves in the order the entities were passed: on a nine-loop
+        face it silently returned them in an order that put a stray line in a
+        hole's group. There is no order to slice a flat result apart by, so
+        the loops are asked for one at a time.
+        """
+        grouped: list[list[adsk.fusion.SketchCurve]] = []
+        for loop in loops:
+            edges = cast(list[adsk.core.Base], utils.fusion.as_list(loop.edges))
+            curves = [
+                curve
+                for entity in self._project_into_sketch(sketch, edges)
+                if (curve := adsk.fusion.SketchCurve.cast(entity))
+            ]
+            if not curves:
+                raise RuntimeError("Fusion failed to project one of the face loops.")
+            grouped.append(curves)
+        return grouped
+
+    def _project_into_sketch(
+        self,
+        sketch: adsk.fusion.Sketch,
+        entities: list[adsk.core.Base],
+    ) -> list[adsk.core.Base]:
+        """sketch.project2 with compute temporarily live.
+
+        project2 raises InternalValidationError on a compute-deferred
+        sketch, so projections briefly leave the batching mode. Going live
+        also computes the sketch, so profile reads right after a projection
+        need no extra solve.
+        """
+        was_deferred = sketch.isComputeDeferred
+        if was_deferred:
+            sketch.isComputeDeferred = False
+        try:
+            return list(sketch.project2(entities, True))
+        finally:
+            if was_deferred:
+                sketch.isComputeDeferred = True
+
+    def _solve_deferred(self, sketch: adsk.fusion.Sketch) -> None:
+        """Requests one sketch compute while edits are batched.
+
+        Every geometry, constraint or dimension write to a live sketch makes
+        Fusion run a full compute cycle, so the sketch builders keep
+        isComputeDeferred set and solve explicitly right before the reads
+        that need computed state (profiles, areas, the constraint status).
+        No-op when the sketch is not deferred: compute already ran.
+        """
+        if sketch.isComputeDeferred:
+            sketch.isComputeDeferred = False
+            sketch.isComputeDeferred = True
 
     def _set_construction(
         self,

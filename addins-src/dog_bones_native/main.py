@@ -255,7 +255,9 @@ class DogBonesNative(addin.Addin):
                         candidate.geometry
                     )
                 )
-                and candidate_plane.normal.isParallelTo(plane.normal)
+                and utils.vector.is_parallel_direction(
+                    candidate_plane.normal, plane.normal
+                )
             ]
             if candidates:
                 candidates.sort(key=lambda item: item.area, reverse=True)
@@ -406,7 +408,9 @@ class DogBonesNative(addin.Addin):
         candidates: list[tuple[adsk.fusion.BRepFace, list[_Corner]]] = []
         for face in edges[0].body.faces:
             plane = adsk.core.Plane.cast(face.geometry)
-            if not plane or not plane.normal.isParallelTo(direction):
+            if not plane or not utils.vector.is_parallel_direction(
+                plane.normal, direction
+            ):
                 continue
 
             corners: list[_Corner] = []
@@ -733,8 +737,9 @@ class DogBonesNative(addin.Addin):
         # never change parametrically, and a max()/sin() expression that
         # references the driven angle breaks the sketch solver.
         compensation = max(1.0, 1.0 / math.sin(corner.outside_angle))
-        length_dimension.parameter.expression = (
-            f"({self.inputs.diameter.expression}) / 2 * {compensation:.9g}"
+        self._set_parameter_expression(
+            length_dimension.parameter,
+            f"({self.inputs.diameter.expression}) / 2 * {compensation:.9g}",
         )
         self._name_parameter(
             length_dimension.parameter,
@@ -758,8 +763,9 @@ class DogBonesNative(addin.Addin):
         )
         if not half_dimension or not half_dimension.parameter:
             raise RuntimeError("Fusion failed to dimension the dog-bone bisector.")
-        half_dimension.parameter.expression = (
-            f"({outside_dimension.parameter.name}) / 2"
+        self._set_parameter_expression(
+            half_dimension.parameter,
+            f"({outside_dimension.parameter.name}) / 2",
         )
         self._name_parameter(
             half_dimension.parameter,
@@ -780,15 +786,17 @@ class DogBonesNative(addin.Addin):
         if self._first_center_distance_name is None:
             # The first corner carries the user's offset expression; later
             # corners reference it instead of duplicating the expression.
-            diameter_dimension.parameter.expression = (
+            self._set_parameter_expression(
+                diameter_dimension.parameter,
                 f"2 * {center_distance_name} + "
-                f"({self.inputs.offset.expression})"
+                f"({self.inputs.offset.expression})",
             )
         else:
-            diameter_dimension.parameter.expression = (
+            self._set_parameter_expression(
+                diameter_dimension.parameter,
                 f"2 * {center_distance_name} + "
                 f"({self._first_diameter_name} - "
-                f"2 * {self._first_center_distance_name})"
+                f"2 * {self._first_center_distance_name})",
             )
         self._name_parameter(
             diameter_dimension.parameter,
@@ -823,6 +831,12 @@ class DogBonesNative(addin.Addin):
         parameter: adsk.fusion.ModelParameter,
         role: str,
     ) -> None:
+        # Nothing reads the assigned names back (later references use
+        # parameter.name live, which stays valid for auto-generated names);
+        # the preview is rolled back, so the renames (~300 ms each in large
+        # documents) only matter on OK.
+        if self.is_previewing:
+            return
         name = f"{self._parameter_prefix}_{role}"
         parameter.name = name
         if parameter.name != name:
