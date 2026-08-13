@@ -243,7 +243,7 @@ class ConcealedHingeNative(addin.Addin):
         design = cast(adsk.fusion.Design, self.app.activeProduct)
         self._parameter_prefix = self._unique_parameter_prefix(design)
 
-        door_sketch, door_pair_lines = self._create_door_sketch(
+        door_sketch, door_hole_points = self._create_door_sketch(
             door_face,
             door_edge,
             carcass_edge,
@@ -252,7 +252,7 @@ class ConcealedHingeNative(addin.Addin):
         carcass_sketch = self._create_carcass_sketch(
             carcass_face,
             door_edge,
-            door_pair_lines,
+            door_hole_points,
             expected_carcass_centers,
         )
         self._verify_hole_centers(
@@ -569,7 +569,7 @@ class ConcealedHingeNative(addin.Addin):
         door_edge: adsk.fusion.BRepEdge,
         carcass_edge: adsk.fusion.BRepEdge,
         expected_centers: list[adsk.core.Point3D],
-    ) -> tuple[adsk.fusion.Sketch, list[adsk.fusion.SketchLine]]:
+    ) -> tuple[adsk.fusion.Sketch, list[adsk.fusion.SketchPoint]]:
         if len(expected_centers) != 4:
             raise ValueError("The door sketch requires four hole centers.")
         component = face.body.parentComponent
@@ -719,18 +719,18 @@ class ConcealedHingeNative(addin.Addin):
             parameter_role="doorDiameter",
         )
         self._require_fully_constrained(sketch)
-        return sketch, pair_lines
+        return sketch, circle_centers
 
     def _create_carcass_sketch(
         self,
         face: adsk.fusion.BRepFace,
         door_edge: adsk.fusion.BRepEdge,
-        door_pair_lines: list[adsk.fusion.SketchLine],
+        door_hole_points: list[adsk.fusion.SketchPoint],
         expected_centers: list[adsk.core.Point3D],
     ) -> adsk.fusion.Sketch:
-        if len(door_pair_lines) != 2 or len(expected_centers) != 4:
+        if len(door_hole_points) != 4 or len(expected_centers) != 4:
             raise ValueError(
-                "The carcass sketch requires two door alignment references "
+                "The carcass sketch requires four door hole references "
                 "and four hole centers."
             )
         component = face.body.parentComponent
@@ -746,8 +746,19 @@ class ConcealedHingeNative(addin.Addin):
             door_edge,
             "door edge",
         )
-        # See _create_door_sketch: batch the sketch solve; the in-loop
-        # projections below briefly re-enable it themselves.
+        # The door SKETCH POINTS are projected, not the door sketch's pair
+        # lines: geometry built on a projected line's endpoints loses the
+        # link when the projection recomputes (the endpoints are replaced,
+        # verified by resizing the door), which silently froze the carcass
+        # holes at their original positions. A projected point survives
+        # recompute and drags its dependents along. One batched call - each
+        # project2 is a document update.
+        projected_hole_points = self._project_points(
+            sketch,
+            door_hole_points,
+            "door hinge hole centers",
+        )
+        # See _create_door_sketch: batch the sketch solve.
         sketch.isComputeDeferred = True
         hole_row = self._add_linked_offset_line(
             sketch,
@@ -762,49 +773,40 @@ class ConcealedHingeNative(addin.Addin):
         lines = sketch.sketchCurves.sketchLines
         remaining_centers = [point.copy() for point in expected_centers]
         circle_centers: list[adsk.fusion.SketchPoint] = []
-        for hinge_index, door_pair_line in enumerate(door_pair_lines, start=1):
-            projected_pair = self._project_line(
-                sketch,
-                door_pair_line,
-                f"door hinge {hinge_index} hole pair",
+        for projected_point in projected_hole_points:
+            point_model = sketch.sketchToModelSpace(
+                projected_point.geometry
             )
-            for endpoint in (
-                projected_pair.startSketchPoint,
-                projected_pair.endSketchPoint,
+            expected_center = min(
+                remaining_centers,
+                key=lambda point: point.distanceTo(point_model),
+            )
+            remaining_centers.remove(expected_center)
+            transfer_line = lines.addByTwoPoints(
+                projected_point,
+                sketch.modelToSketchSpace(expected_center),
+            )
+            if not transfer_line:
+                raise RuntimeError(
+                    "Fusion failed to transfer a door hinge position "
+                    "into the carcass sketch."
+                )
+            transfer_line.isConstruction = True
+            if not constraints.addPerpendicular(
+                projected_door_edge,
+                transfer_line,
             ):
-                endpoint_model = sketch.sketchToModelSpace(
-                    endpoint.geometry
+                raise RuntimeError(
+                    "Fusion failed to align a carcass hinge position."
                 )
-                expected_center = min(
-                    remaining_centers,
-                    key=lambda point: point.distanceTo(endpoint_model),
+            if not constraints.addCoincident(
+                transfer_line.endSketchPoint,
+                hole_row,
+            ):
+                raise RuntimeError(
+                    "Fusion failed to attach a carcass hole to its row."
                 )
-                remaining_centers.remove(expected_center)
-                transfer_line = lines.addByTwoPoints(
-                    endpoint,
-                    sketch.modelToSketchSpace(expected_center),
-                )
-                if not transfer_line:
-                    raise RuntimeError(
-                        "Fusion failed to transfer a door hinge position "
-                        "into the carcass sketch."
-                    )
-                transfer_line.isConstruction = True
-                if not constraints.addPerpendicular(
-                    projected_door_edge,
-                    transfer_line,
-                ):
-                    raise RuntimeError(
-                        "Fusion failed to align a carcass hinge position."
-                    )
-                if not constraints.addCoincident(
-                    transfer_line.endSketchPoint,
-                    hole_row,
-                ):
-                    raise RuntimeError(
-                        "Fusion failed to attach a carcass hole to its row."
-                    )
-                circle_centers.append(transfer_line.endSketchPoint)
+            circle_centers.append(transfer_line.endSketchPoint)
 
         self._add_equal_circles(
             sketch,
@@ -815,6 +817,43 @@ class ConcealedHingeNative(addin.Addin):
         )
         self._require_fully_constrained(sketch)
         return sketch
+
+    def _project_points(
+        self,
+        sketch: adsk.fusion.Sketch,
+        sources: list[adsk.fusion.SketchPoint],
+        description: str,
+    ) -> list[adsk.fusion.SketchPoint]:
+        """Projects sketch points in ONE linked call.
+
+        The result order is not compared against the sources: project2 does
+        not guarantee it returns entities in the order they were passed, so
+        callers must match the points to their own references by geometry.
+        """
+        # project2 throws InternalValidationError on a compute-deferred
+        # sketch; briefly re-enable solving around it.
+        was_deferred = sketch.isComputeDeferred
+        if was_deferred:
+            sketch.isComputeDeferred = False
+        try:
+            projected = sketch.project2(
+                cast(list[adsk.core.Base], list(sources)),
+                True,
+            )
+        finally:
+            if was_deferred:
+                sketch.isComputeDeferred = True
+        points = [
+            candidate
+            for entity in projected
+            if (candidate := adsk.fusion.SketchPoint.cast(entity))
+        ]
+        if len(points) != len(sources):
+            raise RuntimeError(
+                f"Fusion failed to project the {description} into "
+                f"'{sketch.name}'."
+            )
+        return points
 
     def _project_line(
         self,
@@ -1149,23 +1188,47 @@ class ConcealedHingeNative(addin.Addin):
                 return candidate
             index += 1
 
+    def _set_parameter_expression(
+        self,
+        parameter: adsk.fusion.ModelParameter,
+        expression: str,
+    ) -> None:
+        """Overrides the shared helper: writes only expressions that carry a
+        parametric link.
+
+        Every dimension here is created on geometry already placed at the
+        intended value (audited per call site - see door_latch_native's
+        counterbore for the failure mode when that invariant is violated),
+        so writing a pure literal changes nothing but the displayed text.
+        An expression that names a parameter is different - that link cannot
+        be recovered from the geometry - so those are always written.
+
+        See Addin._expression_references_parameter for why this is worth
+        doing: a parameter write costs ~0.5 s on a large assembly.
+        """
+        if self._expression_references_parameter(expression):
+            parameter.expression = expression
+
     def _name_parameter(
         self,
         parameter: adsk.fusion.ModelParameter,
         role: str,
     ) -> None:
-        # Nothing reads the assigned names back (later references use
-        # parameter.name live, which stays valid for auto-generated names);
-        # the preview is rolled back, so the renames (~300 ms each in large
-        # documents) only matter on OK.
-        if self.is_previewing:
-            return
-        name = f"{self._parameter_prefix}_{role}"
-        parameter.name = name
-        if parameter.name != name:
-            raise RuntimeError(
-                f"Fusion did not accept the parameter name '{name}'."
-            )
+        """Renaming is disabled: it is pure cosmetics and it dominates the
+        runtime on large assemblies.
+
+        Nothing depends on the names. Every cross-reference here reads
+        `parameter.name` live, so Fusion's auto-generated names (d123) carry
+        the parametric links just as well.
+
+        The cost is set by the size of the document, not by the number of
+        parameters: a rename measures 0.2 ms in an empty design but ~460 ms
+        in a 1750-feature assembly, because each write triggers a document
+        update that scales with the model.
+
+        To restore human-readable names, delete this early return.
+        """
+        return
 
     def _name_feature_parameters(
         self,
@@ -1173,6 +1236,10 @@ class ConcealedHingeNative(addin.Addin):
         base_role: str,
         excluded: adsk.fusion.ModelParameter | None = None,
     ) -> None:
+        # With _name_parameter disabled this would only scan the
+        # component's model parameters (itself slow in large
+        # documents) to do nothing.
+        return
         suffixes = {
             "AlongDistance": "distance",
             "Side1Offset": "endOffset",

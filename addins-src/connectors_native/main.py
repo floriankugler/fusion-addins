@@ -2466,21 +2466,48 @@ class ConnectorsNative(addin.Addin):
                 return candidate
             index += 1
 
+    def _set_parameter_expression(
+        self,
+        parameter: adsk.fusion.ModelParameter,
+        expression: str,
+    ) -> None:
+        """Overrides the shared helper: writes only expressions that carry a
+        parametric link.
+
+        Every dimension here is created on geometry already placed at the
+        intended value (audited per call site - see door_latch_native's
+        counterbore for the failure mode when that invariant is violated),
+        so writing a pure literal changes nothing but the displayed text.
+        An expression that names a parameter is different - that link cannot
+        be recovered from the geometry - so those are always written (e.g.
+        later slots referencing the first slot's width parameter).
+
+        See Addin._expression_references_parameter for why this is worth
+        doing: a parameter write costs ~0.5 s on a large assembly.
+        """
+        if self._expression_references_parameter(expression):
+            parameter.expression = expression
+
     def _name_parameter(
         self,
         parameter: adsk.fusion.ModelParameter,
         role: str,
     ) -> None:
-        # Nothing reads these names back; the preview is rolled back, so the
-        # renames (~300 ms each in large documents) only matter on OK.
-        if self.is_previewing:
-            return
-        name = f"{self._parameter_prefix}_{role}"
-        parameter.name = name
-        if parameter.name != name:
-            raise RuntimeError(
-                f"Fusion did not accept the parameter name '{name}'."
-            )
+        """Renaming is disabled: it is pure cosmetics and it dominates the
+        runtime on large assemblies.
+
+        Nothing depends on the names. Every cross-reference here reads
+        `parameter.name` live, so Fusion's auto-generated names (d123) carry
+        the parametric links just as well.
+
+        The cost is set by the size of the document, not by the number of
+        parameters: a rename measures 0.2 ms in an empty design but ~460 ms
+        in a 1750-feature assembly, because each write triggers a document
+        update that scales with the model.
+
+        To restore human-readable names, delete this early return.
+        """
+        return
 
     def _group_features(
         self,

@@ -2048,16 +2048,27 @@ class TenonsNative(addin.Addin):
             raise RuntimeError(f"Fusion failed to create '{name}'.")
         sketch.name = name
 
-        # One project2 call for all of them: a projection cannot run on a
-        # compute-deferred sketch, so each one is a document update costing
-        # ~0.5 s on a large assembly. Six calls become one.
-        projected = self._project_lines(
-            sketch,
-            [*layout.bases, *layout.outers],
-        )
-        base_count = len(layout.bases)
-        projected_base_lines = projected[:base_count]
-        projected_outer_lines = projected[base_count:]
+        # Deliberately one call PER LINE, even though each is a document
+        # update (~0.5 s on a large assembly). Batching them needs the
+        # results regrouped by geometry, because project2 does not preserve
+        # the input order - and that is not possible here:
+        #
+        #   - This sketch is not always coplanar with the layout the lines
+        #     come from. The mortise-screw sketch is built on the board's
+        #     END face, perpendicular to the tenon face, so the projections
+        #     land nowhere near their sources.
+        #   - On that perpendicular plane the bases and outers project onto
+        #     each other, so even a plane-aware match would be ambiguous.
+        #
+        # A projection's link to its source is what the caller needs, and
+        # Fusion exposes no way to read it back, so the mapping has to come
+        # from asking for one line at a time.
+        projected_base_lines = [
+            self._project_line(sketch, line) for line in layout.bases
+        ]
+        projected_outer_lines = [
+            self._project_line(sketch, line) for line in layout.outers
+        ]
         for line in [*projected_base_lines, *projected_outer_lines]:
             line.isConstruction = True
         context = self._finish_edge_context(
@@ -3423,25 +3434,6 @@ class TenonsNative(addin.Addin):
             raise RuntimeError("A projected reference is not a straight line.")
         return result
 
-    def _project_lines(
-        self,
-        sketch: adsk.fusion.Sketch,
-        lines: list[adsk.fusion.SketchLine],
-    ) -> list[adsk.fusion.SketchLine]:
-        """Projects several lines in ONE call, returned in the input order.
-
-        project2 does NOT guarantee that it returns its results in the order
-        the entities were passed (verified on a nine-loop face elsewhere in
-        this repo, where a flat call scrambled the grouping), so every
-        projection is matched back to its source by geometry. That is worth
-        the trouble here because each project2 call is a separate document
-        update, which costs ~0.5 s on a large assembly.
-        """
-        return self._project_in_one_call(
-            sketch,
-            cast(list[adsk.core.Base], list(lines)),
-        )
-
     def _project_in_one_call(
         self,
         sketch: adsk.fusion.Sketch,
@@ -3454,6 +3446,12 @@ class TenonsNative(addin.Addin):
         because project2 does NOT guarantee that it returns them in the
         order the entities were passed - verified elsewhere in this repo,
         where a flat call silently scrambled a face's loops.
+
+        ONLY usable when every source lies in this sketch's plane, so that
+        each projection lands on its source. Sources are compared in sketch
+        space, ignoring the out-of-plane component, and an ambiguous match
+        is rejected: two sources that project onto each other cannot be told
+        apart afterwards, and guessing would silently swap them.
         """
         if not entities:
             return []
@@ -3465,23 +3463,34 @@ class TenonsNative(addin.Addin):
         if len(projected) != len(entities):
             raise RuntimeError("Fusion failed to project the reference lines.")
 
+        def in_plane(point: adsk.core.Point3D) -> adsk.core.Point3D:
+            flat = sketch.modelToSketchSpace(point)
+            flat.z = 0
+            return flat
+
         def distance(candidate: adsk.fusion.SketchLine, source: adsk.core.Base) -> float:
-            a = candidate.worldGeometry
-            start, end = self._straight_endpoints(source)
-            forward = (a.startPoint.distanceTo(start) + a.endPoint.distanceTo(end))
-            reversed_ = (a.startPoint.distanceTo(end) + a.endPoint.distanceTo(start))
+            first = candidate.startSketchPoint.geometry
+            second = candidate.endSketchPoint.geometry
+            start, end = (in_plane(point) for point in self._straight_endpoints(source))
+            forward = first.distanceTo(start) + second.distanceTo(end)
+            reversed_ = first.distanceTo(end) + second.distanceTo(start)
             return min(forward, reversed_)
 
+        tolerance = self.app.pointTolerance * 100
         remaining = list(projected)
         ordered: list[adsk.fusion.SketchLine] = []
         for source in entities:
-            match = min(remaining, key=lambda candidate: distance(candidate, source))
-            if distance(match, source) > self.app.pointTolerance * 100:
+            ranked = sorted(remaining, key=lambda candidate: distance(candidate, source))
+            if distance(ranked[0], source) > tolerance:
                 raise RuntimeError(
                     "A projected reference could not be matched to its source."
                 )
-            remaining.remove(match)
-            ordered.append(match)
+            if len(ranked) > 1 and distance(ranked[1], source) <= tolerance:
+                raise RuntimeError(
+                    "Two projected references coincide; they cannot be told apart."
+                )
+            remaining.remove(ranked[0])
+            ordered.append(ranked[0])
         return ordered
 
     def _straight_endpoints(
