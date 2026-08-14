@@ -210,12 +210,7 @@ def _hole_from_face(
         warnings.append(f'{body.name}: cylindrical face with non-vertical axis skipped.')
         return None
 
-    # Concave check: for a hole, the face normal points towards the axis.
-    point = face.pointOnFace
-    _, normal = face.evaluator.getNormalAtPoint(point)
-    radial = cylinder.origin.vectorTo(point)
-    radial = _perpendicular_component(radial, axis)
-    if normal.dotProduct(radial) > 0:
+    if not _is_concave_cylinder(face, cylinder):
         return None  # convex cylinder: outer fillet, part of the contour
 
     # Full-circle check: partial concave cylinders are inside-corner fillets.
@@ -248,6 +243,53 @@ def _hole_from_face(
         body=body,
         bottom_edge=bottom_edge,
     )
+
+
+def _is_concave_cylinder(face: adsk.fusion.BRepFace, cylinder: adsk.core.Cylinder) -> bool:
+    """True if the material lies outside the cylinder (hole wall, inside corner
+    relief) rather than inside it (an outer fillet of the contour)."""
+    axis = cylinder.axis
+    axis.normalize()
+    point = face.pointOnFace
+    _, normal = face.evaluator.getNormalAtPoint(point)
+    radial = _perpendicular_component(cylinder.origin.vectorTo(point), axis)
+    return normal.dotProduct(radial) < 0
+
+
+@dataclass
+class Relief:
+    """Inside corner relief of a contour - typically a dogbone: a small concave
+    arc that a wider cutter cannot reach into. Machined along the arc as an open
+    chain, or by plunging the wall like a hole when a tool of exactly the
+    relief's diameter is available."""
+    edge: adsk.fusion.BRepEdge   # the arc of the contour loop
+    face: adsk.fusion.BRepFace   # the concave cylindrical wall
+    diameter: float
+    depth: float
+
+
+def corner_reliefs(edges: list[adsk.fusion.BRepEdge], max_diameter: float,
+                   depth: float) -> list[Relief]:
+    """Reliefs of a contour loop up to max_diameter, at the given cut depth.
+
+    An arc qualifies when its wall face is a concave cylinder, i.e. the material
+    is on the far side of the arc's centre; convex arcs (rounded outside
+    corners) are machinable with any tool. Full circles are holes or cutouts,
+    not corner reliefs, and are left to the hole/cutout handling.
+    """
+    reliefs: list[Relief] = []
+    for edge in edges:
+        arc = adsk.core.Arc3D.cast(edge.geometry)
+        if not arc or 2 * arc.radius > max_diameter:
+            continue
+        for face in edge.faces:
+            cylinder = adsk.core.Cylinder.cast(face.geometry)
+            if (cylinder and abs(cylinder.radius - arc.radius) < HEIGHT_TOL
+                    and _is_concave_cylinder(face, cylinder)):
+                reliefs.append(Relief(edge=edge, face=face, diameter=2 * arc.radius,
+                                      depth=depth))
+                break
+    return reliefs
 
 
 def _has_full_circle_edge(face: adsk.fusion.BRepFace) -> bool:

@@ -19,6 +19,13 @@ widest tool in the template (which must be TOOL_CLEARANCE smaller than the
 corner it has to reach into); on a misfit the best fitting variant is
 substituted with a warning.
 
+A contour tool wider than an inside corner relief (a dogbone) of the profile
+cannot machine it. Those reliefs are collected across all contours and cutouts
+and get extra operations after the contour operations: a relief matching a
+drill template's tool diameter exactly is plunged with it (a contour pass would
+degenerate to a point), every other one is machined along its arc as an open
+chain by the 'dogbone' template's smaller cutter.
+
 Tabs are opt-in per contour: the tab selection accepts edges or faces of an
 outer contour or a cutout, resolved to the owning feature.
 """
@@ -40,6 +47,10 @@ BIG_HOLE_LIMIT = 3.0
 DEPTH_TOL = 0.005
 # Extra depth required for through cuts (breakthrough below the stock, cm).
 THROUGH_ALLOWANCE = 0.02
+# A tool of exactly a relief's diameter machines it (that is what dogbones are
+# drawn for), so only reliefs narrower than the tool by more than this need an
+# extra operation (cm).
+RELIEF_TOL = 0.005
 
 TAB_NONE = 0
 TAB_OUTER = 1
@@ -61,6 +72,8 @@ class Job:
     cutouts: list[recognition.Cutout] = field(default_factory=list)
     contours: list[recognition.Contour] = field(default_factory=list)
     is_through: bool | None = None  # holes only
+    # Single arcs machined as open chains (dogbone reliefs).
+    open_chains: list = field(default_factory=list)
     tabbed: bool = False
     # Edge loops to place tabs on, with a label for warnings.
     tab_loops: list[tuple[list, str]] = field(default_factory=list)
@@ -262,27 +275,27 @@ def plan(result: recognition.RecognitionResult, registry: dict[str, list[templat
         else:
             cutout_overrides[feature[1]] = label
 
-    limit_dims = _limit_dims_cache()
+    tool_limits = _tool_limits_cache()
     jobs: list[Job] = []
     jobs += _plan_holes(small_holes, drills, bores, warnings)
-    jobs += _plan_pockets(pockets, registry, assignments, finish_pockets, limit_dims, warnings)
+    jobs += _plan_pockets(pockets, registry, assignments, finish_pockets, tool_limits, warnings)
     jobs += _plan_contours(result, cutouts, registry, assignments, tab_policy.mode,
                            tab_outer, tab_cutouts,
                            finish_outer, finish_cutouts, outer_overrides, cutout_overrides,
-                           limit_dims, warnings)
+                           drills, tool_limits, warnings)
     return jobs, warnings
 
 
-def _limit_dims_cache():
-    """Cached (max diameter, min flute length) lookup per template variant."""
-    cache: dict[str, tuple[float | None, float | None]] = {}
+def _tool_limits_cache():
+    """Cached tool limits lookup per template variant (each miss loads a file)."""
+    cache: dict[str, templates.ToolLimits] = {}
 
-    def limit_dims(variant: templates.TemplateVariant) -> tuple[float | None, float | None]:
+    def tool_limits(variant: templates.TemplateVariant) -> templates.ToolLimits:
         if variant.name not in cache:
-            cache[variant.name] = templates.limiting_tool_dimensions(variant)
+            cache[variant.name] = templates.tool_limits(variant)
         return cache[variant.name]
 
-    return limit_dims
+    return tool_limits
 
 
 def _drill_match(diameter: float, drills: dict[float, templates.TemplateVariant]) -> bool:
@@ -405,20 +418,20 @@ def _pick_bore(diameter, required_depth, bores, require_depth):
 
 
 def _plan_pockets(pockets, registry, assignments: Assignments, finish_pockets: set[int],
-                  limit_dims, warnings: list[str]) -> list[Job]:
+                  tool_limits, warnings: list[str]) -> list[Job]:
     if not pockets:
         return []
 
     def fits_radius(variant: templates.TemplateVariant, pocket: recognition.Pocket) -> bool:
         if pocket.min_corner_radius is None:
             return True
-        diameter = limit_dims(variant)[0]
+        diameter = tool_limits(variant).max_diameter
         # The tool has to fit into the corner with room to cut: its diameter
         # must stay below the corner's diameter by at least TOOL_CLEARANCE.
         return diameter is None or diameter <= 2 * pocket.min_corner_radius - TOOL_CLEARANCE
 
     def fits_depth(variant: templates.TemplateVariant, pocket: recognition.Pocket) -> bool:
-        flute = limit_dims(variant)[1]
+        flute = tool_limits(variant).min_flute
         return flute is None or flute >= pocket.depth - DEPTH_TOL
 
     def fits(variant, pocket):
@@ -452,7 +465,7 @@ def _plan_pockets(pockets, registry, assignments: Assignments, finish_pockets: s
                     f'"{variant.display_label}" tool; check the operation.')
             else:
                 eligible = [v for v in registry['pocket'] if v.matches_cutter(assignments.cutter)]
-                replacement = _best_fitting_variant(eligible, variant, pocket, fits, limit_dims)
+                replacement = _best_fitting_variant(eligible, variant, pocket, fits, tool_limits)
                 if replacement:
                     warnings.append(
                         f'{pocket.body.name}: pocket {reason} does not suit '
@@ -469,7 +482,7 @@ def _plan_pockets(pockets, registry, assignments: Assignments, finish_pockets: s
     return list(groups.values())
 
 
-def _best_fitting_variant(variants, chosen, pocket, fits, limit_dims):
+def _best_fitting_variant(variants, chosen, pocket, fits, tool_limits):
     """Among fitting variants prefer the chosen finishing flag and similar labels,
     then the largest tool."""
     candidates = [v for v in variants if fits(v, pocket)]
@@ -477,27 +490,29 @@ def _best_fitting_variant(variants, chosen, pocket, fits, limit_dims):
         return None
     def rank(variant):
         prefix = len(os.path.commonprefix([variant.label, chosen.label]))
-        return (variant.has_finish == chosen.has_finish, prefix, limit_dims(variant)[0] or 0.0)
+        return (variant.has_finish == chosen.has_finish, prefix,
+                tool_limits(variant).max_diameter or 0.0)
     return max(candidates, key=rank)
 
 
-def _contour_depth_check(registry, variant, feature_depth, cutter, limit_dims,
+def _contour_depth_check(registry, variant, feature_depth, cutter, tool_limits,
                          context: str, warnings: list[str]) -> templates.TemplateVariant:
     """Ensure the contour template's tool can cut through the stock; substitute
     a depth-capable variant (same finish flag) or warn."""
     required = feature_depth + THROUGH_ALLOWANCE
-    flute = limit_dims(variant)[1]
+    flute = tool_limits(variant).min_flute
     if flute is None or flute >= required - DEPTH_TOL:
         return variant
     candidates = [
         v for v in registry['contour']
         if v.matches_cutter(cutter) and v.has_finish == variant.has_finish
-        and (limit_dims(v)[1] is None or limit_dims(v)[1] >= required - DEPTH_TOL)
+        and (tool_limits(v).min_flute is None
+             or tool_limits(v).min_flute >= required - DEPTH_TOL)
     ]
     if candidates:
         def rank(v):
             prefix = len(os.path.commonprefix([v.label, variant.label]))
-            return (prefix, limit_dims(v)[0] or 0.0)
+            return (prefix, tool_limits(v).max_diameter or 0.0)
         replacement = max(candidates, key=rank)
         warnings.append(
             f'{context}: cut depth {required * 10:.1f}mm exceeds the "{variant.display_label}" '
@@ -513,7 +528,7 @@ def _plan_contours(result, cutouts, registry, assignments: Assignments, tab_mode
                    tab_outer: set[str], tab_cutouts: set[int],
                    finish_outer: set[str], finish_cutouts: set[int],
                    outer_overrides: dict[str, str], cutout_overrides: dict[int, str],
-                   limit_dims, warnings: list[str]) -> list[Job]:
+                   drills, tool_limits, warnings: list[str]) -> list[Job]:
     if not cutouts and not result.contours:
         return []
     if assignments.contour_default is None and not outer_overrides and not cutout_overrides:
@@ -524,6 +539,9 @@ def _plan_contours(result, cutouts, registry, assignments: Assignments, tab_mode
         if selected:
             return True
         return assignments.finish_outer_all if is_outer else assignments.finish_cutouts_all
+
+    # Inside corner reliefs left over by the contour tools.
+    reliefs: list[recognition.Relief] = []
 
     # Tabbed and untabbed features cannot share an operation: explicit tab
     # positions suppress automatic placement only for contours that have
@@ -541,8 +559,9 @@ def _plan_contours(result, cutouts, registry, assignments: Assignments, tab_mode
             warnings.append(f'No contour template found for "{label}"; cutout skipped.')
             continue
         variant = _contour_depth_check(
-            registry, variant, cutout.depth, assignments.cutter, limit_dims,
+            registry, variant, cutout.depth, assignments.cutter, tool_limits,
             f'{cutout.body.name} cutout', warnings)
+        reliefs += _reliefs(variant, cutout.edges, cutout.depth, tool_limits)
         tabbed = tab_mode in (TAB_INNER, TAB_ALL) or index in tab_cutouts
         key = (variant.name, tabbed)
         if key not in cutout_groups:
@@ -568,8 +587,9 @@ def _plan_contours(result, cutouts, registry, assignments: Assignments, tab_mode
             warnings.append(f'No contour template found for "{label}"; outer contour skipped.')
             continue
         variant = _contour_depth_check(
-            registry, variant, contour.depth, assignments.cutter, limit_dims,
+            registry, variant, contour.depth, assignments.cutter, tool_limits,
             f'{contour.body.name} outer contour', warnings)
+        reliefs += _reliefs(variant, contour.edges, contour.depth, tool_limits)
         tabbed = tab_mode in (TAB_OUTER, TAB_ALL) or body_token in tab_outer
         if tabbed and not contour.edges:
             warnings.append(
@@ -585,7 +605,103 @@ def _plan_contours(result, cutouts, registry, assignments: Assignments, tab_mode
         if tabbed:
             contour_groups[key].tab_loops.append((contour.edges, f'{contour.body.name} outer contour'))
 
-    return list(cutout_groups.values()) + list(contour_groups.values())
+    return (list(cutout_groups.values()) + list(contour_groups.values())
+            + _plan_reliefs(reliefs, registry, drills, assignments.cutter, tool_limits, warnings))
+
+
+def _reliefs(variant: templates.TemplateVariant, edges, depth: float,
+             tool_limits) -> list[recognition.Relief]:
+    """Inside corner reliefs of one contour that its own tool is too wide for.
+
+    The narrowest tool of the template decides: it is the one that reaches
+    furthest into the corners."""
+    diameter = tool_limits(variant).min_diameter
+    if diameter is None:
+        return []
+    return recognition.corner_reliefs(edges, diameter - RELIEF_TOL, depth)
+
+
+def _plan_reliefs(reliefs: list[recognition.Relief], registry, drills, cutter: str | None,
+                  tool_limits, warnings: list[str]) -> list[Job]:
+    """Extra operations for the reliefs the contour operations left behind:
+    plunged with an exactly fitting drill where one exists, milled along the arc
+    with the dogbone template otherwise."""
+    if not reliefs:
+        return []
+
+    drill_groups: dict[str, Job] = {}
+    milled: list[recognition.Relief] = []
+    for relief in reliefs:
+        variant = _drill_for_relief(relief, drills)
+        if not variant:
+            milled.append(relief)
+            continue
+        if variant.name not in drill_groups:
+            drill_groups[variant.name] = Job(
+                variant=variant,
+                display_name=f'Dogbones ({variant.display_label})',
+                is_through=True,
+            )
+        # A relief is a partial hole: the drill strategy takes its wall face.
+        drill_groups[variant.name].holes.append(recognition.Hole(
+            face=relief.face, diameter=relief.diameter, depth=relief.depth,
+            is_through=True, body=relief.face.body))
+
+    for job in drill_groups.values():
+        flute = tool_limits(job.variant).min_flute
+        required = max(hole.depth for hole in job.holes) + THROUGH_ALLOWANCE
+        if flute is not None and flute < required - DEPTH_TOL:
+            warnings.append(
+                f'Dogbone cut depth {required * 10:.1f}mm exceeds the '
+                f'"{job.variant.display_label}" tool ({flute * 10:.1f}mm); check the operation.')
+
+    return list(drill_groups.values()) + _plan_milled_reliefs(
+        milled, registry, cutter, tool_limits, warnings)
+
+
+def _drill_for_relief(relief: recognition.Relief,
+                      drills) -> templates.TemplateVariant | None:
+    """The drill template whose tool has exactly the relief's diameter, if any:
+    such a relief is removed by a single plunge at its centre, while a contour
+    pass along it would degenerate to a point."""
+    for tool_dia, (variant, _) in drills.items():
+        if abs(relief.diameter - tool_dia) < DRILL_MATCH_TOL:
+            return variant
+    return None
+
+
+def _plan_milled_reliefs(reliefs: list[recognition.Relief], registry, cutter: str | None,
+                         tool_limits, warnings: list[str]) -> list[Job]:
+    """One operation with the smallest available dogbone cutter, machining each
+    relief along its arc as an open chain."""
+    if not reliefs:
+        return []
+    candidates = [v for v in registry['dogbone'] if v.matches_cutter(cutter)]
+    if not candidates:
+        warnings.append(
+            f'{len(reliefs)} dogbone(s) are too small for the contour tool, but no dogbone '
+            'template is available; they are not machined.')
+        return []
+    variant = min(candidates, key=lambda v: tool_limits(v).max_diameter or 0.0)
+    limits = tool_limits(variant)
+
+    smallest = min(relief.diameter for relief in reliefs)
+    if limits.max_diameter is not None and limits.max_diameter > smallest - RELIEF_TOL:
+        warnings.append(
+            f'The smallest dogbone (⌀{smallest * 10:.2f}mm) is not wider than the '
+            f'"{variant.display_label}" tool (⌀{limits.max_diameter * 10:.2f}mm), which '
+            'leaves it nothing to cut; check the operation.')
+    required = max(relief.depth for relief in reliefs) + THROUGH_ALLOWANCE
+    if limits.min_flute is not None and limits.min_flute < required - DEPTH_TOL:
+        warnings.append(
+            f'Dogbone cut depth {required * 10:.1f}mm exceeds the "{variant.display_label}" '
+            f'tool ({limits.min_flute * 10:.1f}mm); check the operation.')
+
+    return [Job(
+        variant=variant,
+        display_name=f'Dogbones ({variant.display_label})',
+        open_chains=[relief.edge for relief in reliefs],
+    )]
 
 
 def _variants_by_tool_diameter(

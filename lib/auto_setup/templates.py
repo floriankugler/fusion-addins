@@ -6,8 +6,11 @@ naming convention
 
     <kind>[.<tag>[.<tag>...]]_<label>.f3dhsm-template
 
-where kind is one of 'pocket', 'contour', 'drill', 'bore'. Tags encode machine-
-readable attributes; the label is purely cosmetic (shown in the UI):
+where kind is one of 'pocket', 'contour', 'drill', 'bore', 'dogbone'. The
+'dogbone' kind machines the inside corner reliefs that the contour tool is too
+wide for; it should carry the smallest cutter (reliefs that exactly match a
+drill template's tool are plunged with that drill instead). Tags encode
+machine-readable attributes; the label is purely cosmetic (shown in the UI):
 
     dc      spiral down-cut cutter variant
     udc     spiral up/down-cut cutter variant
@@ -25,7 +28,7 @@ import adsk.core, adsk.cam
 import os
 from dataclasses import dataclass
 
-KINDS = ('pocket', 'contour', 'drill', 'bore')
+KINDS = ('pocket', 'contour', 'drill', 'bore', 'dogbone')
 CUTTER_TAGS = ('dc', 'udc')
 VALID_TAGS = ('dc', 'udc', 'finish')
 FILE_EXT = '.f3dhsm-template'
@@ -64,6 +67,17 @@ class TemplateVariant:
 
     def matches_cutter(self, cutter: str | None) -> bool:
         return self.cutter is None or cutter is None or self.cutter == cutter
+
+
+@dataclass(frozen=True)
+class ToolLimits:
+    """What a template's tools can reach. Every operation of a template runs,
+    so the widest tool has to fit into the feature and the shortest flute has
+    to reach its bottom; the narrowest tool decides how far into inside corners
+    the template gets."""
+    max_diameter: float | None
+    min_flute: float | None
+    min_diameter: float | None
 
 
 def parse_stem(stem: str) -> tuple[str, tuple[str, ...], str] | None:
@@ -134,18 +148,17 @@ def primary_tool(variant: TemplateVariant) -> tuple[float | None, float | None]:
     return dimensions[0] if dimensions else (None, None)
 
 
-def limiting_tool_dimensions(variant: TemplateVariant) -> tuple[float | None, float | None]:
-    """(largest diameter, shortest flute) across the template's operations.
-
-    The dimensions that decide whether a template can machine a feature: every
-    operation of the template runs, so the widest tool has to fit into the
-    feature and the shortest flute has to reach its bottom.
-    """
+def tool_limits(variant: TemplateVariant) -> ToolLimits:
+    """The tool dimensions across the template's operations that decide what it
+    can machine (see ToolLimits)."""
     dimensions = tool_dimensions(variant)
     diameters = [d for d, _ in dimensions if d is not None]
     flutes = [f for _, f in dimensions if f is not None]
-    return (max(diameters) if diameters else None,
-            min(flutes) if flutes else None)
+    return ToolLimits(
+        max_diameter=max(diameters) if diameters else None,
+        min_flute=min(flutes) if flutes else None,
+        min_diameter=min(diameters) if diameters else None,
+    )
 
 
 def export_document_setups(templates_dir: str) -> tuple[list[str], list[str]]:

@@ -339,8 +339,9 @@ class AutoSetupExport(addin.Addin):
     @property
     def plugin_tooltip(self) -> str:
         return ('Exports every setup of the active document whose name follows the '
-                '"<kind>[.<tag>...]_<label>" convention (kind: pocket, contour, drill, bore; '
-                'tags: dc, udc, finish) as a template file used by the Auto Setup command.')
+                '"<kind>[.<tag>...]_<label>" convention (kind: pocket, contour, drill, bore, '
+                'dogbone; tags: dc, udc, finish) as a template file used by the Auto Setup '
+                'command.')
 
     def get_ui_placement(self) -> ui_placement.UIPlacement:
         command = ui_placement.PlacementSpec(

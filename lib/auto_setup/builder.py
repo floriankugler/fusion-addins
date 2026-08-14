@@ -117,8 +117,9 @@ def _insert_job(setup: adsk.cam.Setup, job: rules.Job, tab_policy: rules.TabPoli
 
     for operation in operations:
         _bind_geometry(operation, job)
-        if job.is_through and job.variant.kind == 'drill':
-            # Break through the bottom by 0.2mm (instead of the drill tip option).
+        if job.is_through and job.variant.kind in ('drill', 'bore'):
+            # Break through the bottom by 0.2mm (for drills instead of the
+            # drill tip option), like the contour templates do.
             _try_set(operation, 'bottomHeight_mode', "'from hole bottom'")
             _try_set(operation, 'bottomHeight_offset', '-0.2 mm')
         _apply_tabs(operation, job, tab_policy, warnings, get_tab_sketch)
@@ -179,6 +180,13 @@ def _bind_geometry(operation: adsk.cam.Operation, job: rules.Job):
     for cutout in job.cutouts:
         chain = selections.createNewChainSelection()
         chain.inputGeometry = [cutout.edges[0]]
+    for edge in job.open_chains:
+        chain = selections.createNewChainSelection()
+        chain.inputGeometry = [edge]
+        # A dogbone relief is a single arc: machined as an open chain, not
+        # closed up into a tiny circular pocket.
+        if chain.isOpenAllowed:
+            chain.isOpen = True
     for contour in job.contours:
         silhouette = selections.createNewSilhouetteSelection()
         silhouette.inputGeometry = [contour.body]
