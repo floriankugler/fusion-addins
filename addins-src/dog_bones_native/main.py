@@ -72,10 +72,10 @@ class DogBonesNativeInputs(inputs.Inputs):
             tool_tip="Additional clearance added to the dog-bone diameter.",
             units=units,
         )
-        # A zero offset degenerates the in-face region into two lens
-        # profiles that touch only at the corner vertex, so it is excluded.
+        # Zero is allowed: the relief circle then passes exactly through the
+        # corner vertex, which splits the in-face region into two lens
+        # profiles touching at that vertex (see _dogbone_profiles).
         self.offset.minimum_value = 0
-        self.offset.minimum_inclusive = False
         super().__init__()
 
 
@@ -274,8 +274,8 @@ class DogBonesNative(addin.Addin):
             return "Select one planar face, or one or more parallel edges."
         if self.inputs.diameter.value <= 0:
             return "Tool Diameter must be greater than zero."
-        if self.inputs.offset.value <= 0:
-            return "Offset must be greater than zero."
+        if self.inputs.offset.value < 0:
+            return "Offset cannot be negative."
 
         entities = self.inputs.entities.value
         faces = [
@@ -921,22 +921,41 @@ class DogBonesNative(addin.Addin):
 
         selected: list[tuple[_Corner, adsk.fusion.Profile]] = []
         for corner, circle in zip(corners, circles):
-            probe = self._dogbone_profile_probe(sketch, face, corner, circle)
-            matches = [
-                profile
-                for profile in sketch.profiles
-                if self._profile_uses_circle(profile, circle)
-                and profile.face.isPointOnFace(
-                    probe,
-                    self.app.pointTolerance * 10,
+            # One probe per corner edge. With an offset the vertex lies inside
+            # the circle and both probes hit the same profile; with a zero
+            # offset the circle passes through the vertex and the in-face
+            # region falls apart into two lenses that touch there - one per
+            # edge - and both have to be cut.
+            found: list[adsk.fusion.Profile] = []
+            for along, away in (
+                (corner.edge_one, corner.edge_two),
+                (corner.edge_two, corner.edge_one),
+            ):
+                probe = self._dogbone_profile_probe(
+                    sketch,
+                    face,
+                    corner,
+                    circle,
+                    along,
+                    away,
                 )
-            ]
-            if len(matches) != 1:
-                raise RuntimeError(
-                    "Fusion could not identify exactly one in-face profile "
-                    "for a dog-bone circle."
-                )
-            selected.append((corner, matches[0]))
+                matches = [
+                    profile
+                    for profile in sketch.profiles
+                    if self._profile_uses_circle(profile, circle)
+                    and profile.face.isPointOnFace(
+                        probe,
+                        self.app.pointTolerance * 10,
+                    )
+                ]
+                if len(matches) != 1:
+                    raise RuntimeError(
+                        "Fusion could not identify exactly one in-face profile "
+                        "for a dog-bone circle."
+                    )
+                if all(matches[0] != profile for profile in found):
+                    found.append(matches[0])
+            selected.extend((corner, profile) for profile in found)
 
         if not selected:
             raise RuntimeError("No in-face dog-bone profiles were found.")
@@ -959,13 +978,17 @@ class DogBonesNative(addin.Addin):
         face: adsk.fusion.BRepFace,
         corner: _Corner,
         circle: adsk.fusion.SketchCircle,
+        along: adsk.fusion.BRepEdge,
+        away: adsk.fusion.BRepEdge,
     ) -> adsk.core.Point3D:
+        """A point just inside the face, next to the corner, on the 'along'
+        side of it: it identifies the in-face profile of that corner edge."""
         direction_one = self._edge_direction_from_vertex(
-            corner.edge_one,
+            along,
             corner.vertex,
         )
         direction_two = self._edge_direction_from_vertex(
-            corner.edge_two,
+            away,
             corner.vertex,
         )
         probe_direction = direction_one.copy()

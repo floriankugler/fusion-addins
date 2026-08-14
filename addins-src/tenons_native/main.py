@@ -14,6 +14,12 @@ from lib.fusionbootstrap.runtime import RuntimeInfo
 
 _addin: addin.Addin | None = None
 
+# An offset at or below this is treated as zero (cm): the mortise side then
+# lands on the projected tenon side, and the two are constrained collinear
+# instead of dimensioned - an offset dimension between coincident lines is
+# degenerate.
+_ZERO_OFFSET = 1e-6
+
 
 @unique
 class ConnectorType(Enum):
@@ -296,10 +302,10 @@ class TenonsNativeInputs(inputs.Inputs):
             tool_tip="Clearance added to the mortise along the selected edge.",
             units=units,
         )
-        # The offset dimensions between the projected tenon profile and the
-        # mortise rectangle require a positive value.
+        # Zero is allowed: the mortise then matches the tenon exactly, and the
+        # rectangle side is constrained collinear with the projected tenon
+        # profile instead of being dimensioned off it.
         self.mortise_length_offset.minimum_value = 0
-        self.mortise_length_offset.minimum_inclusive = False
         self.mortise_width_offset = inputs.FloatInput(
             id="mortiseWidthOffset",
             name="Mortise Width Offset",
@@ -308,7 +314,6 @@ class TenonsNativeInputs(inputs.Inputs):
             units=units,
         )
         self.mortise_width_offset.minimum_value = 0
-        self.mortise_width_offset.minimum_inclusive = False
         self.mortise_depth_offset = inputs.FloatInput(
             id="mortiseDepthOffset",
             name="Mortise Depth Offset",
@@ -695,7 +700,10 @@ class TenonsNative(addin.Addin):
             component=component,
             sketch=root_dogbone_sketch,
             target_body=tenon_body,
-            target_entity=tenon_body,
+            target_entity=self._through_target(
+                tenon_body,
+                geometry.tenon_opposite_face,
+            ),
             direction=tenon_through_direction,
             offset_expression=None,
             operation=adsk.fusion.FeatureOperations.CutFeatureOperation,  # type: ignore
@@ -806,10 +814,10 @@ class TenonsNative(addin.Addin):
                 "Remaining Material must be smaller than the mortise-board "
                 "thickness."
             )
-        if self.inputs.mortise_length_offset.value <= 0:
-            return "Mortise Length Offset must be greater than zero."
-        if self.inputs.mortise_width_offset.value <= 0:
-            return "Mortise Width Offset must be greater than zero."
+        if self.inputs.mortise_length_offset.value < 0:
+            return "Mortise Length Offset cannot be negative."
+        if self.inputs.mortise_width_offset.value < 0:
+            return "Mortise Width Offset cannot be negative."
         if self.inputs.hide_dogbones.value:
             # Every hidden relief sits one radius away from the corner along
             # the short edge and bites that far into the mating profile.
@@ -2197,6 +2205,8 @@ class TenonsNative(addin.Addin):
         def coordinate(point: adsk.core.Point3D, axis) -> float:
             return point.x * axis.x + point.y * axis.y
 
+        zero_length = self.inputs.mortise_length_offset.value <= _ZERO_OFFSET
+        zero_width = self.inputs.mortise_width_offset.value <= _ZERO_OFFSET
         length_reference: str | None = None
         width_reference: str | None = None
         # The first rectangle's sides, which the later ones are constrained to.
@@ -2287,35 +2297,43 @@ class TenonsNative(addin.Addin):
             # parameter's expression triggers a document update costing
             # ~0.5 s in a large assembly, against ~1 ms for a constraint.
             if first_lower is None or first_upper is None:
-                left_dimension = self._add_offset_dimension(
+                left_dimension = self._add_offset_dimension_or_collinear(
                     sketch,
                     perpendicular[0],
                     left,
                     f"({self.inputs.mortise_length_offset.expression}) / 2",
                     f"mortise{index}LeftOffset",
+                    zero_length,
                 )
-                length_reference = left_dimension.parameter.name
-                self._add_offset_dimension(
+                length_reference = (
+                    left_dimension.parameter.name if left_dimension else None
+                )
+                self._add_offset_dimension_or_collinear(
                     sketch,
                     perpendicular[1],
                     right,
                     length_reference,
                     f"mortise{index}RightOffset",
+                    zero_length,
                 )
-                lower_dimension = self._add_offset_dimension(
+                lower_dimension = self._add_offset_dimension_or_collinear(
                     sketch,
                     parallel[0],
                     lower,
                     f"({self.inputs.mortise_width_offset.expression}) / 2",
                     f"mortise{index}LowerOffset",
+                    zero_width,
                 )
-                width_reference = lower_dimension.parameter.name
-                self._add_offset_dimension(
+                width_reference = (
+                    lower_dimension.parameter.name if lower_dimension else None
+                )
+                self._add_offset_dimension_or_collinear(
                     sketch,
                     parallel[1],
                     upper,
                     width_reference,
                     f"mortise{index}UpperOffset",
+                    zero_width,
                 )
                 first_lower = lower
                 first_upper = upper
@@ -2327,12 +2345,13 @@ class TenonsNative(addin.Addin):
                 constraints.addCollinear(first_lower, lower)
                 constraints.addCollinear(first_upper, upper)
                 constraints.addEqual(first_lower, lower)
-                self._add_offset_dimension(
+                self._add_offset_dimension_or_collinear(
                     sketch,
                     perpendicular[0],
                     left,
                     length_reference,
                     f"mortise{index}LeftOffset",
+                    zero_length,
                 )
             center = sketch.sketchPoints.add(
                 self._sketch_line_midpoint(diagonal)
@@ -3192,6 +3211,31 @@ class TenonsNative(addin.Addin):
             parameter_role,
         )
 
+    def _add_offset_dimension_or_collinear(
+        self,
+        sketch: adsk.fusion.Sketch,
+        reference: adsk.fusion.SketchLine,
+        line: adsk.fusion.SketchLine,
+        expression: str | None,
+        parameter_role: str,
+        zero: bool,
+    ) -> adsk.fusion.SketchOffsetDimension | None:
+        """Dimension the mortise side off the projected tenon side, or - at a
+        zero offset, where the two coincide and a dimension is degenerate -
+        constrain them collinear."""
+        if zero:
+            sketch.geometricConstraints.addCollinear(reference, line)
+            return None
+        if expression is None:
+            raise RuntimeError("A mortise offset dimension has no expression.")
+        return self._add_offset_dimension(
+            sketch,
+            reference,
+            line,
+            expression,
+            parameter_role,
+        )
+
     def _add_offset_dimension(
         self,
         sketch: adsk.fusion.Sketch,
@@ -3562,6 +3606,27 @@ class TenonsNative(addin.Addin):
             if sketch_normal.dotProduct(direction) >= 0
             else adsk.fusion.ExtentDirections.NegativeExtentDirection
         )
+
+    def _through_target(
+        self,
+        body: adsk.fusion.BRepBody,
+        opposite_face: adsk.fusion.BRepFace,
+    ) -> adsk.core.Base:
+        """Target entity for a cut that goes through the whole board.
+
+        A planar face is preferred over the body: a relief whose circle only
+        touches the material - which is what a zero dog-bone offset draws -
+        makes Fusion reject a body target ("the extrusion profile falls
+        outside the boundary of the selected body"), while a face target
+        simply cuts to that plane. The body is the fallback for when the
+        preceding join has invalidated the face.
+        """
+        try:
+            if opposite_face.isValid and opposite_face.body == body:
+                return opposite_face
+        except Exception:
+            pass
+        return body
 
     def _target_body(
         self,

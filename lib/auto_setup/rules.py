@@ -13,7 +13,9 @@ Pockets and contours are chosen by label in the UI; the selected cutter
 variant (dc / udc) picks the concrete template file (untagged templates are
 valid for any cutter). Finishing: a global mode (none / outer contours / all
 contours) plus an additive selection of individual contours or pockets that
-get the '.finish' template variant regardless of the mode. Pocket templates
+get the '.finish' template variant regardless of the mode. Two subtractive
+selections override those defaults: features that are not machined at all, and
+features that keep their operation but lose the finishing pass. Pocket templates
 are validated against the pocket's minimum concave corner radius using the
 widest tool in the template (which must be TOOL_CLEARANCE smaller than the
 corner it has to reach into); on a misfit the best fitting variant is
@@ -101,10 +103,31 @@ class Assignments:
     finish_cutouts_all: bool = False     # ... on all inner contours (cutouts)
     finish_pockets_all: bool = False     # ... on all pockets
     finish_selection: list = field(default_factory=list)  # entities (additive)
+    # Features not to machine at all, and features that keep their roughing
+    # operation but lose the finishing pass (wins over finish_selection).
+    skip_selection: list = field(default_factory=list)
+    no_finish_selection: list = field(default_factory=list)
     # entityToken of a pocket bottom face -> label
     pocket_overrides: dict[str, str] = field(default_factory=dict)
     # (picked contour entity, label) pairs; resolved to features during planning
     contour_overrides: list[tuple[object, str]] = field(default_factory=list)
+
+
+@dataclass
+class _FeatureSets:
+    """The UI selections resolved to features: outer contours by body
+    entityToken, cutouts and pockets by index."""
+    tab_outer: set[str] = field(default_factory=set)
+    tab_cutouts: set[int] = field(default_factory=set)
+    finish_outer: set[str] = field(default_factory=set)
+    finish_cutouts: set[int] = field(default_factory=set)
+    finish_pockets: set[int] = field(default_factory=set)
+    skip_outer: set[str] = field(default_factory=set)
+    skip_cutouts: set[int] = field(default_factory=set)
+    skip_pockets: set[int] = field(default_factory=set)
+    no_finish_outer: set[str] = field(default_factory=set)
+    no_finish_cutouts: set[int] = field(default_factory=set)
+    no_finish_pockets: set[int] = field(default_factory=set)
 
 
 # ---- UI option enumeration ---------------------------------------------------
@@ -260,9 +283,7 @@ def plan(result: recognition.RecognitionResult, registry: dict[str, list[templat
             small_holes.append(hole)
 
     resolver = SelectionResolver(result, cutouts, pockets)
-    tab_outer, tab_cutouts, _ = _resolve_features(resolver, tab_policy.selection, warnings, 'tab')
-    finish_outer, finish_cutouts, finish_pockets = _resolve_features(
-        resolver, assignments.finish_selection, warnings, 'finishing')
+    sets = _feature_sets(resolver, assignments, tab_policy, warnings)
 
     outer_overrides: dict[str, str] = {}
     cutout_overrides: dict[int, str] = {}
@@ -278,12 +299,25 @@ def plan(result: recognition.RecognitionResult, registry: dict[str, list[templat
     tool_limits = _tool_limits_cache()
     jobs: list[Job] = []
     jobs += _plan_holes(small_holes, drills, bores, warnings)
-    jobs += _plan_pockets(pockets, registry, assignments, finish_pockets, tool_limits, warnings)
-    jobs += _plan_contours(result, cutouts, registry, assignments, tab_policy.mode,
-                           tab_outer, tab_cutouts,
-                           finish_outer, finish_cutouts, outer_overrides, cutout_overrides,
-                           drills, tool_limits, warnings)
+    jobs += _plan_pockets(pockets, registry, assignments, sets, tool_limits, warnings)
+    jobs += _plan_contours(result, cutouts, registry, assignments, tab_policy.mode, sets,
+                           outer_overrides, cutout_overrides, drills, tool_limits, warnings)
     return jobs, warnings
+
+
+def _feature_sets(resolver: SelectionResolver, assignments: Assignments,
+                  tab_policy: TabPolicy, warnings: list[str]) -> _FeatureSets:
+    tab_outer, tab_cutouts, _ = _resolve_features(resolver, tab_policy.selection, warnings, 'tab')
+    finish = _resolve_features(resolver, assignments.finish_selection, warnings, 'finishing')
+    skip = _resolve_features(resolver, assignments.skip_selection, warnings, 'skip')
+    no_finish = _resolve_features(
+        resolver, assignments.no_finish_selection, warnings, 'skip-finishing')
+    return _FeatureSets(
+        tab_outer=tab_outer, tab_cutouts=tab_cutouts,
+        finish_outer=finish[0], finish_cutouts=finish[1], finish_pockets=finish[2],
+        skip_outer=skip[0], skip_cutouts=skip[1], skip_pockets=skip[2],
+        no_finish_outer=no_finish[0], no_finish_cutouts=no_finish[1],
+        no_finish_pockets=no_finish[2])
 
 
 def _tool_limits_cache():
@@ -417,7 +451,7 @@ def _pick_bore(diameter, required_depth, bores, require_depth):
     return bores[tool_dia][0], tool_dia
 
 
-def _plan_pockets(pockets, registry, assignments: Assignments, finish_pockets: set[int],
+def _plan_pockets(pockets, registry, assignments: Assignments, sets: _FeatureSets,
                   tool_limits, warnings: list[str]) -> list[Job]:
     if not pockets:
         return []
@@ -439,13 +473,16 @@ def _plan_pockets(pockets, registry, assignments: Assignments, finish_pockets: s
 
     groups: dict[str, Job] = {}
     for index, pocket in enumerate(pockets):
+        if index in sets.skip_pockets:
+            continue
         token = pocket.bottom_face.entityToken
         is_override = token in assignments.pocket_overrides
         label = assignments.pocket_overrides.get(token, assignments.pocket_default)
         if label is None:
             warnings.append('No pocket template available; pockets skipped.')
             return []
-        finish = assignments.finish_pockets_all or index in finish_pockets
+        finish = ((assignments.finish_pockets_all or index in sets.finish_pockets)
+                  and index not in sets.no_finish_pockets)
         variant = _resolve_with_finish_fallback(
             registry, 'pocket', label, finish, assignments.cutter, warnings)
         if variant is None:
@@ -525,8 +562,7 @@ def _contour_depth_check(registry, variant, feature_depth, cutter, tool_limits,
 
 
 def _plan_contours(result, cutouts, registry, assignments: Assignments, tab_mode: int,
-                   tab_outer: set[str], tab_cutouts: set[int],
-                   finish_outer: set[str], finish_cutouts: set[int],
+                   sets: _FeatureSets,
                    outer_overrides: dict[str, str], cutout_overrides: dict[int, str],
                    drills, tool_limits, warnings: list[str]) -> list[Job]:
     if not cutouts and not result.contours:
@@ -535,7 +571,9 @@ def _plan_contours(result, cutouts, registry, assignments: Assignments, tab_mode
         warnings.append('No contour template available; cutouts and contours skipped.')
         return []
 
-    def finish_wanted(is_outer: bool, selected: bool) -> bool:
+    def finish_wanted(is_outer: bool, selected: bool, excluded: bool) -> bool:
+        if excluded:
+            return False
         if selected:
             return True
         return assignments.finish_outer_all if is_outer else assignments.finish_cutouts_all
@@ -548,11 +586,14 @@ def _plan_contours(result, cutouts, registry, assignments: Assignments, tab_mode
     # points, so a mixed operation would auto-tab the unselected contours.
     cutout_groups: dict[tuple[str, bool], Job] = {}
     for index, cutout in enumerate(cutouts):
+        if index in sets.skip_cutouts:
+            continue
         label = cutout_overrides.get(index, assignments.contour_default)
         if label is None:
             warnings.append(f'{cutout.body.name}: cutout has no contour template; skipped.')
             continue
-        finish = finish_wanted(False, index in finish_cutouts)
+        finish = finish_wanted(False, index in sets.finish_cutouts,
+                               index in sets.no_finish_cutouts)
         variant = _resolve_with_finish_fallback(
             registry, 'contour', label, finish, assignments.cutter, warnings)
         if variant is None:
@@ -562,7 +603,7 @@ def _plan_contours(result, cutouts, registry, assignments: Assignments, tab_mode
             registry, variant, cutout.depth, assignments.cutter, tool_limits,
             f'{cutout.body.name} cutout', warnings)
         reliefs += _reliefs(variant, cutout.edges, cutout.depth, tool_limits)
-        tabbed = tab_mode in (TAB_INNER, TAB_ALL) or index in tab_cutouts
+        tabbed = tab_mode in (TAB_INNER, TAB_ALL) or index in sets.tab_cutouts
         key = (variant.name, tabbed)
         if key not in cutout_groups:
             suffix = ', tabs' if tabbed else ''
@@ -576,11 +617,14 @@ def _plan_contours(result, cutouts, registry, assignments: Assignments, tab_mode
     contour_groups: dict[tuple[str, bool], Job] = {}
     for contour in result.contours:
         body_token = contour.body.entityToken
+        if body_token in sets.skip_outer:
+            continue
         label = outer_overrides.get(body_token, assignments.contour_default)
         if label is None:
             warnings.append(f'{contour.body.name}: outer contour has no template; skipped.')
             continue
-        finish = finish_wanted(True, body_token in finish_outer)
+        finish = finish_wanted(True, body_token in sets.finish_outer,
+                               body_token in sets.no_finish_outer)
         variant = _resolve_with_finish_fallback(
             registry, 'contour', label, finish, assignments.cutter, warnings)
         if variant is None:
@@ -590,7 +634,7 @@ def _plan_contours(result, cutouts, registry, assignments: Assignments, tab_mode
             registry, variant, contour.depth, assignments.cutter, tool_limits,
             f'{contour.body.name} outer contour', warnings)
         reliefs += _reliefs(variant, contour.edges, contour.depth, tool_limits)
-        tabbed = tab_mode in (TAB_OUTER, TAB_ALL) or body_token in tab_outer
+        tabbed = tab_mode in (TAB_OUTER, TAB_ALL) or body_token in sets.tab_outer
         if tabbed and not contour.edges:
             warnings.append(
                 f'{contour.body.name}: no planar bottom face; cannot place tabs on the outer contour.')

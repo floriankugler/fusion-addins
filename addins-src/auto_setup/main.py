@@ -113,6 +113,16 @@ class AutoSetupInputs(inputs.Inputs):
             'instead of the default.')
         self._register_buckets('contour', self.contour_buckets)
 
+        self.skip_selection = inputs.SelectionByEntityTokenInput(
+            id='skipSelection',
+            name='Skip',
+            filter=['Edges', 'Faces'],
+            lower_bound=0,
+            upper_bound=0,
+            tool_tip='Do not machine these features at all (select edges or side faces of '
+                     'outer contours or cutouts, or pocket bottom faces).',
+        )
+
         self.finish_outer = inputs.CheckboxInput(
             id='finishOuter',
             name='Finish outer contours',
@@ -139,6 +149,15 @@ class AutoSetupInputs(inputs.Inputs):
             upper_bound=0,
             tool_tip='Additionally apply a finishing pass to these contours or pockets '
                      '(select edges or side faces), regardless of the checkboxes above.',
+        )
+        self.no_finish_selection = inputs.SelectionByEntityTokenInput(
+            id='noFinishSelection',
+            name='Skip finishing',
+            filter=['Edges', 'Faces'],
+            lower_bound=0,
+            upper_bound=0,
+            tool_tip='Machine these contours or pockets without a finishing pass, even when '
+                     'the checkboxes or the selection above ask for one.',
         )
 
         self.tabs_mode = inputs.DropDownInput(
@@ -295,6 +314,8 @@ class AutoSetup(addin.Addin):
             finish_cutouts_all=self.inputs.finish_cutouts.value,
             finish_pockets_all=self.inputs.finish_pockets.value,
             finish_selection=list(self.inputs.finish_selection.value),
+            skip_selection=list(self.inputs.skip_selection.value),
+            no_finish_selection=list(self.inputs.no_finish_selection.value),
             pocket_overrides=self.inputs.pocket_override_tokens(),
             contour_overrides=self.inputs.contour_override_entities(),
         )
