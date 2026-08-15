@@ -122,6 +122,46 @@ class PartTableInput(inputs.Input):
             if token not in present:
                 self._append_row(face)
 
+    def rebuild(self):
+        """Deletes and re-creates every row, keeping the edited settings.
+
+        Used to recover the dialog after a document switch (the multi-arrange
+        preview solves in a scratch document): the dialog panel discards its
+        rendered table rows while the underlying command inputs keep their
+        state, and re-adding the rows is what makes the panel draw them
+        again. New rows are prefilled from the body attributes, so the
+        settings edited in this dialog session are re-applied from the
+        records afterwards.
+        """
+        self.update_from_input()
+        snapshot = [(record.face, self.value.get(record.token)) for record in self._records]
+        for index in range(len(self._records) - 1, -1, -1):
+            try:
+                self.input.deleteRow(index + 1)
+            except RuntimeError:
+                pass
+        self._records.clear()
+        for face, settings in snapshot:
+            try:
+                if not face.isValid:
+                    continue
+            except RuntimeError:
+                continue
+            self._append_row(face)
+            record = self._records[-1]
+            if settings is None:
+                continue
+            wanted_name = ROTATION_NAMES.get(settings.rotation)
+            if wanted_name:
+                items = record.rotation_cell.listItems
+                for index in range(items.count):
+                    item = items.item(index)
+                    if item.name == wanted_name:
+                        item.isSelected = True
+                        break
+            record.group_cell.value = settings.group or ''
+        self.update_from_input()
+
     def handle_input_changed(self, changed_input: adsk.core.CommandInput) -> bool:
         if not changed_input or self.input is None:
             return False

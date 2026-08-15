@@ -1,9 +1,13 @@
-import math
 from typing import Callable
-from . import relationships as rel, normals as norm, properties as prop
+from . import relationships as rel, normals as norm, properties as prop, sampling
 from .. import fusion, misc, vector
 import adsk.core, adsk.fusion
 from functools import singledispatch
+
+# Slack for the bounding-box tests that prune the mating-face probe sweep, in
+# cm. It has to absorb the probes' offset off the edge plus contact slop, and
+# 2 mm costs nothing in pruning power.
+PROBE_PROXIMITY = 0.2
 
 def adjecent_edge(edge: adsk.fusion.BRepEdge, face: adsk.fusion.BRepFace) -> adsk.fusion.BRepEdge:
     loop = next((l for l in face.loops if l.isOuter), None)
@@ -70,10 +74,10 @@ def find_perpendicular_face(reference_face: adsk.fusion.BRepFace, condition: Cal
     fusion.traverse_occurrence_tree(reference_face.body.assemblyContext, search)
     return result
 
-def find_perpendicular_face_containing_edge(edge: adsk.fusion.BRepEdge, reference_face: adsk.fusion.BRepFace, condition: Callable[[adsk.fusion.BRepFace], bool] = lambda _: True) -> adsk.fusion.BRepFace | None:
+def find_perpendicular_face_containing_edge(edge: adsk.fusion.BRepEdge, reference_face: adsk.fusion.BRepFace, condition: Callable[[adsk.fusion.BRepFace], bool] = lambda _: True, min_coverage: float = 0.0) -> adsk.fusion.BRepFace | None:
     if not rel.is_linear(edge):
         raise ValueError("Only works on linear edges")
-    return find_perpendicular_face(reference_face, lambda f: rel.face_contains_edge(f, edge) and condition(f))
+    return find_perpendicular_face(reference_face, lambda f: rel.face_contains_edge(f, edge, min_coverage) and condition(f))
 
 def surface_and_rim_faces_for_edge(edge: adsk.fusion.BRepEdge) -> tuple[adsk.fusion.BRepFace, adsk.fusion.BRepFace] | None:
     surface_face = largest_face_of_edge(edge)
@@ -89,11 +93,14 @@ def find_mating_faces_at_edge(edge: adsk.fusion.BRepEdge) -> tuple[adsk.fusion.B
         return None
     surface, rim = surface_and_rim[0:2]
 
+    # Probe just inside the rim face, so the points sit on the mating board's
+    # face as well as on the rim.
     rim_normal = norm.normal_into_face(edge, rim)
-    edge_normal = norm.normal_along_edge(edge)
-    step = vector.scaled_by(edge_normal, 5)
-    start = vector.add(edge.startVertex.geometry.asVector(), vector.scaled_by(rim_normal, 0.1))
-    test_points = [vector.add(start, vector.scaled_by(step, x)).asPoint() for x in misc.float_range(0, math.floor(edge.length), edge.length / 10)]
+    test_points = sampling.sample_points_along_edge(
+        edge, offset=vector.scaled_by(rim_normal, 0.1)
+    )
+    if not test_points:
+        return None
 
     def check_face(face: adsk.fusion.BRepFace):
         for t in test_points:
@@ -103,7 +110,7 @@ def find_mating_faces_at_edge(edge: adsk.fusion.BRepEdge) -> tuple[adsk.fusion.B
         return False
 
     other_face = _mating_face_at_test_points(edge, surface, test_points, check_face) \
-        or find_perpendicular_face_containing_edge(edge, surface, check_face)
+        or _best_perpendicular_face_containing_edge(edge, surface, check_face)
     if not other_face:
         return None
     return surface, rim, other_face
@@ -123,7 +130,26 @@ def _mating_face_at_test_points(
     if edge.assemblyContext is not None:
         return None
     component = edge.body.parentComponent
+    # A body whose bounding box misses the edge cannot hold a face mating with
+    # it, so the boxes say up front which stretches of the edge are worth
+    # querying at all - and when nothing is near, that the sweep can be
+    # skipped outright. Bodies in other components are the tree walk's job.
+    nearby = [
+        body.boundingBox
+        for body in component.bRepBodies
+        if body != reference_face.body
+        and rel.bounding_boxes_overlap(body.boundingBox, edge.boundingBox, PROBE_PROXIMITY)
+    ]
+    if not nearby:
+        return None
+    best: adsk.fusion.BRepFace | None = None
+    best_coverage = 0.0
+    # Neighbouring probe points keep turning up the same faces; scoring one
+    # means walking its whole probe list, so score each face only once.
+    scored: list[adsk.fusion.BRepFace] = []
     for point in test_points:
+        if not any(rel.point_in_bounding_box(box, point, PROBE_PROXIMITY) for box in nearby):
+            continue
         try:
             found = component.findBRepUsingPoint(
                 point,
@@ -132,18 +158,49 @@ def _mating_face_at_test_points(
                 False,
             )
         except RuntimeError:
-            return None
+            return best
         for entity in found:
             face = adsk.fusion.BRepFace.cast(entity)
             if (
-                face
-                and face.body != reference_face.body
-                and rel.is_perpendicular(face, reference_face)
-                and rel.face_contains_edge(face, edge)
-                and condition(face)
+                not face
+                or face.body == reference_face.body
+                or not rel.is_perpendicular(face, reference_face)
+                or any(face == other for other in scored)
             ):
-                return face
-    return None
+                continue
+            scored.append(face)
+            coverage = rel.edge_coverage_on_face(face, edge)
+            if coverage <= best_coverage or not condition(face):
+                continue
+            best, best_coverage = face, coverage
+            if best_coverage >= rel.DOMINANT_COVERAGE:
+                return best
+    return best
+
+def _best_perpendicular_face_containing_edge(
+    edge: adsk.fusion.BRepEdge,
+    reference_face: adsk.fusion.BRepFace,
+    condition: Callable[[adsk.fusion.BRepFace], bool],
+) -> adsk.fusion.BRepFace | None:
+    """Fallback for the mating-face search, walking the occurrence tree.
+
+    Any face overlapping the edge at all is a candidate, because a mating
+    board may be far shorter than the selected edge. That admits grazing
+    contacts too, so the face covering the most of the edge wins - and a face
+    spanning most of it ends the walk, since nothing could beat it by enough
+    to matter."""
+    best: adsk.fusion.BRepFace | None = None
+    best_coverage = 0.0
+
+    def check_face(face: adsk.fusion.BRepFace) -> bool:
+        nonlocal best, best_coverage
+        coverage = rel.edge_coverage_on_face(face, edge)
+        if coverage > best_coverage and condition(face):
+            best, best_coverage = face, coverage
+        return best_coverage >= rel.DOMINANT_COVERAGE
+
+    find_perpendicular_face(reference_face, check_face)
+    return best
 
 def find_carcass_edge_for_front_edge(front_edge: adsk.fusion.BRepEdge, front_face: adsk.fusion.BRepFace) -> adsk.fusion.BRepEdge | None:
     normal_into_door_face = norm.normal_into_face(front_edge, front_face)

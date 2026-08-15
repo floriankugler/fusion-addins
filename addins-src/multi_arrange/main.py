@@ -36,6 +36,7 @@ FULL_OPACITY = 1.0
 def run(context, runtime_info: RuntimeInfo):
     global _addin
     _addin = MultiArrange(runtime_info)
+    _addin.register_restore_event()
     # Dev support: allow external tooling to restart this add-in by firing the
     # custom event '<id>_reload' (see lib/fusionbootstrap/reloader.py).
     from lib.fusionbootstrap import reloader
@@ -46,6 +47,7 @@ def run(context, runtime_info: RuntimeInfo):
 def stop(context):
     global _addin
     if _addin:
+        _addin.unregister_restore_event()
         _addin.shutdown()
     _addin = None
 
@@ -89,7 +91,7 @@ class ButtonInput(inputs.Input):
 
 
 class ArrangeInputs(inputs.Inputs):
-    def __init__(self, units: str, initial_sheet_rows: list[tuple[str, str, int]] | None = None):
+    def __init__(self, units: str, initial_sheet_rows: list[tuple] | None = None):
         self.update = inputs.SelectionByEntityTokenInput(
             id='update',
             name='Update arrangement',
@@ -140,10 +142,13 @@ class ArrangeInputs(inputs.Inputs):
             tool_tip=(
                 'Sheet sizes to nest into, laid out left to right. The solver '
                 'fills sheets starting from the first one, so put offcuts and '
-                'smaller sheets first.'
+                'smaller sheets first. The grain column says which way the '
+                'wood grain runs on the physical sheet; grain-constrained '
+                'parts follow it.'
             ),
             units=units,
             initial_rows=initial_sheet_rows,
+            grain_column=True,
         )
         self.offset_x = inputs.FloatInput(
             id='offset_x',
@@ -249,6 +254,83 @@ class MultiArrange(addin.Addin):
                 workspace_id='MfgWorkingModelEnv'))
         return placements
 
+    RESTORE_EVENT_SUFFIX = '_restore_selections'
+
+    def register_restore_event(self):
+        """Custom event for restoring selections AFTER Fusion's own event
+        processing.
+
+        The preview compute switches documents (scratch-document solve), and
+        re-activating this document clears the dialog's selection inputs in
+        activation events that run after the button handler — too late for a
+        synchronous restore. A custom event is queued behind that processing,
+        so its handler sees the cleared inputs and can put the selections
+        back."""
+        from lib.utils.fusion import new_event_handler
+        event_id = self.runtime_info.id + self.RESTORE_EVENT_SUFFIX
+        self._restore_event_id = event_id
+        try:
+            self.app.unregisterCustomEvent(event_id)
+        except Exception:
+            pass
+        event = self.app.registerCustomEvent(event_id)
+        handler = new_event_handler(self._on_restore_event, adsk.core.CustomEventHandler)
+        event.add(handler)
+        # Keep both alive for the add-in's lifetime.
+        self._restore_event = event
+        self._restore_handler = handler
+
+    def unregister_restore_event(self):
+        try:
+            self.app.unregisterCustomEvent(self._restore_event_id)
+        except Exception:
+            pass
+
+    def _on_restore_event(self, args):
+        # Heals the dialog after ANY preview compute (also failed ones): the
+        # scratch-document round-trip wipes the panel's rendering either way.
+        if self.inputs is None:
+            return
+        utils.fusion.log('[MA] deferred display restore')
+        self._rebuilding = True
+        try:
+            if self._selection_snapshot:
+                self._restore_selections(self._selection_snapshot)
+            self._refresh_dialog_display()
+        finally:
+            self._rebuilding = False
+        # Re-baseline the fingerprints on the rebuilt inputs: re-created value
+        # cells may re-normalize expressions ('2000 mm' -> '2000.00 mm'), and
+        # a stale baseline would make the next input event look like a real
+        # change, retiring the preview or the notice.
+        if self._pending_preview is not None:
+            self._preview_fingerprint = self._inputs_fingerprint()
+            if self._pending_placements is not None and self._preview_fingerprint is not None:
+                self._solved_cache = (self._preview_fingerprint, self._pending_placements)
+        if self._notice is not None:
+            self._notice_fingerprint = self._inputs_fingerprint()
+
+    def _refresh_dialog_display(self):
+        """Re-creates the table rows so the dialog panel renders them again.
+
+        After the scratch-document round-trip the dialog panel discards its
+        rendered table rows, even though the underlying command inputs still
+        hold every row and value (verified headless: rowCount, cell values
+        and selections all remain intact — which is also why OK keeps
+        working). Merely toggling visibility does not bring the rows back;
+        deleting and re-adding them does. The rebuilds preserve all edited
+        values, so the input fingerprint is unchanged and the armed preview
+        survives the resulting input events as spurious.
+        """
+        try:
+            self.inputs.rectangles.rebuild()
+        except Exception as error:
+            self.log_exception_traceback('sheets table rebuild', error)
+        try:
+            self.inputs.parts_table.rebuild()
+        except Exception as error:
+            self.log_exception_traceback('parts table rebuild', error)
+
     def _initialize_inputs(self, command, params):
         self._ui_ready = False
         super()._initialize_inputs(command, params)
@@ -273,6 +355,22 @@ class MultiArrange(addin.Addin):
         # Face tokens of the arrangement being replaced, so execute can un-dim
         # the parts that were dropped from it.
         self._recipe_face_tokens: list[str] = []
+        # (fingerprint, sketch-space placements) of the last preview solve;
+        # execute reuses the placements when the inputs are still identical,
+        # skipping the solve entirely.
+        self._solved_cache: tuple | None = None
+        self._pending_placements: list[tuple[float, ...]] | None = None
+        # Selections as they were when the preview was computed. The scratch
+        # document's close re-activates this document, and Fusion clears the
+        # dialog's selection inputs in the activation events AFTER the
+        # button's input_changed handler (and its synchronous restore) has
+        # returned — so the restore is re-applied on every preview cycle
+        # while the preview is armed, like the dimming and the update-hide.
+        self._selection_snapshot: list | None = None
+        # Sheet-plane sketch frames by plane entity token: probing one costs
+        # ~2 s in a large design, and a plane's frame cannot change while the
+        # dialog is open.
+        self._plane_frames: dict[str, adsk.core.Matrix3D] = {}
         self._destroy_hooked = False
         design = self.app.activeDocument.products.itemByProductType('DesignProductType')
         units = design.unitsManager.defaultLengthUnits if design else 'mm'
@@ -282,7 +380,8 @@ class MultiArrange(addin.Addin):
             stored = model.load_sheet_specs(fusion_design)
             if stored:
                 initial_rows = [
-                    (row.get('width', ''), row.get('height', ''), int(row.get('count', 1)))
+                    (row.get('width', ''), row.get('height', ''), int(row.get('count', 1)),
+                     bool(row.get('grain_along_width', False)))
                     for row in stored
                     if row.get('width') and row.get('height')
                 ] or None
@@ -325,6 +424,12 @@ class MultiArrange(addin.Addin):
     def input_changed(self, input):
         if self.inputs is None or input is None:
             return
+        # The deferred display rebuild deletes and re-adds table rows; input
+        # events dispatched mid-rebuild see a half-empty table, and the
+        # fingerprint mismatch would retire the freshly armed preview and any
+        # notice as if the user had changed something.
+        if getattr(self, '_rebuilding', False):
+            return
         self.inputs.rectangles.handle_input_changed(input)
         if self.inputs.parts_table.handle_input_changed(input):
             self._set_notice(self.inputs.parts_table.message)
@@ -366,9 +471,19 @@ class MultiArrange(addin.Addin):
                     utils.fusion.log('[MA] preview: computing')
                     snapshot = self._snapshot_selections(
                         [self.inputs.faces, self.inputs.plane, self.inputs.update])
-                    self._pending_preview = self._compute_preview_data()
-                    self._restore_selections(snapshot)
+                    self._selection_snapshot = snapshot
+                    try:
+                        self._pending_preview = self._compute_preview_data()
+                    finally:
+                        # Heal the dialog once Fusion's document-activation
+                        # aftermath (which wipes the panel's rendering) has
+                        # run — a failed compute switches documents all the
+                        # same, so this runs unconditionally.
+                        self._restore_selections(snapshot)
+                        self.app.fireCustomEvent(self._restore_event_id)
                     self._preview_fingerprint = self._inputs_fingerprint()
+                    if self._pending_placements is not None and self._preview_fingerprint is not None:
+                        self._solved_cache = (self._preview_fingerprint, self._pending_placements)
                     self._set_notice(None)
             except Exception as error:
                 # Failures like "not enough room" belong in the dialog, not
@@ -383,8 +498,11 @@ class MultiArrange(addin.Addin):
             if ((self._pending_preview is not None or self._preview_graphics is not None)
                     and fingerprint != self._preview_fingerprint):
                 # A real change: retire the preview like native previews do.
+                # The selection snapshot goes with it — restoring selections
+                # past this point would fight the user's own edits.
                 utils.fusion.log(f'[MA] preview: cleared by real change of {input.id}')
                 self._pending_preview = None
+                self._selection_snapshot = None
                 self._clear_preview_graphics()
             else:
                 utils.fusion.log(f'[MA] preview: ignoring spurious change of {input.id}')
@@ -486,6 +604,11 @@ class MultiArrange(addin.Addin):
         """
         self._reapply_update_hidden()
         self._sync_dimming()
+        # The scratch document's activation churn clears the dialog's
+        # selection inputs after the preview compute returns; put them back
+        # while the preview is armed.
+        if self._pending_preview is not None and self._selection_snapshot:
+            self._restore_selections(self._selection_snapshot)
 
     # ---------------------------------------------------------------- dimming
 
@@ -672,6 +795,7 @@ class MultiArrange(addin.Addin):
 
     def _on_destroy(self, args):
         self._pending_preview = None
+        self._selection_snapshot = None
         self._clear_preview_graphics()
         if self._did_execute:
             # The dim stays on as a permanent marker of what is arranged;
@@ -696,56 +820,87 @@ class MultiArrange(addin.Addin):
     def _compute_preview_data(self):
         """Solves the arrangement and returns what to draw.
 
-        The solve is transient: every model object it creates is deleted again
-        before this returns. Returns (layout, outline_points) where layout is
-        a list of (temporary BRepBody, name) at the solved positions.
+        The solve runs in a scratch document (engine.solve_in_scratch); the
+        only touch on the user's design is a probe sketch to read the sheet
+        plane's frame, deleted immediately and cached per plane. Returns
+        (layout, outline_points) where layout is a list of (temporary
+        BRepBody, name) at the solved positions.
         """
         design = _active_design(self.app)
         pairs = [(face, settings) for face, settings in self.inputs.parts_table.face_settings()
                  if face.isValid]
         faces = [face for face, _ in pairs]
         settings_list = [settings for _, settings in pairs]
-        root = design.rootComponent
         self._clear_preview_graphics()
+        self._pending_placements = None
 
-        outline_points: list[adsk.core.Point3D] = []
-        temp_occurrence = root.occurrences.addNewComponent(adsk.core.Matrix3D.create())
+        plane = self.inputs.plane.value[0] if self.inputs.plane.value else None
+        plane_transform = self._plane_transform(design, plane)
+        options = engine.Options(
+            object_spacing=self.inputs.spacing.value,
+            frame_width=self.inputs.frame.value,
+            placement_clearance=0.0,
+            part_in_part=self.inputs.part_in_part.value,
+            create_copies=True,
+        )
+        layout = engine.compute_layout(design, faces, self._envelope_spec(),
+                                       plane_transform, options,
+                                       settings_list=settings_list)
+        self._pending_placements = layout.placements
+        return layout.bodies, layout.outline
+
+    def _envelope_spec(self) -> engine.EnvelopeSpec:
+        # Grain is always the envelope's Y axis, so a sheet whose grain runs
+        # along its width enters the envelope rotated (width and height
+        # swapped). The nested result shows that sheet standing on its side —
+        # which is exactly the cut layout relative to the grain.
+        rectangles = []
+        for spec in self.inputs.rectangles.value:
+            if spec.grain_along_width:
+                rectangles.append(envelope_builder.RectangleSpec(
+                    width=spec.height, width_expression=spec.height_expression,
+                    height=spec.width, height_expression=spec.width_expression,
+                    count=spec.count))
+            else:
+                rectangles.append(spec)
+        return engine.EnvelopeSpec(
+            rectangles=rectangles,
+            x_offset=envelope_builder.OffsetSpec(
+                value=self.inputs.offset_x.value, expression=self.inputs.offset_x.expression),
+            y_offset=envelope_builder.OffsetSpec(
+                value=self.inputs.offset_y.value, expression=self.inputs.offset_y.expression),
+        )
+
+    def _plane_transform(self, design: adsk.fusion.Design, plane) -> adsk.core.Matrix3D:
+        """The sketch frame (sketch space -> world) a sketch on `plane` gets.
+
+        Fusion assigns sketch axes when a sketch is created on a plane or
+        face, so the frame is read from a probe sketch (created without edge
+        projection) and the probe is deleted again. `plane` None means the
+        root X-Y construction plane, whose sketch frame is the identity.
+        """
+        if plane is None:
+            return adsk.core.Matrix3D.create()
         try:
-            plane = self.inputs.plane.value[0] if self.inputs.plane.value else root.xYConstructionPlane
-            sketch = envelope_builder.build_envelope_sketch_on(
-                temp_occurrence.component,
-                plane,
-                self.inputs.rectangles.value,
-                'Envelope',
-                x_offset=envelope_builder.OffsetSpec(
-                    value=self.inputs.offset_x.value, expression=self.inputs.offset_x.expression),
-                y_offset=envelope_builder.OffsetSpec(
-                    value=self.inputs.offset_y.value, expression=self.inputs.offset_y.expression),
-            )
-            if sketch.profiles.count != 1:
-                raise RuntimeError('The envelope sketch did not produce a single profile.')
-            lines = sketch.sketchCurves.sketchLines
-            for index in range(lines.count):
-                line = lines.item(index)
-                if line.isConstruction or line.isReference:
-                    continue
-                geometry = line.worldGeometry
-                outline_points.append(geometry.startPoint.copy())
-                outline_points.append(geometry.endPoint.copy())
-
-            options = engine.Options(
-                object_spacing=self.inputs.spacing.value,
-                frame_width=self.inputs.frame.value,
-                placement_clearance=0.0,
-                part_in_part=self.inputs.part_in_part.value,
-                create_copies=True,
-            )
-            layout = engine.compute_layout(design, faces, sketch.profiles.item(0), options,
-                                           settings_list=settings_list)
+            token = plane.entityToken
+        except RuntimeError:
+            token = None
+        if token and token in self._plane_frames:
+            return self._plane_frames[token].copy()
+        # The probe lives in a throwaway component: creating a sketch directly
+        # on the root of a large design costs several seconds, while the same
+        # sketch inside a fresh (identity-placed) component is cheap and gets
+        # the identical frame.
+        temp_occurrence = design.rootComponent.occurrences.addNewComponent(
+            adsk.core.Matrix3D.create())
+        try:
+            sketch = temp_occurrence.component.sketches.addWithoutEdges(plane)
+            transform = sketch.transform
         finally:
-            if temp_occurrence.isValid:
-                temp_occurrence.deleteMe()
-        return layout, outline_points
+            temp_occurrence.deleteMe()
+        if token:
+            self._plane_frames[token] = transform.copy()
+        return transform
 
     def _execute_preview(self, args: adsk.core.CommandEventArgs):
         # Draw only, and redraw on EVERY cycle while the preview is armed:
@@ -788,7 +943,8 @@ class MultiArrange(addin.Addin):
                  record.group_cell.value)
                 for record in ins.parts_table.records)
             sheets = tuple(
-                (spec.width_expression, spec.height_expression, spec.count)
+                (spec.width_expression, spec.height_expression, spec.count,
+                 spec.grain_along_width)
                 for spec in ins.rectangles.value)
             return (
                 ins.faces.input.selectionCount if ins.faces.input else 0,
@@ -807,6 +963,10 @@ class MultiArrange(addin.Addin):
 
     def _validate(self, args: adsk.core.ValidateInputsEventArgs):
         if self.inputs is None:
+            return
+        if getattr(self, '_rebuilding', False):
+            # Mid-rebuild the tables are half-empty; leave the dialog state
+            # untouched until the rebuild is done.
             return
         self.update_inputs_from_ui()
         message = self._input_error()
@@ -854,33 +1014,27 @@ class MultiArrange(addin.Addin):
         settings_list = [settings for _, settings in pairs]
         self._save_settings()
         model.save_sheet_specs(design, [
-            {'width': spec.width_expression, 'height': spec.height_expression, 'count': spec.count}
+            {'width': spec.width_expression, 'height': spec.height_expression, 'count': spec.count,
+             'grain_along_width': spec.grain_along_width}
             for spec in self.inputs.rectangles.value
         ])
 
         timeline_start = None
         if design.designType == adsk.fusion.DesignTypes.ParametricDesignType:
-            timeline_start = design.timeline.count
+            # Marker, not count: features are inserted at the marker, and
+            # rolled-back features may be parked at the end of the timeline.
+            timeline_start = design.timeline.markerPosition
 
         root = design.rootComponent
+        # The sheet plane's frame must be probed BEFORE the result component
+        # exists, so the probe's temporary churn stays out of the timeline
+        # group range.
+        plane = self.inputs.plane.value[0] if self.inputs.plane.value else None
+        plane_transform = self._plane_transform(design, plane)
+
         result_occurrence = root.occurrences.addNewComponent(adsk.core.Matrix3D.create())
         result_component = result_occurrence.component
         result_component.name = engine.RESULT_COMPONENT_NAME
-
-        plane = self.inputs.plane.value[0] if self.inputs.plane.value else root.xYConstructionPlane
-        sketch = envelope_builder.build_envelope_sketch_on(
-            result_component,
-            plane,
-            self.inputs.rectangles.value,
-            'Envelope',
-            x_offset=envelope_builder.OffsetSpec(
-                value=self.inputs.offset_x.value, expression=self.inputs.offset_x.expression),
-            y_offset=envelope_builder.OffsetSpec(
-                value=self.inputs.offset_y.value, expression=self.inputs.offset_y.expression),
-        )
-        if sketch.profiles.count != 1:
-            raise RuntimeError('The envelope sketch did not produce a single profile.')
-        profile = sketch.profiles.item(0)
 
         options = engine.Options(
             object_spacing=self.inputs.spacing.value,
@@ -889,14 +1043,26 @@ class MultiArrange(addin.Addin):
             part_in_part=self.inputs.part_in_part.value,
             create_copies=True,
         )
-        engine.run(design, faces, profile, options,
+        # Reuse the preview's solved placements when the inputs are still
+        # exactly the ones the preview was computed for — the solver is
+        # deterministic, so re-solving would produce the same layout.
+        cached_placements = None
+        fingerprint = self._inputs_fingerprint()
+        if (self._solved_cache is not None and fingerprint is not None
+                and self._solved_cache[0] == fingerprint):
+            cached_placements = self._solved_cache[1]
+            utils.fusion.log('[MA] execute: reusing preview placements')
+        engine.run(design, faces, self._envelope_spec(), options,
+                   plane_transform=plane_transform,
                    timeline_start=timeline_start, settings_list=settings_list,
-                   result_occurrence=result_occurrence)
+                   result_occurrence=result_occurrence,
+                   cached_placements=cached_placements)
 
         model.save_recipe(result_component, {
                 'faces': [face.entityToken for face in faces],
                 'sheets': [
-                    {'width': spec.width_expression, 'height': spec.height_expression, 'count': spec.count}
+                    {'width': spec.width_expression, 'height': spec.height_expression, 'count': spec.count,
+             'grain_along_width': spec.grain_along_width}
                     for spec in self.inputs.rectangles.value
                 ],
                 'plane': self.inputs.plane.value[0].entityToken if self.inputs.plane.value else None,

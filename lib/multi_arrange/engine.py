@@ -3,25 +3,34 @@
 Fusion's Arrange feature is used purely as a nesting solver:
 
 1. Every part (and every rigid group) is copied into a temporary, flat,
-   grain-aligned single-body proxy component. Groups become one body joined by
-   thin bridges, because the solver only collision-checks a single body per
-   component.
-2. One True Shape Arrange runs over all proxies against the selected envelope
-   profile (the multi-sheet gutter profile produced by the envelope add-in, or
-   any other single profile).
-3. The placement transforms are read back, the Arrange feature and the proxies
-   are deleted, and clean per-part bodies are placed at the solved positions —
-   either as copies or by moving the original bodies.
+   grain-aligned single-body proxy (a TemporaryBRepManager body). Groups
+   become one body joined by thin bridges, because the solver only
+   collision-checks a single body per component.
+2. The proxies are placed into a SCRATCH DOCUMENT together with a freshly
+   built envelope sketch, and one True Shape Arrange runs there. Every
+   document write costs time proportional to the size of the whole document
+   (measured: 0.7-1.8 s per write in an 1800-feature design vs ~10 ms in an
+   empty one), so running the sacrificial solver machinery in a throwaway
+   document instead of the user's design turns a ~50 s solve into ~2 s. The
+   scratch document is closed without saving; the user's design never sees
+   any solver artifacts. Opening and closing a document does not disturb an
+   open command dialog: each document has its own command stack, and the
+   dialog is active again once the scratch document closes (verified).
+3. The placements are read back in envelope-sketch space, mapped through the
+   envelope sketch's frame in the user's design, and clean per-part bodies
+   are placed at the solved positions — as copies into the result component
+   (all inside ONE base feature), or by moving the original bodies.
 
-Nothing of the solver machinery survives; the remaining timeline entries are
-wrapped in one timeline group.
+The timeline entries created in the user's design (result component, envelope
+sketch, one base feature) are wrapped in one timeline group.
 """
 
 import adsk.core, adsk.fusion
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from . import model
+from ..envelope import builder as envelope_builder
 
 
 BRIDGE_WIDTH = 0.2       # cm; thin enough that no real part can span it
@@ -39,8 +48,21 @@ class Options:
     create_copies: bool = True
 
 
+@dataclass
+class EnvelopeSpec:
+    """What the envelope sketch is built from, so the solver can rebuild an
+    identical sketch in the scratch document."""
+    rectangles: list[envelope_builder.RectangleSpec]
+    x_offset: envelope_builder.OffsetSpec | None = None
+    y_offset: envelope_builder.OffsetSpec | None = None
+
+
 class MultiArrangeError(RuntimeError):
     pass
+
+
+class NoRoomError(MultiArrangeError):
+    """The solver reported NO_ROOM for the envelope."""
 
 
 # ------------------------------------------------------------------ matrices
@@ -219,13 +241,14 @@ def group_frame(parts: list[model.Part]) -> adsk.core.Matrix3D:
 
 @dataclass
 class Proxy:
-    occurrence: adsk.fusion.Occurrence
+    merged_body: adsk.fusion.BRepBody    # flat, local-frame temporary body
     frame: adsk.core.Matrix3D            # local->world frame of the source part(s)
     parts: list[model.Part]
     rotation_type: int
     flip: bool = False                   # counteract the solver's largest-face-up normalization
     rotation_correction: float = 0.0     # counteract the solver's in-plane re-orientation
-    placement: adsk.core.Matrix3D | None = None  # world transform of the solved copy
+    occurrence: adsk.fusion.Occurrence | None = None  # scratch-document occurrence, only during solve
+    placement: adsk.core.Matrix3D | None = None  # solved transform, in envelope-SKETCH space
 
 
 def largest_face_is_bottom(body: adsk.fusion.BRepBody) -> bool:
@@ -275,8 +298,9 @@ def add_body_to_component(component: adsk.fusion.Component, body: adsk.fusion.BR
     return component.bRepBodies.add(body)
 
 
-def build_proxy(root: adsk.fusion.Component, index: int, parts: list[model.Part],
-                frame: adsk.core.Matrix3D) -> Proxy:
+def build_proxy(parts: list[model.Part], frame: adsk.core.Matrix3D) -> Proxy:
+    """Builds the flat, grain-aligned proxy body — pure temp-BRep geometry,
+    no document writes."""
     temp_manager = adsk.fusion.TemporaryBRepManager.get()
     to_local = inverted(frame)
 
@@ -303,23 +327,27 @@ def build_proxy(root: adsk.fusion.Component, index: int, parts: list[model.Part]
                 break
             _, i, j = best
             connected.add(j)
-            bridge = bridge_body(temp_manager, bodies[i], bodies[j], centers[i], centers[j])
-            temp_manager.booleanOperation(merged, bridge, adsk.fusion.BooleanTypes.UnionBooleanType)
+            bridge = bridge_body(temp_manager, bodies[i], bodies[j])
+            if bridge is not None:
+                temp_manager.booleanOperation(merged, bridge, adsk.fusion.BooleanTypes.UnionBooleanType)
         for body in bodies[1:]:
             temp_manager.booleanOperation(merged, body, adsk.fusion.BooleanTypes.UnionBooleanType)
+        if merged.lumps.count > 1:
+            raise MultiArrangeError(
+                f"Could not bridge the parts of group '{parts[0].settings.group}' into "
+                'a single connected proxy body.'
+            )
 
-    occurrence = root.occurrences.addNewComponent(adsk.core.Matrix3D.create())
-    occurrence.component.name = f'{PROXY_PREFIX}_{index}'
-    added = add_body_to_component(occurrence.component, merged)
-    if len(parts) > 1 and count_lumps(added) > 1:
-        raise MultiArrangeError(
-            f"Could not bridge the parts of group '{parts[0].settings.group}' into "
-            'a single connected proxy body.'
-        )
     rotations = [part.settings.rotation for part in parts]
-    return Proxy(occurrence=occurrence, frame=frame, parts=parts,
+    return Proxy(merged_body=merged, frame=frame, parts=parts,
                  rotation_type=rotation_type_for(rotations),
-                 flip=largest_face_is_bottom(added))
+                 flip=largest_face_is_bottom(merged))
+
+
+def build_proxies(singles: list[model.Part], groups: list[model.Group]) -> list[Proxy]:
+    proxies = [build_proxy([part], part_frame(part)) for part in singles]
+    proxies.extend(build_proxy(group.parts, group_frame(group.parts)) for group in groups)
+    return proxies
 
 
 def body_center_2d(body: adsk.fusion.BRepBody) -> tuple[float, float]:
@@ -327,33 +355,45 @@ def body_center_2d(body: adsk.fusion.BRepBody) -> tuple[float, float]:
     return ((box.minPoint.x + box.maxPoint.x) / 2.0, (box.minPoint.y + box.maxPoint.y) / 2.0)
 
 
+# How far the bridge plate reaches INTO each body past their closest points,
+# so the union has real material overlap on both ends.
+BRIDGE_OVERLAP = 1.0  # cm
+
+
 def bridge_body(temp_manager: adsk.fusion.TemporaryBRepManager,
-                body_a: adsk.fusion.BRepBody, body_b: adsk.fusion.BRepBody,
-                center_a: tuple[float, float], center_b: tuple[float, float]) -> adsk.fusion.BRepBody:
-    """A thin plate connecting the two bodies, spanning centroid to centroid."""
-    dx = center_b[0] - center_a[0]
-    dy = center_b[1] - center_a[1]
-    length = math.hypot(dx, dy)
-    if length < 1e-6:
-        raise MultiArrangeError('Two group parts occupy the same position.')
-    direction = adsk.core.Vector3D.create(dx / length, dy / length, 0.0)
+                body_a: adsk.fusion.BRepBody, body_b: adsk.fusion.BRepBody) -> adsk.fusion.BRepBody | None:
+    """A thin plate crossing the closest gap between the two bodies, or None
+    when they already touch.
+
+    The bridge spans the bodies' closest approach (extended a little into
+    each side), NOT their centroids: when one part lies inside a cutout of
+    the other — a hatch in a wall, say — both centroids can fall in the hole
+    and a centroid bridge floats without touching either body. The closest
+    approach by construction has material on both ends."""
+    app = adsk.core.Application.get()
+    measurement = app.measureManager.measureMinimumDistance(body_a, body_b)
+    point_a = measurement.positionOne
+    point_b = measurement.positionTwo
+    dx = point_b.x - point_a.x
+    dy = point_b.y - point_a.y
+    gap = math.hypot(dx, dy)
+    if gap < 1e-6:
+        # Touching or overlapping: the plain union already connects them.
+        return None
+    direction = adsk.core.Vector3D.create(dx / gap, dy / gap, 0.0)
     width_direction = adsk.core.Vector3D.create(-direction.y, direction.x, 0.0)
 
     height = min(body_a.boundingBox.maxPoint.z, body_b.boundingBox.maxPoint.z)
     if height <= 1e-6:
         raise MultiArrangeError('Group parts have no thickness overlap for bridging.')
     center = adsk.core.Point3D.create(
-        (center_a[0] + center_b[0]) / 2.0,
-        (center_a[1] + center_b[1]) / 2.0,
+        (point_a.x + point_b.x) / 2.0,
+        (point_a.y + point_b.y) / 2.0,
         height / 2.0,
     )
     box = adsk.core.OrientedBoundingBox3D.create(
-        center, direction, width_direction, length, BRIDGE_WIDTH, height)
+        center, direction, width_direction, gap + 2.0 * BRIDGE_OVERLAP, BRIDGE_WIDTH, height)
     return temp_manager.createBox(box)
-
-
-def count_lumps(body: adsk.fusion.BRepBody) -> int:
-    return body.lumps.count
 
 
 # ------------------------------------------------------------------ pipeline
@@ -396,47 +436,138 @@ def collect_parts(design: adsk.fusion.Design, faces: list[adsk.fusion.BRepFace],
 
 
 def run(design: adsk.fusion.Design, faces: list[adsk.fusion.BRepFace],
-        envelope_profile: adsk.fusion.Profile, options: Options,
+        envelope_spec: EnvelopeSpec, options: Options,
+        plane_transform: adsk.core.Matrix3D | None = None,
         timeline_start: int | None = None,
         settings_list: list[model.PartSettings] | None = None,
-        result_occurrence: adsk.fusion.Occurrence | None = None) -> int:
+        result_occurrence: adsk.fusion.Occurrence | None = None,
+        cached_placements: list[tuple[float, ...]] | None = None) -> int:
     """Runs the whole pipeline. Returns the number of placed parts.
 
+    The envelope exists only in the scratch document during the solve; the
+    user's design receives nothing but the placed copies. plane_transform is
+    the sketch frame the sheet plane would give a sketch (see
+    the probe in main._plane_transform); None means the root X-Y plane.
+
     Pass timeline_start to extend the resulting timeline group backwards over
-    features the caller created as part of this run (e.g. an inline envelope
-    sketch).
+    features the caller created as part of this run (e.g. the result
+    component's occurrence). cached_placements (sketch-space matrices, one per
+    proxy, as returned in Layout.placements) skips the solve entirely — valid
+    only when the inputs are unchanged since the layout was computed.
     """
     root = design.rootComponent
     timeline = design.timeline if design.designType == adsk.fusion.DesignTypes.ParametricDesignType else None
+    # New features are inserted AT THE MARKER, not at the end: a design can
+    # have rolled-back features parked after the marker, and count-based
+    # indices would span them (timelineGroups.add then fails with "rolled
+    # back features not allowed").
     if timeline_start is None:
-        timeline_start = timeline.count if timeline else 0
+        timeline_start = timeline.markerPosition if timeline else 0
 
     singles, groups = collect_parts(design, faces, settings_list)
     if not singles and not groups:
         raise MultiArrangeError('No parts selected.')
+    proxies = build_proxies(singles, groups)
 
-    proxies: list[Proxy] = []
-    try:
-        for part in singles:
-            proxies.append(build_proxy(root, len(proxies), [part], part_frame(part)))
-        for group in groups:
-            proxies.append(build_proxy(root, len(proxies), group.parts, group_frame(group.parts)))
+    if cached_placements is not None and len(cached_placements) == len(proxies):
+        for proxy, cells in zip(proxies, cached_placements):
+            matrix = adsk.core.Matrix3D.create()
+            matrix.setWithArray(list(cells))
+            proxy.placement = matrix
+    else:
+        solve_in_scratch(proxies, envelope_spec, options)
 
-        solve(root, proxies, envelope_profile, options)
-
-        placed = place_results(design, root, proxies, options, result_occurrence)
-    finally:
-        for proxy in proxies:
-            if proxy.occurrence.isValid:
-                proxy.occurrence.deleteMe()
+    placed = place_results(design, root, proxies, options, result_occurrence,
+                           plane_transform)
 
     if timeline:
-        timeline_end = timeline.count - 1
+        timeline_end = timeline.markerPosition - 1
         if timeline_end > timeline_start:
             group = timeline.timelineGroups.add(timeline_start, timeline_end)
             group.name = TIMELINE_GROUP_NAME
 
     return placed
+
+
+def solve_in_scratch(proxies: list[Proxy], envelope_spec: EnvelopeSpec,
+                     options: Options) -> list[adsk.core.Point3D]:
+    """Runs the sacrificial solve in a throwaway document.
+
+    Builds the envelope sketch (on the scratch X-Y plane) and one component
+    per proxy in a new document, runs the closed-loop solve there, converts
+    the placements into envelope-sketch space, and closes the document without
+    saving. Returns the envelope outline as sketch-space segment endpoint
+    pairs (for preview graphics).
+
+    Creating the document briefly activates it; the user's document — and an
+    open command dialog on it, which has its own per-document command stack —
+    become active again when the scratch document closes.
+    """
+    app = adsk.core.Application.get()
+    previous_document = app.activeDocument
+    document = app.documents.add(adsk.core.DocumentTypes.FusionDesignDocumentType)
+    try:
+        design = adsk.fusion.Design.cast(
+            document.products.itemByProductType('DesignProductType'))
+        root = design.rootComponent
+
+        sketch = envelope_builder.build_envelope_sketch_on(
+            root, root.xYConstructionPlane, envelope_spec.rectangles, 'Envelope',
+            x_offset=envelope_spec.x_offset, y_offset=envelope_spec.y_offset)
+        if sketch.profiles.count != 1:
+            raise MultiArrangeError('The envelope sketch did not produce a single profile.')
+        profile = sketch.profiles.item(0)
+
+        check_parts_fit(proxies, envelope_spec, options)
+
+        for index, proxy in enumerate(proxies):
+            occurrence = root.occurrences.addNewComponent(adsk.core.Matrix3D.create())
+            occurrence.component.name = f'{PROXY_PREFIX}_{index}'
+            add_body_to_component(occurrence.component, proxy.merged_body)
+            proxy.occurrence = occurrence
+
+        try:
+            solve(root, proxies, profile, options)
+        except NoRoomError:
+            # The solver's FIRST pass places parts in its own opaque default
+            # orientation; the closed-loop corrections that turn them to the
+            # grain only apply from the second pass on. A default orientation
+            # can demand far more room than the corrected one (measured: three
+            # panels needing 1773 mm corrected were refused on a 2000 mm sheet
+            # because their default orientation needs ~2236 mm) — so a tight
+            # envelope dies in pass 1 without the corrections ever engaging.
+            # The default orientation is geometry-derived, not envelope-
+            # derived: learn the corrections on an oversized envelope, then
+            # retry the real one warm-started. A NoRoomError from the retry is
+            # genuine and propagates.
+            learn_orientation_corrections(root, proxies, envelope_spec, options)
+            solve(root, proxies, profile, options)
+
+        # Placements come back in scratch-world space; store them relative to
+        # the envelope sketch so they are meaningful in any document.
+        plane_inverse = inverted(sketch.transform)
+        for proxy in proxies:
+            proxy.placement = multiply(plane_inverse, proxy.placement)
+
+        outline: list[adsk.core.Point3D] = []
+        lines = sketch.sketchCurves.sketchLines
+        for index in range(lines.count):
+            line = lines.item(index)
+            if line.isConstruction or line.isReference:
+                continue
+            geometry = line.geometry  # sketch space
+            outline.append(geometry.startPoint.copy())
+            outline.append(geometry.endPoint.copy())
+        return outline
+    finally:
+        for proxy in proxies:
+            proxy.occurrence = None
+        document.close(False)
+        try:
+            if previous_document.isValid and app.activeDocument != previous_document:
+                previous_document.activate()
+        except RuntimeError:
+            pass
 
 
 def create_arrange_feature(root: adsk.fusion.Component, proxies: list[Proxy],
@@ -464,8 +595,78 @@ def create_arrange_feature(root: adsk.fusion.Component, proxies: list[Proxy],
         return arrange_features.add(solver_input)
     except RuntimeError as error:
         if 'NO_ROOM' in str(error):
-            raise MultiArrangeError(no_room_message(proxies, envelope_profile)) from error
+            raise NoRoomError(no_room_message(proxies, envelope_profile)) from error
         raise
+
+
+def learn_orientation_corrections(root: adsk.fusion.Component, proxies: list[Proxy],
+                                  envelope_spec: EnvelopeSpec, options: Options):
+    """Runs the closed-loop solve on an oversized envelope to learn each
+    part's flip/rotation correction, leaving the corrections on the proxies.
+
+    The oversized envelope gives the solver room for its default
+    orientations, so the loop can measure and correct them; the resulting
+    per-part offsets carry over to any envelope because they only depend on
+    the part's geometry."""
+    width = 3.0 * sum(rect.width * max(1, rect.count) for rect in envelope_spec.rectangles)
+    height = 3.0 * max(rect.height for rect in envelope_spec.rectangles)
+    sketch = envelope_builder.build_envelope_sketch_on(
+        root, root.xYConstructionPlane,
+        [envelope_builder.RectangleSpec(
+            width, f'{width * 10:.2f} mm', height, f'{height * 10:.2f} mm', 1)],
+        'EnvelopeLearn')
+    try:
+        if sketch.profiles.count != 1:
+            raise MultiArrangeError('The learning envelope did not produce a single profile.')
+        solve(root, proxies, sketch.profiles.item(0), options)
+    finally:
+        try:
+            sketch.deleteMe()
+        except RuntimeError:
+            pass
+
+
+def check_parts_fit(proxies: list[Proxy], envelope_spec: EnvelopeSpec,
+                    options: Options):
+    """Raises an actionable error for any part that cannot fit ANY sheet.
+
+    The generic solver NO_ROOM error only reports areas, which hides the
+    most common real cause: a grain-constrained part is only allowed to
+    rotate 180 degrees, so its grain dimension must fit the sheet HEIGHT —
+    a part can be far smaller than the sheet and still not fit. The proxy is
+    built grain-along-local-Y, so its bounding box gives both extents
+    directly.
+    """
+    inset = 2.0 * options.frame_width
+    sheets = [(rect.width - inset, rect.height - inset)
+              for rect in envelope_spec.rectangles]
+    for proxy in proxies:
+        box = proxy.merged_body.boundingBox
+        part_width = box.maxPoint.x - box.minPoint.x    # across the grain
+        part_height = box.maxPoint.y - box.minPoint.y   # along the grain
+        free = proxy.rotation_type == adsk.fusion.ArrangeRotationTypes.AllRotationsArrangeRotationType
+        fits_upright = any(part_width <= w and part_height <= h for w, h in sheets)
+        fits_rotated = any(part_height <= w and part_width <= h for w, h in sheets)
+        if fits_upright or (free and fits_rotated):
+            continue
+
+        if len(proxy.parts) > 1:
+            name = f"Group '{proxy.parts[0].settings.group}'"
+        else:
+            name = f"Part '{proxy.parts[0].body.name}'"
+        size = f'{part_width * 10:.0f} x {part_height * 10:.0f} mm (across x along grain)'
+        if not free and fits_rotated:
+            raise MultiArrangeError(
+                f'{name} is {size} and only fits the sheets rotated, which its '
+                'grain setting forbids: grain-aligned parts run along the sheet '
+                'HEIGHT (the second column of the sheets table). Enter the '
+                'sheets with the grain direction as the height, or set the '
+                "part's rotation to Free."
+            )
+        raise MultiArrangeError(
+            f'{name} is {size}, larger than every sheet (frame width included). '
+            'Enlarge the sheets or reduce the frame width.'
+        )
 
 
 def no_room_message(proxies: list[Proxy], envelope_profile: adsk.fusion.Profile) -> str:
@@ -566,46 +767,59 @@ def solve(root: adsk.fusion.Component, proxies: list[Proxy],
     raise MultiArrangeError('Could not stabilize the part orientations against the solver.')
 
 
+@dataclass
+class Layout:
+    """A solved layout: preview bodies, the envelope outline, and the raw
+    sketch-space placements (reusable by run() via cached_placements)."""
+    bodies: list[tuple[adsk.fusion.BRepBody, str]]  # transformed temp copies + names
+    outline: list[adsk.core.Point3D]                # world-space segment endpoints
+    placements: list[tuple[float, ...]] = field(default_factory=list)
+
+
 def compute_layout(design: adsk.fusion.Design, faces: list[adsk.fusion.BRepFace],
-                   envelope_profile: adsk.fusion.Profile,
+                   envelope_spec: EnvelopeSpec,
+                   plane_transform: adsk.core.Matrix3D,
                    options: Options,
                    settings_list: list[model.PartSettings] | None = None
-                   ) -> list[tuple[adsk.fusion.BRepBody, str]]:
-    """Solves the arrangement and returns transformed TEMPORARY copies of the
-    part bodies, leaving the model unchanged (all solver artifacts deleted).
+                   ) -> Layout:
+    """Solves the arrangement (in the scratch document) and returns
+    transformed TEMPORARY copies of the part bodies, leaving the user's
+    design completely untouched.
+
+    plane_transform is the sketch frame the envelope will occupy in the
+    user's design (sketch space -> world) — obtained from a probe sketch on
+    the selected plane, so the preview shows the parts exactly where OK will
+    put them.
 
     Used for the preview: the temporary bodies are drawn as custom graphics,
     which live outside the model and its transactions — model-based previews
-    of this pipeline (new occurrences, an Arrange feature) get discarded by
-    Fusion's preview transaction.
+    of this pipeline get discarded by Fusion's preview transaction.
     """
-    root = design.rootComponent
     temp_manager = adsk.fusion.TemporaryBRepManager.get()
     singles, groups = collect_parts(design, faces, settings_list)
     if not singles and not groups:
         raise MultiArrangeError('No parts selected.')
+    proxies = build_proxies(singles, groups)
 
-    proxies: list[Proxy] = []
-    try:
-        for part in singles:
-            proxies.append(build_proxy(root, len(proxies), [part], part_frame(part)))
-        for group in groups:
-            proxies.append(build_proxy(root, len(proxies), group.parts, group_frame(group.parts)))
+    outline_sketch = solve_in_scratch(proxies, envelope_spec, options)
 
-        solve(root, proxies, envelope_profile, options)
+    bodies: list[tuple[adsk.fusion.BRepBody, str]] = []
+    for proxy in proxies:
+        world_placement = multiply(plane_transform, proxy.placement)
+        delta = multiply(world_placement, inverted(proxy.frame))
+        for part in proxy.parts:
+            copy = temp_manager.copy(part.body)
+            temp_manager.transform(copy, delta)
+            bodies.append((copy, part.body.name))
 
-        results: list[tuple[adsk.fusion.BRepBody, str]] = []
-        for proxy in proxies:
-            delta = multiply(proxy.placement, inverted(proxy.frame))
-            for part in proxy.parts:
-                copy = temp_manager.copy(part.body)
-                temp_manager.transform(copy, delta)
-                results.append((copy, part.body.name))
-        return results
-    finally:
-        for proxy in proxies:
-            if proxy.occurrence.isValid:
-                proxy.occurrence.deleteMe()
+    outline = []
+    for point in outline_sketch:
+        world_point = point.copy()
+        world_point.transformBy(plane_transform)
+        outline.append(world_point)
+
+    placements = [tuple(proxy.placement.asArray()) for proxy in proxies]
+    return Layout(bodies=bodies, outline=outline, placements=placements)
 
 
 def read_placements(root: adsk.fusion.Component, proxies: list[Proxy]):
@@ -627,8 +841,15 @@ def read_placements(root: adsk.fusion.Component, proxies: list[Proxy]):
 
 def place_results(design: adsk.fusion.Design, root: adsk.fusion.Component,
                   proxies: list[Proxy], options: Options,
-                  result_occurrence: adsk.fusion.Occurrence | None = None) -> int:
+                  result_occurrence: adsk.fusion.Occurrence | None = None,
+                  plane_transform: adsk.core.Matrix3D | None = None) -> int:
+    """Places the parts at their solved positions.
+
+    plane_transform maps envelope-sketch space (which the placements are
+    stored in) to world space in the user's design."""
     temp_manager = adsk.fusion.TemporaryBRepManager.get()
+    if plane_transform is None:
+        plane_transform = adsk.core.Matrix3D.create()
     placed = 0
 
     if options.create_copies:
@@ -637,26 +858,49 @@ def place_results(design: adsk.fusion.Design, root: adsk.fusion.Component,
             result_occurrence.component.name = RESULT_COMPONENT_NAME
         result_component = result_occurrence.component
         to_result_space = inverted(result_occurrence.transform2)
+
+        copies: list[tuple[adsk.fusion.BRepBody, model.Part, adsk.core.Matrix3D]] = []
         for proxy in proxies:
-            delta = multiply(proxy.placement, inverted(proxy.frame))
+            world_placement = multiply(plane_transform, proxy.placement)
+            delta = multiply(world_placement, inverted(proxy.frame))
             for part in proxy.parts:
                 copy = temp_manager.copy(part.body)
                 temp_manager.transform(copy, delta)
-                add_body_to_component(result_component, copy)
-                # Re-fetch the body: the reference returned from inside the
-                # base-feature edit does not accept a name reliably.
-                bodies = result_component.bRepBodies
-                added = bodies.item(bodies.count - 1)
-                added.name = part.body.name
-                apply_appearance(part.body, added, delta, to_result_space)
-                placed += 1
+                copies.append((copy, part, delta))
+
+        # All copies go into ONE base feature: every feature edit costs time
+        # proportional to the document size, so per-body base features
+        # dominate the runtime in large designs.
+        existing = result_component.bRepBodies.count
+        if design.designType == adsk.fusion.DesignTypes.ParametricDesignType:
+            base = result_component.features.baseFeatures.add()
+            base.startEdit()
+            try:
+                for copy, _part, _delta in copies:
+                    result_component.bRepBodies.add(copy, base)
+            finally:
+                base.finishEdit()
+        else:
+            for copy, _part, _delta in copies:
+                result_component.bRepBodies.add(copy)
+
+        # Re-fetch the bodies: references returned from inside the
+        # base-feature edit do not accept a name reliably. Bodies keep their
+        # insertion order.
+        bodies = result_component.bRepBodies
+        for offset, (_copy, part, delta) in enumerate(copies):
+            added = bodies.item(existing + offset)
+            added.name = part.body.name
+            apply_appearance(part.body, added, delta, to_result_space)
+            placed += 1
         return placed
 
     # A move feature on a body proxy applies its transform in root (world)
     # coordinates, so the solved delta can be used directly.
     move_features = root.features.moveFeatures
     for proxy in proxies:
-        delta = multiply(proxy.placement, inverted(proxy.frame))
+        world_placement = multiply(plane_transform, proxy.placement)
+        delta = multiply(world_placement, inverted(proxy.frame))
         for part in proxy.parts:
             bodies = adsk.core.ObjectCollection.create()
             bodies.add(part.body)

@@ -42,6 +42,10 @@ class RectangleSpec:
     height: float
     height_expression: str
     count: int
+    # Multi-arrange only: the sheet's grain runs along its width, so the
+    # sheet enters the solve envelope rotated (grain is always envelope Y).
+    # The envelope builder itself ignores this flag.
+    grain_along_width: bool = False
 
 
 @dataclass

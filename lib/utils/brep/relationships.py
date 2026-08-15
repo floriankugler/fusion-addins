@@ -1,6 +1,6 @@
+import math
 from .. import vector
-from .. import misc
-from . import normals as norm
+from . import normals as norm, sampling
 import adsk.core, adsk.fusion
 from adsk.core import Vector3D
 
@@ -64,16 +64,62 @@ def is_parallel(a: adsk.fusion.BRepFace | adsk.fusion.BRepEdge | Vector3D, b: ad
         case _:
             raise TypeError(f"Unsupported type: {type(a)}, {type(b)}")
 
-def face_contains_edge(face: adsk.fusion.BRepFace, edge: adsk.fusion.BRepEdge) -> bool:
-    if not is_planar(face):
+# A face covering at least this much of the edge is the edge's dominant mate;
+# see face_contains_edge.
+DOMINANT_COVERAGE = 0.5
+
+def bounding_boxes_overlap(a: adsk.core.BoundingBox3D, b: adsk.core.BoundingBox3D, tolerance: float = 1e-6) -> bool:
+    """Whether two boxes overlap, within tolerance. Geometry that cannot touch
+    fails this before any surface evaluation, which is the cheap way to skip
+    the bulk of a design."""
+    return all(
+        getattr(a.minPoint, axis) - tolerance <= getattr(b.maxPoint, axis)
+        and getattr(b.minPoint, axis) - tolerance <= getattr(a.maxPoint, axis)
+        for axis in ("x", "y", "z")
+    )
+
+def point_in_bounding_box(box: adsk.core.BoundingBox3D, point: adsk.core.Point3D, tolerance: float = 1e-6) -> bool:
+    return all(
+        getattr(box.minPoint, axis) - tolerance <= getattr(point, axis) <= getattr(box.maxPoint, axis) + tolerance
+        for axis in ("x", "y", "z")
+    )
+
+def edge_coverage_on_face(face: adsk.fusion.BRepFace, edge: adsk.fusion.BRepEdge, tolerance: float = 1e-6) -> float:
+    """Fraction of the edge's probe points that lie on the face, 0.0 to 1.0."""
+    if not is_planar(face) or not bounding_boxes_overlap(face.boundingBox, edge.boundingBox, tolerance):
+        return 0.0
+    test_points = sampling.sample_points_along_edge(edge)
+    if not test_points:
+        return 0.0
+    hits = sum(1 for p in test_points if face.isPointOnFace(p, tolerance))
+    return hits / len(test_points)
+
+def face_contains_edge(face: adsk.fusion.BRepFace, edge: adsk.fusion.BRepEdge, min_coverage: float = 0.0, tolerance: float = 1e-6) -> bool:
+    """Whether the face covers at least `min_coverage` of the edge's length.
+
+    The default accepts any real overlap, because a mating board is often much
+    shorter than the selected edge - a narrow rail butting into a wide panel,
+    say. Pass DOMINANT_COVERAGE to ask for a face that runs along most of the
+    edge, which is worth trying first when several faces could qualify.
+
+    This gets called for every face of every body in some searches, so it
+    stops probing as soon as the answer is settled either way.
+    """
+    if not is_planar(face) or not bounding_boxes_overlap(face.boundingBox, edge.boundingBox, tolerance):
         return False
-    edge_normal = norm.normal_along_edge(edge)
-    test_points = [
-        vector.add(edge.startVertex.geometry.asVector(), vector.scaled_by(edge_normal, x)).asPoint()
-        for x in misc.float_range(0, edge.length, edge.length / 10)
-    ]
-    evaluated = [1 if face.isPointOnFace(p, 1e-6) else 0 for p in test_points]
-    return sum(evaluated) > 5
+    test_points = sampling.sample_points_along_edge(edge)
+    if not test_points:
+        return False
+    needed = max(1, math.ceil(min_coverage * len(test_points)))
+    hits = 0
+    for index, point in enumerate(test_points):
+        if face.isPointOnFace(point, tolerance):
+            hits += 1
+            if hits >= needed:
+                return True
+        elif hits + (len(test_points) - index - 1) < needed:
+            return False
+    return False
 
 def is_smooth_edge(edge: adsk.fusion.BRepEdge) -> bool:
     """

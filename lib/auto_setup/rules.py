@@ -59,6 +59,11 @@ TAB_OUTER = 1
 TAB_INNER = 2
 TAB_ALL = 3
 
+# Operation order within one tool diameter: holes first (they are drilled into
+# solid material), then pockets, then the contours that free the part, and
+# finally the corner reliefs left over by a contour tool.
+KIND_ORDER = {'drill': 0, 'bore': 1, 'pocket': 2, 'contour': 3, 'dogbone': 4}
+
 
 class RulesError(Exception):
     pass
@@ -302,7 +307,18 @@ def plan(result: recognition.RecognitionResult, registry: dict[str, list[templat
     jobs += _plan_pockets(pockets, registry, assignments, sets, tool_limits, warnings)
     jobs += _plan_contours(result, cutouts, registry, assignments, tab_policy.mode, sets,
                            outer_overrides, cutout_overrides, drills, tool_limits, warnings)
+    jobs.sort(key=lambda job: _job_order(job, tool_limits))
     return jobs, warnings
+
+
+def _job_order(job: Job, tool_limits) -> tuple:
+    """Widest tool first, so the machine works its way down the tool sizes; per
+    diameter by feature kind, and tabbed contours before untabbed ones - a part
+    that is already free would move under the next cut."""
+    diameter = tool_limits(job.variant).max_diameter or 0.0
+    return (-round(diameter, 4),
+            KIND_ORDER.get(job.variant.kind, len(KIND_ORDER)),
+            0 if job.tabbed else 1)
 
 
 def _feature_sets(resolver: SelectionResolver, assignments: Assignments,
@@ -581,9 +597,11 @@ def _plan_contours(result, cutouts, registry, assignments: Assignments, tab_mode
     # Inside corner reliefs left over by the contour tools.
     reliefs: list[recognition.Relief] = []
 
-    # Tabbed and untabbed features cannot share an operation: explicit tab
-    # positions suppress automatic placement only for contours that have
-    # points, so a mixed operation would auto-tab the unselected contours.
+    # Tabbed and untabbed features get separate operations so the tabbed ones
+    # can run first (see _job_order): a part that is already free would move
+    # under the next cut. Mixing them would be safe as far as tabs go - the
+    # builder pins the automatic tab count to zero, so only contours with an
+    # explicit position are tabbed.
     cutout_groups: dict[tuple[str, bool], Job] = {}
     for index, cutout in enumerate(cutouts):
         if index in sets.skip_cutouts:

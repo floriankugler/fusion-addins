@@ -1051,27 +1051,15 @@ class ConnectorsNative(addin.Addin):
         access_face: adsk.fusion.BRepFace,
         small_face: adsk.fusion.BRepFace,
     ) -> adsk.fusion.BRepFace:
-        midpoint = adsk.core.Point3D.create(
-            (
-                edge.startVertex.geometry.x
-                + edge.endVertex.geometry.x
-            )
-            / 2,
-            (
-                edge.startVertex.geometry.y
-                + edge.endVertex.geometry.y
-            )
-            / 2,
-            (
-                edge.startVertex.geometry.z
-                + edge.endVertex.geometry.z
-            )
-            / 2,
-        )
-        test_point = self._translated(
-            midpoint,
-            utils.brep.normal_into_face(edge, small_face),
-            0.1,
+        # Probe along the whole edge rather than at its midpoint alone. The
+        # guide board can meet just part of the edge, and a single probe
+        # misses it whenever that part does not cover the middle.
+        test_points = utils.brep.sample_points_along_edge(
+            edge,
+            offset=utils.vector.scaled_by(
+                utils.brep.normal_into_face(edge, small_face),
+                0.1,
+            ),
         )
         # Exclude every selected edge's body: the guide board is the one
         # the selected boards are mounted against.
@@ -1084,25 +1072,44 @@ class ConnectorsNative(addin.Addin):
                     proxy.nativeObject or proxy,
                 )
                 excluded_bodies.append(native.body)
-        candidates: list[adsk.fusion.BRepFace] = []
+        candidates: list[tuple[int, float, adsk.fusion.BRepFace]] = []
         component = access_face.body.parentComponent
         for body in component.bRepBodies:
             if any(body == excluded for excluded in excluded_bodies):
                 continue
+            # A body whose bounding box misses the edge cannot hold a face
+            # running along it, and rejecting it here avoids reading the
+            # geometry of every one of its faces.
+            if not utils.brep.bounding_boxes_overlap(
+                body.boundingBox,
+                edge.boundingBox,
+                utils.brep.PROBE_PROXIMITY,
+            ):
+                continue
             for face in body.faces:
-                if (
+                # face_contains_edge is bounding-box gated, so it throws out
+                # nearly every face before anything probes the points.
+                if not (
                     utils.brep.is_planar(face)
                     and utils.brep.is_perpendicular(face, access_face)
                     and utils.brep.face_contains_edge(face, edge)
-                    and face.isPointOnFace(test_point, 1e-6)
                 ):
-                    candidates.append(face)
+                    continue
+                contact = sum(
+                    1
+                    for point in test_points
+                    if face.isPointOnFace(point, 1e-6)
+                )
+                if contact:
+                    candidates.append((contact, face.area, face))
         if not candidates:
             raise ValueError(
                 "Could not find an adjacent board face along the selected edge."
             )
-        candidates.sort(key=lambda face: face.area, reverse=True)
-        return candidates[0]
+        # Whichever face runs along the most of the edge is the board the
+        # selection is mounted against; area only breaks ties.
+        candidates.sort(key=lambda c: (c[0], c[1]), reverse=True)
+        return candidates[0][2]
 
     def _connector_positions(
         self,

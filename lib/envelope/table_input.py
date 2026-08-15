@@ -7,11 +7,16 @@ from .. import inputs
 from . import builder
 
 
+GRAIN_ALONG_HEIGHT = 'Along height'
+GRAIN_ALONG_WIDTH = 'Along width'
+
+
 @dataclass
 class TableRow:
     width: adsk.core.ValueCommandInput
     height: adsk.core.ValueCommandInput
     count: adsk.core.IntegerSpinnerCommandInput
+    grain: adsk.core.DropDownCommandInput | None = None
 
 
 class RectangleTableInput(inputs.Input):
@@ -25,13 +30,18 @@ class RectangleTableInput(inputs.Input):
     input: adsk.core.TableCommandInput
 
     def __init__(self, id: str, name: str, tool_tip: str, units: str, update_visibility=lambda: True,
-                 initial_rows: list[tuple[str, str, int]] | None = None):
+                 initial_rows: list[tuple] | None = None,
+                 grain_column: bool = False):
         super().__init__(id, name, tool_tip, update_visibility)
         self.units = units
         self.value = []
         self._rows: list[TableRow] = []
-        # Rows to prefill the table with: (width expr, height expr, count).
+        # Rows to prefill the table with: (width expr, height expr, count)
+        # plus an optional grain_along_width flag.
         self.initial_rows = initial_rows
+        # Multi-arrange shows a per-sheet grain direction column; the envelope
+        # add-in has no grain concept and leaves it off.
+        self.grain_column = grain_column
         # Row inputs need ids that are unique for the lifetime of the dialog,
         # so the counter keeps rising instead of tracking the row index.
         self._next_row_key = 0
@@ -42,7 +52,10 @@ class RectangleTableInput(inputs.Input):
         if params is not None:
             raise RuntimeError("The rectangles table cannot be restored from a custom feature.")
 
-        table = command_inputs.addTableCommandInput(self.id, self.name, 3, '2:2:1')
+        if self.grain_column:
+            table = command_inputs.addTableCommandInput(self.id, self.name, 4, '2:2:1:2')
+        else:
+            table = command_inputs.addTableCommandInput(self.id, self.name, 3, '2:2:1')
         table.minimumVisibleRows = 2
         table.maximumVisibleRows = 10
         table.hasGrid = False
@@ -51,8 +64,8 @@ class RectangleTableInput(inputs.Input):
 
         self._add_header_row()
         if self.initial_rows:
-            for width_expression, height_expression, count in self.initial_rows:
-                self._append_row(width_expression, height_expression, count)
+            for row in self.initial_rows:
+                self._append_row(*row)
         else:
             self._append_row(builder.DEFAULT_WIDTH_EXPRESSION, builder.DEFAULT_HEIGHT_EXPRESSION, 1)
 
@@ -76,6 +89,7 @@ class RectangleTableInput(inputs.Input):
                 self._expression_of(last.width, builder.DEFAULT_WIDTH_EXPRESSION) if last else builder.DEFAULT_WIDTH_EXPRESSION,
                 self._expression_of(last.height, builder.DEFAULT_HEIGHT_EXPRESSION) if last else builder.DEFAULT_HEIGHT_EXPRESSION,
                 int(last.count.value) if last else 1,
+                self._grain_of(last),
             )
             return True
 
@@ -86,15 +100,35 @@ class RectangleTableInput(inputs.Input):
 
         return False
 
-    def set_rows(self, rows: list[tuple[str, str, int]]):
+    def set_rows(self, rows: list[tuple]):
         """Replaces the table contents (used when prefilling from a stored
-        arrangement recipe)."""
+        arrangement recipe). Rows are (width expr, height expr, count) with an
+        optional grain_along_width flag."""
         while self._rows:
-            self.input.deleteRow(len(self._rows))
+            try:
+                self.input.deleteRow(len(self._rows))
+            except RuntimeError:
+                pass
             self._rows.pop()
-        for width_expression, height_expression, count in rows:
-            self._append_row(width_expression, height_expression, count)
+        for row in rows:
+            self._append_row(*row)
         self.update_from_input()
+
+    def rebuild(self):
+        """Deletes and re-creates every row from the current values.
+
+        Used to recover the dialog after a document switch (the multi-arrange
+        preview solves in a scratch document): the dialog panel discards its
+        rendered table rows while the underlying command inputs keep their
+        state, and re-adding the rows is what makes the panel draw them
+        again.
+        """
+        self.update_from_input()
+        self.set_rows([
+            (spec.width_expression, spec.height_expression, spec.count,
+             spec.grain_along_width)
+            for spec in self.value
+        ])
 
     def update_from_input(self):
         specs: list[builder.RectangleSpec] = []
@@ -105,8 +139,18 @@ class RectangleTableInput(inputs.Input):
                 height=row.height.value,
                 height_expression=self._expression_of(row.height, builder.DEFAULT_HEIGHT_EXPRESSION),
                 count=int(row.count.value),
+                grain_along_width=self._grain_of(row),
             ))
         self.value = specs
+
+    def _grain_of(self, row: TableRow | None) -> bool:
+        if row is None or row.grain is None:
+            return False
+        try:
+            item = row.grain.selectedItem
+        except RuntimeError:
+            return False
+        return bool(item and item.name == GRAIN_ALONG_WIDTH)
 
     def create_in_feature_input(self, feature_input: adsk.fusion.CustomFeatureInput):
         raise RuntimeError("The rectangles table cannot be stored in a custom feature.")
@@ -119,12 +163,14 @@ class RectangleTableInput(inputs.Input):
 
     def _add_header_row(self):
         children = self.input.commandInputs
-        for column, title in enumerate(('Width', 'Height', 'Count')):
+        titles = ('Width', 'Height', 'Count', 'Grain') if self.grain_column else ('Width', 'Height', 'Count')
+        for column, title in enumerate(titles):
             header = children.addStringValueInput(f'{self.id}_header_{column}', '', title)
             header.isReadOnly = True
             self.input.addCommandInput(header, 0, column, 0, 0)
 
-    def _append_row(self, width_expression: str, height_expression: str, count: int):
+    def _append_row(self, width_expression: str, height_expression: str, count: int,
+                    grain_along_width: bool = False):
         key = self._next_row_key
         self._next_row_key += 1
         children = self.input.commandInputs
@@ -152,11 +198,24 @@ class RectangleTableInput(inputs.Input):
             max(1, count),
         )
 
+        grain = None
+        if self.grain_column:
+            grain = children.addDropDownCommandInput(
+                f'{self.id}_grain_{key}', '', adsk.core.DropDownStyles.TextListDropDownStyle)  # type: ignore
+            grain.listItems.add(GRAIN_ALONG_HEIGHT, not grain_along_width)
+            grain.listItems.add(GRAIN_ALONG_WIDTH, grain_along_width)
+            grain.tooltip = (
+                'Direction of the wood grain on this sheet. Grain-constrained '
+                'parts are always nested with their grain along this direction.'
+            )
+
         row_index = self.input.rowCount
         self.input.addCommandInput(width, row_index, 0, 0, 0)
         self.input.addCommandInput(height, row_index, 1, 0, 0)
         self.input.addCommandInput(count_input, row_index, 2, 0, 0)
-        self._rows.append(TableRow(width, height, count_input))
+        if grain is not None:
+            self.input.addCommandInput(grain, row_index, 3, 0, 0)
+        self._rows.append(TableRow(width, height, count_input, grain))
 
     def _delete_selected_row(self):
         # The table always keeps one row so the command can never end up with
