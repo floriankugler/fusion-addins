@@ -181,6 +181,16 @@ class AutoSetupInputs(inputs.Inputs):
             tool_tip='Additionally place tabs on these contours (select edges or side faces of '
                      'outer contours or cutouts), regardless of the dropdown above.',
         )
+        self.no_tab_contours = inputs.SelectionByEntityTokenInput(
+            id='noTabContours',
+            name='↳ Skip tabs',
+            filter=['Edges', 'Faces'],
+            lower_bound=0,
+            upper_bound=0,
+            tool_tip='Never place tabs on these contours (select edges or side faces of '
+                     'outer contours or cutouts), whatever the dropdown and the selection '
+                     'above ask for.',
+        )
         tabs_active = lambda: self.tabs_mode.value != rules.TAB_NONE or len(self.tab_contours.value) > 0
         self.tab_min_count = inputs.IntegerInput(
             id='tabMinCount',
@@ -322,6 +332,7 @@ class AutoSetup(addin.Addin):
         tab_policy = rules.TabPolicy(
             mode=self.inputs.tabs_mode.value,
             selection=list(self.inputs.tab_contours.value),
+            skip_selection=list(self.inputs.no_tab_contours.value),
             min_count=self.inputs.tab_min_count.value,
         )
         jobs, warnings = rules.plan(result, self.inputs.registry, assignments, tab_policy)

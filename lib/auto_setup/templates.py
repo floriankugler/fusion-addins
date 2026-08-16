@@ -142,6 +142,21 @@ def tool_dimensions(variant: TemplateVariant) -> list[tuple[float | None, float 
     return dimensions
 
 
+def tab_width(variant: TemplateVariant) -> float | None:
+    """The template's tab width in cm, read without creating an operation.
+
+    Tab positions are placed before the first operation exists (see
+    builder._TabPoints), so the width has to come from the template file.
+    """
+    template = load(variant)
+    operations = template.operations
+    for idx in range(operations.count):
+        parameter = operations.get(idx).parameters.itemByName('tabWidth')
+        if parameter:
+            return parameter.value.value
+    return None
+
+
 def primary_tool(variant: TemplateVariant) -> tuple[float | None, float | None]:
     """(diameter, flute length) of the template's first operation."""
     dimensions = tool_dimensions(variant)

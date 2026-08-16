@@ -29,7 +29,8 @@ degenerate to a point), every other one is machined along its arc as an open
 chain by the 'dogbone' template's smaller cutter.
 
 Tabs are opt-in per contour: the tab selection accepts edges or faces of an
-outer contour or a cutout, resolved to the owning feature.
+outer contour or a cutout, resolved to the owning feature. A second selection
+takes tabs away again and wins over both the mode and the tab selection.
 """
 
 import os
@@ -89,12 +90,14 @@ class Job:
 @dataclass
 class TabPolicy:
     """Tab placement policy from the command UI: a global mode plus an additive
-    selection of individual contours (edges/faces of outer contours or cutouts).
+    selection of individual contours (edges/faces of outer contours or cutouts),
+    and a subtractive selection that beats both.
 
     The tab count per contour follows from the contour length with degressive
     density (see tabs.tab_count); min_count is the floor."""
     mode: int = TAB_NONE
-    selection: list = field(default_factory=list)  # entities (additive)
+    selection: list = field(default_factory=list)       # entities (additive)
+    skip_selection: list = field(default_factory=list)  # entities (wins)
     min_count: int = 4
 
 
@@ -124,6 +127,8 @@ class _FeatureSets:
     entityToken, cutouts and pockets by index."""
     tab_outer: set[str] = field(default_factory=set)
     tab_cutouts: set[int] = field(default_factory=set)
+    no_tab_outer: set[str] = field(default_factory=set)
+    no_tab_cutouts: set[int] = field(default_factory=set)
     finish_outer: set[str] = field(default_factory=set)
     finish_cutouts: set[int] = field(default_factory=set)
     finish_pockets: set[int] = field(default_factory=set)
@@ -324,12 +329,14 @@ def _job_order(job: Job, tool_limits) -> tuple:
 def _feature_sets(resolver: SelectionResolver, assignments: Assignments,
                   tab_policy: TabPolicy, warnings: list[str]) -> _FeatureSets:
     tab_outer, tab_cutouts, _ = _resolve_features(resolver, tab_policy.selection, warnings, 'tab')
+    no_tab = _resolve_features(resolver, tab_policy.skip_selection, warnings, 'skip-tab')
     finish = _resolve_features(resolver, assignments.finish_selection, warnings, 'finishing')
     skip = _resolve_features(resolver, assignments.skip_selection, warnings, 'skip')
     no_finish = _resolve_features(
         resolver, assignments.no_finish_selection, warnings, 'skip-finishing')
     return _FeatureSets(
         tab_outer=tab_outer, tab_cutouts=tab_cutouts,
+        no_tab_outer=no_tab[0], no_tab_cutouts=no_tab[1],
         finish_outer=finish[0], finish_cutouts=finish[1], finish_pockets=finish[2],
         skip_outer=skip[0], skip_cutouts=skip[1], skip_pockets=skip[2],
         no_finish_outer=no_finish[0], no_finish_cutouts=no_finish[1],
@@ -621,7 +628,8 @@ def _plan_contours(result, cutouts, registry, assignments: Assignments, tab_mode
             registry, variant, cutout.depth, assignments.cutter, tool_limits,
             f'{cutout.body.name} cutout', warnings)
         reliefs += _reliefs(variant, cutout.edges, cutout.depth, tool_limits)
-        tabbed = tab_mode in (TAB_INNER, TAB_ALL) or index in sets.tab_cutouts
+        tabbed = ((tab_mode in (TAB_INNER, TAB_ALL) or index in sets.tab_cutouts)
+                  and index not in sets.no_tab_cutouts)
         key = (variant.name, tabbed)
         if key not in cutout_groups:
             suffix = ', tabs' if tabbed else ''
@@ -652,7 +660,8 @@ def _plan_contours(result, cutouts, registry, assignments: Assignments, tab_mode
             registry, variant, contour.depth, assignments.cutter, tool_limits,
             f'{contour.body.name} outer contour', warnings)
         reliefs += _reliefs(variant, contour.edges, contour.depth, tool_limits)
-        tabbed = tab_mode in (TAB_OUTER, TAB_ALL) or body_token in sets.tab_outer
+        tabbed = ((tab_mode in (TAB_OUTER, TAB_ALL) or body_token in sets.tab_outer)
+                  and body_token not in sets.no_tab_outer)
         if tabbed and not contour.edges:
             warnings.append(
                 f'{contour.body.name}: no planar bottom face; cannot place tabs on the outer contour.')
