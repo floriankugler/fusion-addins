@@ -74,6 +74,53 @@ class _PatternBoundary:
     boundary_lines: list[adsk.fusion.SketchLine]
 
 
+@dataclass(frozen=True)
+class _BoundingBoxFrame:
+    """The manual bounding box measured in the plane of the selected face.
+
+    `u` and `v` span that plane - `u` along the Pattern Axis when one is
+    given - and the limits are the box extremes along them, measured from
+    `origin`. Holding the box in its own frame rather than as world corners
+    lets geometry be tested against it by a plain interval comparison, no
+    matter how the box is rotated.
+    """
+
+    origin: adsk.core.Point3D
+    u: adsk.core.Vector3D
+    v: adsk.core.Vector3D
+    min_u: float
+    max_u: float
+    min_v: float
+    max_v: float
+
+    @property
+    def extents(self) -> tuple[float, float]:
+        return (self.max_u - self.min_u, self.max_v - self.min_v)
+
+    def coordinates(self, point: adsk.core.Point3D) -> tuple[float, float]:
+        offset = self.origin.vectorTo(point)
+        return (offset.dotProduct(self.u), offset.dotProduct(self.v))
+
+    def corners(self) -> list[adsk.core.Point3D]:
+        def corner(u: float, v: float) -> adsk.core.Point3D:
+            point = self.origin.copy()
+            point.translateBy(
+                adsk.core.Vector3D.create(
+                    self.u.x * u + self.v.x * v,
+                    self.u.y * u + self.v.y * v,
+                    self.u.z * u + self.v.z * v,
+                )
+            )
+            return point
+
+        return [
+            corner(self.min_u, self.min_v),
+            corner(self.max_u, self.min_v),
+            corner(self.max_u, self.max_v),
+            corner(self.min_u, self.max_v),
+        ]
+
+
 def run(context, runtime_info: RuntimeInfo):
     global _addin
     _addin = CutoutsNative(runtime_info)
@@ -963,15 +1010,15 @@ class CutoutsNative(addin.Addin):
                 )
         return None
 
-    def _bounding_box_measurements(
+    def _bounding_box_frame(
         self,
         face: adsk.fusion.BRepFace,
-    ) -> tuple[tuple[float, float], list[adsk.core.Point3D]] | None:
+    ) -> _BoundingBoxFrame | None:
         """Measures the manual bounding box analytically, before any sketch
         exists, so the dialog can validate against it.
 
-        Returns its extents along and across the pattern axis, together with
-        its four corners in world space.
+        Returns it in the face plane's own frame, oriented along the pattern
+        axis when one is given.
         """
         plane = adsk.core.Plane.cast(face.geometry)
         if not plane:
@@ -1021,36 +1068,22 @@ class CutoutsNative(addin.Addin):
             )
         if len(coordinates) < 2:
             return None
-        min_u = min(item[0] for item in coordinates)
-        max_u = max(item[0] for item in coordinates)
-        min_v = min(item[1] for item in coordinates)
-        max_v = max(item[1] for item in coordinates)
-
-        def corner(u: float, v: float) -> adsk.core.Point3D:
-            point = plane.origin.copy()
-            point.translateBy(
-                adsk.core.Vector3D.create(
-                    u_vector.x * u + v_vector.x * v,
-                    u_vector.y * u + v_vector.y * v,
-                    u_vector.z * u + v_vector.z * v,
-                )
-            )
-            return point
-
-        corners = [
-            corner(min_u, min_v),
-            corner(max_u, min_v),
-            corner(max_u, max_v),
-            corner(min_u, max_v),
-        ]
-        return (max_u - min_u, max_v - min_v), corners
+        return _BoundingBoxFrame(
+            origin=plane.origin,
+            u=u_vector,
+            v=v_vector,
+            min_u=min(item[0] for item in coordinates),
+            max_u=max(item[0] for item in coordinates),
+            min_v=min(item[1] for item in coordinates),
+            max_v=max(item[1] for item in coordinates),
+        )
 
     def _bounding_box_extents(
         self,
         face: adsk.fusion.BRepFace,
     ) -> tuple[float, float] | None:
-        measured = self._bounding_box_measurements(face)
-        return measured[0] if measured else None
+        frame = self._bounding_box_frame(face)
+        return frame.extents if frame else None
 
     def _use_bounding_box_outline(self, face: adsk.fusion.BRepFace) -> bool:
         """Whether the cutout can be built straight from the bounding box.
@@ -1073,10 +1106,10 @@ class CutoutsNative(addin.Addin):
         if self.inputs.pattern_type.value == CutoutsNativeInputs.CROSS.value:
             # The cross wedges are already built on the boundary.
             return False
-        measured = self._bounding_box_measurements(face)
-        if not measured:
+        frame = self._bounding_box_frame(face)
+        if not frame:
             return False
-        corners = measured[1]
+        corners = frame.corners()
         centre = adsk.core.Point3D.create(
             sum(corner.x for corner in corners) / len(corners),
             sum(corner.y for corner in corners) / len(corners),
@@ -1100,36 +1133,102 @@ class CutoutsNative(addin.Addin):
                 return False
         return True
 
-    def _sketch_bounds(
+    def _cutout_region_frame(
         self,
-        curves: list[adsk.fusion.SketchCurve],
-    ) -> tuple[float, float, float, float] | None:
-        """Extent of a curve set in sketch space."""
-        xs: list[float] = []
-        ys: list[float] = []
-        for curve in curves:
-            if not curve or not curve.isValid:
-                continue
-            box = curve.boundingBox
-            xs.extend((box.minPoint.x, box.maxPoint.x))
-            ys.extend((box.minPoint.y, box.maxPoint.y))
-        if not xs:
-            return None
-        return (min(xs), min(ys), max(xs), max(ys))
+        face: adsk.fusion.BRepFace,
+    ) -> _BoundingBoxFrame | None:
+        """The region a face loop has to reach to shape the cutout, when the
+        user pinned one down explicitly - otherwise None.
 
-    def _bounds_overlap(
+        Only an *inset* manual bounding box counts. Without the inset the cut
+        runs right up to the box, so a hole just outside it still needs its
+        Inner Feature Inset ring to keep a wall between the two. The inset
+        already keeps that much material around the whole box, so anything
+        outside it cannot be reached by the cut.
+
+        The region is the box as selected, NOT the inset one: a hole in the
+        band between the two still sits against the cut border, close enough
+        that its clearance ring belongs there.
+        """
+        if not self._has_manual_bounds():
+            return None
+        if self._bounding_box_inset() <= 1e-9:
+            return None
+        return self._bounding_box_frame(face)
+
+    def _loop_reaches_region(
         self,
-        first: tuple[float, float, float, float] | None,
-        second: tuple[float, float, float, float] | None,
+        loop: adsk.fusion.BRepLoop,
+        region: _BoundingBoxFrame,
     ) -> bool:
-        if first is None or second is None:
+        """Whether a face loop touches the region the cutout is confined to.
+
+        Measured in the region's own frame, so a bounding box turned by the
+        Pattern Axis is compared exactly rather than through a world-aligned
+        box that would grow with the rotation.
+        """
+        min_u = min_v = math.inf
+        max_u = max_v = -math.inf
+        for edge in loop.edges:
+            for point in self._curve_points(edge.geometry):
+                u, v = region.coordinates(point)
+                min_u, max_u = min(min_u, u), max(max_u, u)
+                min_v, max_v = min(min_v, v), max(max_v, v)
+        if min_u > max_u:
+            # Nothing measurable: keep the loop rather than guess it away.
             return True
+        tolerance = self.app.pointTolerance * 100
         return not (
-            first[2] < second[0]
-            or first[0] > second[2]
-            or first[3] < second[1]
-            or first[1] > second[3]
+            max_u < region.min_u - tolerance
+            or min_u > region.max_u + tolerance
+            or max_v < region.min_v - tolerance
+            or min_v > region.max_v + tolerance
         )
+
+    def _curve_points(
+        self,
+        geometry: adsk.core.Curve3D,
+    ) -> list[adsk.core.Point3D]:
+        """Points along a curve, dense enough to bound it. A bounding box
+        would be cheaper but is world-aligned, so on a rotated box it reports
+        an extent the curve does not have."""
+        evaluator = geometry.evaluator
+        success, start, end = evaluator.getParameterExtents()
+        if not success:
+            return []
+        success, points = evaluator.getStrokes(start, end, 1e-4)
+        return points if success else []
+
+    def _loops_to_project(
+        self,
+        face: adsk.fusion.BRepFace,
+        loops: list[adsk.fusion.BRepLoop],
+        use_bounding_box_outline: bool,
+    ) -> list[adsk.fusion.BRepLoop]:
+        """The face loops that actually shape the cutout.
+
+        Inside an inset bounding box, a hole that lies outside the box cannot
+        influence the cut, so it is dropped here - before it is projected,
+        which is the expensive part of building this sketch (see
+        _project_face_loops), and before it costs an offset of its own.
+        Deliberately judged on the hole's own extent, not grown by the Inner
+        Feature Inset: the box is the user's explicit limit, and a hole beside
+        it should not carve its clearance ring into the box.
+
+        The outer loop goes the same way when the box replaces it outright.
+        """
+        region = self._cutout_region_frame(face)
+        kept: list[adsk.fusion.BRepLoop] = []
+        for loop in loops:
+            if loop.isOuter:
+                if use_bounding_box_outline:
+                    # The box already limits the cutout, and it sits on the
+                    # face, so the contour cannot bind.
+                    continue
+            elif region and not self._loop_reaches_region(loop, region):
+                continue
+            kept.append(loop)
+        return kept
 
     def _axis_direction(
         self,
@@ -1257,13 +1356,18 @@ class CutoutsNative(addin.Addin):
         # Batch the edits: without this, every projection, construction
         # toggle, offset and tab entity triggers its own full compute cycle.
         sketch.isComputeDeferred = True
-        bounded_by_box = False
-        box_bounds: tuple[float, float, float, float] | None = None
+        bounded_by_box = self._use_bounding_box_outline(face)
         try:
-            loops = utils.fusion.as_list(face.loops)
-            projected_by_loop = self._project_face_loops(sketch, loops)
+            loops = self._loops_to_project(
+                face,
+                utils.fusion.as_list(face.loops),
+                bounded_by_box,
+            )
+            projected_by_loop = (
+                self._project_face_loops(sketch, loops) if loops else []
+            )
 
-            if self._use_bounding_box_outline(face):
+            if bounded_by_box:
                 # The inset bounding box IS the outline to cut, so the face's
                 # own outer contour is not needed - and neither is the
                 # separate bounding-box tool that would otherwise be built
@@ -1279,30 +1383,14 @@ class CutoutsNative(addin.Addin):
                 self._set_construction(sketch, box_lines, False)
                 outer_curves.extend(box_lines)
                 final_curves.extend(box_lines)
-                box_bounds = self._sketch_bounds(box_lines)
-                bounded_by_box = True
 
             for loop, projected in zip(loops, projected_by_loop):
                 self._set_construction(sketch, projected, True)
                 if loop.isOuter:
-                    if bounded_by_box:
-                        # The box already limits the cutout, and it sits on
-                        # the face, so the contour cannot bind.
-                        continue
                     input_value = self.inputs.outer_inset
                     parameter_role = "outerInset"
                     expression = input_value.expression
                 else:
-                    if bounded_by_box and not self._bounds_overlap(
-                        self._sketch_bounds(projected),
-                        box_bounds,
-                    ):
-                        # The hole itself lies outside the box, so it is
-                        # ignored. Deliberately judged on the hole's own
-                        # extent, not grown by the inner inset: the box is
-                        # the user's explicit limit, and a hole beside it
-                        # should not carve its clearance ring into the box.
-                        continue
                     inner_loop_index += 1
                     input_value = self.inputs.inner_feature_inset
                     parameter_role = f"innerInset{inner_loop_index}"

@@ -754,7 +754,8 @@ class MultiArrange(addin.Addin):
         ins.parts_table.sync([cast(adsk.fusion.BRepFace, face) for face in ins.faces.value])
 
         rows = [
-            (row.get('width', ''), row.get('height', ''), int(row.get('count', 1)))
+            (row.get('width', ''), row.get('height', ''), int(row.get('count', 1)),
+             bool(row.get('grain_along_width', False)))
             for row in recipe.get('sheets', [])
             if row.get('width') and row.get('height')
         ]
