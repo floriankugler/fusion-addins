@@ -394,6 +394,7 @@ def _bind_geometry(operation: adsk.cam.Operation, job: rules.Job):
         if not parameter:
             raise BuilderError(f'{operation.name}: no hole geometry parameter found.')
         parameter.value.value = faces
+        _pin_hole_selection(operation)
         return
 
     parameter = operation.parameters.itemByName('pockets') or operation.parameters.itemByName('contours')
@@ -423,6 +424,25 @@ def _bind_geometry(operation: adsk.cam.Operation, job: rules.Job):
         # contour operation would machine every body's outer contour.
         silhouette.isSetupModelSelected = False
     contours_param.applyCurveSelections(selections)
+
+
+def _pin_hole_selection(operation: adsk.cam.Operation):
+    """Machine exactly the holes this operation was given.
+
+    'Select same diameter' is on in a stock drill/bore template, and it makes
+    Fusion pull in every other hole of that diameter in the setup - depth is not
+    part of that match. The holes have already been sorted into a through and a
+    blind operation here, so the option hands each of them the other's holes as
+    well: every hole is then machined twice, and the through operation drills
+    its breakthrough allowance past the bottom of the blind ones.
+
+    The narrowing sub-options ('same depth' and friends) are left alone: they
+    only apply while the expansion itself is on, and Fusion rejects a write to a
+    parameter its dialog has disabled.
+    """
+    parameter = operation.parameters.itemByName('selectSameDiameter')
+    if parameter:
+        parameter.value.value = False
 
 
 def _try_set(operation: adsk.cam.Operation, parameter_name: str, expression: str):

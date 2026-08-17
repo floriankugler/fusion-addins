@@ -266,7 +266,7 @@
     <parameter expression="1" name="maximumRoughingSteps"/>
     <parameter expression="true" name="spiralCircularPockets"/>
     <parameter expression="true" name="doMultipleDepths"/>
-    <parameter expression="tool_diameter" name="maximumStepdown"/>
+    <parameter expression="6.4mm" name="maximumStepdown"/>
     <parameter expression="0" name="numberOfFinishingStepdowns"/>
     <parameter expression="0.2mm" name="finishingStepdown"/>
     <parameter expression="tool_taperAngle" name="slopeAngle"/>
