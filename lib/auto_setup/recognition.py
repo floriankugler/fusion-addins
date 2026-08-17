@@ -151,14 +151,24 @@ def _recognize_body(body: adsk.fusion.BRepBody, frame: Frame) -> RecognitionResu
     ]
     if not bottom_faces:
         result.warnings.append(f'{body.name}: no planar bottom face found; skipped cutout detection.')
+    bottom_tokens = {f.entityToken for f in bottom_faces}
+    covered = 0
     for face in bottom_faces:
         for loop in face.loops:
             if loop.isOuter:
                 continue
             if _loop_matches_hole(loop, result.holes, frame):
                 continue
+            if not _opens_to_top(loop, bottom_tokens, frame, z_max):
+                covered += 1
+                continue
             result.cutouts.append(Cutout(edges=list(loop.edges), body=body,
                                          depth=z_max - z_min))
+    if covered:
+        result.warnings.append(
+            f'{body.name}: {covered} opening(s) in the bottom face are covered by '
+            'material from above and were not machined; they are only reachable '
+            'from the other side.')
 
     outer_edges: list[adsk.fusion.BRepEdge] = []
     if bottom_faces:
@@ -367,6 +377,56 @@ def _is_hole_bottom(face: adsk.fusion.BRepFace, hole_faces: list[adsk.fusion.BRe
             if f.entityToken != face.entityToken:
                 adjacent.add(f.entityToken)
     return len(adjacent) > 0 and adjacent.issubset(hole_tokens)
+
+
+def _opens_to_top(loop: adsk.fusion.BRepLoop, bottom_tokens: set[str],
+                  frame: Frame, z_max: float) -> bool:
+    """True if the opening bounded by this inner loop of a bottom face reaches
+    the top of the body.
+
+    Only a through opening may be cut as an inside contour: an opening that is
+    covered by material from above - a pocket or a blind hole worked from the
+    bottom - would be milled straight through the part if it were treated like
+    one, so it belongs to a setup on the other side and is left alone here.
+
+    The surface bounding the opening is walked from the loop upwards. A through
+    cutout reaches the top within a step or two (one more when its rim is
+    chamfered or filleted), while a cavity worked from the bottom is closed off
+    by its own ceiling and the walk ends inside it. The bottom faces are never
+    crossed, so the walk stays on the opening it started from instead of
+    escaping around the body.
+    """
+    seen = set(bottom_tokens)
+    queue: list[adsk.fusion.BRepFace] = []
+
+    def push(face: adsk.fusion.BRepFace):
+        if face.entityToken not in seen:
+            seen.add(face.entityToken)
+            queue.append(face)
+
+    for edge in loop.edges:
+        for face in edge.faces:
+            push(face)
+    while queue:
+        face = queue.pop()
+        if _face_top_height(face, frame) >= z_max - HEIGHT_TOL:
+            return True
+        for edge in face.edges:
+            for neighbor in edge.faces:
+                push(neighbor)
+    return False
+
+
+def _face_top_height(face: adsk.fusion.BRepFace, frame: Frame) -> float:
+    """Height of the highest point of a face's boundary.
+
+    Edge midpoints are measured alongside the vertices because a periodic edge
+    - the full circle of a hole wall - carries no vertex at all, and a face
+    bounded only by such edges would otherwise report no height.
+    """
+    heights = [frame.height(vertex.geometry) for vertex in face.vertices]
+    heights += [frame.height(_edge_midpoint(edge)) for edge in face.edges]
+    return max(heights) if heights else float('-inf')
 
 
 def _loop_matches_hole(loop: adsk.fusion.BRepLoop, holes: list[Hole], frame: Frame) -> bool:
