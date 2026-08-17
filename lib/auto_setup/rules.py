@@ -9,6 +9,12 @@ Holes are handled automatically from the available drill/bore templates
   than the hole; holes too big for that use the largest bore tool. Holes
   smaller than every tool are skipped with a warning.
 
+Bores are grouped per hole diameter rather than per tool, because their
+feedrate is scaled with the hole: a bore template's feedrate is the one for a
+hole the size of the tool, and it grows in proportion from there (see
+builder._scale_bore_feed). A feedrate is an operation-wide setting, so two hole
+diameters cannot share an operation.
+
 Pockets and contours are chosen by label in the UI; the selected cutter
 variant (dc / udc) picks the concrete template file (untagged templates are
 valid for any cutter). Finishing: a global mode (none / outer contours / all
@@ -54,6 +60,11 @@ THROUGH_ALLOWANCE = 0.02
 # drawn for), so only reliefs narrower than the tool by more than this need an
 # extra operation (cm).
 RELIEF_TOL = 0.005
+# Ceiling for the diameter-scaled boring feedrate (mm/min).
+MAX_BORE_FEED = 3000.0
+# Resolution of the boring feed scale. Holes whose diameters agree to this much
+# share an operation, so modelling noise does not split one into several.
+FEED_SCALE_TOL = 3  # decimal places
 
 TAB_NONE = 0
 TAB_OUTER = 1
@@ -80,6 +91,9 @@ class Job:
     cutouts: list[recognition.Cutout] = field(default_factory=list)
     contours: list[recognition.Contour] = field(default_factory=list)
     is_through: bool | None = None  # holes only
+    # Hole diameter in tool diameters, used to scale the boring feedrate; None
+    # for everything that is not a bore.
+    feed_scale: float | None = None
     # Single arcs machined as open chains (dogbone reliefs).
     open_chains: list = field(default_factory=list)
     tabbed: bool = False
@@ -396,7 +410,7 @@ def _plan_holes(holes, drills, bores, warnings: list[str]) -> list[Job]:
         warnings.append('No drill/bore templates found; all holes skipped.')
         return []
 
-    groups: dict[tuple[str, float, bool], Job] = {}
+    groups: dict[tuple[str, float, bool, float | None], Job] = {}
     for hole in holes:
         required_depth = hole.depth + (THROUGH_ALLOWANCE if hole.is_through else 0.0)
         picked = _pick_hole_template(hole, required_depth, drills, bores, warnings)
@@ -406,16 +420,24 @@ def _plan_holes(holes, drills, bores, warnings: list[str]) -> list[Job]:
                 'drill/bore template; skipped.')
             continue
         variant, tool_dia = picked
-        key = (variant.kind, tool_dia, hole.is_through)
+        # A bore's feedrate follows the hole diameter, so each diameter needs
+        # its own operation. A drill's hole is the size of its tool by
+        # definition, so its tool diameter already says everything.
+        feed_scale = (round(hole.diameter / tool_dia, FEED_SCALE_TOL)
+                      if variant.kind == 'bore' and tool_dia else None)
+        key = (variant.kind, tool_dia, hole.is_through, feed_scale)
         if key not in groups:
             kind_label = 'through' if hole.is_through else 'blind'
+            size = f'⌀{hole.diameter * 10:.1f}mm, ' if feed_scale is not None else ''
             groups[key] = Job(
                 variant=variant,
-                display_name=f'{variant.kind.capitalize()} ({variant.display_label}, {kind_label})',
+                display_name=f'{variant.kind.capitalize()} ({variant.display_label}, '
+                             f'{size}{kind_label})',
                 is_through=hole.is_through,
+                feed_scale=feed_scale,
             )
         groups[key].holes.append(hole)
-    order = lambda key: (0 if key[0] == 'drill' else 1, key[1], key[2])
+    order = lambda key: (0 if key[0] == 'drill' else 1, key[1], key[3] or 0.0, key[2])
     return [groups[key] for key in sorted(groups.keys(), key=order)]
 
 

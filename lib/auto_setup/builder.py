@@ -326,6 +326,8 @@ def _insert_job(setup: adsk.cam.Setup, job_index: int, job: rules.Job,
 
     for operation in operations:
         _bind_geometry(operation, job)
+        if job.feed_scale is not None:
+            _scale_bore_feed(operation, job.feed_scale)
         if job.is_through and job.variant.kind in ('drill', 'bore'):
             # Break through the bottom by 0.2mm (for drills instead of the
             # drill tip option), like the contour templates do.
@@ -424,6 +426,36 @@ def _bind_geometry(operation: adsk.cam.Operation, job: rules.Job):
         # contour operation would machine every body's outer contour.
         silhouette.isSetupModelSelected = False
     contours_param.applyCurveSelections(selections)
+
+
+def _scale_bore_feed(operation: adsk.cam.Operation, scale: float):
+    """Raise the boring feedrate in proportion to the hole diameter.
+
+    Boring a hole barely wider than the tool keeps the cutter engaged over
+    nearly its whole diameter and sets the machine chattering, which is why a
+    bore template carries a deliberately low feedrate. That rate belongs to a
+    hole the size of the tool; a wider hole is a lighter cut and the same rate
+    just wastes time. So the template's value is scaled by the hole diameter in
+    tool diameters - twice the diameter, twice the feed - and capped at
+    rules.MAX_BORE_FEED.
+
+    tool_feedCutting is the rate the helix itself is cut at (verified against
+    posted G-code, 2026-08-17); the entry and exit rates are lead-in moves and
+    are left to the template. tool_feedTransition follows tool_feedCutting by
+    its own expression, so it comes along.
+    """
+    parameter = operation.parameters.itemByName('tool_feedCutting')
+    if not parameter:
+        return
+    template_feed = parameter.value.value  # mm/min
+    feed = min(template_feed * scale, rules.MAX_BORE_FEED)
+    # The cap keeps the scaling from running away, it is not there to slow down
+    # a template that is already faster than it.
+    if feed <= template_feed:
+        return
+    # Whole mm/min: finer than any machine resolves, and it keeps the value
+    # readable in the operation dialog next to the template's own round numbers.
+    parameter.expression = f'{feed:.0f} mm/min'
 
 
 def _pin_hole_selection(operation: adsk.cam.Operation):
