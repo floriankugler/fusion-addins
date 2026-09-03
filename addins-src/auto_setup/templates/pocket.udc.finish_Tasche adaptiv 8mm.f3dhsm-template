@@ -270,7 +270,7 @@
     <parameter expression="'always'" name="highFeedrateModeProxy"/>
     <parameter expression="machine.defined &amp;&amp; machine.maxFeedrate > 0 ? machine.maxFeedrate : Math.max(tool_feedCutting; Math.max(tool_feedEntry; tool_feedExit))" name="highFeedrate"/>
     <parameter expression="true" name="allowRapidRetract"/>
-    <parameter expression="5 * tool_diameter" name="stayDownDistance"/>
+    <parameter expression="15 mm" name="stayDownDistance"/>
     <parameter expression="Math.max(Math.min(tool_diameter * 0.1; 15.0); 2.0)" name="minimumStayDownClearance"/>
     <parameter expression="'level0'" name="stayDownLevel"/>
     <parameter expression="0.2mm" name="liftHeight"/>
@@ -652,7 +652,7 @@
     <parameter expression="true" name="allowRapidRetract"/>
     <parameter expression="Math.min(1.0mm; tool_diameter * 0.2)" name="safeDistance"/>
     <parameter expression="true" name="keepToolDown"/>
-    <parameter expression="50mm" name="stayDownDistance"/>
+    <parameter expression="15 mm" name="stayDownDistance"/>
     <parameter expression="0mm" name="liftHeight"/>
     <parameter expression="true" name="doLeadIn"/>
     <parameter expression="1mm" name="entry_radius"/>

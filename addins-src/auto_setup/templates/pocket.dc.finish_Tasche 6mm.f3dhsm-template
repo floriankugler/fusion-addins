@@ -221,8 +221,8 @@
     <parameter expression="'bottom'" name="bottomHeightFromLowest_checkModel"/>
     <parameter expression="'ignore'" name="bottomHeightFromHighest_checkFixture"/>
     <parameter expression="'ignore'" name="bottomHeightFromLowest_checkFixture"/>
-    <parameter expression="(-0.2) * 1mm" name="bottomHeight_offset"/>
-    <parameter expression="-0.2" name="bottomHeight_value"/>
+    <parameter expression="0mm" name="bottomHeight_offset"/>
+    <parameter expression="0.0" name="bottomHeight_value"/>
     <parameter expression="0.1mm" name="tolerance"/>
     <parameter expression="tolerance * 0.5" name="contourTolerance"/>
     <parameter expression="tolerance" name="calculationTolerance"/>
@@ -284,7 +284,7 @@
     <parameter expression="true" name="allowRapidRetract"/>
     <parameter expression="Math.min(1.0mm; tool_diameter * 0.2)" name="safeDistance"/>
     <parameter expression="true" name="keepToolDown"/>
-    <parameter expression="50mm" name="stayDownDistance"/>
+    <parameter expression="15 mm" name="stayDownDistance"/>
     <parameter expression="0mm" name="liftHeight"/>
     <parameter expression="false" name="doLeadIn"/>
     <parameter expression="1mm" name="entry_radius"/>

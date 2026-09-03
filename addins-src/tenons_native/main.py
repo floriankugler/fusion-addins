@@ -279,12 +279,28 @@ class TenonsNativeInputs(inputs.Inputs):
             ),
         )
         self.distance_from_edge.minimum_value = 0
+        self.distribute_evenly = inputs.CheckboxInput(
+            id="distributeEvenly",
+            name="Distribute Evenly",
+            default_value=False,
+            tool_tip=(
+                "Derive the tenon width so that every tenon and every gap "
+                "between two tenons is equally wide. The End Margin stays a "
+                "manual input and is not part of the pattern."
+            ),
+            update_visibility=lambda: (
+                self.positioning.value
+                == TenonsNativeInputs.Positioning.NUMBER.value
+                and self.number_of_tenons.value > 1
+            ),
+        )
         self.width = inputs.FloatInput(
             id="width",
             name="Tenon Width",
             default_value=5.0,
             tool_tip="Width of every tenon along the selected edge.",
             units=units,
+            update_visibility=lambda: not self.distributing_evenly(),
         )
         self.width.minimum_value = 0
         self.remaining_material = inputs.FloatInput(
@@ -523,6 +539,17 @@ class TenonsNativeInputs(inputs.Inputs):
         self.threaded_insert_collar_depth.minimum_value = 0
 
         super().__init__()
+
+    def distributing_evenly(self) -> bool:
+        """True while the tenon width is derived from the edge instead of
+        typed in. Only an exact number of tenons can be distributed, and a
+        single tenon has no gap to match, so the option is inert otherwise."""
+        return (
+            self.positioning.value
+            == TenonsNativeInputs.Positioning.NUMBER.value
+            and self.number_of_tenons.value > 1
+            and self.distribute_evenly.value
+        )
 
 
 class TenonsNative(addin.Addin):
@@ -796,7 +823,13 @@ class TenonsNative(addin.Addin):
         if geometry.tenon_face.body == geometry.mortise_face.body:
             return "The mortises must be cut into a second solid body."
 
-        if self.inputs.width.value <= 0:
+        tenon_width = self._tenon_width(geometry.edge)
+        if tenon_width <= 0:
+            if self.inputs.distributing_evenly():
+                return (
+                    "End Margin leaves no room to distribute the tenons "
+                    "evenly along the selected edge."
+                )
             return "Tenon Width must be greater than zero."
         if self.inputs.tool_diameter.value <= 0:
             return "Tool Diameter must be greater than zero."
@@ -825,7 +858,7 @@ class TenonsNative(addin.Addin):
                 self.inputs.tool_diameter.value
                 + self.inputs.dog_bone_offset.value
             ) / 2
-            if self.inputs.width.value <= 2 * radius:
+            if tenon_width <= 2 * radius:
                 return (
                     "Hidden dog bones cut one relief radius into each end of "
                     "a tenon: Tenon Width must exceed Tool Diameter plus Dog "
@@ -854,13 +887,13 @@ class TenonsNative(addin.Addin):
             self._distance_from_edge_start(geometry.edge, point)
             for point in positions
         )
-        half_width = self.inputs.width.value / 2
+        half_width = tenon_width / 2
         if intervals[0] < half_width - 1e-6:
             return "The first tenon extends beyond the selected edge."
         if intervals[-1] > geometry.edge.length - half_width + 1e-6:
             return "The last tenon extends beyond the selected edge."
         if any(
-            right - left < self.inputs.width.value - 1e-6
+            right - left < tenon_width - 1e-6
             for left, right in zip(intervals, intervals[1:])
         ):
             return "The selected tenon positions overlap."
@@ -871,7 +904,7 @@ class TenonsNative(addin.Addin):
             gaps = [
                 intervals[0] - half_width,
                 *[
-                    right - left - self.inputs.width.value
+                    right - left - tenon_width
                     for left, right in zip(intervals, intervals[1:])
                 ],
                 geometry.edge.length - intervals[-1] - half_width,
@@ -906,7 +939,7 @@ class TenonsNative(addin.Addin):
             if (
                 self.inputs.tenon_screw.value == ScrewType.TWO_SIDES.value
                 and 2 * self.inputs.screw_offset.value
-                >= self.inputs.width.value - 1e-6
+                >= tenon_width - 1e-6
             ):
                 return (
                     "Screw Offset must be smaller than half the Tenon Width "
@@ -971,6 +1004,26 @@ class TenonsNative(addin.Addin):
             mortise_thickness=utils.brep.get_board_thickness(mortise_face),
         )
 
+    def _tenon_width(self, edge: adsk.fusion.BRepEdge) -> float:
+        """The width every tenon is built at.
+
+        With 'Distribute Evenly' the width is not typed in but derived, so
+        that tenons and the gaps between them are equally wide: n tenons
+        leave n-1 gaps, so the span between the two End Margins divides into
+        2n-1 equal parts. The margins themselves stay the user's own input
+        and are deliberately not part of the pattern.
+
+        The sketch does not rely on this number - `_create_tenon_layout`
+        drops the width dimension and constrains the first gap equal to the
+        first tenon instead, which keeps the layout parametric when the
+        board or the margin changes. This value only places the geometry at
+        its solved position up front.
+        """
+        if not self.inputs.distributing_evenly():
+            return self.inputs.width.value
+        span = edge.length - 2 * self.inputs.distance_from_edge.value
+        return span / (2 * self.inputs.number_of_tenons.value - 1)
+
     def _tenon_positions(
         self,
         edge: adsk.fusion.BRepEdge,
@@ -998,19 +1051,27 @@ class TenonsNative(addin.Addin):
         if count == 1:
             distances = [edge.length / 2]
         else:
+            width = self._tenon_width(edge)
             available = (
                 edge.length
                 - 2 * self.inputs.distance_from_edge.value
-                - self.inputs.width.value
+                - width
             )
             if available <= 0:
+                if self.inputs.distributing_evenly():
+                    # The width is derived here, so it can never be the part
+                    # the user has to shrink - only the margins can give.
+                    raise ValueError(
+                        "End Margin leaves no room to distribute the tenons "
+                        "evenly along the selected edge."
+                    )
                 raise ValueError(
                     "End Margin and Tenon Width leave no room for placement."
                 )
             pitch = available / (count - 1)
             distances = [
                 self.inputs.distance_from_edge.value
-                + self.inputs.width.value / 2
+                + width / 2
                 + index * pitch
                 for index in range(count)
             ]
@@ -1098,11 +1159,11 @@ class TenonsNative(addin.Addin):
         outer_ends: list[adsk.fusion.SketchPoint] = []
         first_base: adsk.fusion.SketchLine | None = None
         first_outer: adsk.fusion.SketchLine | None = None
+        half_width = self._tenon_width(edge) / 2
         for index, (center, center_model) in enumerate(
             zip(centers, positions),
             start=1,
         ):
-            half_width = self.inputs.width.value / 2
             start_model = self._translated(center_model, direction, -half_width)
             end_model = self._translated(center_model, direction, half_width)
             outer_start = self._translated(start_model, outward, tenon_length)
@@ -1134,12 +1195,13 @@ class TenonsNative(addin.Addin):
             constraints.addPerpendicular(left, base)
             if first_base is None:
                 first_base = base
-                self._add_line_length_dimension(
-                    sketch,
-                    base,
-                    self.inputs.width.expression,
-                    "tenonWidth",
-                )
+                if not self.inputs.distributing_evenly():
+                    self._add_line_length_dimension(
+                        sketch,
+                        base,
+                        self.inputs.width.expression,
+                        "tenonWidth",
+                    )
             else:
                 constraints.addEqual(first_base, base)
             if first_outer is None:
@@ -1203,7 +1265,36 @@ class TenonsNative(addin.Addin):
                     start_margin.parameter.name,
                     "endMargin",
                 )
-            if len(centers) > 2:
+            if self.inputs.distributing_evenly():
+                # No width dimension was written for the first tenon. The
+                # pattern itself replaces it: one construction line per gap,
+                # all gaps equal to each other and to the first tenon. The
+                # width then follows the edge and the margins parametrically
+                # instead of freezing the number computed at creation time.
+                #
+                # This deliberately spells out every gap rather than reusing
+                # the equal-spans block below. Equal centre-to-centre spans
+                # plus one equal gap is the same constraint count and the
+                # same unique solution, but Fusion rejected it as
+                # over-constrained at three tenons - its redundancy analysis
+                # is structural, not numeric. A plain chain of equal-length
+                # collinear segments solves at every count.
+                gaps: list[adsk.fusion.SketchLine] = []
+                for left, right in zip(bases, bases[1:]):
+                    gap = sketch.sketchCurves.sketchLines.addByTwoPoints(
+                        left.endSketchPoint,
+                        right.startSketchPoint,
+                    )
+                    if not gap:
+                        raise RuntimeError(
+                            "Fusion failed to create a tenon gap reference."
+                        )
+                    gap.isConstruction = True
+                    gaps.append(gap)
+                constraints.addEqual(bases[0], gaps[0])
+                for gap in gaps[1:]:
+                    constraints.addEqual(gaps[0], gap)
+            elif len(centers) > 2:
                 # With two tenons the spacing is already determined by the
                 # margins; a single span would stay unconstrained.
                 spans: list[adsk.fusion.SketchLine] = []
@@ -1361,6 +1452,7 @@ class TenonsNative(addin.Addin):
                 adsk.core.Vector3D,
             ]
         ] = []
+        half_width = self._tenon_width(geometry.edge) / 2
         for center, (_, projected_start, projected_end) in zip(
             layout.center_model_points,
             projected_bases,
@@ -1372,7 +1464,7 @@ class TenonsNative(addin.Addin):
                         self._translated(
                             center,
                             edge_direction,
-                            -self.inputs.width.value / 2,
+                            -half_width,
                         ),
                         self._opposite(edge_direction),
                     ),
@@ -1381,7 +1473,7 @@ class TenonsNative(addin.Addin):
                         self._translated(
                             center,
                             edge_direction,
-                            self.inputs.width.value / 2,
+                            half_width,
                         ),
                         edge_direction,
                     ),
@@ -2209,9 +2301,6 @@ class TenonsNative(addin.Addin):
         zero_width = self.inputs.mortise_width_offset.value <= _ZERO_OFFSET
         length_reference: str | None = None
         width_reference: str | None = None
-        # The first rectangle's sides, which the later ones are constrained to.
-        first_lower: adsk.fusion.SketchLine | None = None
-        first_upper: adsk.fusion.SketchLine | None = None
         rectangles = []
         for index, projected in enumerate(projected_profiles, start=1):
             parallel: list[adsk.fusion.SketchLine] = []
@@ -2285,74 +2374,61 @@ class TenonsNative(addin.Addin):
             constraints.addPerpendicular(right, lower)
             constraints.addParallel(upper, lower)
             constraints.addPerpendicular(left, lower)
-            # Only the first rectangle carries dimensions; the rest are tied
-            # to it with geometric constraints, exactly as the tenon layout
-            # does with its own repeats. All tenons are identical there
-            # (addEqual on the base, addCollinear on the outer edge), so
-            # every mortise rectangle has the same extents and only its
-            # position along the edge differs.
+            # Every rectangle is offset from its OWN projected tenon on all
+            # four sides. Every tenon is projected into this sketch anyway,
+            # so each mortise is both positioned and sized by the tenon it
+            # has to receive - an earlier version dimensioned only the first
+            # rectangle and tied the rest to it (collinear + equal), which
+            # made every mortise depend on tenon 1's geometry rather than on
+            # its own counterpart.
             #
-            # This is worth doing because a dimension is not just a
-            # constraint: it creates a parameter, and writing that
-            # parameter's expression triggers a document update costing
-            # ~0.5 s in a large assembly, against ~1 ms for a constraint.
-            if first_lower is None or first_upper is None:
-                left_dimension = self._add_offset_dimension_or_collinear(
-                    sketch,
-                    perpendicular[0],
-                    left,
-                    f"({self.inputs.mortise_length_offset.expression}) / 2",
-                    f"mortise{index}LeftOffset",
-                    zero_length,
-                )
-                length_reference = (
-                    left_dimension.parameter.name if left_dimension else None
-                )
-                self._add_offset_dimension_or_collinear(
-                    sketch,
-                    perpendicular[1],
-                    right,
-                    length_reference,
-                    f"mortise{index}RightOffset",
-                    zero_length,
-                )
-                lower_dimension = self._add_offset_dimension_or_collinear(
-                    sketch,
-                    parallel[0],
-                    lower,
-                    f"({self.inputs.mortise_width_offset.expression}) / 2",
-                    f"mortise{index}LowerOffset",
-                    zero_width,
-                )
-                width_reference = (
-                    lower_dimension.parameter.name if lower_dimension else None
-                )
-                self._add_offset_dimension_or_collinear(
-                    sketch,
-                    parallel[1],
-                    upper,
-                    width_reference,
-                    f"mortise{index}UpperOffset",
-                    zero_width,
-                )
-                first_lower = lower
-                first_upper = upper
-            else:
-                # Collinear fixes this rectangle across the edge (position
-                # and height), equal fixes its length, and the one remaining
-                # dimension places it along the edge relative to its OWN
-                # tenon profile - which is the only thing that differs.
-                constraints.addCollinear(first_lower, lower)
-                constraints.addCollinear(first_upper, upper)
-                constraints.addEqual(first_lower, lower)
-                self._add_offset_dimension_or_collinear(
-                    sketch,
-                    perpendicular[0],
-                    left,
-                    length_reference,
-                    f"mortise{index}LeftOffset",
-                    zero_length,
-                )
+            # Only the first rectangle spells out the user's offset
+            # expressions; the later ones reference its parameters, so the
+            # clearance is still authored once. That matters beyond
+            # tidiness: writing a parameter expression triggers a document
+            # update costing ~0.5 s in a large assembly, and
+            # `_set_parameter_expression` skips a write that would not move
+            # anything.
+            left_dimension = self._add_offset_dimension_or_collinear(
+                sketch,
+                perpendicular[0],
+                left,
+                length_reference
+                or f"({self.inputs.mortise_length_offset.expression}) / 2",
+                f"mortise{index}LeftOffset",
+                zero_length,
+            )
+            length_reference = length_reference or (
+                left_dimension.parameter.name if left_dimension else None
+            )
+            self._add_offset_dimension_or_collinear(
+                sketch,
+                perpendicular[1],
+                right,
+                length_reference,
+                f"mortise{index}RightOffset",
+                zero_length,
+            )
+            lower_dimension = self._add_offset_dimension_or_collinear(
+                sketch,
+                parallel[0],
+                lower,
+                width_reference
+                or f"({self.inputs.mortise_width_offset.expression}) / 2",
+                f"mortise{index}LowerOffset",
+                zero_width,
+            )
+            width_reference = width_reference or (
+                lower_dimension.parameter.name if lower_dimension else None
+            )
+            self._add_offset_dimension_or_collinear(
+                sketch,
+                parallel[1],
+                upper,
+                width_reference,
+                f"mortise{index}UpperOffset",
+                zero_width,
+            )
             center = sketch.sketchPoints.add(
                 self._sketch_line_midpoint(diagonal)
             )

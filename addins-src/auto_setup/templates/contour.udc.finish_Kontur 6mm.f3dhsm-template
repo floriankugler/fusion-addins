@@ -311,7 +311,7 @@
     <parameter expression="true" name="allowRapidRetract"/>
     <parameter expression="Math.min(1.0mm; tool_diameter * 0.2)" name="safeDistance"/>
     <parameter expression="true" name="keepToolDown"/>
-    <parameter expression="50mm" name="stayDownDistance"/>
+    <parameter expression="15 mm" name="stayDownDistance"/>
     <parameter expression="0mm" name="liftHeight"/>
     <parameter expression="true" name="doLeadIn"/>
     <parameter expression="1mm" name="entry_radius"/>

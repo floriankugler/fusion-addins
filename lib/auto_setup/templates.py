@@ -157,6 +157,20 @@ def tab_width(variant: TemplateVariant) -> float | None:
     return None
 
 
+def is_adaptive(variant: TemplateVariant) -> bool:
+    """True if any operation of the template clears adaptively.
+
+    Adaptive clearing pays off over a long, smooth, deep engagement. On a small
+    pocket it never gets into that rhythm - the passes are all lead-in and
+    corner - so such a template is only worth using above a floor area (see
+    rules.SMALL_POCKET_AREA), whatever tool it carries.
+    """
+    template = load(variant)
+    operations = template.operations
+    return any('adaptive' in (operations.get(idx).strategy or '').lower()
+               for idx in range(operations.count))
+
+
 def primary_tool(variant: TemplateVariant) -> tuple[float | None, float | None]:
     """(diameter, flute length) of the template's first operation."""
     dimensions = tool_dimensions(variant)

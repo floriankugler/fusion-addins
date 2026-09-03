@@ -93,6 +93,17 @@ class AutoSetupInputs(inputs.Inputs):
             tool_tip='Cutter variant used to pick templates. Templates without a cutter tag '
                      'are valid for either choice.',
         )
+        self.overcut = inputs.FloatInput(
+            id='overcut',
+            name='Overcut',
+            default_value=0.02,
+            tool_tip='How far a through cut reaches past the bottom of the part, so it breaks '
+                     'through cleanly: outer contours, cutouts, through holes and the dogbones '
+                     'that go with them. Reliefs on a pocket floor never get one. The value '
+                     'also decides how long a tool has to be to cut a feature through.',
+            units=units,
+        )
+        self.overcut.minimum_value = 0.0
 
         self.pocket_default = self._options_dropdown(
             'pocketDefault', 'Pocket operation', self.pocket_options,
@@ -316,8 +327,12 @@ class AutoSetup(addin.Addin):
         frame = recognition.Frame.from_x_axis(
             x_axis, recognition.face_normal(top_face))
         result = recognition.recognize(bodies, frame)
+        # Both halves work off the same value: rules sizes the tools against it,
+        # the builder writes it into the operations.
+        overcut = self.inputs.overcut.value
         assignments = rules.Assignments(
             cutter=self.inputs.selected_cutter,
+            overcut=overcut,
             pocket_default=self.inputs.default_pocket(),
             contour_default=self.inputs.default_contour(),
             finish_outer_all=self.inputs.finish_outer.value,
@@ -338,7 +353,7 @@ class AutoSetup(addin.Addin):
         jobs, warnings = rules.plan(result, self.inputs.registry, assignments, tab_policy)
         summary = builder.create_setup(
             self.inputs.setup_name.value, bodies, jobs, warnings, tab_policy,
-            x_axis=x_axis, top_face=top_face, frame=frame)
+            x_axis=x_axis, top_face=top_face, frame=frame, overcut=overcut)
 
         if summary.warnings:
             self.ui.messageBox(

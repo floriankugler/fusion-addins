@@ -74,9 +74,17 @@ class Pocket:
     bottom_face: adsk.fusion.BRepFace
     depth: float
     body: adsk.fusion.BRepBody
-    # Smallest concave (inside) corner fillet radius of the boundary, None if
-    # there are no concave arcs (e.g. all corners sharp): no tool constraint.
-    min_corner_radius: float | None = None
+    # Radii of the concave (inside) corner arcs of the boundary. Empty when
+    # there are none (e.g. all corners sharp): no tool constraint. The small
+    # ones among them are corner reliefs that get their own operation, so the
+    # list is kept whole rather than reduced to its minimum here.
+    corner_radii: list[float] = field(default_factory=list)
+    # Floor area, which decides how wide a tool is worth using.
+    area: float = 0.0
+
+    @property
+    def min_corner_radius(self) -> float | None:
+        return min(self.corner_radii, default=None)
 
 
 @dataclass
@@ -142,7 +150,8 @@ def _recognize_body(body: adsk.fusion.BRepBody, frame: Frame) -> RecognitionResu
                 bottom_face=face,
                 depth=z_max - face_z,
                 body=body,
-                min_corner_radius=_min_concave_corner_radius(face),
+                corner_radii=_concave_corner_radii(face),
+                area=face.area,
             ))
 
     bottom_faces = [
@@ -276,10 +285,13 @@ class Relief:
     face: adsk.fusion.BRepFace   # the concave cylindrical wall
     diameter: float
     depth: float
+    # False for a relief on a pocket floor, which the tool must stop at instead
+    # of cutting through.
+    is_through: bool = True
 
 
 def corner_reliefs(edges: list[adsk.fusion.BRepEdge], max_diameter: float,
-                   depth: float) -> list[Relief]:
+                   depth: float, is_through: bool = True) -> list[Relief]:
     """Reliefs of a contour loop up to max_diameter, at the given cut depth.
 
     An arc qualifies when its wall face is a concave cylinder, i.e. the material
@@ -297,7 +309,7 @@ def corner_reliefs(edges: list[adsk.fusion.BRepEdge], max_diameter: float,
             if (cylinder and abs(cylinder.radius - arc.radius) < HEIGHT_TOL
                     and _is_concave_cylinder(face, cylinder)):
                 reliefs.append(Relief(edge=edge, face=face, diameter=2 * arc.radius,
-                                      depth=depth))
+                                      depth=depth, is_through=is_through))
                 break
     return reliefs
 
@@ -306,15 +318,15 @@ def _has_full_circle_edge(face: adsk.fusion.BRepFace) -> bool:
     return any(adsk.core.Circle3D.cast(edge.geometry) for edge in face.edges)
 
 
-def _min_concave_corner_radius(face: adsk.fusion.BRepFace) -> float | None:
-    """Smallest radius among concave boundary arcs of a planar face.
+def _concave_corner_radii(face: adsk.fusion.BRepFace) -> list[float]:
+    """Radii of the concave boundary arcs of a planar face.
 
     An arc is concave (an inside corner fillet the tool must fit into) when the
     face material lies on the arc's center side. Sharp corners are ignored:
     they carry no design radius, the tool simply leaves its own.
     """
     evaluator = face.evaluator
-    min_radius: float | None = None
+    radii: list[float] = []
     for loop in face.loops:
         for edge in loop.edges:
             geometry = adsk.core.Circle3D.cast(edge.geometry) or adsk.core.Arc3D.cast(edge.geometry)
@@ -330,9 +342,8 @@ def _min_concave_corner_radius(face: adsk.fusion.BRepFace) -> float | None:
             probe.translateBy(towards_center)
             ok, parameter = evaluator.getParameterAtPoint(probe)
             if ok and evaluator.isParameterOnFace(parameter):
-                radius = geometry.radius
-                min_radius = radius if min_radius is None else min(min_radius, radius)
-    return min_radius
+                radii.append(geometry.radius)
+    return radii
 
 
 def _edge_midpoint(edge: adsk.fusion.BRepEdge) -> adsk.core.Point3D:

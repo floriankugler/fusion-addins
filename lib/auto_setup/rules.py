@@ -22,17 +22,20 @@ contours) plus an additive selection of individual contours or pockets that
 get the '.finish' template variant regardless of the mode. Two subtractive
 selections override those defaults: features that are not machined at all, and
 features that keep their operation but lose the finishing pass. Pocket templates
-are validated against the pocket's minimum concave corner radius using the
-widest tool in the template (which must be TOOL_CLEARANCE smaller than the
-corner it has to reach into); on a misfit the best fitting variant is
-substituted with a warning.
+are validated against the pocket: the widest tool in the template must be
+TOOL_CLEARANCE smaller than the corners it has to reach into, its shortest
+flute must reach the floor, and a template that clears adaptively is only used
+on a floor of at least SMALL_POCKET_AREA. On a misfit the best fitting variant
+is substituted with a warning.
 
-A contour tool wider than an inside corner relief (a dogbone) of the profile
-cannot machine it. Those reliefs are collected across all contours and cutouts
-and get extra operations after the contour operations: a relief matching a
-drill template's tool diameter exactly is plunged with it (a contour pass would
-degenerate to a point), every other one is machined along its arc as an open
-chain by the 'dogbone' template's smaller cutter.
+A tool wider than an inside corner relief (a dogbone) of the profile cannot
+machine it. Those reliefs are collected across all contours, cutouts and pocket
+floors and get extra operations after the ones they belong to: a relief
+matching a drill template's tool diameter exactly is plunged with it (a contour
+pass would degenerate to a point), every other one is machined along its arc as
+an open chain by the 'dogbone' template's smaller cutter. Because such a corner
+is machined separately, it places no demand on the template it came from and is
+left out of that template's corner-radius check.
 
 Tabs are opt-in per contour: the tab selection accepts edges or faces of an
 outer contour or a cutout, resolved to the owning feature. A second selection
@@ -54,7 +57,9 @@ TOOL_CLEARANCE = 0.01
 BIG_HOLE_LIMIT = 3.0
 # Tolerance when checking a tool's flute length against a feature depth (cm).
 DEPTH_TOL = 0.005
-# Extra depth required for through cuts (breakthrough below the stock, cm).
+# Default overcut: how far a through cut reaches past the bottom of the part so
+# it breaks through cleanly (cm). The command asks for it; this is the fallback
+# for callers that do not, and it is what the templates are authored with.
 THROUGH_ALLOWANCE = 0.02
 # A tool of exactly a relief's diameter machines it (that is what dogbones are
 # drawn for), so only reliefs narrower than the tool by more than this need an
@@ -62,6 +67,10 @@ THROUGH_ALLOWANCE = 0.02
 RELIEF_TOL = 0.005
 # Ceiling for the diameter-scaled boring feedrate (mm/min).
 MAX_BORE_FEED = 3000.0
+# Floor area an adaptive pocket template needs to be worth its while (cm²).
+# Below it the clearing passes are all lead-in and corner, and a plain pocket
+# template does the job.
+SMALL_POCKET_AREA = 25.0
 # Resolution of the boring feed scale. Holes whose diameters agree to this much
 # share an operation, so modelling noise does not split one into several.
 FEED_SCALE_TOL = 3  # decimal places
@@ -121,6 +130,10 @@ class Assignments:
     cutter: str | None = None            # 'dc' | 'udc' | None
     pocket_default: str | None = None    # label
     contour_default: str | None = None   # label
+    # How far a through cut reaches past the bottom of the part (cm). Decides
+    # here how long a tool has to be to cut a feature through; the builder
+    # writes it into the operations.
+    overcut: float = THROUGH_ALLOWANCE
     finish_outer_all: bool = False       # finishing pass on all outer contours
     finish_cutouts_all: bool = False     # ... on all inner contours (cutouts)
     finish_pockets_all: bool = False     # ... on all pockets
@@ -297,7 +310,8 @@ def plan(result: recognition.RecognitionResult, registry: dict[str, list[templat
                     bottom_face=bottom_face,
                     depth=hole.depth,
                     body=hole.body,
-                    min_corner_radius=hole.diameter / 2,
+                    corner_radii=[hole.diameter / 2],
+                    area=bottom_face.area,
                 ))
             else:
                 warnings.append(
@@ -322,10 +336,17 @@ def plan(result: recognition.RecognitionResult, registry: dict[str, list[templat
 
     tool_limits = _tool_limits_cache()
     jobs: list[Job] = []
-    jobs += _plan_holes(small_holes, drills, bores, warnings)
-    jobs += _plan_pockets(pockets, registry, assignments, sets, tool_limits, warnings)
-    jobs += _plan_contours(result, cutouts, registry, assignments, tab_policy.mode, sets,
-                           outer_overrides, cutout_overrides, drills, tool_limits, warnings)
+    jobs += _plan_holes(small_holes, drills, bores, assignments.overcut, warnings)
+    pocket_jobs, pocket_reliefs = _plan_pockets(
+        pockets, registry, assignments, sets, tool_limits, warnings)
+    contour_jobs, contour_reliefs = _plan_contours(
+        result, cutouts, registry, assignments, tab_policy.mode, sets,
+        outer_overrides, cutout_overrides, drills, tool_limits, warnings)
+    jobs += pocket_jobs + contour_jobs
+    # Reliefs from both sources go into the same pass: one operation per cutter
+    # and cut depth, rather than one per feature that happened to have corners.
+    jobs += _plan_reliefs(pocket_reliefs + contour_reliefs, registry, drills,
+                          assignments.cutter, tool_limits, assignments.overcut, warnings)
     jobs.sort(key=lambda job: _job_order(job, tool_limits))
     return jobs, warnings
 
@@ -403,7 +424,7 @@ def _resolve_features(resolver: SelectionResolver, selection, warnings: list[str
     return outer_tokens, cutout_ids, pocket_ids
 
 
-def _plan_holes(holes, drills, bores, warnings: list[str]) -> list[Job]:
+def _plan_holes(holes, drills, bores, overcut: float, warnings: list[str]) -> list[Job]:
     if not holes:
         return []
     if not drills and not bores:
@@ -412,7 +433,7 @@ def _plan_holes(holes, drills, bores, warnings: list[str]) -> list[Job]:
 
     groups: dict[tuple[str, float, bool, float | None], Job] = {}
     for hole in holes:
-        required_depth = hole.depth + (THROUGH_ALLOWANCE if hole.is_through else 0.0)
+        required_depth = hole.depth + (overcut if hole.is_through else 0.0)
         picked = _pick_hole_template(hole, required_depth, drills, bores, warnings)
         if not picked:
             warnings.append(
@@ -497,25 +518,53 @@ def _pick_bore(diameter, required_depth, bores, require_depth):
 
 
 def _plan_pockets(pockets, registry, assignments: Assignments, sets: _FeatureSets,
-                  tool_limits, warnings: list[str]) -> list[Job]:
+                  tool_limits, warnings: list[str]) -> tuple[list[Job], list[recognition.Relief]]:
     if not pockets:
-        return []
+        return [], []
+
+    def binding_radius(variant: templates.TemplateVariant,
+                       pocket: recognition.Pocket) -> float | None:
+        """The tightest corner the template's own tool has to reach into.
+
+        Corners narrower than its finest tool are corner reliefs - dogbones -
+        and are cut by a separate operation (see _reliefs), so they place no
+        demand on this template and are left out.
+        """
+        relieved = tool_limits(variant).min_diameter
+        radii = [r for r in pocket.corner_radii
+                 if relieved is None or 2 * r >= relieved - RELIEF_TOL]
+        return min(radii, default=None)
 
     def fits_radius(variant: templates.TemplateVariant, pocket: recognition.Pocket) -> bool:
-        if pocket.min_corner_radius is None:
+        radius = binding_radius(variant, pocket)
+        if radius is None:
             return True
         diameter = tool_limits(variant).max_diameter
         # The tool has to fit into the corner with room to cut: its diameter
         # must stay below the corner's diameter by at least TOOL_CLEARANCE.
-        return diameter is None or diameter <= 2 * pocket.min_corner_radius - TOOL_CLEARANCE
+        return diameter is None or diameter <= 2 * radius - TOOL_CLEARANCE
 
     def fits_depth(variant: templates.TemplateVariant, pocket: recognition.Pocket) -> bool:
         flute = tool_limits(variant).min_flute
         return flute is None or flute >= pocket.depth - DEPTH_TOL
 
-    def fits(variant, pocket):
-        return fits_radius(variant, pocket) and fits_depth(variant, pocket)
+    # Each miss loads a template file, and the same variant is asked about once
+    # per pocket and again for every substitution candidate.
+    adaptive: dict[str, bool] = {}
 
+    def is_adaptive(variant: templates.TemplateVariant) -> bool:
+        if variant.name not in adaptive:
+            adaptive[variant.name] = templates.is_adaptive(variant)
+        return adaptive[variant.name]
+
+    def fits_area(variant: templates.TemplateVariant, pocket: recognition.Pocket) -> bool:
+        return not is_adaptive(variant) or pocket.area >= SMALL_POCKET_AREA
+
+    def fits(variant, pocket):
+        return (fits_radius(variant, pocket) and fits_depth(variant, pocket)
+                and fits_area(variant, pocket))
+
+    reliefs: list[recognition.Relief] = []
     groups: dict[str, Job] = {}
     for index, pocket in enumerate(pockets):
         if index in sets.skip_pockets:
@@ -536,9 +585,11 @@ def _plan_pockets(pockets, registry, assignments: Assignments, sets: _FeatureSet
 
         problems = []
         if not fits_radius(variant, pocket):
-            problems.append(f'corner radius {pocket.min_corner_radius * 10:.1f}mm')
+            problems.append(f'corner radius {binding_radius(variant, pocket) * 10:.1f}mm')
         if not fits_depth(variant, pocket):
             problems.append(f'depth {pocket.depth * 10:.1f}mm')
+        if not fits_area(variant, pocket):
+            problems.append(f'area {pocket.area:.1f}cm²')
         if problems:
             reason = ' and '.join(problems)
             if is_override:
@@ -557,11 +608,19 @@ def _plan_pockets(pockets, registry, assignments: Assignments, sets: _FeatureSet
                     warnings.append(
                         f'{pocket.body.name}: pocket {reason} does not suit any pocket '
                         f'template; keeping "{variant.display_label}", check the operation.')
+        reliefs += _reliefs(variant, _pocket_edges(pocket), pocket.depth, tool_limits,
+                            is_through=False)
         if variant.name not in groups:
             groups[variant.name] = Job(
                 variant=variant, display_name=f'Pockets ({variant.display_label})')
         groups[variant.name].pockets.append(pocket)
-    return list(groups.values())
+    return list(groups.values()), reliefs
+
+
+def _pocket_edges(pocket: recognition.Pocket) -> list[adsk.fusion.BRepEdge]:
+    """Every boundary edge of the pocket floor. Islands come along: their walls
+    are convex, so corner_reliefs discards them by itself."""
+    return [edge for loop in pocket.bottom_face.loops for edge in loop.edges]
 
 
 def _best_fitting_variant(variants, chosen, pocket, fits, tool_limits):
@@ -578,10 +637,11 @@ def _best_fitting_variant(variants, chosen, pocket, fits, tool_limits):
 
 
 def _contour_depth_check(registry, variant, feature_depth, cutter, tool_limits,
-                         context: str, warnings: list[str]) -> templates.TemplateVariant:
+                         overcut: float, context: str,
+                         warnings: list[str]) -> templates.TemplateVariant:
     """Ensure the contour template's tool can cut through the stock; substitute
     a depth-capable variant (same finish flag) or warn."""
-    required = feature_depth + THROUGH_ALLOWANCE
+    required = feature_depth + overcut
     flute = tool_limits(variant).min_flute
     if flute is None or flute >= required - DEPTH_TOL:
         return variant
@@ -609,12 +669,13 @@ def _contour_depth_check(registry, variant, feature_depth, cutter, tool_limits,
 def _plan_contours(result, cutouts, registry, assignments: Assignments, tab_mode: int,
                    sets: _FeatureSets,
                    outer_overrides: dict[str, str], cutout_overrides: dict[int, str],
-                   drills, tool_limits, warnings: list[str]) -> list[Job]:
+                   drills, tool_limits,
+                   warnings: list[str]) -> tuple[list[Job], list[recognition.Relief]]:
     if not cutouts and not result.contours:
-        return []
+        return [], []
     if assignments.contour_default is None and not outer_overrides and not cutout_overrides:
         warnings.append('No contour template available; cutouts and contours skipped.')
-        return []
+        return [], []
 
     def finish_wanted(is_outer: bool, selected: bool, excluded: bool) -> bool:
         if excluded:
@@ -648,7 +709,7 @@ def _plan_contours(result, cutouts, registry, assignments: Assignments, tab_mode
             continue
         variant = _contour_depth_check(
             registry, variant, cutout.depth, assignments.cutter, tool_limits,
-            f'{cutout.body.name} cutout', warnings)
+            assignments.overcut, f'{cutout.body.name} cutout', warnings)
         reliefs += _reliefs(variant, cutout.edges, cutout.depth, tool_limits)
         tabbed = ((tab_mode in (TAB_INNER, TAB_ALL) or index in sets.tab_cutouts)
                   and index not in sets.no_tab_cutouts)
@@ -680,7 +741,7 @@ def _plan_contours(result, cutouts, registry, assignments: Assignments, tab_mode
             continue
         variant = _contour_depth_check(
             registry, variant, contour.depth, assignments.cutter, tool_limits,
-            f'{contour.body.name} outer contour', warnings)
+            assignments.overcut, f'{contour.body.name} outer contour', warnings)
         reliefs += _reliefs(variant, contour.edges, contour.depth, tool_limits)
         tabbed = ((tab_mode in (TAB_OUTER, TAB_ALL) or body_token in sets.tab_outer)
                   and body_token not in sets.no_tab_outer)
@@ -698,58 +759,64 @@ def _plan_contours(result, cutouts, registry, assignments: Assignments, tab_mode
         if tabbed:
             contour_groups[key].tab_loops.append((contour.edges, f'{contour.body.name} outer contour'))
 
-    return (list(cutout_groups.values()) + list(contour_groups.values())
-            + _plan_reliefs(reliefs, registry, drills, assignments.cutter, tool_limits, warnings))
+    return list(cutout_groups.values()) + list(contour_groups.values()), reliefs
 
 
 def _reliefs(variant: templates.TemplateVariant, edges, depth: float,
-             tool_limits) -> list[recognition.Relief]:
-    """Inside corner reliefs of one contour that its own tool is too wide for.
+             tool_limits, is_through: bool = True) -> list[recognition.Relief]:
+    """Inside corner reliefs of one contour or pocket floor that its own tool is
+    too wide for.
 
     The narrowest tool of the template decides: it is the one that reaches
     furthest into the corners."""
     diameter = tool_limits(variant).min_diameter
     if diameter is None:
         return []
-    return recognition.corner_reliefs(edges, diameter - RELIEF_TOL, depth)
+    return recognition.corner_reliefs(edges, diameter - RELIEF_TOL, depth, is_through)
 
 
 def _plan_reliefs(reliefs: list[recognition.Relief], registry, drills, cutter: str | None,
-                  tool_limits, warnings: list[str]) -> list[Job]:
+                  tool_limits, overcut: float, warnings: list[str]) -> list[Job]:
     """Extra operations for the reliefs the contour operations left behind:
     plunged with an exactly fitting drill where one exists, milled along the arc
     with the dogbone template otherwise."""
     if not reliefs:
         return []
 
-    drill_groups: dict[str, Job] = {}
+    # A relief on a pocket floor is cut to that floor, one through the stock is
+    # cut past the bottom, so the two cannot share an operation.
+    drill_groups: dict[tuple[str, bool], Job] = {}
     milled: list[recognition.Relief] = []
     for relief in reliefs:
         variant = _drill_for_relief(relief, drills)
         if not variant:
             milled.append(relief)
             continue
-        if variant.name not in drill_groups:
-            drill_groups[variant.name] = Job(
+        key = (variant.name, relief.is_through)
+        if key not in drill_groups:
+            suffix = '' if relief.is_through else ', pocket'
+            drill_groups[key] = Job(
                 variant=variant,
-                display_name=f'Dogbones ({variant.display_label})',
-                is_through=True,
+                display_name=f'Dogbones ({variant.display_label}{suffix})',
+                is_through=relief.is_through,
             )
         # A relief is a partial hole: the drill strategy takes its wall face.
-        drill_groups[variant.name].holes.append(recognition.Hole(
+        drill_groups[key].holes.append(recognition.Hole(
             face=relief.face, diameter=relief.diameter, depth=relief.depth,
-            is_through=True, body=relief.face.body))
+            is_through=relief.is_through, body=relief.face.body))
 
     for job in drill_groups.values():
         flute = tool_limits(job.variant).min_flute
-        required = max(hole.depth for hole in job.holes) + THROUGH_ALLOWANCE
+        required = max(hole.depth for hole in job.holes)
+        if job.is_through:
+            required += overcut
         if flute is not None and flute < required - DEPTH_TOL:
             warnings.append(
                 f'Dogbone cut depth {required * 10:.1f}mm exceeds the '
                 f'"{job.variant.display_label}" tool ({flute * 10:.1f}mm); check the operation.')
 
     return list(drill_groups.values()) + _plan_milled_reliefs(
-        milled, registry, cutter, tool_limits, warnings)
+        milled, registry, cutter, tool_limits, overcut, warnings)
 
 
 def _drill_for_relief(relief: recognition.Relief,
@@ -764,9 +831,15 @@ def _drill_for_relief(relief: recognition.Relief,
 
 
 def _plan_milled_reliefs(reliefs: list[recognition.Relief], registry, cutter: str | None,
-                         tool_limits, warnings: list[str]) -> list[Job]:
-    """One operation with the smallest available dogbone cutter, machining each
-    relief along its arc as an open chain."""
+                         tool_limits, overcut: float, warnings: list[str]) -> list[Job]:
+    """Operations with the smallest available dogbone cutter, machining each
+    relief along its arc as an open chain.
+
+    One operation per cut depth: the dogbone template takes its bottom height
+    from the selected contour, which is a single height for the whole
+    operation, so reliefs sitting at different levels - the stock bottom, and
+    the floor of every pocket depth - have to be kept apart.
+    """
     if not reliefs:
         return []
     candidates = [v for v in registry['dogbone'] if v.matches_cutter(cutter)]
@@ -784,17 +857,27 @@ def _plan_milled_reliefs(reliefs: list[recognition.Relief], registry, cutter: st
             f'The smallest dogbone (⌀{smallest * 10:.2f}mm) is not wider than the '
             f'"{variant.display_label}" tool (⌀{limits.max_diameter * 10:.2f}mm), which '
             'leaves it nothing to cut; check the operation.')
-    required = max(relief.depth for relief in reliefs) + THROUGH_ALLOWANCE
-    if limits.min_flute is not None and limits.min_flute < required - DEPTH_TOL:
-        warnings.append(
-            f'Dogbone cut depth {required * 10:.1f}mm exceeds the "{variant.display_label}" '
-            f'tool ({limits.min_flute * 10:.1f}mm); check the operation.')
 
-    return [Job(
-        variant=variant,
-        display_name=f'Dogbones ({variant.display_label})',
-        open_chains=[relief.edge for relief in reliefs],
-    )]
+    # A relief hangs from the top face, so equal depths sit at equal heights.
+    levels: dict[tuple[float, bool], list[recognition.Relief]] = {}
+    for relief in reliefs:
+        levels.setdefault((round(relief.depth, 4), relief.is_through), []).append(relief)
+
+    jobs: list[Job] = []
+    for (depth, is_through), group in sorted(levels.items()):
+        required = depth + (overcut if is_through else 0.0)
+        if limits.min_flute is not None and limits.min_flute < required - DEPTH_TOL:
+            warnings.append(
+                f'Dogbone cut depth {required * 10:.1f}mm exceeds the "{variant.display_label}" '
+                f'tool ({limits.min_flute * 10:.1f}mm); check the operation.')
+        suffix = '' if is_through else f', pocket {depth * 10:.1f}mm'
+        jobs.append(Job(
+            variant=variant,
+            display_name=f'Dogbones ({variant.display_label}{suffix})',
+            open_chains=[relief.edge for relief in group],
+            is_through=is_through,
+        ))
+    return jobs
 
 
 def _variants_by_tool_diameter(

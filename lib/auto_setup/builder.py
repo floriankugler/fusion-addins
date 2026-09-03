@@ -34,7 +34,8 @@ def create_setup(name: str, bodies: list[adsk.fusion.BRepBody],
                  tab_policy: rules.TabPolicy | None = None,
                  x_axis=None,
                  top_face: adsk.fusion.BRepFace | None = None,
-                 frame: recognition.Frame | None = None) -> BuildSummary:
+                 frame: recognition.Frame | None = None,
+                 overcut: float = rules.THROUGH_ALLOWANCE) -> BuildSummary:
     cam = _cam_product()
     tab_policy = tab_policy or rules.TabPolicy()
 
@@ -64,7 +65,7 @@ def create_setup(name: str, bodies: list[adsk.fusion.BRepBody],
     for index, job in enumerate(jobs):
         try:
             summary.operations.extend(
-                _insert_job(setup, index, job, tab_points, summary.warnings))
+                _insert_job(setup, index, job, tab_points, overcut, summary.warnings))
         except Exception as error:
             summary.warnings.append(f'Operation "{job.display_name}" failed: {error}')
     # Hide the tabs sketch (if one was created): the operations keep their
@@ -314,7 +315,8 @@ def _cam_product() -> adsk.cam.CAM:
 
 
 def _insert_job(setup: adsk.cam.Setup, job_index: int, job: rules.Job,
-                tab_points: _TabPoints, warnings: list[str]) -> list[adsk.cam.Operation]:
+                tab_points: _TabPoints, overcut: float,
+                warnings: list[str]) -> list[adsk.cam.Operation]:
     template = templates.load(job.variant)
     template_input = adsk.cam.CreateFromCAMTemplateInput.create()
     template_input.camTemplate = template
@@ -328,11 +330,7 @@ def _insert_job(setup: adsk.cam.Setup, job_index: int, job: rules.Job,
         _bind_geometry(operation, job)
         if job.feed_scale is not None:
             _scale_bore_feed(operation, job.feed_scale)
-        if job.is_through and job.variant.kind in ('drill', 'bore'):
-            # Break through the bottom by 0.2mm (for drills instead of the
-            # drill tip option), like the contour templates do.
-            _try_set(operation, 'bottomHeight_mode', "'from hole bottom'")
-            _try_set(operation, 'bottomHeight_offset', '-0.2 mm')
+        _apply_overcut(operation, job, overcut)
         try:
             _apply_tabs(operation, job_index, job, tab_points, warnings)
         except Exception as error:
@@ -350,6 +348,42 @@ def _insert_job(setup: adsk.cam.Setup, job_index: int, job: rules.Job,
         else:
             operation.name = f'{job.display_name} – {operation.name}'
     return operations
+
+
+def _apply_overcut(operation: adsk.cam.Operation, job: rules.Job, overcut: float):
+    """Write the setup's overcut into an operation that cuts through the part.
+
+    The offset is written rather than left to the template whichever way it
+    goes: the contour and dogbone templates are authored with an allowance of
+    their own, the drill and bore templates with none, and the setting has to
+    beat both. A pocket keeps the template's value - it stops at its floor and
+    has nothing to break through.
+    """
+    kind = job.variant.kind
+    if kind == 'pocket':
+        return
+    if kind in ('drill', 'bore'):
+        if not job.is_through:
+            return  # a blind hole ends at its own bottom
+        # Reach past the hole bottom - for a drill that takes the place of the
+        # drill tip option - the way a contour reaches past the stock.
+        _try_set(operation, 'bottomHeight_mode', "'from hole bottom'")
+    elif job.is_through is False:
+        # A dogbone relief on a pocket floor ends at that floor, where an
+        # allowance below it would leave a notch.
+        _try_set(operation, 'bottomHeight_offset', '0 mm')
+        return
+    _try_set(operation, 'bottomHeight_offset', _overcut_offset(overcut))
+
+
+def _overcut_offset(overcut: float) -> str:
+    """The overcut as a bottom height offset: reaching past the bottom is a
+    negative offset from it.
+
+    Written in mm - the unit the templates are authored in - so that the
+    document's own length units cannot change what the expression means.
+    """
+    return f'-{overcut * 10:g} mm' if overcut else '0 mm'
 
 
 def _apply_tabs(operation: adsk.cam.Operation, job_index: int, job: rules.Job,

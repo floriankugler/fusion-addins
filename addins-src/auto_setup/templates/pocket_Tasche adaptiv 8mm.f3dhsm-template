@@ -24,7 +24,7 @@
       <coolant mode="disabled"/>
       <material name="hss"/>
       <body assembly-gauge-length="25" body-length="25" coolant-support="no" diameter="8" flute-length="22" number-of-flutes="3" overall-length="60" shaft-diameter="8" shoulder-diameter="8" shoulder-length="22" thread-pitch="0" thread-profile-angle="60"/>
-      <motion clockwise="yes" cutting-feedrate="3500" entry-feedrate="1750" exit-feedrate="1750" feed-mode="per-minute" plunge-feedrate="800" ramp-angle="4" ramp-feedrate="1000" ramp-spindle-rpm="17650" retract-feedrate="0" spindle-rpm="17650" transition-feedrate="3500"/>
+      <motion clockwise="yes" cutting-feedrate="3500" entry-feedrate="1750" exit-feedrate="1750" feed-mode="per-minute" plunge-feedrate="800" ramp-angle="4" ramp-feedrate="1500" ramp-spindle-rpm="17650" retract-feedrate="0" spindle-rpm="17650" transition-feedrate="3500"/>
       <presets>
         <preset description="" id="{0f0aa0cc-8b2f-43ba-94fd-2674e655899a}" name="Default preset">
           <parameter expression="'disabled'" key="tool_coolant" value="disabled"/>
@@ -122,7 +122,7 @@
     <parameter expression="1750." name="tool_feedEntry"/>
     <parameter expression="1750." name="tool_feedExit"/>
     <parameter expression="tool_feedCutting" name="tool_feedTransition"/>
-    <parameter expression="1000." name="tool_feedRamp"/>
+    <parameter expression="1500.00 mm/min" name="tool_feedRamp"/>
     <parameter expression="800." name="tool_feedPlunge"/>
     <parameter expression="tool_spindleSpeed > 0 ? tool_feedPlunge/tool_spindleSpeed : 0.0" name="tool_feedPerRevolution"/>
     <parameter expression="tool_feedPlunge" name="tool_feedRetract"/>
@@ -270,7 +270,7 @@
     <parameter expression="'always'" name="highFeedrateModeProxy"/>
     <parameter expression="machine.defined &amp;&amp; machine.maxFeedrate > 0 ? machine.maxFeedrate : Math.max(tool_feedCutting; Math.max(tool_feedEntry; tool_feedExit))" name="highFeedrate"/>
     <parameter expression="true" name="allowRapidRetract"/>
-    <parameter expression="5 * tool_diameter" name="stayDownDistance"/>
+    <parameter expression="15 mm" name="stayDownDistance"/>
     <parameter expression="Math.max(Math.min(tool_diameter * 0.1; 15.0); 2.0)" name="minimumStayDownClearance"/>
     <parameter expression="'level0'" name="stayDownLevel"/>
     <parameter expression="0.2mm" name="liftHeight"/>
@@ -278,7 +278,7 @@
     <parameter expression="0mm" name="leadRadius"/>
     <parameter expression="0mm" name="verticalLeadRadius"/>
     <parameter expression="'helix'" name="rampType"/>
-    <parameter expression="tool_rampAngle" name="rampAngle"/>
+    <parameter expression="8" name="rampAngle"/>
     <parameter expression="1deg" name="rampTaperAngle"/>
     <parameter expression="2.5mm" name="rampClearanceHeight"/>
     <parameter expression="Math.max((tool_diameter - 2 * tool_cornerRadius) * 0.95; tool_diameter * 0.25)" name="helicalRampDiameter"/>

@@ -563,7 +563,11 @@ class DogBonesNative(addin.Addin):
             raise RuntimeError("Fusion failed to create the dog-bone sketch.")
         sketch.name = "Dog Bones (Native) - Layout"
 
-        projected_lines: dict[int, adsk.fusion.SketchLine] = {}
+        # Indexed by endpoint coordinates, not by the source edge behind
+        # `referencedEntity`: reading that property costs ~75 ms per
+        # projected line in a large assembly (3.4 s for this face's 44-edge
+        # loop) while the endpoint geometry is free.
+        projected_lines: dict[tuple, adsk.fusion.SketchLine] = {}
         for loop in face.loops:
             edges = cast(list[adsk.core.Base], utils.fusion.as_list(loop.edges))
             projected = sketch.project2(edges, True)
@@ -571,14 +575,13 @@ class DogBonesNative(addin.Addin):
                 raise RuntimeError("Fusion failed to project a face loop.")
             for entity in projected:
                 line = adsk.fusion.SketchLine.cast(entity)
-                referenced = (
-                    adsk.fusion.BRepEdge.cast(line.referencedEntity)
-                    if line
-                    else None
-                )
-                if line and referenced:
-                    native = referenced.nativeObject or referenced
-                    projected_lines[native.tempId] = line
+                if line:
+                    projected_lines[
+                        self._line_key(
+                            line.startSketchPoint.geometry,
+                            line.endSketchPoint.geometry,
+                        )
+                    ] = line
 
         if selected_edges:
             projected_edges = sketch.project2(
@@ -591,6 +594,11 @@ class DogBonesNative(addin.Addin):
         sketch.isComputeDeferred = True
         self._first_center_distance_name = None
         self._first_diameter_name = None
+        # One entry per distinct corner angle: the first corner of a group
+        # carries the dimensions, every later one only equal constraints.
+        leaders: dict[float, tuple[
+            adsk.fusion.SketchLine, adsk.fusion.SketchCircle
+        ]] = {}
         circles: list[adsk.fusion.SketchCircle] = []
         for corner_index, corner in enumerate(corners, start=1):
             line_one = self._projected_line(
@@ -610,6 +618,7 @@ class DogBonesNative(addin.Addin):
                     line_one,
                     line_two,
                     corner_index,
+                    leaders,
                 )
             )
 
@@ -617,19 +626,30 @@ class DogBonesNative(addin.Addin):
         self._require_fully_constrained(sketch)
         return sketch, circles
 
+    def _line_key(
+        self,
+        first: adsk.core.Point3D,
+        second: adsk.core.Point3D,
+    ) -> tuple:
+        """Orientation-independent lookup key for a sketch-space segment."""
+        start = (round(first.x, 6), round(first.y, 6))
+        end = (round(second.x, 6), round(second.y, 6))
+        return (start, end) if start <= end else (end, start)
+
     def _projected_line(
         self,
         sketch: adsk.fusion.Sketch,
-        projected_lines: dict[int, adsk.fusion.SketchLine],
+        projected_lines: dict[tuple, adsk.fusion.SketchLine],
         edge: adsk.fusion.BRepEdge,
     ) -> adsk.fusion.SketchLine:
-        native = edge.nativeObject or edge
-        result = projected_lines.get(native.tempId)
+        start = sketch.modelToSketchSpace(edge.startVertex.geometry)
+        end = sketch.modelToSketchSpace(edge.endVertex.geometry)
+        result = projected_lines.get(self._line_key(start, end))
         if result:
             return result
 
-        start = sketch.modelToSketchSpace(edge.startVertex.geometry)
-        end = sketch.modelToSketchSpace(edge.endVertex.geometry)
+        # Rounding the key can miss a match right on a digit boundary; fall
+        # back to the tolerant scan then.
         for curve in sketch.sketchCurves:
             line = adsk.fusion.SketchLine.cast(curve)
             if not line:
@@ -662,6 +682,10 @@ class DogBonesNative(addin.Addin):
         line_one: adsk.fusion.SketchLine,
         line_two: adsk.fusion.SketchLine,
         corner_index: int,
+        leaders: dict[
+            float,
+            tuple[adsk.fusion.SketchLine, adsk.fusion.SketchCircle],
+        ],
     ) -> adsk.fusion.SketchCircle:
         vertex_point = sketch.modelToSketchSpace(corner.vertex.geometry)
         center_distance = self._center_distance_for_corner(corner)
@@ -696,56 +720,56 @@ class DogBonesNative(addin.Addin):
         )
         placement_distance = max(self.inputs.diameter.value, 0.5)
 
-        outside_text = self._translated_sketch_point(
-            vertex_point,
-            bisector_2d,
-            placement_distance,
-        )
-        outside_dimension = sketch.sketchDimensions.addAngularDimension(
-            line_one,
-            line_two,
-            outside_text,
-            False,
-        )
-        if not outside_dimension or not outside_dimension.parameter:
-            raise RuntimeError("Fusion failed to measure the outside corner angle.")
-        self._name_parameter(
-            outside_dimension.parameter,
-            f"corner{corner_index}_outsideAngle",
-        )
+        # Corners that share an outside angle share both their center
+        # distance and their relief diameter, so only the first corner of
+        # each angle group carries dimensions; the rest are tied to it with
+        # equal constraints. That matters for more than tidiness: a
+        # dimension plus its expression write costs ~1 s in a large
+        # assembly, an equal constraint ~30 ms.
+        group_key = round(center_distance, 9)
+        leader = leaders.get(group_key)
 
-        # The length dimension must precede the bisector angular dimension:
-        # the reverse order makes the sketch solver flag some corners as
-        # over-constrained.
-        length_text = center_line.endSketchPoint.geometry.copy()
-        perpendicular = adsk.core.Vector3D.create(
-            -bisector_2d.y,
-            bisector_2d.x,
-            0,
-        )
-        length_text.translateBy(perpendicular)
-        length_dimension = sketch.sketchDimensions.addDistanceDimension(
-            center_line.startSketchPoint,
-            center_line.endSketchPoint,
-            adsk.fusion.DimensionOrientations.AlignedDimensionOrientation,  # type: ignore
-            length_text,
-        )
-        if not length_dimension or not length_dimension.parameter:
-            raise RuntimeError("Fusion failed to dimension the dog-bone center line.")
-        # The 1/sin(angle) reach compensation is baked as a numeric factor:
-        # the corner angle is measured from fixed projected geometry and can
-        # never change parametrically, and a max()/sin() expression that
-        # references the driven angle breaks the sketch solver.
-        compensation = max(1.0, 1.0 / math.sin(corner.outside_angle))
-        self._set_parameter_expression(
-            length_dimension.parameter,
-            f"({self.inputs.diameter.expression}) / 2 * {compensation:.9g}",
-        )
-        self._name_parameter(
-            length_dimension.parameter,
-            f"corner{corner_index}_centerDistance",
-        )
-        center_distance_name = length_dimension.parameter.name
+        # The length dimension (or the equal constraint standing in for it)
+        # must precede the bisector angular dimension: the reverse order
+        # makes the sketch solver flag some corners as over-constrained.
+        center_distance_name = ""
+        if leader is None:
+            length_text = center_line.endSketchPoint.geometry.copy()
+            perpendicular = adsk.core.Vector3D.create(
+                -bisector_2d.y,
+                bisector_2d.x,
+                0,
+            )
+            length_text.translateBy(perpendicular)
+            length_dimension = sketch.sketchDimensions.addDistanceDimension(
+                center_line.startSketchPoint,
+                center_line.endSketchPoint,
+                adsk.fusion.DimensionOrientations.AlignedDimensionOrientation,  # type: ignore
+                length_text,
+            )
+            if not length_dimension or not length_dimension.parameter:
+                raise RuntimeError(
+                    "Fusion failed to dimension the dog-bone center line."
+                )
+            # The 1/sin(angle) reach compensation is baked as a numeric
+            # factor: the corner angle is measured from fixed projected
+            # geometry and can never change parametrically, and a
+            # max()/sin() expression that references the angle breaks the
+            # sketch solver.
+            compensation = max(1.0, 1.0 / math.sin(corner.outside_angle))
+            self._set_parameter_expression(
+                length_dimension.parameter,
+                f"({self.inputs.diameter.expression}) / 2 * {compensation:.9g}",
+            )
+            self._name_parameter(
+                length_dimension.parameter,
+                f"corner{corner_index}_centerDistance",
+            )
+            center_distance_name = length_dimension.parameter.name
+        elif not sketch.geometricConstraints.addEqual(center_line, leader[0]):
+            raise RuntimeError(
+                "Fusion rejected the shared dog-bone center distance."
+            )
 
         half_direction = edge_one_direction.copy()
         half_direction.add(bisector_2d)
@@ -756,6 +780,16 @@ class DogBonesNative(addin.Addin):
             half_direction,
             placement_distance * 0.75,
         )
+        # The bisector angle is dimensioned directly against the projected
+        # corner edge. An earlier version measured the outside corner angle
+        # with a second, driven ("reference") dimension and derived this one
+        # as half of it — but a sketch stops resolving new geometry once it
+        # holds more than five driven dimensions: from the sixth dog bone on,
+        # every circle and center line stayed under-constrained and the
+        # add-in aborted. The corner angle is measured from fixed projected
+        # geometry and cannot change parametrically anyway (the reach
+        # compensation above is baked in as a literal for the same reason),
+        # so the literal half angle Fusion computes here loses nothing.
         half_dimension = sketch.sketchDimensions.addAngularDimension(
             line_one,
             center_line,
@@ -763,48 +797,48 @@ class DogBonesNative(addin.Addin):
         )
         if not half_dimension or not half_dimension.parameter:
             raise RuntimeError("Fusion failed to dimension the dog-bone bisector.")
-        self._set_parameter_expression(
-            half_dimension.parameter,
-            f"({outside_dimension.parameter.name}) / 2",
-        )
         self._name_parameter(
             half_dimension.parameter,
             f"corner{corner_index}_bisectorAngle",
         )
 
-        diameter_text = circle.centerSketchPoint.geometry.copy()
-        diameter_text.x += max(
-            self.inputs.diameter.value + self.inputs.offset.value,
-            0.5,
-        )
-        diameter_dimension = sketch.sketchDimensions.addDiameterDimension(
-            circle,
-            diameter_text,
-        )
-        if not diameter_dimension or not diameter_dimension.parameter:
-            raise RuntimeError("Fusion failed to dimension the dog-bone circle.")
-        if self._first_center_distance_name is None:
-            # The first corner carries the user's offset expression; later
-            # corners reference it instead of duplicating the expression.
-            self._set_parameter_expression(
-                diameter_dimension.parameter,
-                f"2 * {center_distance_name} + "
-                f"({self.inputs.offset.expression})",
+        if leader is None:
+            diameter_text = circle.centerSketchPoint.geometry.copy()
+            diameter_text.x += max(
+                self.inputs.diameter.value + self.inputs.offset.value,
+                0.5,
             )
-        else:
-            self._set_parameter_expression(
-                diameter_dimension.parameter,
-                f"2 * {center_distance_name} + "
-                f"({self._first_diameter_name} - "
-                f"2 * {self._first_center_distance_name})",
+            diameter_dimension = sketch.sketchDimensions.addDiameterDimension(
+                circle,
+                diameter_text,
             )
-        self._name_parameter(
-            diameter_dimension.parameter,
-            f"corner{corner_index}_diameter",
-        )
-        if self._first_center_distance_name is None:
-            self._first_center_distance_name = center_distance_name
-            self._first_diameter_name = diameter_dimension.parameter.name
+            if not diameter_dimension or not diameter_dimension.parameter:
+                raise RuntimeError("Fusion failed to dimension the dog-bone circle.")
+            if self._first_center_distance_name is None:
+                # The first corner carries the user's offset expression;
+                # later corners reference it instead of duplicating it.
+                self._set_parameter_expression(
+                    diameter_dimension.parameter,
+                    f"2 * {center_distance_name} + "
+                    f"({self.inputs.offset.expression})",
+                )
+            else:
+                self._set_parameter_expression(
+                    diameter_dimension.parameter,
+                    f"2 * {center_distance_name} + "
+                    f"({self._first_diameter_name} - "
+                    f"2 * {self._first_center_distance_name})",
+                )
+            self._name_parameter(
+                diameter_dimension.parameter,
+                f"corner{corner_index}_diameter",
+            )
+            if self._first_center_distance_name is None:
+                self._first_center_distance_name = center_distance_name
+                self._first_diameter_name = diameter_dimension.parameter.name
+            leaders[group_key] = (center_line, circle)
+        elif not sketch.geometricConstraints.addEqual(circle, leader[1]):
+            raise RuntimeError("Fusion rejected the shared dog-bone diameter.")
         return circle
 
     def _unique_parameter_prefix(
@@ -919,8 +953,21 @@ class DogBonesNative(addin.Addin):
         if len(corners) != len(circles):
             raise RuntimeError("Each dog-bone corner must have one sketch circle.")
 
+        # One pass over the profiles instead of one per probe: with 20
+        # corners the old code walked every profile's curves 40 times.
+        candidates: list[list[adsk.fusion.Profile]] = [[] for _ in circles]
+        for profile in sketch.profiles:
+            entities = [
+                profile_curve.sketchEntity
+                for loop in profile.profileLoops
+                for profile_curve in loop.profileCurves
+            ]
+            for index, circle in enumerate(circles):
+                if any(entity == circle for entity in entities):
+                    candidates[index].append(profile)
+
         selected: list[tuple[_Corner, adsk.fusion.Profile]] = []
-        for corner, circle in zip(corners, circles):
+        for corner_index, (corner, circle) in enumerate(zip(corners, circles)):
             # One probe per corner edge. With an offset the vertex lies inside
             # the circle and both probes hit the same profile; with a zero
             # offset the circle passes through the vertex and the in-face
@@ -941,9 +988,8 @@ class DogBonesNative(addin.Addin):
                 )
                 matches = [
                     profile
-                    for profile in sketch.profiles
-                    if self._profile_uses_circle(profile, circle)
-                    and profile.face.isPointOnFace(
+                    for profile in candidates[corner_index]
+                    if profile.face.isPointOnFace(
                         probe,
                         self.app.pointTolerance * 10,
                     )
@@ -960,17 +1006,6 @@ class DogBonesNative(addin.Addin):
         if not selected:
             raise RuntimeError("No in-face dog-bone profiles were found.")
         return selected
-
-    def _profile_uses_circle(
-        self,
-        profile: adsk.fusion.Profile,
-        circle: adsk.fusion.SketchCircle,
-    ) -> bool:
-        return any(
-            profile_curve.sketchEntity == circle
-            for loop in profile.profileLoops
-            for profile_curve in loop.profileCurves
-        )
 
     def _dogbone_profile_probe(
         self,

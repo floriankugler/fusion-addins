@@ -1187,23 +1187,11 @@ class ConnectorsNative(addin.Addin):
         if not sketch:
             raise RuntimeError(f"Fusion failed to create '{name}'.")
         sketch.name = name
-        projected = [
-            curve
-            for entity in sketch.project2(
-                cast(list[adsk.core.Base], [edge]),
-                True,
-            )
-            if (curve := adsk.fusion.SketchCurve.cast(entity))
-        ]
-        if len(projected) != 1:
-            raise RuntimeError(
-                f"Fusion failed to project the selected edge into '{name}'."
-            )
-        edge_line = adsk.fusion.SketchLine.cast(projected[0])
-        if not edge_line:
-            raise RuntimeError(
-                f"The projected edge in '{name}' is not a straight line."
-            )
+        edge_line = self._project_single_line(
+            sketch,
+            edge,
+            f"selected edge into '{name}'",
+        )
         edge_line.isConstruction = True
         start_vertex = edge.startVertex.geometry
         edge_start = min(
@@ -1782,26 +1770,100 @@ class ConnectorsNative(addin.Addin):
             if was_deferred:
                 sketch.isComputeDeferred = True
 
+    def _project_single_line(
+        self,
+        sketch: adsk.fusion.Sketch,
+        entity: adsk.core.Base,
+        description: str,
+    ) -> adsk.fusion.SketchLine:
+        """Projects one straight entity and keeps only its own projection.
+
+        project2 hands back more than what was asked for on some geometry:
+        for an edge of a board's narrow end face it also projects that
+        face's parallel edge, so a sketch on the end face gets two lines
+        1 thickness apart, and a sketch on the broad face - where both
+        edges project onto the same place - gets the same line twice.
+        Fusion offers no way to ask for less, so the result is matched
+        back to the source and the surplus lines are deleted; leaving them
+        would split the profiles the connector geometry is built from.
+
+        Lines that already existed before the call are never deleted: a
+        repeated projection can return the line an earlier call created,
+        and that one still belongs to its caller.
+        """
+        before = list(sketch.sketchCurves.sketchLines)
+        projected = [
+            line
+            for candidate in self._project_entities(
+                sketch,
+                cast(list[adsk.core.Base], [entity]),
+            )
+            if (line := adsk.fusion.SketchLine.cast(candidate))
+        ]
+        start, end = self._flattened_endpoints(sketch, entity)
+        tolerance = self.app.pointTolerance * 100
+
+        def matches_source(line: adsk.fusion.SketchLine) -> bool:
+            first = line.startSketchPoint.geometry
+            second = line.endSketchPoint.geometry
+            return (
+                max(first.distanceTo(start), second.distanceTo(end))
+                <= tolerance
+                or max(first.distanceTo(end), second.distanceTo(start))
+                <= tolerance
+            )
+
+        keeper = next(
+            (line for line in projected if matches_source(line)),
+            None,
+        )
+        if not keeper:
+            raise RuntimeError(
+                f"Fusion failed to project the {description}."
+            )
+        # Deleting while the sketch is compute-deferred is fine: only
+        # project2 itself rejects a deferred sketch.
+        for line in projected:
+            if line == keeper or any(line == earlier for earlier in before):
+                continue
+            line.deleteMe()
+        return keeper
+
+    def _flattened_endpoints(
+        self,
+        sketch: adsk.fusion.Sketch,
+        entity: adsk.core.Base,
+    ) -> tuple[adsk.core.Point3D, adsk.core.Point3D]:
+        """The entity's endpoints where they land in the sketch plane."""
+        edge = adsk.fusion.BRepEdge.cast(entity)
+        if edge:
+            ends = (edge.startVertex.geometry, edge.endVertex.geometry)
+        else:
+            line = adsk.fusion.SketchLine.cast(entity)
+            if not line:
+                raise RuntimeError(
+                    "Only straight entities can be projected as a line."
+                )
+            ends = (
+                line.startSketchPoint.worldGeometry,
+                line.endSketchPoint.worldGeometry,
+            )
+        flattened = []
+        for point in ends:
+            local = sketch.modelToSketchSpace(point)
+            local.z = 0
+            flattened.append(local)
+        return flattened[0], flattened[1]
+
     def _project_reference_line(
         self,
         sketch: adsk.fusion.Sketch,
         edge: adsk.fusion.BRepEdge,
         description: str,
     ) -> adsk.fusion.SketchLine:
-        projected = [
-            line
-            for entity in self._project_entities(
-                sketch,
-                cast(list[adsk.core.Base], [edge]),
-            )
-            if (line := adsk.fusion.SketchLine.cast(entity))
-        ]
-        if len(projected) != 1:
-            raise RuntimeError(
-                f"Fusion failed to project the {description}."
-            )
-        projected[0].isConstruction = True
-        return projected[0]
+        projected = self._project_single_line(sketch, edge, description)
+        projected.isConstruction = True
+        return projected
 
     def _project_opposite_edge(
         self,
@@ -1830,20 +1892,13 @@ class ConnectorsNative(addin.Addin):
                 selected_midpoint
             ),
         )
-        projected = [
-            line
-            for entity in self._project_entities(
-                sketch,
-                cast(list[adsk.core.Base], [opposite_edge]),
-            )
-            if (line := adsk.fusion.SketchLine.cast(entity))
-        ]
-        if len(projected) != 1:
-            raise RuntimeError(
-                "Fusion failed to project the opposite edge of the small face."
-            )
-        projected[0].isConstruction = True
-        return projected[0]
+        projected = self._project_single_line(
+            sketch,
+            opposite_edge,
+            "opposite edge of the small face",
+        )
+        projected.isConstruction = True
+        return projected
 
     def _project_points(
         self,

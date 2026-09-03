@@ -7,7 +7,7 @@
 
   <iconID id="0"/>
 
-  <template description="Bohrung 1/8&quot;" isFallback="0" strategy="bore" toolPresetId="{de5941c9-276b-442b-a914-61c700b240ac}" unit="millimeters" version="189">
+  <template description="Bohrung 1/8&quot; (2)" isFallback="0" strategy="bore" toolPresetId="{de5941c9-276b-442b-a914-61c700b240ac}" unit="millimeters" version="189">
     <tool guid="4a0f6b62-caca-48fb-9584-8ad1c37ac050" tool-library-version="36" type="flat end mill" unit="inches" version="1.5">
       <description>1/8 Spiral Down-Cut</description>
       <expressions>
