@@ -45,7 +45,7 @@ takes tabs away again and wins over both the mode and the tab selection.
 import os
 import adsk.core, adsk.fusion
 from dataclasses import dataclass, field
-from . import recognition, templates
+from . import holding, recognition, tabs, templates
 
 # A hole this close to a drill template's tool diameter is drilled (cm).
 DRILL_MATCH_TOL = 0.005
@@ -79,6 +79,9 @@ TAB_NONE = 0
 TAB_OUTER = 1
 TAB_INNER = 2
 TAB_ALL = 3
+# Physics-driven: tab exactly the pieces that cannot hold themselves on the
+# vacuum bed, at positions chosen by the holding model (see lib.auto_setup.holding).
+TAB_AUTO = 4
 
 # Operation order within one tool diameter: holes first (they are drilled into
 # solid material), then pockets, then the contours that free the part, and
@@ -106,8 +109,9 @@ class Job:
     # Single arcs machined as open chains (dogbone reliefs).
     open_chains: list = field(default_factory=list)
     tabbed: bool = False
-    # Edge loops to place tabs on, with a label for warnings.
-    tab_loops: list[tuple[list, str]] = field(default_factory=list)
+    # Edge loops to place tabs on: (edges, label for warnings, explicit tab
+    # points or None for the length-based automatic placement).
+    tab_loops: list[tuple[list, str, list | None]] = field(default_factory=list)
 
 
 @dataclass
@@ -117,11 +121,13 @@ class TabPolicy:
     and a subtractive selection that beats both.
 
     The tab count per contour follows from the contour length with degressive
-    density (see tabs.tab_count); min_count is the floor."""
+    density (see tabs.tab_count); min_count is the floor. Mode TAB_AUTO plans
+    tabs from the vacuum holding model instead and needs `holding` set."""
     mode: int = TAB_NONE
     selection: list = field(default_factory=list)       # entities (additive)
     skip_selection: list = field(default_factory=list)  # entities (wins)
     min_count: int = 4
+    holding: holding.HoldingParams | None = None        # TAB_AUTO calibration
 
 
 @dataclass
@@ -279,7 +285,8 @@ def _resolve_with_finish_fallback(registry, kind: str, label: str, finish_wanted
 # ---- Planning ----------------------------------------------------------------
 
 def plan(result: recognition.RecognitionResult, registry: dict[str, list[templates.TemplateVariant]],
-         assignments: Assignments, tab_policy: TabPolicy | None = None) -> tuple[list[Job], list[str]]:
+         assignments: Assignments, tab_policy: TabPolicy | None = None,
+         frame: recognition.Frame | None = None) -> tuple[list[Job], list[str]]:
     warnings = list(result.warnings)
     tab_policy = tab_policy or TabPolicy()
 
@@ -335,13 +342,19 @@ def plan(result: recognition.RecognitionResult, registry: dict[str, list[templat
             cutout_overrides[feature[1]] = label
 
     tool_limits = _tool_limits_cache()
+    auto_positions = None
+    if tab_policy.mode == TAB_AUTO:
+        auto_positions = _plan_auto_tabs(
+            result, cutouts, frame, tab_policy, assignments, registry,
+            tool_limits, sets, warnings)
     jobs: list[Job] = []
     jobs += _plan_holes(small_holes, drills, bores, assignments.overcut, warnings)
     pocket_jobs, pocket_reliefs = _plan_pockets(
         pockets, registry, assignments, sets, tool_limits, warnings)
     contour_jobs, contour_reliefs = _plan_contours(
         result, cutouts, registry, assignments, tab_policy.mode, sets,
-        outer_overrides, cutout_overrides, drills, tool_limits, warnings)
+        outer_overrides, cutout_overrides, drills, tool_limits, warnings,
+        auto_positions)
     jobs += pocket_jobs + contour_jobs
     # Reliefs from both sources go into the same pass: one operation per cutter
     # and cut depth, rather than one per feature that happened to have corners.
@@ -666,13 +679,209 @@ def _contour_depth_check(registry, variant, feature_depth, cutter, tool_limits,
     return variant
 
 
+# A tab needs the full sheet thickness above it: no tabs where material was
+# milled off the top, nor within this distance of such a stretch, measured
+# along the contour (cm).
+THICKNESS_MARGIN = 1.0
+# The top face boundary counts as running "directly above" the bottom contour
+# within this XY deviation (cm) - covers outline sampling error, nothing more.
+FULL_THICKNESS_TOL = 0.1
+
+
+def _near_outline(x: float, y: float, outline: list, tolerance: float) -> bool:
+    """Whether an XY point lies within tolerance of a closed polyline."""
+    limit = tolerance * tolerance
+    count = len(outline)
+    for i in range(count):
+        x1, y1 = outline[i]
+        x2, y2 = outline[(i + 1) % count]
+        dx, dy = x2 - x1, y2 - y1
+        squared = dx * dx + dy * dy
+        t = 0.0 if squared < 1e-18 else max(
+            0.0, min(1.0, ((x - x1) * dx + (y - y1) * dy) / squared))
+        px, py = x - x1 - t * dx, y - y1 - t * dy
+        if px * px + py * py <= limit:
+            return True
+    return False
+
+
+def _plan_auto_tabs(result, cutouts, frame, tab_policy: TabPolicy,
+                    assignments: Assignments, registry, tool_limits,
+                    sets: _FeatureSets, warnings: list[str]) -> dict | None:
+    """Physics-driven tab planning (TAB_AUTO).
+
+    Decomposes the sheet with the holding model, asks the planner which parts
+    cannot hold themselves, and where tabs must go to merge them into
+    assemblies that do (see holding.plan_tabs). Only the setup's actual parts
+    have to be held: waste - offcuts, the skeleton, cutout waste - may shift
+    once it is free, so it never gets a requirement of its own (unless the
+    user selects it), but it serves as anchorage. A part offers tab sites on
+    its outer contour AND on its cutout loops - a tab there ties the part to
+    its own cutout waste, whose footprint then counts towards the holding.
+
+    Marks the tabbed features in `sets` - the ordinary selection machinery
+    then gives them tabbed operations - and returns the planned positions
+    keyed by id(edge loop). None disables tabs entirely.
+
+    The kerf raster and the tab width come from the default contour template;
+    a per-feature override with a different tool is close enough for holding
+    purposes.
+    """
+    if frame is None or tab_policy.holding is None:
+        warnings.append('Automatic tabs need the machining frame and holding '
+                        'calibration; no tabs placed.')
+        return None
+    variant = None
+    if assignments.contour_default:
+        variant = _resolve_with_finish_fallback(
+            registry, 'contour', assignments.contour_default, False,
+            assignments.cutter, warnings)
+    kerf = (tool_limits(variant).max_diameter if variant else None) or 0.6
+    width = (templates.tab_width(variant) if variant else None) or 0.8
+
+    try:
+        setup_sheet = holding.decompose_setup(
+            result, frame, tab_policy.holding,
+            kerfs={c.body.entityToken: kerf for c in result.contours},
+            cutouts_override=cutouts)
+    except ValueError:
+        warnings.append('Automatic tabs: nothing to analyze; no tabs placed.')
+        return None
+    sheet = setup_sheet.sheet
+
+    requests: list[holding.TabRequest] = []
+    loop_feature: dict[int, tuple] = {}  # id(edges) -> ('outer', token) | ('cutout', index)
+    points: dict[tuple, adsk.core.Point3D] = {}
+    top_outlines: dict[str, list] = {}   # body entityToken -> full-height top outlines
+
+    def full_thickness(loop, position: float, body) -> bool:
+        """True if the part carries the full sheet thickness above this stretch
+        of the contour (THICKNESS_MARGIN to each side along the loop).
+
+        Where nothing was milled off the top, the boundary of the body's top
+        face runs directly above the bottom contour; a pocket, rabbet or
+        chamfer reaching the contour makes it detour inward. A tab under such
+        thinned material can be taller than what is left above it.
+        """
+        token = body.entityToken
+        if token not in top_outlines:
+            top_outlines[token] = _top_face_outlines(body)
+        outlines = top_outlines[token]
+        if not outlines:
+            return False
+        for offset in (-THICKNESS_MARGIN, 0.0, THICKNESS_MARGIN):
+            point = loop.point_at(position + offset)
+            x = point.asVector().dotProduct(frame.x)
+            y = point.asVector().dotProduct(frame.y)
+            if not any(_near_outline(x, y, outline, FULL_THICKNESS_TOL)
+                       for outline in outlines):
+                return False
+        return True
+
+    def _top_face_outlines(body) -> list:
+        """Every loop of the body's full-height top faces, projected to frame
+        XY: the outer loops trace the contour where it is full thickness, the
+        inner ones do the same above cutouts."""
+        z_max = max(frame.height(v.geometry) for v in body.vertices)
+        outlines = []
+        for face in body.faces:
+            if not adsk.core.Plane.cast(face.geometry):
+                continue
+            _, normal = face.evaluator.getNormalAtPoint(face.pointOnFace)
+            if normal.dotProduct(frame.z) < 1 - recognition.DIRECTION_TOL:
+                continue
+            if frame.height(face.pointOnFace) < z_max - recognition.HEIGHT_TOL:
+                continue
+            for face_loop in face.loops:
+                outlines.append(
+                    [(p.asVector().dotProduct(frame.x), p.asVector().dotProduct(frame.y))
+                     for p in tabs.loop_outline(list(face_loop.edges)).points])
+        return outlines
+
+    def loop_candidates(edges: list, feature: tuple, body) -> list:
+        loop_feature[id(edges)] = feature
+        loop, sites = tabs.candidate_positions(edges, width)
+        entries = []
+        for n, (position, point) in enumerate(sites):
+            if not full_thickness(loop, position, body):
+                continue
+            key = (id(edges), n)
+            points[key] = point
+            entries.append((point.asVector().dotProduct(frame.x),
+                            point.asVector().dotProduct(frame.y), key))
+        return entries
+
+    def add_request(piece: int, candidates: list, forced: bool):
+        requests.append(holding.TabRequest(
+            piece=piece, candidates=candidates,
+            bridge=holding.BRIDGE_FACTOR * kerf,
+            min_count=tab_policy.min_count,
+            min_separation=tabs.MIN_SEPARATION_FACTOR * width,
+            forced=forced))
+
+    part_cutouts: dict[str, list] = {}
+    for index, cutout in enumerate(cutouts):
+        part_cutouts.setdefault(cutout.body.entityToken, []).append((index, cutout))
+
+    for contour in result.contours:
+        token = contour.body.entityToken
+        piece = setup_sheet.part_pieces.get(token)
+        if (piece is None or not contour.edges or token in sets.skip_outer
+                or token in sets.no_tab_outer):
+            continue
+        candidates = loop_candidates(contour.edges, ('outer', token), contour.body)
+        for index, cutout in part_cutouts.get(token, []):
+            if index in sets.skip_cutouts or index in sets.no_tab_cutouts:
+                continue
+            candidates += loop_candidates(cutout.edges, ('cutout', index), cutout.body)
+        add_request(piece, candidates, token in sets.tab_outer)
+    # Waste never has to be held - it may shift once free - so only cutout
+    # waste the user explicitly selected gets a requirement of its own.
+    for index, cutout in enumerate(cutouts):
+        if (index not in sets.tab_cutouts or index in sets.skip_cutouts
+                or index in sets.no_tab_cutouts):
+            continue
+        piece = setup_sheet.cutout_pieces.get(index)
+        if piece is None:
+            continue  # milled away entirely; nothing left to hold
+        add_request(piece, loop_candidates(cutout.edges, ('cutout', index), cutout.body),
+                    True)
+
+    plans, lines, plan_warnings = holding.plan_tabs(sheet, requests)
+    warnings += plan_warnings
+    warnings += [f'Tabs — {line}' for line in lines]
+
+    positions: dict[int, list] = {}
+    placed: set[tuple] = set()
+    for plan in plans:
+        for _, _, key, _ in plan.chosen:
+            if key in placed:
+                continue  # the same site chosen through two requests
+            placed.add(key)
+            kind, feature = loop_feature[key[0]]
+            if kind == 'outer':
+                sets.tab_outer.add(feature)
+            else:
+                sets.tab_cutouts.add(feature)
+            positions.setdefault(key[0], []).append(points[key])
+    return positions
+
+
 def _plan_contours(result, cutouts, registry, assignments: Assignments, tab_mode: int,
                    sets: _FeatureSets,
                    outer_overrides: dict[str, str], cutout_overrides: dict[int, str],
-                   drills, tool_limits,
-                   warnings: list[str]) -> tuple[list[Job], list[recognition.Relief]]:
+                   drills, tool_limits, warnings: list[str],
+                   auto_positions: dict | None = None,
+                   ) -> tuple[list[Job], list[recognition.Relief]]:
     if not cutouts and not result.contours:
         return [], []
+
+    def planned_positions(edges: list) -> list | None:
+        """Explicit tab points for a loop (TAB_AUTO), or None for the density
+        placement. An empty list means the planner could not place any."""
+        if auto_positions is None:
+            return None
+        return auto_positions.get(id(edges), [])
     if assignments.contour_default is None and not outer_overrides and not cutout_overrides:
         warnings.append('No contour template available; cutouts and contours skipped.')
         return [], []
@@ -721,7 +930,9 @@ def _plan_contours(result, cutouts, registry, assignments: Assignments, tab_mode
                 tabbed=tabbed)
         cutout_groups[key].cutouts.append(cutout)
         if tabbed:
-            cutout_groups[key].tab_loops.append((cutout.edges, f'{cutout.body.name} cutout'))
+            cutout_groups[key].tab_loops.append(
+                (cutout.edges, f'{cutout.body.name} cutout',
+                 planned_positions(cutout.edges)))
 
     contour_groups: dict[tuple[str, bool], Job] = {}
     for contour in result.contours:
@@ -757,7 +968,9 @@ def _plan_contours(result, cutouts, registry, assignments: Assignments, tab_mode
                 tabbed=tabbed)
         contour_groups[key].contours.append(contour)
         if tabbed:
-            contour_groups[key].tab_loops.append((contour.edges, f'{contour.body.name} outer contour'))
+            contour_groups[key].tab_loops.append(
+                (contour.edges, f'{contour.body.name} outer contour',
+                 planned_positions(contour.edges)))
 
     return list(cutout_groups.values()) + list(contour_groups.values()), reliefs
 

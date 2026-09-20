@@ -11,7 +11,7 @@ if _ADDIN_LIB_DIR not in lib.__path__:
     lib.__path__.append(_ADDIN_LIB_DIR)
 
 from lib import addin, inputs, ui_placement
-from lib.auto_setup import recognition, templates, rules, builder
+from lib.auto_setup import recognition, templates, rules, builder, holding
 from lib.fusionbootstrap.runtime import RuntimeInfo
 import adsk.core, adsk.fusion
 from typing import cast
@@ -179,9 +179,13 @@ class AutoSetupInputs(inputs.Inputs):
                 inputs.DropDownInput.Item('Outer contours', rules.TAB_OUTER),
                 inputs.DropDownInput.Item('Inner contours', rules.TAB_INNER),
                 inputs.DropDownInput.Item('All contours', rules.TAB_ALL),
+                inputs.DropDownInput.Item('Automatic (vacuum)', rules.TAB_AUTO),
             ],
             default_value=rules.TAB_NONE,
-            tool_tip='Which contours get holding tabs.',
+            tool_tip='Which contours get holding tabs. "Automatic (vacuum)" tabs exactly '
+                     'the pieces that cannot hold themselves on the vacuum bed, at '
+                     'positions chosen by the holding model - calibrate the holding '
+                     'values below with test cuts.',
         )
         self.tab_contours = inputs.SelectionByEntityTokenInput(
             id='tabContours',
@@ -213,6 +217,58 @@ class AutoSetupInputs(inputs.Inputs):
                      'held safely.',
             update_visibility=tabs_active,
         )
+
+        self.holding_report = inputs.CheckboxInput(
+            id='holdingReport',
+            name='Holding report',
+            default_value=False,
+            tool_tip='Report whether each piece of the fully cut sheet (parts, cutout '
+                     'waste, offcuts, skeleton) stays put on the vacuum bed by itself: '
+                     'effective suction after edge leakage, against sliding and twisting '
+                     'by the cutter. Analysis only - it does not change the setup. '
+                     'Calibrate the values below with test cuts.',
+        )
+        holding_visible = lambda: (self.holding_report.value
+                                   or self.tabs_mode.value == rules.TAB_AUTO)
+        self.holding_pressure = inputs.FloatInput(
+            id='holdingPressure',
+            name='↳ Holding pressure (N/cm²)',
+            default_value=holding.HoldingParams.pressure,
+            tool_tip='Suction under a sealed footprint. The effective value on your '
+                     'bleed spoilboard, not the pump rating.',
+            units='',
+            update_visibility=holding_visible,
+        )
+        self.holding_pressure.minimum_value = 0.001
+        self.holding_force = inputs.FloatInput(
+            id='holdingForce',
+            name='↳ Cutting force (N)',
+            default_value=holding.HoldingParams.cutting_force,
+            tool_tip='Lateral force at the cutter during a contour pass.',
+            units='',
+            update_visibility=holding_visible,
+        )
+        self.holding_force.minimum_value = 0.001
+        self.holding_leak = inputs.FloatInput(
+            id='holdingLeak',
+            name='↳ Leak margin',
+            default_value=holding.HoldingParams.leak_margin,
+            tool_tip='Rim of a piece\'s footprint that holds nothing because air feeds '
+                     'in around its free edges.',
+            units=units,
+            update_visibility=holding_visible,
+        )
+        self.holding_leak.minimum_value = 0.0
+        self.holding_oversize = inputs.FloatInput(
+            id='holdingOversize',
+            name='↳ Sheet oversize',
+            default_value=holding.HoldingParams.sheet_oversize,
+            tool_tip='How far the physical sheet extends beyond the stock box on each '
+                     'side. The extra footprint anchors the skeleton.',
+            units=units,
+            update_visibility=holding_visible,
+        )
+        self.holding_oversize.minimum_value = 0.0
         super().__init__()
 
     def _options_dropdown(self, id: str, name: str, labels: list[str],
@@ -344,13 +400,21 @@ class AutoSetup(addin.Addin):
             pocket_overrides=self.inputs.pocket_override_tokens(),
             contour_overrides=self.inputs.contour_override_entities(),
         )
+        holding_params = holding.HoldingParams(
+            pressure=self.inputs.holding_pressure.value,
+            cutting_force=self.inputs.holding_force.value,
+            leak_margin=self.inputs.holding_leak.value,
+            sheet_oversize=self.inputs.holding_oversize.value,
+        )
         tab_policy = rules.TabPolicy(
             mode=self.inputs.tabs_mode.value,
             selection=list(self.inputs.tab_contours.value),
             skip_selection=list(self.inputs.no_tab_contours.value),
             min_count=self.inputs.tab_min_count.value,
+            holding=holding_params,
         )
-        jobs, warnings = rules.plan(result, self.inputs.registry, assignments, tab_policy)
+        jobs, warnings = rules.plan(result, self.inputs.registry, assignments, tab_policy,
+                                    frame=frame)
         summary = builder.create_setup(
             self.inputs.setup_name.value, bodies, jobs, warnings, tab_policy,
             x_axis=x_axis, top_face=top_face, frame=frame, overcut=overcut)
@@ -358,6 +422,15 @@ class AutoSetup(addin.Addin):
         if summary.warnings:
             self.ui.messageBox(
                 'Setup created with warnings:\n\n' + '\n'.join(f'• {w}' for w in summary.warnings),
+                'Auto Setup',
+            )
+
+        if self.inputs.holding_report.value:
+            pieces, notes = holding.analyze_setup(result, frame, holding_params)
+            lines = holding.format_report(pieces) + notes
+            self.ui.messageBox(
+                'Holding analysis (×1.00 = holds exactly, with safety factor '
+                f'{holding_params.safety:g}):\n\n' + '\n'.join(f'• {line}' for line in lines),
                 'Auto Setup',
             )
 

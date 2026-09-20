@@ -166,13 +166,20 @@ class _TabPoints:
 
     def _materialize(self) -> list[tuple[adsk.core.Point3D, adsk.fusion.SketchPoint]]:
         result: list[tuple[adsk.core.Point3D, adsk.fusion.SketchPoint]] = []
-        if self._width is None:
-            return result
         for job in self._jobs:
-            for edges, label in job.tab_loops:
-                for point in tabs.compute_tab_points(
+            for edges, label, fixed in job.tab_loops:
+                if fixed is not None:
+                    # Positions planned upstream (physics mode); an empty list
+                    # means the planner could not place any - the operation
+                    # then reports its tabs as disabled.
+                    points = fixed
+                elif self._width is not None:
+                    points = tabs.compute_tab_points(
                         edges, self._width, self._tab_policy.min_count,
-                        self._warnings, label):
+                        self._warnings, label)
+                else:
+                    points = []
+                for point in points:
                     sketch = self._tab_sketch()
                     result.append(
                         (point, sketch.sketchPoints.add(sketch.modelToSketchSpace(point))))

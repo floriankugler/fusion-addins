@@ -99,6 +99,38 @@ def compute_tab_points(
     return [loop.point_at(p) for p in positions]
 
 
+# Spacing of candidate positions offered to the physics tab planner (cm).
+CANDIDATE_SPACING = 2.5
+
+
+def candidate_positions(edges: list[adsk.fusion.BRepEdge],
+                        tab_width: float) -> tuple['_Loop', list]:
+    """Candidate tab sites along a loop for the physics planner.
+
+    The corner-clearance-respecting stretches (same rules as automatic
+    placement), each sampled about every CANDIDATE_SPACING with a midpoint for
+    short ones. The planner picks the subset that actually holds the part; it
+    never needs positions outside these stretches. Falls back to the middle of
+    the longest edge when no stretch is long enough.
+
+    Returns the loop and its sites as (arc position, point) pairs, so the
+    caller can probe the loop around each site (e.g. the full-thickness check).
+    """
+    loop = _Loop(edges)
+    intervals = _valid_intervals(loop, tab_width)
+    positions: list[float] = []
+    for start, end in intervals:
+        length = end - start
+        if length <= 0:
+            continue
+        count = max(1, round(length / CANDIDATE_SPACING))
+        positions += [start + (t + 0.5) * length / count for t in range(count)]
+    if not positions:
+        longest = max(range(len(edges)), key=lambda i: loop.lengths[i])
+        positions = [loop.cumulative[longest] + loop.lengths[longest] / 2]
+    return loop, [(p, loop.point_at(p)) for p in positions]
+
+
 def _snap_candidates(ideal: float, intervals: list[tuple[float, float]],
                      perimeter: float, tab_width: float) -> list[float]:
     """The ideal position if valid; otherwise the nearest valid positions,
@@ -131,17 +163,55 @@ def _snapped_position(start: float, end: float, boundary: float,
 
 
 def _valid_intervals(loop: '_Loop', tab_width: float) -> list[tuple[float, float]]:
-    edge_count = len(loop.edges)
-    if edge_count == 1:
+    if len(loop.edges) == 1:
         # A single closed edge (circle): the parametric seam is not a corner.
-        return [(0.0, loop.perimeter)]
-    margins = [_corner_margin(loop, i, tab_width) for i in range(edge_count)]
-    intervals = []
-    for i in range(edge_count):
-        start = loop.cumulative[i] + margins[i]
-        end = loop.cumulative[i] + loop.lengths[i] - margins[(i + 1) % edge_count]
-        if end > start:
-            intervals.append((start, end))
+        intervals = [(0.0, loop.perimeter)]
+    else:
+        edge_count = len(loop.edges)
+        margins = [_corner_margin(loop, i, tab_width) for i in range(edge_count)]
+        intervals = []
+        for i in range(edge_count):
+            start = loop.cumulative[i] + margins[i]
+            end = loop.cumulative[i] + loop.lengths[i] - margins[(i + 1) % edge_count]
+            if end > start:
+                intervals.append((start, end))
+    # A tab in a rounded corner is hard to trim flush, so tight arcs are kept
+    # tab-free - but only while the loop offers anything else: on a loop that
+    # is all tight curve (a round cutout) a curved tab beats a flying part.
+    curved = _subtract_spans(intervals, _tight_arc_spans(loop))
+    return curved or intervals
+
+
+# Arcs below this radius count as rounded corners: no tabs on them while the
+# loop has straighter stretches to offer (cm).
+MIN_TAB_ARC_RADIUS = 4.0
+
+
+def _tight_arc_spans(loop: '_Loop') -> list[tuple[float, float]]:
+    """Arc-length spans of the loop's edges that are arcs (or full circles)
+    tighter than MIN_TAB_ARC_RADIUS."""
+    spans = []
+    for i, edge in enumerate(loop.edges):
+        geometry = (adsk.core.Arc3D.cast(edge.geometry)
+                    or adsk.core.Circle3D.cast(edge.geometry))
+        if geometry and geometry.radius < MIN_TAB_ARC_RADIUS:
+            spans.append((loop.cumulative[i], loop.cumulative[i] + loop.lengths[i]))
+    return spans
+
+
+def _subtract_spans(intervals: list[tuple[float, float]],
+                    spans: list[tuple[float, float]]) -> list[tuple[float, float]]:
+    for span_start, span_end in spans:
+        remaining = []
+        for start, end in intervals:
+            if span_end <= start or span_start >= end:
+                remaining.append((start, end))
+                continue
+            if start < span_start:
+                remaining.append((start, span_start))
+            if span_end < end:
+                remaining.append((span_end, end))
+        intervals = remaining
     return intervals
 
 
