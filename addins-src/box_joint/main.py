@@ -3,7 +3,18 @@
 Functionally modeled on the BoxJoint custom-feature add-in
 (https://github.com/EvilHacker/BoxJoint/), restricted to 90-degree butt
 joints, but built entirely from native Fusion features: fully constrained
-sketches, join/cut extrudes, and to-object extents.
+sketches, join/cut extrudes, to-object extents, and rectangular feature
+patterns.
+
+The joint is built as ONE seed unit (a single notch with its reliefs and
+a single gap) plus two feature patterns whose quantity and spacing are
+expressions over user parameters - editing boxJointFingers in Change
+Parameters re-derives the whole joint at a new finger count, and a driven
+dimension of the joint length keeps everything tracking the boards. At
+three fingers the fingers pattern has nothing to copy (the engine rejects
+a quantity below two), so its one clamped copy is parked far off the
+board and the pattern shows a harmless compute warning until the count
+reaches five.
 
 The joint is described in a local frame that is only used to compute
 model-space positions (all sketch geometry is positioned by constraints):
@@ -113,7 +124,6 @@ class _JointSpec:
     axial: float        # axial clearance (along the joint)
     lateral: float      # lateral clearance (finger tips / notch bottoms)
     radius: float       # bit radius; 0 disables all reliefs
-    node_zs: list[float]
     zero_margin: bool
     zero_axial: bool
     zero_lateral: bool
@@ -123,28 +133,42 @@ class _JointSpec:
         return self.radius > _ZERO_OFFSET
 
 
+@dataclass
+class _ParamSet:
+    """Named parameters the joint is driven by after creation.
+
+    fingers/margin/tool/axial/lateral are USER parameters (editable in
+    Change Parameters; the finger count is the headline knob). length is
+    the DRIVEN model dimension measuring the joint along the corner, and
+    width the model dimension deriving the finger width from it - both
+    live in the notch sketch and are filled in while it is built."""
+    fingers: str
+    margin: str
+    tool: str
+    axial: str
+    lateral: str
+    length: str | None = None
+    width: str | None = None
+
+
 @dataclass(frozen=True)
 class _NotchWall:
-    node: int                        # grid node index 1..n-1
-    z: float                         # wall position (node z +- axial/2)
-    anchor: adsk.fusion.SketchPoint  # sketch point on the corner line at z
+    z: float                         # wall position at creation time
+    open_side: int                   # +1/-1: which z side the notch is on
+    anchor: adsk.fusion.SketchPoint  # outer endpoint on the corner line
     line: adsk.fusion.SketchLine     # the notch wall line
 
 
 @dataclass(frozen=True)
 class _NotchLayout:
     sketch: adsk.fusion.Sketch
-    grid_points: list[adsk.fusion.SketchPoint]
-    walls: list[_NotchWall]          # ordered by node index
-    bottom_line: adsk.fusion.SketchLine | None  # first notch-bottom line
-    radius_param: str | None         # bit-radius parameter (first fillet)
-    axial_param: str | None          # axial/2 offset parameter
-    lateral_param: str | None        # lateral offset parameter
+    walls: list[_NotchWall]          # the seed notch's two walls
+    bottom_line: adsk.fusion.SketchLine | None
+    direction_line: adsk.fusion.SketchLine  # pattern direction (start->end)
 
 
 @dataclass(frozen=True)
 class _GapWall:
-    node: int
     z: float
     line: adsk.fusion.SketchLine     # the gap wall (= finger side)
     tip: adsk.fusion.SketchPoint     # its end on the finger-tip line
@@ -153,8 +177,8 @@ class _GapWall:
 @dataclass(frozen=True)
 class _GapLayout:
     sketch: adsk.fusion.Sketch
-    walls: list[_GapWall]            # ordered by node index
-    bottom_line: adsk.fusion.SketchLine  # first gap-bottom line
+    walls: list[_GapWall]            # the seed gap's two walls
+    bottom_line: adsk.fusion.SketchLine
 
 
 class BoxJointInputs(inputs.Inputs):
@@ -292,6 +316,9 @@ class BoxJoint(addin.Addin):
         design = adsk.fusion.Design.cast(self.app.activeProduct)
         if not design:
             raise RuntimeError("Box Joint requires an active Fusion design.")
+        # One parameter prefix per command invocation: preview cycles then
+        # update the same user parameters instead of minting new ones.
+        self._session_prefix = None
         return BoxJointInputs(design.unitsManager)
 
     def pre_select(self, input, selection) -> bool:
@@ -580,7 +607,6 @@ class BoxJoint(addin.Addin):
         lateral = max(self.inputs.clearance_lateral.value, 0)
         radius = max(self.inputs.tool_diameter.value, 0) / 2
         width = (geometry.joint_length - 2 * margin) / count
-        node_zs = [margin + index * width for index in range(count + 1)]
         return _JointSpec(
             count=count,
             finger_width=width,
@@ -588,7 +614,6 @@ class BoxJoint(addin.Addin):
             axial=axial,
             lateral=lateral,
             radius=radius if radius > _ZERO_OFFSET else 0.0,
-            node_zs=node_zs,
             zero_margin=margin <= _ZERO_OFFSET,
             zero_axial=axial <= _ZERO_OFFSET,
             zero_lateral=lateral <= _ZERO_OFFSET,
@@ -623,6 +648,7 @@ class BoxJoint(addin.Addin):
 
         geometry = self._resolve_geometry()
         component = geometry.face_a.body.parentComponent
+        design = component.parentDesign
         spec = self._joint_spec(geometry)
         self._body_tokens = {
             "a": geometry.face_a.body.entityToken,
@@ -634,7 +660,9 @@ class BoxJoint(addin.Addin):
             "b_inside": geometry.b_inside.entityToken,
         }
 
-        notch = self._create_notch_sketch(component, geometry, spec)
+        params = self._create_user_parameters(design, spec)
+
+        notch = self._create_notch_sketch(component, geometry, spec, params)
         self._require_fully_constrained(notch.sketch)
 
         groove_sketch: adsk.fusion.Sketch | None = None
@@ -647,6 +675,7 @@ class BoxJoint(addin.Addin):
                 geometry,
                 spec,
                 notch,
+                params,
             )
             self._require_fully_constrained(groove_sketch)
             notch_relief_sketch = self._create_notch_relief_sketch(
@@ -654,10 +683,19 @@ class BoxJoint(addin.Addin):
                 geometry,
                 spec,
                 notch,
+                params,
             )
             self._require_fully_constrained(notch_relief_sketch)
 
-        gaps = self._create_gap_sketch(component, geometry, spec, notch)
+        strip_sketch = self._create_strip_sketch(
+            component,
+            geometry,
+            spec,
+            params,
+        )
+        self._require_fully_constrained(strip_sketch)
+
+        gaps = self._create_gap_sketch(component, geometry, spec, params)
         self._require_fully_constrained(gaps.sketch)
 
         if spec.has_relief:
@@ -665,29 +703,44 @@ class BoxJoint(addin.Addin):
                 component,
                 geometry,
                 spec,
-                notch,
-                gaps,
+                params,
             )
             self._require_fully_constrained(finger_groove_sketch)
             relief_sketch = self._create_root_relief_sketch(
                 component,
                 geometry,
                 spec,
-                notch,
                 gaps,
+                params,
             )
             self._require_fully_constrained(relief_sketch)
 
-        # Give the finger board the whole corner overlap, then carve the
-        # gaps back out of it (the BoxJoint add-in's joiner/cutter scheme).
-        strip_bodies = self._create_strip_extrude(component, geometry)
+        # Give the finger board the joint span (first to last notch wall),
+        # then carve the gaps back out of it. The span deliberately stops
+        # at the outer notch walls: the end gaps then only recess the seat
+        # in B's original body, so their outer kept fillets stay above the
+        # notch board and the pattern can use one uniform gap shape.
+        strip_extrude = self._create_to_entity_extrude(
+            component=component,
+            sketch=strip_sketch,
+            target_body=self._target_body(component, "b"),
+            target_entity=self._resolve_face("face_a"),
+            direction=self._opposite(geometry.y_dir),
+            offset_expression=None,
+            operation=adsk.fusion.FeatureOperations.NewBodyFeatureOperation,  # type: ignore
+            name="Box Joint - Finger Stock",
+            parameter_role="fingerStock",
+        )
         self._create_join_combine(
             component,
             self._target_body(component, "b"),
-            strip_bodies,
+            cast(
+                list[adsk.fusion.BRepBody],
+                utils.fusion.as_list(strip_extrude.bodies),
+            ),
         )
 
-        last_feature: adsk.fusion.Feature = self._create_to_entity_extrude(
+        gap_cut = self._create_to_entity_extrude(
             component=component,
             sketch=gaps.sketch,
             target_body=self._target_body(component, "b"),
@@ -695,19 +748,31 @@ class BoxJoint(addin.Addin):
             direction=geometry.x_dir,
             offset_expression=None,
             operation=adsk.fusion.FeatureOperations.CutFeatureOperation,  # type: ignore
-            name="Box Joint - Gap Cuts",
-            parameter_role="gaps",
+            name="Box Joint - Gap Cut",
+            parameter_role="gap",
         )
-        last_feature = self._create_to_entity_extrude(
-            component=component,
-            sketch=notch.sketch,
-            target_body=self._target_body(component, "a"),
-            target_entity=self._cut_target(component, "a", "a_inside"),
-            direction=geometry.y_dir,
-            offset_expression=None,
-            operation=adsk.fusion.FeatureOperations.CutFeatureOperation,  # type: ignore
-            name="Box Joint - Notch Cuts",
-            parameter_role="notches",
+        self._create_pattern(
+            component,
+            [gap_cut],
+            notch.direction_line,
+            f"({params.fingers} + 1) / 2",
+            f"2 * ({params.width})",
+            "Box Joint - Gaps Pattern",
+        )
+
+        finger_features: list[adsk.fusion.Feature] = []
+        finger_features.append(
+            self._create_to_entity_extrude(
+                component=component,
+                sketch=notch.sketch,
+                target_body=self._target_body(component, "a"),
+                target_entity=self._cut_target(component, "a", "a_inside"),
+                direction=geometry.y_dir,
+                offset_expression=None,
+                operation=adsk.fusion.FeatureOperations.CutFeatureOperation,  # type: ignore
+                name="Box Joint - Notch Cut",
+                parameter_role="notch",
+            )
         )
         if spec.has_relief:
             assert (
@@ -716,68 +781,174 @@ class BoxJoint(addin.Addin):
                 and finger_groove_sketch
                 and relief_sketch
             )
-            lateral_expression = (
-                notch.lateral_param
-                or self.inputs.clearance_lateral.expression
-            )
-            radius_param = cast(str, notch.radius_param)
-            last_feature = self._create_to_entity_extrude(
-                component=component,
-                sketch=groove_sketch,
-                target_body=self._target_body(component, "a"),
-                target_entity=self._cut_target(component, "a", "b_inside"),
-                direction=geometry.x_dir,
-                offset_expression=(
-                    None
-                    if spec.zero_lateral
-                    else f"({lateral_expression})"
-                ),
-                operation=adsk.fusion.FeatureOperations.CutFeatureOperation,  # type: ignore
-                name="Box Joint - Wall Grooves Cut",
-                parameter_role="wallGrooves",
-            )
-            last_feature = self._create_distance_extrude(
-                component=component,
-                sketch=notch_relief_sketch,
-                target_body=self._target_body(component, "a"),
-                direction=self._opposite(geometry.y_dir),
-                distance=f"({radius_param})",
-                operation=adsk.fusion.FeatureOperations.CutFeatureOperation,  # type: ignore
-                name="Box Joint - Notch Reliefs Cut",
-                parameter_role="notchReliefs",
-            )
-            if spec.zero_lateral:
-                finger_groove_offset = f"-({radius_param})"
-            else:
-                finger_groove_offset = (
-                    f"({lateral_expression}) - ({radius_param})"
+            finger_features.append(
+                self._create_to_entity_extrude(
+                    component=component,
+                    sketch=groove_sketch,
+                    target_body=self._target_body(component, "a"),
+                    target_entity=self._cut_target(
+                        component, "a", "b_inside"),
+                    direction=geometry.x_dir,
+                    offset_expression=f"({params.lateral})",
+                    operation=adsk.fusion.FeatureOperations.CutFeatureOperation,  # type: ignore
+                    name="Box Joint - Wall Grooves Cut",
+                    parameter_role="wallGrooves",
                 )
-            last_feature = self._create_to_entity_extrude(
-                component=component,
-                sketch=finger_groove_sketch,
-                target_body=self._target_body(component, "b"),
-                target_entity=self._cut_target(component, "b", "a_inside"),
-                direction=geometry.y_dir,
-                offset_expression=finger_groove_offset,
-                operation=adsk.fusion.FeatureOperations.CutFeatureOperation,  # type: ignore
-                name="Box Joint - Finger Grooves Cut",
-                parameter_role="fingerGrooves",
             )
-            last_feature = self._create_distance_extrude(
-                component=component,
-                sketch=relief_sketch,
-                target_body=self._target_body(component, "b"),
-                direction=self._opposite(geometry.x_dir),
-                distance=f"({radius_param})",
-                operation=adsk.fusion.FeatureOperations.CutFeatureOperation,  # type: ignore
-                name="Box Joint - Root Reliefs Cut",
-                parameter_role="rootReliefs",
+            finger_features.append(
+                self._create_distance_extrude(
+                    component=component,
+                    sketch=notch_relief_sketch,
+                    target_body=self._target_body(component, "a"),
+                    direction=self._opposite(geometry.y_dir),
+                    distance=f"({params.tool}) / 2",
+                    operation=adsk.fusion.FeatureOperations.CutFeatureOperation,  # type: ignore
+                    name="Box Joint - Notch Reliefs Cut",
+                    parameter_role="notchReliefs",
+                )
             )
+            finger_features.append(
+                self._create_to_entity_extrude(
+                    component=component,
+                    sketch=finger_groove_sketch,
+                    target_body=self._target_body(component, "b"),
+                    target_entity=self._cut_target(
+                        component, "b", "a_inside"),
+                    direction=geometry.y_dir,
+                    offset_expression=(
+                        f"({params.lateral}) - ({params.tool}) / 2"
+                    ),
+                    operation=adsk.fusion.FeatureOperations.CutFeatureOperation,  # type: ignore
+                    name="Box Joint - Finger Grooves Cut",
+                    parameter_role="fingerGrooves",
+                )
+            )
+            finger_features.append(
+                self._create_distance_extrude(
+                    component=component,
+                    sketch=relief_sketch,
+                    target_body=self._target_body(component, "b"),
+                    direction=self._opposite(geometry.x_dir),
+                    distance=f"({params.tool}) / 2",
+                    operation=adsk.fusion.FeatureOperations.CutFeatureOperation,  # type: ignore
+                    name="Box Joint - Root Reliefs Cut",
+                    parameter_role="rootReliefs",
+                )
+            )
+        finger_pattern = self._create_pattern(
+            component,
+            finger_features,
+            notch.direction_line,
+            # The pattern engine rejects a quantity of one, so three
+            # fingers clamp to two instances - and the spacing then jumps
+            # by 10 m, parking the extra copy far off the board instead of
+            # letting it bite the margins. A pattern whose only copy is
+            # empty reports a compute error while leaving the (correct)
+            # seed geometry alone, so that state is tolerated: the flag
+            # clears itself as soon as the finger count reaches five.
+            f"max(({params.fingers} - 1) / 2 ; 2)",
+            (
+                f"2 * ({params.width}) + "
+                f"max(2 - ({params.fingers} - 1) / 2 ; 0) * 10 m"
+            ),
+            "Box Joint - Fingers Pattern",
+            tolerate_empty=spec.count == 3,
+            # Half a cell over: every patterned feature's copy then hits
+            # virgin material somewhere (the pattern engine wants at least
+            # one intersecting copy PER feature, and at one-cell spacing
+            # the finger-side cuts land exactly on already-cut regions).
+            placeholder_spacing=f"({params.width}) / 2",
+        )
 
-        self._group_features(component, notch.sketch, last_feature)
+        self._group_features(component, notch.sketch, finger_pattern)
 
     # ------------------------------------------------------------------
-    # Sketch: notches on the notch board's outside face
+    # Parameters
+    # ------------------------------------------------------------------
+
+    def _create_user_parameters(
+        self,
+        design: adsk.fusion.Design,
+        spec: _JointSpec,
+    ) -> _ParamSet:
+        """The joint's editable knobs as named user parameters.
+
+        boxJointFingers is the headline one: every sketch dimension and
+        both pattern quantities/spacings are expressions over these, so
+        editing a parameter in Change Parameters re-derives the whole
+        joint - including the finger count. The prefix is chosen once per
+        command invocation so preview cycles reuse the same parameters
+        instead of minting boxJoint2, boxJoint3, ...
+        """
+        prefix = getattr(self, "_session_prefix", None)
+        if not prefix:
+            names = {
+                parameter.name for parameter in design.allParameters
+            }
+            index = 1
+            while True:
+                candidate = (
+                    "boxJoint" if index == 1 else f"boxJoint{index}"
+                )
+                if f"{candidate}Fingers" not in names:
+                    break
+                index += 1
+            prefix = candidate
+            self._session_prefix = prefix
+        units = design.unitsManager.defaultLengthUnits
+
+        def ensure(name: str, expression: str, unit: str, comment: str) -> str:
+            parameter = design.userParameters.itemByName(name)
+            if parameter:
+                parameter.expression = expression
+                return parameter.name
+            parameter = design.userParameters.add(
+                name,
+                adsk.core.ValueInput.createByString(expression),
+                unit,
+                comment,
+            )
+            if not parameter:
+                raise RuntimeError(
+                    f"Fusion failed to create the parameter '{name}'."
+                )
+            return parameter.name
+
+        return _ParamSet(
+            fingers=ensure(
+                f"{prefix}Fingers",
+                str(spec.count),
+                "",
+                "Box Joint: total number of fingers (keep it odd)",
+            ),
+            margin=ensure(
+                f"{prefix}Margin",
+                self.inputs.margin.expression,
+                units,
+                "Box Joint: plain margin at both joint ends",
+            ),
+            tool=ensure(
+                f"{prefix}ToolDiameter",
+                self.inputs.tool_diameter.expression,
+                units,
+                "Box Joint: CNC bit diameter driving the hidden reliefs",
+            ),
+            axial=ensure(
+                f"{prefix}ClearanceAxial",
+                self.inputs.clearance_axial.expression,
+                units,
+                "Box Joint: clearance along the joint",
+            ),
+            lateral=ensure(
+                f"{prefix}ClearanceLateral",
+                self.inputs.clearance_lateral.expression,
+                units,
+                "Box Joint: clearance across the joint",
+            ),
+        )
+
+    # ------------------------------------------------------------------
+    # Sketch: the seed notch on the notch board's outside face
     # ------------------------------------------------------------------
 
     def _create_notch_sketch(
@@ -785,13 +956,14 @@ class BoxJoint(addin.Addin):
         component: adsk.fusion.Component,
         geometry: _ResolvedGeometry,
         spec: _JointSpec,
+        params: _ParamSet,
     ) -> _NotchLayout:
         sketch = component.sketches.addWithoutEdges(geometry.face_a)
         if not sketch:
             raise RuntimeError(
-                "Fusion failed to create 'Box Joint - Notches'."
+                "Fusion failed to create 'Box Joint - Notch'."
             )
-        sketch.name = "Box Joint - Notches"
+        sketch.name = "Box Joint - Notch"
 
         corner_line = self._project_line(sketch, geometry.corner_edge)
         corner_line.isConstruction = True
@@ -815,124 +987,123 @@ class BoxJoint(addin.Addin):
                 self._joint_point(geometry, x, 0, z)
             )
 
-        grid_points = self._add_grid_chain(
-            sketch,
-            corner_line,
+        # DRIVEN joint length between the projected shoulder vertices: the
+        # one measured value everything else is derived from, so the joint
+        # re-derives when the boards change.
+        text = anchor_start.geometry.copy()
+        text.x += 0.5
+        text.y += 0.5
+        driven = sketch.sketchDimensions.addDistanceDimension(
             anchor_start,
             anchor_end,
-            spec,
-            to_sketch,
-            "notch",
+            adsk.fusion.DimensionOrientations.AlignedDimensionOrientation,  # type: ignore
+            text,
+            False,
         )
-
-        axial_param: str | None = None
-        first_axial: adsk.fusion.SketchLine | None = None
-
-        def wall_anchor(
-            node: int,
-            sign: int,
-        ) -> tuple[float, adsk.fusion.SketchPoint]:
-            nonlocal axial_param, first_axial
-            if spec.zero_axial:
-                return spec.node_zs[node], grid_points[node]
-            z = spec.node_zs[node] + sign * spec.axial / 2
-            segment = lines.addByTwoPoints(
-                grid_points[node],
-                to_sketch(0, z),
+        if not driven or not driven.parameter:
+            raise RuntimeError(
+                "Fusion failed to measure the joint length."
             )
-            if not segment:
-                raise RuntimeError(
-                    "Fusion failed to create a notch wall offset."
-                )
-            segment.isConstruction = True
-            constraints.addCoincident(segment.endSketchPoint, corner_line)
-            if first_axial is None:
-                first_axial = segment
-                dimension = self._add_line_length_dimension(
-                    sketch,
-                    segment,
-                    f"({self.inputs.clearance_axial.expression}) / 2",
-                    "axialClearanceHalf",
-                )
-                axial_param = dimension.parameter.name
-            else:
-                constraints.addEqual(first_axial, segment)
-            return z, segment.endSketchPoint
+        params.length = driven.parameter.name
 
-        walls: list[_NotchWall] = []
+        # The finger-width construction line doubles as the patterns'
+        # direction entity: a pattern along a sketch line runs from its
+        # start point towards its end point (verified), so anchoring the
+        # start at the joint start makes the direction deterministic.
+        width_line = lines.addByTwoPoints(
+            anchor_start,
+            to_sketch(0, spec.finger_width),
+        )
+        if not width_line:
+            raise RuntimeError(
+                "Fusion failed to create the finger width line."
+            )
+        width_line.isConstruction = True
+        constraints.addCoincident(width_line.endSketchPoint, corner_line)
+        width_dimension = self._add_line_length_dimension(
+            sketch,
+            width_line,
+            f"(({params.length}) - 2 * ({params.margin}))"
+            f" / ({params.fingers})",
+            "fingerWidth",
+        )
+        params.width = width_dimension.parameter.name
+
         radius = spec.radius
         depth = geometry.thickness_b + spec.lateral
-        lateral_param: str | None = None
-        radius_param: str | None = None
-        first_bottom: adsk.fusion.SketchLine | None = None
-        for node in range(1, spec.count - 1, 2):
-            left_z, left_anchor = wall_anchor(node, -1)
-            right_z, right_anchor = wall_anchor(node + 1, +1)
+        left_z = spec.margin + spec.finger_width - spec.axial / 2
+        right_z = spec.margin + 2 * spec.finger_width + spec.axial / 2
 
-            wall_l = lines.addByTwoPoints(
-                left_anchor,
-                to_sketch(depth - radius, left_z),
+        step = lines.addByTwoPoints(anchor_start, to_sketch(0, left_z))
+        if not step:
+            raise RuntimeError(
+                "Fusion failed to position the seed notch."
             )
-            bottom = lines.addByTwoPoints(
-                to_sketch(depth, left_z + radius),
-                to_sketch(depth, right_z - radius),
-            )
-            wall_r = lines.addByTwoPoints(
-                right_anchor,
-                to_sketch(depth - radius, right_z),
-            )
-            outer = lines.addByTwoPoints(right_anchor, left_anchor)
-            walls.extend([
-                _NotchWall(
-                    node=node,
-                    z=left_z,
-                    anchor=left_anchor,
-                    line=wall_l,
-                ),
-                _NotchWall(
-                    node=node + 1,
-                    z=right_z,
-                    anchor=right_anchor,
-                    line=wall_r,
-                ),
-            ])
-            if not all((wall_l, bottom, wall_r, outer)):
-                raise RuntimeError(
-                    "Fusion failed to create a notch profile."
-                )
-            constraints.addPerpendicular(wall_l, corner_line)
-            constraints.addPerpendicular(wall_r, corner_line)
-            if first_bottom is None:
-                first_bottom = bottom
-                if spec.zero_lateral:
-                    # Collinear already implies parallel; adding both trips
-                    # Fusion's structural redundancy analysis.
-                    constraints.addCollinear(inner_line, bottom)
-                else:
-                    constraints.addParallel(bottom, corner_line)
-                    dimension = self._add_offset_dimension(
-                        sketch,
-                        inner_line,
-                        bottom,
-                        self.inputs.clearance_lateral.expression,
-                        "lateralClearance",
-                    )
-                    lateral_param = dimension.parameter.name
-            else:
-                constraints.addCollinear(first_bottom, bottom)
+        step.isConstruction = True
+        constraints.addCoincident(step.endSketchPoint, corner_line)
+        self._add_line_length_dimension(
+            sketch,
+            step,
+            f"({params.margin}) + ({params.width}) - ({params.axial}) / 2",
+            "notchPosition",
+        )
 
-            if radius <= 0:
-                # Square notch: the walls run to the bottom directly.
-                constraints.addCoincident(
-                    wall_l.endSketchPoint,
-                    bottom.startSketchPoint,
-                )
-                constraints.addCoincident(
-                    wall_r.endSketchPoint,
-                    bottom.endSketchPoint,
-                )
-                continue
+        wall_l = lines.addByTwoPoints(
+            step.endSketchPoint,
+            to_sketch(depth - radius, left_z),
+        )
+        wall_r = lines.addByTwoPoints(
+            to_sketch(0, right_z),
+            to_sketch(depth - radius, right_z),
+        )
+        if not wall_l or not wall_r:
+            raise RuntimeError("Fusion failed to create the notch walls.")
+        outer = lines.addByTwoPoints(
+            wall_r.startSketchPoint,
+            wall_l.startSketchPoint,
+        )
+        if not outer:
+            raise RuntimeError("Fusion failed to close the notch profile.")
+        constraints.addPerpendicular(wall_l, corner_line)
+        constraints.addPerpendicular(wall_r, corner_line)
+        constraints.addCoincident(wall_r.startSketchPoint, corner_line)
+        self._add_offset_dimension(
+            sketch,
+            wall_l,
+            wall_r,
+            f"({params.width}) + ({params.axial})",
+            "notchWidth",
+        )
 
+        bottom = lines.addByTwoPoints(
+            to_sketch(depth, left_z + radius),
+            to_sketch(depth, right_z - radius),
+        )
+        if not bottom:
+            raise RuntimeError("Fusion failed to create the notch bottom.")
+        if spec.zero_lateral:
+            # An offset dimension between coincident lines is degenerate.
+            constraints.addCollinear(inner_line, bottom)
+        else:
+            constraints.addParallel(bottom, corner_line)
+            self._add_offset_dimension(
+                sketch,
+                inner_line,
+                bottom,
+                f"({params.lateral})",
+                "lateralClearance",
+            )
+
+        if radius <= 0:
+            constraints.addCoincident(
+                wall_l.endSketchPoint,
+                bottom.startSketchPoint,
+            )
+            constraints.addCoincident(
+                wall_r.endSketchPoint,
+                bottom.endSketchPoint,
+            )
+        else:
             diagonal = radius - radius / math.sqrt(2)
             fillet_l = sketch.sketchCurves.sketchArcs.addByThreePoints(
                 wall_l.endSketchPoint,
@@ -952,106 +1123,35 @@ class BoxJoint(addin.Addin):
             constraints.addTangent(fillet_l, bottom)
             constraints.addTangent(fillet_r, bottom)
             constraints.addTangent(fillet_r, wall_r)
-
-            # The kept bottom-corner fillets carry the bit radius; the
-            # first one holds the driving dimension, every other relief in
-            # this and the other sketches references its parameter. Each
-            # fillet gets its own radius dimension: with an arc-to-arc
-            # equal chain Fusion's structural analysis left one arc center
-            # under-constrained in some configurations (seen with a
-            # non-zero axial clearance at three fingers).
             for fillet in (fillet_l, fillet_r):
-                if radius_param is None:
-                    dimension = self._add_arc_radius_dimension(
-                        sketch,
-                        fillet,
-                        f"({self.inputs.tool_diameter.expression}) / 2",
-                        "bitRadius",
-                    )
-                    radius_param = dimension.parameter.name
-                else:
-                    self._add_arc_radius_dimension(
-                        sketch,
-                        fillet,
-                        radius_param,
-                        "bitRadiusLink",
-                    )
+                self._add_arc_radius_dimension(
+                    sketch,
+                    fillet,
+                    f"({params.tool}) / 2",
+                    "bitRadius",
+                )
 
         sketch.isComputeDeferred = False
         return _NotchLayout(
             sketch=sketch,
-            grid_points=grid_points,
-            walls=walls,
-            bottom_line=first_bottom,
-            radius_param=radius_param,
-            axial_param=axial_param,
-            lateral_param=lateral_param,
+            walls=[
+                _NotchWall(
+                    z=left_z,
+                    open_side=1,
+                    anchor=step.endSketchPoint,
+                    line=wall_l,
+                ),
+                _NotchWall(
+                    z=right_z,
+                    open_side=-1,
+                    anchor=wall_r.startSketchPoint,
+                    line=wall_r,
+                ),
+            ],
+            bottom_line=bottom,
+            direction_line=width_line,
         )
 
-    def _add_grid_chain(
-        self,
-        sketch: adsk.fusion.Sketch,
-        corner_line: adsk.fusion.SketchLine,
-        anchor_start: adsk.fusion.SketchPoint,
-        anchor_end: adsk.fusion.SketchPoint,
-        spec: _JointSpec,
-        to_sketch,
-        parameter_role: str,
-    ) -> list[adsk.fusion.SketchPoint]:
-        """A chain of n equal construction segments along the corner line.
-
-        No segment carries a width dimension: the solver derives the
-        finger width from the anchors and the margins, so the layout stays
-        parametric when the boards change. (A plain chain of equal-length
-        collinear segments is also the only equal-spacing formulation
-        Fusion's redundancy analysis accepts at every finger count.)
-        """
-        constraints = sketch.geometricConstraints
-        grid_points: list[adsk.fusion.SketchPoint] = []
-        for index, z in enumerate(spec.node_zs):
-            point = sketch.sketchPoints.add(to_sketch(0, z))
-            if not point:
-                raise RuntimeError(
-                    "Fusion failed to create a finger grid point."
-                )
-            grid_points.append(point)
-        if spec.zero_margin:
-            constraints.addCoincident(grid_points[0], anchor_start)
-            constraints.addCoincident(grid_points[-1], anchor_end)
-            for point in grid_points[1:-1]:
-                constraints.addCoincident(point, corner_line)
-        else:
-            for point in grid_points:
-                constraints.addCoincident(point, corner_line)
-            start_dimension = self._add_distance_dimension(
-                sketch,
-                anchor_start,
-                grid_points[0],
-                self.inputs.margin.expression,
-                f"{parameter_role}StartMargin",
-            )
-            self._add_distance_dimension(
-                sketch,
-                grid_points[-1],
-                anchor_end,
-                start_dimension.parameter.name,
-                f"{parameter_role}EndMargin",
-            )
-        segments: list[adsk.fusion.SketchLine] = []
-        for first, second in zip(grid_points, grid_points[1:]):
-            segment = sketch.sketchCurves.sketchLines.addByTwoPoints(
-                first,
-                second,
-            )
-            if not segment:
-                raise RuntimeError(
-                    "Fusion failed to create a finger grid segment."
-                )
-            segment.isConstruction = True
-            segments.append(segment)
-        for segment in segments[1:]:
-            constraints.addEqual(segments[0], segment)
-        return grid_points
 
     # ------------------------------------------------------------------
     # Sketch: wall grooves on the notch board's end face
@@ -1063,6 +1163,7 @@ class BoxJoint(addin.Addin):
         geometry: _ResolvedGeometry,
         spec: _JointSpec,
         notch: _NotchLayout,
+        params: _ParamSet,
     ) -> adsk.fusion.Sketch:
         sketch = component.sketches.addWithoutEdges(geometry.a_end)
         if not sketch:
@@ -1091,16 +1192,15 @@ class BoxJoint(addin.Addin):
             sketch,
             inside_line,
             [
-                # Odd nodes are left notch walls (notch toward +z), even
-                # nodes right walls: open the groove into the notch so it
-                # clears the kept bottom-corner fillet near the inside face.
-                (projected, wall.z, 1 if wall.node % 2 == 1 else -1)
+                # Open the groove into the notch so it clears the kept
+                # bottom-corner fillet near the inside face.
+                (projected, wall.z, wall.open_side)
                 for projected, wall in zip(wall_points, notch.walls)
             ],
             to_sketch,
             surface,
             radius,
-            cast(str, notch.radius_param),
+            f"({params.tool}) / 2",
             "wallGroove",
         )
         sketch.isComputeDeferred = False
@@ -1228,21 +1328,24 @@ class BoxJoint(addin.Addin):
         component: adsk.fusion.Component,
         geometry: _ResolvedGeometry,
         spec: _JointSpec,
-        notch: _NotchLayout,
+        params: _ParamSet,
     ) -> _GapLayout:
+        """The seed gap on the finger board's outside face.
+
+        One closed gap shape with kept fillets at both bottom corners; the
+        gaps pattern replicates it over every second cell. The end
+        instances extend past the finger stock, where their outer fillets
+        keep only material above the notch board's inside face - harmless,
+        so no end special-casing is needed."""
         sketch = component.sketches.addWithoutEdges(geometry.face_b)
         if not sketch:
             raise RuntimeError(
-                "Fusion failed to create 'Box Joint - Gaps'."
+                "Fusion failed to create 'Box Joint - Gap'."
             )
-        sketch.name = "Box Joint - Gaps"
+        sketch.name = "Box Joint - Gap"
 
-        # The projected corner edge stays a REGULAR curve: it is the tip-side
-        # boundary of every gap profile. Closing each gap with its own line
-        # between the wall tips is not an option: with zero axial clearance
-        # the wall tips are projected (fixed) points, and a curve whose two
-        # endpoints are both fixed makes Fusion's solver report the sketch
-        # as over-constrained (verified empirically).
+        # The projected corner edge stays a REGULAR curve: it is the
+        # tip-side boundary of the gap profile.
         tip_line = self._project_line(sketch, geometry.corner_edge)
         shoulder_line = self._project_line(sketch, geometry.shoulder_edge)
         shoulder_line.isConstruction = True
@@ -1250,14 +1353,6 @@ class BoxJoint(addin.Addin):
             sketch,
             geometry.shoulder_edge.startVertex,
         )
-        anchor_end = self._project_point(
-            sketch,
-            geometry.shoulder_edge.endVertex,
-        )
-        node_points = {
-            node: self._project_point(sketch, notch.grid_points[node])
-            for node in range(1, spec.count)
-        }
 
         sketch.isComputeDeferred = True
         constraints = sketch.geometricConstraints
@@ -1271,166 +1366,120 @@ class BoxJoint(addin.Addin):
 
         radius = spec.radius
         seat = geometry.thickness_a + spec.lateral
-        diagonal = radius - radius / math.sqrt(2)
-        axial_param = notch.axial_param
-        first_axial: adsk.fusion.SketchLine | None = None
-        first_bottom: adsk.fusion.SketchLine | None = None
-        walls: dict[int, _GapWall] = {}
+        left_z = spec.margin - spec.axial / 2
+        right_z = spec.margin + spec.finger_width + spec.axial / 2
 
-        def gap_anchor(node: int) -> tuple[float, adsk.fusion.SketchPoint]:
-            # The gap walls sit on the opposite side of each grid node
-            # from the notch walls: fingers narrow, notches widen.
-            nonlocal first_axial
-            if spec.zero_axial:
-                return spec.node_zs[node], node_points[node]
-            sign = 1 if node % 2 == 1 else -1
-            z = spec.node_zs[node] + sign * spec.axial / 2
-            segment = lines.addByTwoPoints(node_points[node], to_sketch(0, z))
-            if not segment:
-                raise RuntimeError(
-                    "Fusion failed to create a gap wall offset."
-                )
-            segment.isConstruction = True
-            constraints.addCoincident(segment.endSketchPoint, tip_line)
-            if first_axial is None:
-                first_axial = segment
-                self._add_line_length_dimension(
-                    sketch,
-                    segment,
-                    cast(str, axial_param),
-                    "gapAxialClearanceHalf",
-                )
-            else:
-                constraints.addEqual(first_axial, segment)
-            return z, segment.endSketchPoint
+        # Position the right wall from the joint start; the left wall
+        # hangs off it through the width dimension.
+        step = lines.addByTwoPoints(
+            anchor_start,
+            to_sketch(geometry.thickness_a, right_z),
+        )
+        if not step:
+            raise RuntimeError("Fusion failed to position the seed gap.")
+        step.isConstruction = True
+        constraints.addCoincident(step.endSketchPoint, shoulder_line)
+        self._add_line_length_dimension(
+            sketch,
+            step,
+            f"({params.margin}) + ({params.width}) + ({params.axial}) / 2",
+            "gapPosition",
+        )
 
-        def add_wall(node: int) -> _GapWall:
-            z, anchor = gap_anchor(node)
-            wall = lines.addByTwoPoints(
-                anchor,
-                to_sketch(seat - radius, z),
+        wall_r = lines.addByTwoPoints(
+            to_sketch(0, right_z),
+            to_sketch(seat - radius, right_z),
+        )
+        wall_l = lines.addByTwoPoints(
+            to_sketch(0, left_z),
+            to_sketch(seat - radius, left_z),
+        )
+        if not wall_l or not wall_r:
+            raise RuntimeError("Fusion failed to create the gap walls.")
+        constraints.addPerpendicular(wall_r, shoulder_line)
+        constraints.addPerpendicular(wall_l, shoulder_line)
+        constraints.addCoincident(step.endSketchPoint, wall_r)
+        constraints.addCoincident(wall_r.startSketchPoint, tip_line)
+        constraints.addCoincident(wall_l.startSketchPoint, tip_line)
+        self._add_offset_dimension(
+            sketch,
+            wall_r,
+            wall_l,
+            f"({params.width}) + ({params.axial})",
+            "gapWidth",
+        )
+
+        bottom = lines.addByTwoPoints(
+            to_sketch(seat, left_z + radius),
+            to_sketch(seat, right_z - radius),
+        )
+        if not bottom:
+            raise RuntimeError("Fusion failed to create the gap bottom.")
+        if spec.zero_lateral:
+            constraints.addCollinear(shoulder_line, bottom)
+        else:
+            constraints.addParallel(bottom, shoulder_line)
+            self._add_offset_dimension(
+                sketch,
+                shoulder_line,
+                bottom,
+                f"({params.lateral})",
+                "gapLateralClearance",
             )
-            if not wall:
-                raise RuntimeError("Fusion failed to create a gap wall.")
-            constraints.addPerpendicular(wall, tip_line)
-            gap_wall = _GapWall(node=node, z=z, line=wall, tip=anchor)
-            walls[node] = gap_wall
-            return gap_wall
 
-        def add_bottom(
-            start: adsk.core.Point3D | adsk.fusion.SketchPoint,
-            end: adsk.core.Point3D | adsk.fusion.SketchPoint,
-        ) -> adsk.fusion.SketchLine:
-            nonlocal first_bottom
-            bottom = lines.addByTwoPoints(start, end)
-            if not bottom:
-                raise RuntimeError("Fusion failed to create a gap bottom.")
-            if first_bottom is None:
-                first_bottom = bottom
-                if spec.zero_lateral:
-                    # Collinear already implies parallel; adding both trips
-                    # Fusion's structural redundancy analysis.
-                    constraints.addCollinear(shoulder_line, bottom)
-                else:
-                    constraints.addParallel(bottom, shoulder_line)
-                    self._add_offset_dimension(
-                        sketch,
-                        shoulder_line,
-                        bottom,
-                        notch.lateral_param
-                        or self.inputs.clearance_lateral.expression,
-                        "gapLateralClearance",
-                    )
-            else:
-                constraints.addCollinear(first_bottom, bottom)
-            return bottom
-
-        def add_fillet(
-            bottom: adsk.fusion.SketchLine,
-            bottom_point: adsk.fusion.SketchPoint,
-            wall: _GapWall,
-            z_inward: int,
-        ) -> None:
-            # z_inward: direction from the wall into the gap (+1/-1).
-            if radius <= 0:
-                constraints.addCoincident(
-                    bottom_point,
-                    wall.line.endSketchPoint,
-                )
-                return
-            fillet = arcs.addByThreePoints(
-                bottom_point,
-                to_sketch(seat - diagonal, wall.z + z_inward * diagonal),
-                wall.line.endSketchPoint,
+        if radius <= 0:
+            constraints.addCoincident(
+                wall_l.endSketchPoint,
+                bottom.startSketchPoint,
             )
-            if not fillet:
+            constraints.addCoincident(
+                wall_r.endSketchPoint,
+                bottom.endSketchPoint,
+            )
+        else:
+            diagonal = radius - radius / math.sqrt(2)
+            fillet_l = arcs.addByThreePoints(
+                bottom.startSketchPoint,
+                to_sketch(seat - diagonal, left_z + diagonal),
+                wall_l.endSketchPoint,
+            )
+            fillet_r = arcs.addByThreePoints(
+                bottom.endSketchPoint,
+                to_sketch(seat - diagonal, right_z - diagonal),
+                wall_r.endSketchPoint,
+            )
+            if not fillet_l or not fillet_r:
                 raise RuntimeError(
                     "Fusion failed to create a gap corner fillet."
                 )
-            constraints.addTangent(fillet, wall.line)
-            constraints.addTangent(fillet, bottom)
-            # Every fillet carries its own radius dimension; an arc-to-arc
-            # equal chain can leave an arc center structurally
-            # under-constrained (see the notch sketch).
-            self._add_arc_radius_dimension(
-                sketch,
-                fillet,
-                cast(str, notch.radius_param)
-                if notch.radius_param
-                else f"({self.inputs.tool_diameter.expression}) / 2",
-                "gapFilletRadius",
-            )
-
-        # Start end gap: open at the board end, one filleted corner.
-        start_wall = add_wall(1)
-        start_outer = lines.addByTwoPoints(
-            to_sketch(0, 0),
-            to_sketch(seat, 0),
-        )
-        if not start_outer:
-            raise RuntimeError("Fusion failed to create a gap side.")
-        constraints.addPerpendicular(start_outer, tip_line)
-        constraints.addCoincident(anchor_start, start_outer)
-        constraints.addCoincident(start_outer.startSketchPoint, tip_line)
-        start_bottom = add_bottom(
-            start_outer.endSketchPoint,
-            to_sketch(seat, start_wall.z - radius),
-        )
-        add_fillet(start_bottom, start_bottom.endSketchPoint, start_wall, -1)
-
-        # Interior gaps: two filleted corners each.
-        for node in range(2, spec.count - 1, 2):
-            wall_l = add_wall(node)
-            wall_r = add_wall(node + 1)
-            bottom = add_bottom(
-                to_sketch(seat, wall_l.z + radius),
-                to_sketch(seat, wall_r.z - radius),
-            )
-            add_fillet(bottom, bottom.startSketchPoint, wall_l, +1)
-            add_fillet(bottom, bottom.endSketchPoint, wall_r, -1)
-
-        # End gap at the far board end.
-        end_wall = add_wall(spec.count - 1)
-        end_outer = lines.addByTwoPoints(
-            to_sketch(0, geometry.joint_length),
-            to_sketch(seat, geometry.joint_length),
-        )
-        if not end_outer:
-            raise RuntimeError("Fusion failed to create a gap side.")
-        constraints.addPerpendicular(end_outer, tip_line)
-        constraints.addCoincident(anchor_end, end_outer)
-        constraints.addCoincident(end_outer.startSketchPoint, tip_line)
-        end_bottom = add_bottom(
-            to_sketch(seat, end_wall.z + radius),
-            end_outer.endSketchPoint,
-        )
-        add_fillet(end_bottom, end_bottom.startSketchPoint, end_wall, +1)
+            constraints.addTangent(fillet_l, wall_l)
+            constraints.addTangent(fillet_l, bottom)
+            constraints.addTangent(fillet_r, bottom)
+            constraints.addTangent(fillet_r, wall_r)
+            for fillet in (fillet_l, fillet_r):
+                self._add_arc_radius_dimension(
+                    sketch,
+                    fillet,
+                    f"({params.tool}) / 2",
+                    "gapFilletRadius",
+                )
 
         sketch.isComputeDeferred = False
         return _GapLayout(
             sketch=sketch,
-            walls=[walls[node] for node in sorted(walls)],
-            bottom_line=cast(adsk.fusion.SketchLine, first_bottom),
+            walls=[
+                _GapWall(
+                    z=left_z,
+                    line=wall_l,
+                    tip=wall_l.startSketchPoint,
+                ),
+                _GapWall(
+                    z=right_z,
+                    line=wall_r,
+                    tip=wall_r.startSketchPoint,
+                ),
+            ],
+            bottom_line=bottom,
         )
 
     # ------------------------------------------------------------------
@@ -1442,8 +1491,7 @@ class BoxJoint(addin.Addin):
         component: adsk.fusion.Component,
         geometry: _ResolvedGeometry,
         spec: _JointSpec,
-        notch: _NotchLayout,
-        gaps: _GapLayout,
+        params: _ParamSet,
     ) -> adsk.fusion.Sketch:
         sketch = component.sketches.addWithoutEdges(geometry.face_a)
         if not sketch:
@@ -1454,29 +1502,57 @@ class BoxJoint(addin.Addin):
 
         inner_line = self._project_line(sketch, geometry.inner_edge)
         inner_line.isConstruction = True
-        side_points = [
-            self._project_point(sketch, wall.tip)
-            for wall in gaps.walls
-        ]
+        corner_line = self._project_line(sketch, geometry.corner_edge)
+        corner_line.isConstruction = True
+        anchor_start = self._project_point(
+            sketch,
+            geometry.shoulder_edge.startVertex,
+        )
 
         sketch.isComputeDeferred = True
+        constraints = sketch.geometricConstraints
+        lines = sketch.sketchCurves.sketchLines
 
         def to_sketch(x: float, z: float) -> adsk.core.Point3D:
             return sketch.modelToSketchSpace(
                 self._joint_point(geometry, x, 0, z)
             )
 
+        # The seed finger's two side positions, dimension-driven from the
+        # joint start.
+        sites: list[tuple[adsk.fusion.SketchPoint, float, int]] = []
+        for expression, z, role in (
+            (
+                f"({params.margin}) + ({params.width})"
+                f" + ({params.axial}) / 2",
+                spec.margin + spec.finger_width + spec.axial / 2,
+                "fingerGroovePositionLeft",
+            ),
+            (
+                f"({params.margin}) + 2 * ({params.width})"
+                f" - ({params.axial}) / 2",
+                spec.margin + 2 * spec.finger_width - spec.axial / 2,
+                "fingerGroovePositionRight",
+            ),
+        ):
+            step = lines.addByTwoPoints(anchor_start, to_sketch(0, z))
+            if not step:
+                raise RuntimeError(
+                    "Fusion failed to position a finger groove."
+                )
+            step.isConstruction = True
+            constraints.addCoincident(step.endSketchPoint, corner_line)
+            self._add_line_length_dimension(sketch, step, expression, role)
+            sites.append((step.endSketchPoint, z, 0))
+
         self._add_lens_grooves(
             sketch,
             inner_line,
-            [
-                (projected, wall.z, 0)
-                for projected, wall in zip(side_points, gaps.walls)
-            ],
+            sites,
             to_sketch,
             geometry.thickness_b,
             spec.radius,
-            cast(str, notch.radius_param),
+            f"({params.tool}) / 2",
             "fingerGroove",
         )
         sketch.isComputeDeferred = False
@@ -1491,8 +1567,8 @@ class BoxJoint(addin.Addin):
         component: adsk.fusion.Component,
         geometry: _ResolvedGeometry,
         spec: _JointSpec,
-        notch: _NotchLayout,
         gaps: _GapLayout,
+        params: _ParamSet,
     ) -> adsk.fusion.Sketch:
         sketch = component.sketches.addWithoutEdges(geometry.b_inside)
         if not sketch:
@@ -1503,46 +1579,83 @@ class BoxJoint(addin.Addin):
 
         bottom_line = self._project_line(sketch, gaps.bottom_line)
         bottom_line.isConstruction = True
-        wall_lines = [
-            self._project_line(sketch, wall.line)
-            for wall in gaps.walls
-        ]
-        for line in wall_lines:
-            line.isConstruction = True
+        # The seed gap's right wall is the seed finger's left side; the
+        # finger's right side hangs off it by width - axial.
+        right_wall = max(gaps.walls, key=lambda wall: wall.z)
+        wall_line = self._project_line(sketch, right_wall.line)
+        wall_line.isConstruction = True
 
         sketch.isComputeDeferred = True
         constraints = sketch.geometricConstraints
         radius = spec.radius
         center_y = geometry.thickness_a + spec.lateral - radius
-        first_circle: adsk.fusion.SketchCircle | None = None
-        for wall, wall_line in zip(gaps.walls, wall_lines):
-            circle = sketch.sketchCurves.sketchCircles.addByCenterRadius(
-                sketch.modelToSketchSpace(
-                    self._joint_point(
-                        geometry,
-                        geometry.thickness_b,
-                        center_y,
-                        wall.z,
-                    )
-                ),
-                radius,
+
+        circle_l = sketch.sketchCurves.sketchCircles.addByCenterRadius(
+            sketch.modelToSketchSpace(
+                self._joint_point(
+                    geometry,
+                    geometry.thickness_b,
+                    center_y,
+                    right_wall.z,
+                )
+            ),
+            radius,
+        )
+        if not circle_l:
+            raise RuntimeError(
+                "Fusion failed to create a root relief circle."
             )
-            if not circle:
-                raise RuntimeError(
-                    "Fusion failed to create a root relief circle."
+        constraints.addCoincident(circle_l.centerSketchPoint, wall_line)
+        constraints.addTangent(circle_l, bottom_line)
+        self._add_circle_diameter_dimension(
+            sketch,
+            circle_l,
+            f"({params.tool})",
+            "rootReliefDiameter",
+        )
+
+        span = sketch.sketchCurves.sketchLines.addByTwoPoints(
+            circle_l.centerSketchPoint,
+            sketch.modelToSketchSpace(
+                self._joint_point(
+                    geometry,
+                    geometry.thickness_b,
+                    center_y,
+                    right_wall.z + spec.finger_width - spec.axial,
                 )
-            constraints.addCoincident(circle.centerSketchPoint, wall_line)
-            constraints.addTangent(circle, bottom_line)
-            if first_circle is None:
-                first_circle = circle
-                self._add_circle_diameter_dimension(
-                    sketch,
-                    circle,
-                    f"({cast(str, notch.radius_param)}) * 2",
-                    "rootReliefDiameter",
-                )
-            else:
-                constraints.addEqual(first_circle, circle)
+            ),
+        )
+        if not span:
+            raise RuntimeError(
+                "Fusion failed to span the root relief pair."
+            )
+        span.isConstruction = True
+        constraints.addParallel(span, bottom_line)
+        self._add_line_length_dimension(
+            sketch,
+            span,
+            f"({params.width}) - ({params.axial})",
+            "rootReliefSpan",
+        )
+
+        circle_r = sketch.sketchCurves.sketchCircles.addByCenterRadius(
+            span.endSketchPoint.geometry,
+            radius,
+        )
+        if not circle_r:
+            raise RuntimeError(
+                "Fusion failed to create a root relief circle."
+            )
+        constraints.addCoincident(
+            circle_r.centerSketchPoint,
+            span.endSketchPoint,
+        )
+        self._add_circle_diameter_dimension(
+            sketch,
+            circle_r,
+            f"({params.tool})",
+            "rootReliefDiameter",
+        )
         sketch.isComputeDeferred = False
         return sketch
 
@@ -1556,6 +1669,7 @@ class BoxJoint(addin.Addin):
         geometry: _ResolvedGeometry,
         spec: _JointSpec,
         notch: _NotchLayout,
+        params: _ParamSet,
     ) -> adsk.fusion.Sketch:
         """Hidden dog bones on the notch board's inside face.
 
@@ -1588,7 +1702,6 @@ class BoxJoint(addin.Addin):
         constraints = sketch.geometricConstraints
         radius = spec.radius
         center_x = geometry.thickness_b + spec.lateral - radius
-        first_circle: adsk.fusion.SketchCircle | None = None
         for wall, wall_line in zip(notch.walls, wall_lines):
             circle = sketch.sketchCurves.sketchCircles.addByCenterRadius(
                 sketch.modelToSketchSpace(
@@ -1607,16 +1720,12 @@ class BoxJoint(addin.Addin):
                 )
             constraints.addCoincident(circle.centerSketchPoint, wall_line)
             constraints.addTangent(circle, bottom_line)
-            if first_circle is None:
-                first_circle = circle
-                self._add_circle_diameter_dimension(
-                    sketch,
-                    circle,
-                    f"({cast(str, notch.radius_param)}) * 2",
-                    "notchReliefDiameter",
-                )
-            else:
-                constraints.addEqual(first_circle, circle)
+            self._add_circle_diameter_dimension(
+                sketch,
+                circle,
+                f"({params.tool})",
+                "notchReliefDiameter",
+            )
         sketch.isComputeDeferred = False
         return sketch
 
@@ -1624,60 +1733,188 @@ class BoxJoint(addin.Addin):
     # Features
     # ------------------------------------------------------------------
 
-    def _create_strip_extrude(
+    def _create_strip_sketch(
         self,
         component: adsk.fusion.Component,
         geometry: _ResolvedGeometry,
-    ) -> list[adsk.fusion.BRepBody]:
-        extrude_input = component.features.extrudeFeatures.createInput(
-            geometry.b_end,
-            adsk.fusion.FeatureOperations.NewBodyFeatureOperation,  # type: ignore
+        spec: _JointSpec,
+        params: _ParamSet,
+    ) -> adsk.fusion.Sketch:
+        """Profile of the finger stock on B's butting end face.
+
+        Spans from the first to the last notch wall, so the patterned end
+        gaps only ever recess the seat in B's original body."""
+        sketch = component.sketches.addWithoutEdges(geometry.b_end)
+        if not sketch:
+            raise RuntimeError(
+                "Fusion failed to create 'Box Joint - Finger Stock'."
+            )
+        sketch.name = "Box Joint - Finger Stock"
+
+        outer_line = self._project_line(sketch, geometry.shoulder_edge)
+        outer_line.isConstruction = True
+        inner_line = self._project_line(sketch, geometry.inner_edge)
+        inner_line.isConstruction = True
+        anchor_start = self._project_point(
+            sketch,
+            geometry.shoulder_edge.startVertex,
         )
-        if not extrude_input:
-            raise RuntimeError(
-                "Fusion failed to initialize the finger stock extrude."
+        anchor_end = self._project_point(
+            sketch,
+            geometry.shoulder_edge.endVertex,
+        )
+
+        sketch.isComputeDeferred = True
+        constraints = sketch.geometricConstraints
+        lines = sketch.sketchCurves.sketchLines
+
+        def to_sketch(x: float, z: float) -> adsk.core.Point3D:
+            return sketch.modelToSketchSpace(
+                self._joint_point(geometry, x, geometry.thickness_a, z)
             )
-        face_a = self._resolve_face("face_a")
-        extent = adsk.fusion.ToEntityExtentDefinition.create(face_a, False)
-        if not extent:
-            raise RuntimeError(
-                "Fusion failed to define the finger stock extent."
+
+        # One bit radius PAST the outer notch walls: the end gap
+        # instances carve that excess back but keep the first and last
+        # finger's outer root fillet whole.
+        inset = (
+            "({margin}) + ({width}) - ({axial}) / 2 - ({tool}) / 2".format(
+                margin=params.margin,
+                width=params.width,
+                axial=params.axial,
+                tool=params.tool,
             )
-        direction = self._opposite(geometry.y_dir)
-        extent.directionHint = direction
-        # A body face's natural extrude direction is its outward normal,
-        # which points from the butting end face into the notch board.
-        if not extrude_input.setOneSideExtent(
-            extent,
-            adsk.fusion.ExtentDirections.PositiveExtentDirection,  # type: ignore
+        )
+        start_z = (
+            spec.margin + spec.finger_width - spec.axial / 2 - spec.radius
+        )
+        end_z = geometry.joint_length - start_z
+
+        # The long sides come first, collinear with the projected board
+        # edges; the steps and short sides then consume exactly their
+        # remaining degrees of freedom (dimensioning a finished
+        # point-to-point rectangle instead leaves the analyzer flagging
+        # the long sides while rejecting further constraints).
+        long_outer = lines.addByTwoPoints(
+            to_sketch(0, start_z),
+            to_sketch(0, end_z),
+        )
+        long_inner = lines.addByTwoPoints(
+            to_sketch(geometry.thickness_b, start_z),
+            to_sketch(geometry.thickness_b, end_z),
+        )
+        if not long_outer or not long_inner:
+            raise RuntimeError(
+                "Fusion failed to create the finger stock profile."
+            )
+        constraints.addCollinear(outer_line, long_outer)
+        constraints.addCollinear(inner_line, long_inner)
+
+        for anchor, endpoint in (
+            (anchor_start, long_outer.startSketchPoint),
+            (anchor_end, long_outer.endSketchPoint),
         ):
+            step = lines.addByTwoPoints(anchor, endpoint)
+            if not step:
+                raise RuntimeError(
+                    "Fusion failed to position the finger stock."
+                )
+            step.isConstruction = True
+            self._add_line_length_dimension(
+                sketch,
+                step,
+                inset,
+                "fingerStockInset",
+            )
+
+        side_start = lines.addByTwoPoints(
+            long_outer.startSketchPoint,
+            long_inner.startSketchPoint,
+        )
+        side_end = lines.addByTwoPoints(
+            long_outer.endSketchPoint,
+            long_inner.endSketchPoint,
+        )
+        if not side_start or not side_end:
             raise RuntimeError(
-                "Fusion rejected the finger stock extent."
+                "Fusion failed to create the finger stock sides."
             )
-        extrude = component.features.extrudeFeatures.add(extrude_input)
-        if not extrude or extrude.bodies.count == 0:
-            raise RuntimeError(
-                "Fusion failed to extrude the finger stock."
+        constraints.addPerpendicular(side_start, outer_line)
+        constraints.addPerpendicular(side_end, outer_line)
+        sketch.isComputeDeferred = False
+        return sketch
+
+    def _create_pattern(
+        self,
+        component: adsk.fusion.Component,
+        features: list[adsk.fusion.Feature],
+        direction_line: adsk.fusion.SketchLine,
+        quantity_expression: str,
+        spacing_expression: str,
+        name: str,
+        tolerate_empty: bool = False,
+        placeholder_spacing: str | None = None,
+    ) -> adsk.fusion.RectangularPatternFeature:
+        """Feature pattern along the joint (direction: line start->end).
+
+        Quantity and spacing are expressions over the joint's user
+        parameters, so editing boxJointFingers re-derives the pattern.
+        AdjustPatternCompute re-evaluates every instance: the end gap
+        instances produce non-identical results, and instances that leave
+        the boards entirely are silently skipped (verified) - which the
+        three-finger case relies on."""
+        entities = adsk.core.ObjectCollection.createWithArray(
+            cast(list[adsk.core.Base], features)
+        )
+        patterns = component.features.rectangularPatternFeatures
+        pattern_input = patterns.createInput(
+            entities,
+            direction_line,
+            adsk.core.ValueInput.createByString(quantity_expression),
+            adsk.core.ValueInput.createByString(spacing_expression),
+            adsk.fusion.PatternDistanceType.SpacingPatternDistanceType,  # type: ignore
+        )
+        if not pattern_input:
+            raise RuntimeError(f"Fusion failed to initialize '{name}'.")
+        pattern_input.patternComputeOption = (
+            adsk.fusion.PatternComputeOptions.AdjustPatternCompute  # type: ignore
+        )
+        try:
+            pattern = patterns.add(pattern_input)
+        except RuntimeError:
+            if not tolerate_empty:
+                raise
+            # Adding a pattern whose every copy is empty is refused
+            # outright. Add it with a one-cell placeholder spacing whose
+            # copy genuinely cuts, then swap in the real expressions: the
+            # recompute parks the copy off the board again, which an
+            # EXISTING pattern tolerates (it merely reports a warning
+            # until the finger count reaches five).
+            placeholder = patterns.createInput(
+                entities,
+                direction_line,
+                adsk.core.ValueInput.createByString("2"),
+                adsk.core.ValueInput.createByString(
+                    cast(str, placeholder_spacing)
+                ),
+                adsk.fusion.PatternDistanceType.SpacingPatternDistanceType,  # type: ignore
             )
-        extrude.name = "Box Joint - Finger Stock"
-        # For a face-profile extrude, extrude.bodies contains the profile
-        # face's source body alongside the newly created one; only the new
-        # body may go into the join, or the combine gets its own target as
-        # a tool and rejects the input.
-        source_body = self._target_body(component, "b")
-        strip_bodies = [
-            body
-            for body in cast(
-                list[adsk.fusion.BRepBody],
-                utils.fusion.as_list(extrude.bodies),
+            placeholder.patternComputeOption = (
+                adsk.fusion.PatternComputeOptions.AdjustPatternCompute  # type: ignore
             )
-            if body != source_body
-        ]
-        if len(strip_bodies) != 1:
-            raise RuntimeError(
-                "The finger stock extrude did not create exactly one body."
-            )
-        return strip_bodies
+            pattern = patterns.add(placeholder)
+            pattern.quantityOne.expression = quantity_expression
+            pattern.distanceOne.expression = spacing_expression
+        if not pattern:
+            raise RuntimeError(f"Fusion failed to create '{name}'.")
+        pattern.name = name
+        healthy = adsk.fusion.FeatureHealthStates.HealthyFeatureHealthState
+        if pattern.healthState != healthy and not tolerate_empty:
+            try:
+                message = pattern.errorOrWarningMessage
+            except Exception:
+                message = "unhealthy pattern"
+            raise RuntimeError(f"'{name}' failed to compute: {message}")
+        return pattern
 
     def _create_join_combine(
         self,
@@ -2110,6 +2347,7 @@ class BoxJoint(addin.Addin):
             )
         if sketch.isFullyConstrained:
             return
+
         unconstrained_curves = [
             curve
             for curve in sketch.sketchCurves
