@@ -1,0 +1,13 @@
+{
+  "autodeskProduct": "Fusion360",
+  "type": "addin",
+  "id": "com.floriankugler.box-joint",
+  "author": "",
+  "description": {
+    "": "Creates CNC-friendly box/finger joints between two butting boards using native Fusion timeline features."
+  },
+  "version": "",
+  "runOnStartup": false,
+  "supportedOS": "windows|mac",
+  "editEnabled": true
+}
