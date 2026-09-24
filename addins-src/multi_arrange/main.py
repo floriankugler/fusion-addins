@@ -21,16 +21,14 @@ _addin: addin.Addin | None = None
 
 RESOURCE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'Resources')
 
-# Opacity applied to the source parts of an arrangement, so it is obvious at a
-# glance which parts are already covered. The dim is deliberately strong: while
-# the dialog is open these very parts are also selection-highlighted, and a
+# Opacity applied to the source parts of an arrangement while the dialog is
+# open, so it is obvious at a glance which parts are being arranged. The dim is
+# deliberately strong: these very parts are also selection-highlighted, and a
 # milder value is invisible underneath that highlight.
 #
-# It is applied while the dialog is open AND kept once the arrangement is
-# created, so the marker survives into the model; only cancelling the dialog or
-# taking a part out of the arrangement restores full opacity.
-DIMMED_OPACITY = 0.15
-FULL_OPACITY = 1.0
+# The dim only lasts while the dialog is open: OK, cancel and taking a part out
+# of the table all put the part's original opacity back.
+DIMMED_OPACITY = 0.25
 
 
 def run(context, runtime_info: RuntimeInfo):
@@ -352,9 +350,6 @@ class MultiArrange(addin.Addin):
         self._original_opacity: dict[str, float] = {}
         # Parts currently dimmed by this dialog.
         self._dimmed: set[str] = set()
-        # Face tokens of the arrangement being replaced, so execute can un-dim
-        # the parts that were dropped from it.
-        self._recipe_face_tokens: list[str] = []
         # (fingerprint, sketch-space placements) of the last preview solve;
         # execute reuses the placements when the inputs are still identical,
         # skipping the solve entirely.
@@ -658,7 +653,7 @@ class MultiArrange(addin.Addin):
 
         for token in list(self._dimmed):
             if token not in wanted:
-                self._restore_opacity(token, undim=True)
+                self._restore_opacity(token)
 
         for token, body in wanted.items():
             try:
@@ -671,16 +666,8 @@ class MultiArrange(addin.Addin):
             self._set_opacity(body, DIMMED_OPACITY)
             self._dimmed.add(token)
 
-    def _restore_opacity(self, token: str, undim: bool = False):
-        """Puts a part's opacity back.
-
-        `undim` marks the "taken out of the arrangement" case: a part that was
-        already dimmed when the dialog opened belongs to an earlier
-        arrangement, and dropping it from this one means it is not arranged at
-        all any more, so it goes back to fully visible instead of to the dim it
-        arrived with. Cancelling must NOT do that — there the point is to leave
-        the model exactly as it was found, dim included.
-        """
+    def _restore_opacity(self, token: str):
+        """Puts a part's opacity back to what it was when the dialog opened."""
         self._dimmed.discard(token)
         original = self._original_opacity.get(token)
         if original is None:
@@ -688,61 +675,17 @@ class MultiArrange(addin.Addin):
         body = self._resolve_body(token)
         if body is None:
             return
-        if undim and abs(original - DIMMED_OPACITY) < 1e-6:
-            original = FULL_OPACITY
         self._set_opacity(body, original)
 
     def _restore_all_opacity(self):
         for token in list(self._dimmed):
             self._restore_opacity(token)
 
-    def _persist_dimming(self):
-        """Marks the arranged source parts by dimming them, from execute.
-
-        Called from execute so the dim lands in execute's own transaction and
-        becomes part of the model; it deliberately outlives the dialog, so the
-        parts an arrangement already covers stay recognizable. Parts dropped
-        from an arrangement that is being replaced are un-dimmed in the same
-        pass, since they are no longer covered by anything.
-        """
-        if self.inputs is None:
-            return
-        arranged = set()
-        for record in self.inputs.parts_table.records:
-            body = self._record_body(record)
-            if body is None:
-                continue
-            arranged.add(body.entityToken)
-            self._set_opacity(body, DIMMED_OPACITY)
-
-        for token in self._recipe_face_tokens:
-            body = self._resolve_face_body(token)
-            if body is None or body.entityToken in arranged:
-                continue
-            # Was part of the arrangement being replaced, is not part of the
-            # new one: nothing covers it any more.
-            self._set_opacity(body, FULL_OPACITY)
-
-    def _resolve_face_body(self, face_token: str) -> adsk.fusion.BRepBody | None:
-        design = adsk.fusion.Design.cast(self.app.activeProduct)
-        if design is None:
-            return None
-        try:
-            entities = design.findEntityByToken(face_token)
-        except RuntimeError:
-            return None
-        for entity in entities or []:
-            face = adsk.fusion.BRepFace.cast(entity)
-            if face:
-                return face.body
-        return None
-
     def _apply_recipe(self, recipe: dict):
         design = _active_design(self.app)
         ins = self.inputs
 
         ins.faces.input.clearSelection()
-        self._recipe_face_tokens = list(recipe.get('faces', []))
         missing = 0
         for token in recipe.get('faces', []):
             entities = design.findEntityByToken(token)
@@ -799,8 +742,9 @@ class MultiArrange(addin.Addin):
         self._selection_snapshot = None
         self._clear_preview_graphics()
         if self._did_execute:
-            # The dim stays on as a permanent marker of what is arranged;
-            # execute wrote it inside its own transaction.
+            # Nothing to undo: the dim only ever lived in the preview
+            # transactions, which Fusion rolls back before execute runs, so
+            # the parts are already back at their original opacity.
             return
         # Cancelled: undo both display changes the dialog made.
         self._restore_all_opacity()
@@ -1001,11 +945,9 @@ class MultiArrange(addin.Addin):
         if old is not None:
             old.deleteMe()
         # An empty parts list deletes the selected arrangement without building
-        # a replacement. _persist_dimming then finds nothing arranged and puts
-        # every part of the deleted arrangement back to full opacity.
+        # a replacement.
         if self.inputs.parts_table.records:
             self._run_arrangement()
-        self._persist_dimming()
 
     def _run_arrangement(self):
         design = _active_design(self.app)

@@ -93,8 +93,7 @@ class PartTableInput(inputs.Input):
             f'{self.id}_remove_all', 'Remove all', False, '', False)
         self._remove_all_button.tooltip = (
             'Empties the parts list. With an existing arrangement selected '
-            'above, clicking OK on an empty list deletes that arrangement and '
-            'restores its parts to full opacity.'
+            'above, clicking OK on an empty list deletes that arrangement.'
         )
         table.addToolbarCommandInput(self._remove_all_button)
 
