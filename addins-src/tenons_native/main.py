@@ -3547,12 +3547,48 @@ class TenonsNative(addin.Addin):
             cast(list[adsk.core.Base], [line]),
             True,
         )
-        if len(projected) != 1:
+        if len(projected) == 0:
             raise RuntimeError("Fusion failed to project a reference line.")
-        result = adsk.fusion.SketchLine.cast(projected[0])
-        if not result:
+        lines = [adsk.fusion.SketchLine.cast(entity) for entity in projected]
+        if not all(lines):
             raise RuntimeError("A projected reference is not a straight line.")
-        return result
+        if len(lines) == 1:
+            return lines[0]
+
+        # Fusion can answer a single edge with several lines: on some bodies
+        # the persistent reference it stores for the linked projection is
+        # ambiguous and resolves to sibling edges as well (seen on a board
+        # whose four long edges each projected as the same pair of lines).
+        # Keep the line that lands on the source and demote the strays to
+        # construction, so they cannot form profiles in the sketch.
+        def in_plane(point: adsk.core.Point3D) -> adsk.core.Point3D:
+            flat = sketch.modelToSketchSpace(point)
+            flat.z = 0
+            return flat
+
+        start, end = (in_plane(point) for point in self._straight_endpoints(line))
+
+        def distance(candidate: adsk.fusion.SketchLine) -> float:
+            first = candidate.startSketchPoint.geometry
+            second = candidate.endSketchPoint.geometry
+            return min(
+                first.distanceTo(start) + second.distanceTo(end),
+                first.distanceTo(end) + second.distanceTo(start),
+            )
+
+        ranked = sorted(lines, key=distance)
+        tolerance = self.app.pointTolerance * 100
+        if distance(ranked[0]) > tolerance:
+            raise RuntimeError(
+                "A projected reference could not be matched to its source."
+            )
+        if distance(ranked[1]) <= tolerance:
+            raise RuntimeError(
+                "Two projected references coincide; they cannot be told apart."
+            )
+        for stray in ranked[1:]:
+            stray.isConstruction = True
+        return ranked[0]
 
     def _project_in_one_call(
         self,
