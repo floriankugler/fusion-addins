@@ -364,12 +364,22 @@ def _apply_overcut(operation: adsk.cam.Operation, job: rules.Job, overcut: float
     goes: the contour and dogbone templates are authored with an allowance of
     their own, the drill and bore templates with none, and the setting has to
     beat both. A pocket keeps the template's value - it stops at its floor and
-    has nothing to break through.
+    has nothing to break through - and so do the V-bit operations, which take
+    their depth from the modelled chamfer or groove.
     """
     kind = job.variant.kind
-    if kind == 'pocket':
+    if kind in ('pocket',) + rules.V_BIT_KINDS:
         return
     if kind in ('drill', 'bore'):
+        if job.depth_limit is not None:
+            # A tight bore or drilling stops short of the hole bottom. The
+            # limit counts from the top face; the hole top Fusion measures from
+            # is the top of the wall, which a chamfered rim puts lower by its
+            # height.
+            depth = max(job.depth_limit - job.rim, 0.0)
+            _try_set(operation, 'bottomHeight_mode', "'from hole top'")
+            _try_set(operation, 'bottomHeight_offset', f'-{depth * 10:g} mm')
+            return
         if not job.is_through:
             return  # a blind hole ends at its own bottom
         # Reach past the hole bottom - for a drill that takes the place of the
@@ -429,6 +439,12 @@ def _apply_tabs(operation: adsk.cam.Operation, job_index: int, job: rules.Job,
 
 
 def _bind_geometry(operation: adsk.cam.Operation, job: rules.Job):
+    if job.chamfers:
+        _bind_chamfers(operation, job)
+        return
+    if job.grooves:
+        _bind_grooves(operation, job)
+        return
     if job.holes:
         faces = [hole.face for hole in job.holes]
         # The drill strategy selects hole geometry via 'holeFaces', bore via 'circularFaces'.
@@ -467,6 +483,95 @@ def _bind_geometry(operation: adsk.cam.Operation, job: rules.Job):
         # contour operation would machine every body's outer contour.
         silhouette.isSetupModelSelected = False
     contours_param.applyCurveSelections(selections)
+
+
+def _bind_chamfers(operation: adsk.cam.Operation, job: rules.Job):
+    """Bind a 2D Chamfer operation to modelled chamfers: one chain per chamfer,
+    along its lower edge.
+
+    The chamfer is in the model already, so the operation must not add one of
+    its own: with a chamfer width, or with clearance to the model, the tool
+    would have to cut into the chamfer face and Fusion returns an empty
+    toolpath. Both are therefore zeroed whatever the template says; how far the
+    tip runs past the lower edge stays the template's choice. The bottom height
+    follows each chain, so chamfers of different sizes share the operation.
+    """
+    parameter = operation.parameters.itemByName('contours')
+    if not parameter:
+        raise BuilderError(f'{operation.name}: no contour geometry parameter found; '
+                           'a chamfer template needs a 2D Chamfer operation.')
+    _try_set(operation, 'chamferWidth', '0 mm')
+    _try_set(operation, 'chamferClearance', '0 mm')
+    _try_set(operation, 'bottomHeight_mode', "'from contour'")
+    _try_set(operation, 'bottomHeight_offset', '0 mm')
+    contours_param = adsk.cam.CadContours2dParameterValue.cast(parameter.value)
+    selections = contours_param.getCurveSelections()
+    selections.clear()
+    for chamfer in job.chamfers:
+        chain = selections.createNewChainSelection()
+        # Every edge is handed over, not just one to chain from: left to
+        # itself Fusion closes an open chain along whatever edges it finds,
+        # e.g. down through a groove that crosses the chamfer.
+        if not chamfer.is_closed and chain.isOpenAllowed:
+            chain.isOpen = True
+        chain.inputGeometry = chamfer.edges
+        chain.isReverted = _tool_on_wrong_side(chamfer)
+    contours_param.applyCurveSelections(selections)
+
+
+def _tool_on_wrong_side(chamfer: recognition.Chamfer) -> bool:
+    """Whether the chain along a chamfer's lower edge has to be reversed.
+
+    The tool runs on the left of the chain direction, and has to run on the
+    open side of the chamfer: the side its face looks out to. A chain takes its
+    direction from its first edge (measured 2026-10-03: on the wrong side the
+    toolpath comes out empty, because the tool would be inside the part).
+    """
+    edge, face = chamfer.edges[0], chamfer.faces[0]
+    evaluator = edge.evaluator
+    _, param_min, param_max = evaluator.getParameterExtents()
+    middle = (param_min + param_max) / 2
+    _, tangent = evaluator.getTangent(middle)
+    _, point = evaluator.getPointAtParameter(middle)
+    _, open_side = face.evaluator.getNormalAtPoint(point)
+    # Seen from above, the open side is on the left of the edge when
+    # tangent x open side points up.
+    return tangent.crossProduct(open_side).dotProduct(chamfer.up) < 0
+
+
+def _bind_grooves(operation: adsk.cam.Operation, job: rules.Job):
+    """Bind a Trace operation to V-grooves: the tool tip follows the bottom
+    edge of each groove, which carries the groove's depth by itself.
+
+    Trace switches its chamfering mode on by itself for a chamfer mill. That
+    mode is for breaking an edge with the flank and has no business here - the
+    groove is cut by running the tip along its bottom - and it refuses to work
+    with multiple depths ("Multiple depths not supported when chamfering!"),
+    which is how a groove template takes a deep groove in several passes.
+
+    The number of those passes is not the template's to know: Trace takes as
+    many extra passes as it is told, however deep the groove is, so the count
+    worked out for these grooves (rules._plan_bevels) is written here. The
+    stepdown between them stays the template's.
+    """
+    parameter = operation.parameters.itemByName('curves')
+    if not parameter:
+        raise BuilderError(f'{operation.name}: no curve geometry parameter found; '
+                           'a groove template needs a Trace operation.')
+    _try_set(operation, 'doChamfer', 'false')
+    if job.extra_passes == 0:
+        _try_set(operation, 'doMultipleDepths', 'false')
+    elif job.extra_passes is not None:
+        _try_set(operation, 'numberOfStepdowns', str(job.extra_passes))
+    curves_param = adsk.cam.CadContours2dParameterValue.cast(parameter.value)
+    selections = curves_param.getCurveSelections()
+    selections.clear()
+    for groove in job.grooves:
+        chain = selections.createNewChainSelection()
+        if chain.isOpenAllowed:
+            chain.isOpen = True
+        chain.inputGeometry = groove.edges
+    curves_param.applyCurveSelections(selections)
 
 
 def _scale_bore_feed(operation: adsk.cam.Operation, scale: float):

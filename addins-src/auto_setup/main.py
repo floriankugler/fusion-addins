@@ -124,6 +124,16 @@ class AutoSetupInputs(inputs.Inputs):
             'instead of the default.')
         self._register_buckets('contour', self.contour_buckets)
 
+        self.chamfers = inputs.CheckboxInput(
+            id='chamfers',
+            name='Chamfers and V-grooves',
+            default_value=True,
+            tool_tip='Machine the 45° chamfers at the top face (rims of holes, pockets and '
+                     'cutouts, outer contours) and pointed 90° grooves with the chamfer bit. '
+                     'The chamfer bit is the last tool of the setup. Leave single ones out '
+                     'with the Skip selection below.',
+        )
+
         self.skip_selection = inputs.SelectionByEntityTokenInput(
             id='skipSelection',
             name='Skip',
@@ -131,7 +141,8 @@ class AutoSetupInputs(inputs.Inputs):
             lower_bound=0,
             upper_bound=0,
             tool_tip='Do not machine these features at all (select edges or side faces of '
-                     'outer contours or cutouts, or pocket bottom faces).',
+                     'outer contours or cutouts, pocket bottom faces, or the faces of '
+                     'chamfers and V-grooves).',
         )
 
         self.finish_outer = inputs.CheckboxInput(
@@ -355,8 +366,8 @@ class AutoSetup(addin.Addin):
 
     @property
     def plugin_tooltip(self) -> str:
-        return ('Creates a manufacturing setup with drilling, boring, pocket and contour '
-                'operations derived from the geometry of the selected bodies. '
+        return ('Creates a manufacturing setup with drilling, boring, pocket, contour and '
+                'chamfer operations derived from the geometry of the selected bodies. '
                 'Operation parameters come from the templates in the add-in\'s templates folder.')
 
     def get_ui_placement(self) -> ui_placement.UIPlacement:
@@ -397,6 +408,7 @@ class AutoSetup(addin.Addin):
             finish_selection=list(self.inputs.finish_selection.value),
             skip_selection=list(self.inputs.skip_selection.value),
             no_finish_selection=list(self.inputs.no_finish_selection.value),
+            chamfers_enabled=self.inputs.chamfers.value,
             pocket_overrides=self.inputs.pocket_override_tokens(),
             contour_overrides=self.inputs.contour_override_entities(),
         )
@@ -460,8 +472,8 @@ class AutoSetupExport(addin.Addin):
     def plugin_tooltip(self) -> str:
         return ('Exports every setup of the active document whose name follows the '
                 '"<kind>[.<tag>...]_<label>" convention (kind: pocket, contour, drill, bore, '
-                'dogbone; tags: dc, udc, finish) as a template file used by the Auto Setup '
-                'command.')
+                'dogbone, chamfer, groove; tags: dc, udc, finish) as a template file used by '
+                'the Auto Setup command.')
 
     def get_ui_placement(self) -> ui_placement.UIPlacement:
         command = ui_placement.PlacementSpec(

@@ -1,13 +1,23 @@
 """Mapping from recognized features to template-based operations.
 
-Holes are handled automatically from the available drill/bore templates
-(filtered by the selected cutter variant):
-- A hole matching a drill template's tool diameter exactly is drilled with it.
+Holes are handled automatically from the available bore templates (filtered by
+the selected cutter variant):
 - Through holes larger than BIG_HOLE_LIMIT are machined as inner contours.
-- Other holes are bored with the smallest tool that leaves no standing core
-  (tool diameter > hole diameter / 2) and is at least TOOL_CLEARANCE smaller
-  than the hole; holes too big for that use the largest bore tool. Holes
-  smaller than every tool are skipped with a warning.
+- Other holes are bored with the widest cutter that is at least BORE_CLEARANCE
+  smaller than the hole. A cutter with less room than that cannot clear its
+  chips and burns the wall. In a blind hole the cutter also has to reach the
+  centre (hole diameter <= 2 x cutter diameter), or it leaves a core standing;
+  in a through hole the core drops out.
+- A hole that leaves no cutter that much room is bored with the widest cutter
+  that fits into it at all, but only TIGHT_CUT_DEPTH deep, which is as far as
+  such a tight cut goes without burn marks.
+- A hole no bore cutter fits into at all is drilled - plunged with a cutter of
+  exactly its diameter - if a drill template has that cutter, again only
+  TIGHT_CUT_DEPTH deep. That is the tightest cut there is.
+- Every other hole is skipped with a warning.
+Drilling is the last resort only (PREFER_DRILLING is off for now): a hole that
+matches a drill template but can be bored is bored. The drill templates still
+plunge the corner reliefs that match their tool.
 
 Bores are grouped per hole diameter rather than per tool, because their
 feedrate is scaled with the hole: a bore template's feedrate is the one for a
@@ -33,22 +43,44 @@ machine it. Those reliefs are collected across all contours, cutouts and pocket
 floors and get extra operations after the ones they belong to: a relief
 matching a drill template's tool diameter exactly is plunged with it (a contour
 pass would degenerate to a point), every other one is machined along its arc as
-an open chain by the 'dogbone' template's smaller cutter. Because such a corner
-is machined separately, it places no demand on the template it came from and is
-left out of that template's corner-radius check.
+an open chain by a 'dogbone' template - the one with the widest cutter that
+still fits the relief. Because such a corner is machined separately, it places
+no demand on the template it came from and is left out of that template's
+corner-radius check.
+
+The 45 degree chamfers at the top face (hole, pocket and cutout rims, the outer
+contour) and pointed 90 degree grooves belong to the V-bit of the 'chamfer' and
+'groove' templates. They are machined whenever they are found, unless the
+command switches them off or the skip selection names them. The V-bit is always
+the last tool of the setup, whatever its diameter.
 
 Tabs are opt-in per contour: the tab selection accepts edges or faces of an
 outer contour or a cutout, resolved to the owning feature. A second selection
 takes tabs away again and wins over both the mode and the tab selection.
 """
 
+import math
 import os
 import adsk.core, adsk.fusion
 from dataclasses import dataclass, field
 from . import holding, recognition, tabs, templates
 
+# Whether a hole that matches a drill template's tool is drilled rather than
+# bored. Off for now: plunging a cutter of exactly the hole's diameter through
+# the sheet burns, so a hole is bored whenever a bore cutter fits into it, and
+# drilled only when none does (and then only TIGHT_CUT_DEPTH deep). Corner
+# reliefs are not affected, they are plunged as before.
+PREFER_DRILLING = False
 # A hole this close to a drill template's tool diameter is drilled (cm).
 DRILL_MATCH_TOL = 0.005
+# A cutter needs this much less diameter than the hole it bores (cm).
+BORE_CLEARANCE = 0.1
+# How deep a hole is machined, measured from the top face, when the cutter has
+# less than BORE_CLEARANCE in it - down to none at all for a drilled hole (cm).
+TIGHT_CUT_DEPTH = 0.4
+# Slack for comparing a cutter with the room a hole leaves it (cm): a 3.175mm
+# cutter in a 4.175mm hole has its 1mm, whatever the floats say.
+FIT_TOL = 1e-6
 # A tool must be at least this much smaller than the narrowest part of the
 # feature it machines (cm): a 6mm cutter cannot machine a 6mm wide pocket
 # corner or bore a 6mm hole, it has to leave material to remove.
@@ -87,6 +119,16 @@ TAB_AUTO = 4
 # solid material), then pockets, then the contours that free the part, and
 # finally the corner reliefs left over by a contour tool.
 KIND_ORDER = {'drill': 0, 'bore': 1, 'pocket': 2, 'contour': 3, 'dogbone': 4}
+# The kinds machined by the V-bit. Their operations are not sorted by tool size
+# with the others: the V-bit is the last tool of the setup.
+V_BIT_KINDS = ('chamfer', 'groove')
+# The flank angle of the V-bit against its axis (degrees), and how far a tool
+# may deviate from it.
+V_BIT_TAPER = 45.0
+V_BIT_TAPER_TOL = 0.1
+# A tab can sit below a rim chamfer as long as the chamfer takes no more than
+# this share of the sheet thickness; a deeper one counts as thinned material.
+TAB_CHAMFER_SHARE = 1 / 3
 
 
 class RulesError(Exception):
@@ -106,8 +148,17 @@ class Job:
     # Hole diameter in tool diameters, used to scale the boring feedrate; None
     # for everything that is not a bore.
     feed_scale: float | None = None
+    # Holes only: stop this far below the top face instead of at the hole
+    # bottom (see TIGHT_CUT_DEPTH), with the height of the holes' rim.
+    depth_limit: float | None = None
+    rim: float = 0.0
     # Single arcs machined as open chains (dogbone reliefs).
     open_chains: list = field(default_factory=list)
+    chamfers: list[recognition.Chamfer] = field(default_factory=list)
+    grooves: list[recognition.Groove] = field(default_factory=list)
+    # Grooves only: how many passes the tool takes above the final one at the
+    # groove bottom. None leaves the template as it is (a single pass).
+    extra_passes: int | None = None
     tabbed: bool = False
     # Edge loops to place tabs on: (edges, label for warnings, explicit tab
     # points or None for the length-based automatic placement).
@@ -148,6 +199,8 @@ class Assignments:
     # operation but lose the finishing pass (wins over finish_selection).
     skip_selection: list = field(default_factory=list)
     no_finish_selection: list = field(default_factory=list)
+    # Whether chamfers and V-grooves are machined at all.
+    chamfers_enabled: bool = True
     # entityToken of a pocket bottom face -> label
     pocket_overrides: dict[str, str] = field(default_factory=dict)
     # (picked contour entity, label) pairs; resolved to features during planning
@@ -291,6 +344,7 @@ def plan(result: recognition.RecognitionResult, registry: dict[str, list[templat
     tab_policy = tab_policy or TabPolicy()
 
     drills = _variants_by_tool_diameter(registry['drill'], assignments.cutter, warnings)
+    preferred_drills = drills if PREFER_DRILLING else {}
     bores = _variants_by_tool_diameter(registry['bore'], assignments.cutter, warnings)
     max_bore = max(bores.keys(), default=None)
 
@@ -301,7 +355,7 @@ def plan(result: recognition.RecognitionResult, registry: dict[str, list[templat
     cutouts = list(result.cutouts)
     pockets = list(result.pockets)
     for hole in result.holes:
-        if _drill_match(hole.diameter, drills):
+        if _drill_match(hole.diameter, preferred_drills):
             small_holes.append(hole)
         elif hole.is_through and hole.diameter > BIG_HOLE_LIMIT:
             if hole.bottom_edge:
@@ -328,7 +382,9 @@ def plan(result: recognition.RecognitionResult, registry: dict[str, list[templat
             small_holes.append(hole)
 
     resolver = SelectionResolver(result, cutouts, pockets)
-    sets = _feature_sets(resolver, assignments, tab_policy, warnings)
+    skipped_bevels, skip_selection = _split_bevel_selection(
+        result, resolver, assignments.skip_selection)
+    sets = _feature_sets(resolver, assignments, tab_policy, skip_selection, warnings)
 
     outer_overrides: dict[str, str] = {}
     cutout_overrides: dict[int, str] = {}
@@ -361,6 +417,10 @@ def plan(result: recognition.RecognitionResult, registry: dict[str, list[templat
     jobs += _plan_reliefs(pocket_reliefs + contour_reliefs, registry, drills,
                           assignments.cutter, tool_limits, assignments.overcut, warnings)
     jobs.sort(key=lambda job: _job_order(job, tool_limits))
+    # Operations are grouped by tool, widest first, to keep tool changes down;
+    # the V-bit comes after all of them.
+    jobs += _plan_bevels(result, registry, assignments, sets, resolver,
+                         skipped_bevels, warnings)
     return jobs, warnings
 
 
@@ -375,11 +435,12 @@ def _job_order(job: Job, tool_limits) -> tuple:
 
 
 def _feature_sets(resolver: SelectionResolver, assignments: Assignments,
-                  tab_policy: TabPolicy, warnings: list[str]) -> _FeatureSets:
+                  tab_policy: TabPolicy, skip_selection: list,
+                  warnings: list[str]) -> _FeatureSets:
     tab_outer, tab_cutouts, _ = _resolve_features(resolver, tab_policy.selection, warnings, 'tab')
     no_tab = _resolve_features(resolver, tab_policy.skip_selection, warnings, 'skip-tab')
     finish = _resolve_features(resolver, assignments.finish_selection, warnings, 'finishing')
-    skip = _resolve_features(resolver, assignments.skip_selection, warnings, 'skip')
+    skip = _resolve_features(resolver, skip_selection, warnings, 'skip')
     no_finish = _resolve_features(
         resolver, assignments.no_finish_selection, warnings, 'skip-finishing')
     return _FeatureSets(
@@ -389,6 +450,183 @@ def _feature_sets(resolver: SelectionResolver, assignments: Assignments,
         skip_outer=skip[0], skip_cutouts=skip[1], skip_pockets=skip[2],
         no_finish_outer=no_finish[0], no_finish_cutouts=no_finish[1],
         no_finish_pockets=no_finish[2])
+
+
+def _split_bevel_selection(result: recognition.RecognitionResult,
+                           resolver: SelectionResolver,
+                           selection: list) -> tuple[set[tuple], list]:
+    """Take the chamfers and grooves out of the skip selection.
+
+    A chamfer or a groove is picked by one of its faces, or by an edge that
+    belongs to nothing else. Its lower edge is also the top of the wall below
+    it, and that stays what it always was: a pick of the contour, cutout or
+    pocket the wall belongs to. Returns the picked ('chamfer' | 'groove',
+    index) features and the rest of the selection.
+    """
+    features: dict[str, tuple] = {}
+    for index, chamfer in enumerate(result.chamfers):
+        for face in chamfer.faces:
+            features[face.entityToken] = ('chamfer', index)
+    for index, groove in enumerate(result.grooves):
+        for entity in groove.faces + groove.edges:
+            features[entity.entityToken] = ('groove', index)
+    if not features:
+        return set(), list(selection)
+
+    picked: set[tuple] = set()
+    rest: list = []
+    for entity in selection:
+        feature = features.get(entity.entityToken)
+        edge = adsk.fusion.BRepEdge.cast(entity)
+        if feature is None and edge and resolver.resolve(entity) is None:
+            feature = next((features[face.entityToken] for face in edge.faces
+                            if face.entityToken in features), None)
+        if feature is None:
+            rest.append(entity)
+        else:
+            picked.add(feature)
+    return picked, rest
+
+
+def _plan_bevels(result: recognition.RecognitionResult, registry, assignments: Assignments,
+                 sets: _FeatureSets, resolver: SelectionResolver,
+                 skipped: set[tuple], warnings: list[str]) -> list[Job]:
+    """The V-bit operations: one for all chamfers, and one for the grooves per
+    number of passes they take. Each chamfer is cut at its own depth and each
+    groove along its own bottom edge, so neither has to be split up by size as
+    such.
+
+    A groove template that cuts in multiple depths names its maximum stepdown,
+    but the Trace operation behind it only takes a fixed number of passes, the
+    last one on the groove bottom and the others a stepdown apart above it. The
+    number is therefore worked out here, from the groove depth - and grooves
+    that need a different number get an operation of their own, or the shallow
+    ones would be traced through the air above them first.
+    """
+    if not assignments.chamfers_enabled:
+        return []
+
+    def owner_skipped(chamfer: recognition.Chamfer) -> bool:
+        """A feature that is not machined keeps its rim as it is."""
+        for wall in chamfer.walls:
+            feature = resolver.resolve(wall)
+            if feature and feature[1] in {'outer': sets.skip_outer,
+                                          'cutout': sets.skip_cutouts,
+                                          'pocket': sets.skip_pockets}[feature[0]]:
+                return True
+        return False
+
+    chamfers = [chamfer for index, chamfer in enumerate(result.chamfers)
+                if ('chamfer', index) not in skipped and not owner_skipped(chamfer)]
+    grooves = [groove for index, groove in enumerate(result.grooves)
+               if ('groove', index) not in skipped]
+    jobs: list[Job] = []
+
+    if chamfers:
+        picked = _v_bit_variant(registry, 'chamfer', assignments.cutter,
+                                f'{len(chamfers)} chamfer(s)', warnings)
+        if picked:
+            variant, bit = picked
+            chamfers = [chamfer for chamfer in chamfers
+                        if _chamfer_fits(chamfer, variant, bit, warnings)]
+            if chamfers:
+                jobs.append(Job(variant=variant,
+                                display_name=f'Chamfers ({variant.display_label})',
+                                chamfers=chamfers))
+    if grooves:
+        picked = _v_bit_variant(registry, 'groove', assignments.cutter,
+                                f'{len(grooves)} V-groove(s)', warnings)
+        if picked:
+            variant, bit = picked
+            if bit.tip_diameter > TOOL_CLEARANCE:
+                warnings.append(
+                    f'The "{variant.display_label}" tool has a flat tip of '
+                    f'{bit.tip_diameter * 10:.2f}mm and leaves a groove with a flat bottom '
+                    'that wide instead of a pointed one; check the operation.')
+            deepest = max(groove.depth for groove in grooves)
+            if bit.reach is not None and deepest > bit.reach + DEPTH_TOL:
+                warnings.append(
+                    f'V-groove depth {deepest * 10:.1f}mm exceeds what the '
+                    f'"{variant.display_label}" tool can cut ({bit.reach * 10:.1f}mm); '
+                    'check the operation.')
+            step = templates.stepdown(variant)
+            if step is None:
+                jobs.append(Job(variant=variant,
+                                display_name=f'V-grooves ({variant.display_label})',
+                                grooves=grooves))
+            else:
+                by_passes: dict[int, list[recognition.Groove]] = {}
+                for groove in grooves:
+                    passes = max(1, math.ceil((groove.depth - DEPTH_TOL) / step))
+                    by_passes.setdefault(passes, []).append(groove)
+                for passes, group in sorted(by_passes.items()):
+                    count = '1 pass' if passes == 1 else f'{passes} passes'
+                    jobs.append(Job(
+                        variant=variant,
+                        display_name=f'V-grooves ({variant.display_label}, {count})',
+                        grooves=group, extra_passes=passes - 1))
+    return jobs
+
+
+def _v_bit_variant(registry, kind: str, cutter: str | None, what: str,
+                   warnings: list[str]) -> tuple[templates.TemplateVariant, templates.VBit] | None:
+    """The template for the chamfers or the grooves with its tool: a 90 degree
+    bit if there is one, and among those the one that reaches deepest."""
+    candidates = [(variant, templates.v_bit(variant)) for variant in registry[kind]
+                  if variant.matches_cutter(cutter)]
+    if not candidates:
+        warnings.append(
+            f'{what} found, but no {kind} template is available; not machined.')
+        return None
+
+    def is_right_angle(bit: templates.VBit) -> bool:
+        return (bit.taper_angle is not None
+                and abs(bit.taper_angle - V_BIT_TAPER) <= V_BIT_TAPER_TOL)
+
+    variant, bit = max(candidates,
+                       key=lambda entry: (is_right_angle(entry[1]), entry[1].reach or 0.0))
+    if not is_right_angle(bit):
+        angle = 'an unknown angle' if bit.taper_angle is None else f'{2 * bit.taper_angle:g}°'
+        warnings.append(
+            f'The "{variant.display_label}" tool is not a 90° bit ({angle}); it does not '
+            f'cut the modelled {kind}s to shape, check the operation.')
+    return variant, bit
+
+
+def _chamfer_fits(chamfer: recognition.Chamfer, variant: templates.TemplateVariant,
+                  bit: templates.VBit, warnings: list[str]) -> bool:
+    """Whether the tool can cut this chamfer. A chamfer that is merely too
+    wide is kept with a warning; the rim of a hole too narrow for the tool
+    path is left out, because there is no path to cut it on.
+
+    The tip runs past the lower chamfer edge by the template's tip offset, so
+    the flank has to cover the chamfer and the offset, and around a hole the
+    tool centre circles that much inside the wall.
+    """
+    size = f'{chamfer.body.name}: chamfer {chamfer.height * 10:.1f}mm'
+    if chamfer.hole_radius is not None:
+        path_radius = chamfer.hole_radius - bit.tip_offset - bit.tip_diameter / 2
+        if path_radius < TOOL_CLEARANCE:
+            _warn_once(
+                warnings,
+                f'{size} on a ⌀{chamfer.hole_radius * 20:.1f}mm hole is too narrow for the '
+                f'"{variant.display_label}" tool with its tip offset of '
+                f'{bit.tip_offset * 10:.1f}mm; not machined.')
+            return False
+    required = chamfer.height + bit.tip_offset
+    if bit.reach is not None and required > bit.reach + DEPTH_TOL:
+        _warn_once(
+            warnings,
+            f'{size} needs {required * 10:.1f}mm of cutting flank including the tip '
+            f'offset, the "{variant.display_label}" tool has {bit.reach * 10:.1f}mm; '
+            'check the operation.')
+    return True
+
+
+def _warn_once(warnings: list[str], message: str):
+    """A body with twenty identical holes should not raise twenty warnings."""
+    if message not in warnings:
+        warnings.append(message)
 
 
 def _tool_limits_cache():
@@ -441,27 +679,34 @@ def _plan_holes(holes, drills, bores, overcut: float, warnings: list[str]) -> li
     if not holes:
         return []
     if not drills and not bores:
-        warnings.append('No drill/bore templates found; all holes skipped.')
+        warnings.append('No bore templates found; all holes skipped.')
         return []
 
-    groups: dict[tuple[str, float, bool, float | None], Job] = {}
+    groups: dict[tuple, Job] = {}
     for hole in holes:
-        required_depth = hole.depth + (overcut if hole.is_through else 0.0)
-        picked = _pick_hole_template(hole, required_depth, drills, bores, warnings)
+        picked = _pick_hole_template(hole, overcut, drills, bores, warnings)
         if not picked:
             warnings.append(
-                f'{hole.body.name}: hole ⌀{hole.diameter * 10:.2f}mm has no matching '
-                'drill/bore template; skipped.')
+                f'{hole.body.name}: hole ⌀{hole.diameter * 10:.2f}mm is too small for '
+                'every bore cutter and matches no drill template; skipped.')
             continue
-        variant, tool_dia = picked
+        variant, tool_dia, depth_limit = picked
         # A bore's feedrate follows the hole diameter, so each diameter needs
         # its own operation. A drill's hole is the size of its tool by
         # definition, so its tool diameter already says everything.
         feed_scale = (round(hole.diameter / tool_dia, FEED_SCALE_TOL)
                       if variant.kind == 'bore' and tool_dia else None)
-        key = (variant.kind, tool_dia, hole.is_through, feed_scale)
+        # A depth-limited hole is measured from the top face but set from the
+        # top of the hole wall, so holes with different rims cannot share one.
+        rim = round(hole.rim, 4) if depth_limit is not None else 0.0
+        key = (variant.kind, tool_dia, hole.is_through, feed_scale, depth_limit, rim)
         if key not in groups:
-            kind_label = 'through' if hole.is_through else 'blind'
+            if depth_limit is not None:
+                kind_label = f'{depth_limit * 10:g}mm deep'
+                if rim:
+                    kind_label += f', {rim * 10:g}mm rim'
+            else:
+                kind_label = 'through' if hole.is_through else 'blind'
             size = f'⌀{hole.diameter * 10:.1f}mm, ' if feed_scale is not None else ''
             groups[key] = Job(
                 variant=variant,
@@ -469,39 +714,51 @@ def _plan_holes(holes, drills, bores, overcut: float, warnings: list[str]) -> li
                              f'{size}{kind_label})',
                 is_through=hole.is_through,
                 feed_scale=feed_scale,
+                depth_limit=depth_limit,
+                rim=rim,
             )
         groups[key].holes.append(hole)
-    order = lambda key: (0 if key[0] == 'drill' else 1, key[1], key[3] or 0.0, key[2])
+    order = lambda key: (0 if key[0] == 'drill' else 1, key[1], key[3] or 0.0, key[2],
+                         key[4] or 0.0, key[5])
     return [groups[key] for key in sorted(groups.keys(), key=order)]
 
 
-def _pick_hole_template(hole, required_depth, drills, bores, warnings):
+def _pick_hole_template(hole, overcut: float, drills, bores, warnings):
+    """(template, tool diameter, depth limit or None) for a hole, None if no
+    cutter fits into it."""
     diameter = hole.diameter
+    required_depth = hole.depth + (overcut if hole.is_through else 0.0)
 
     def depth_ok(flute):
         return flute is None or flute >= required_depth - DEPTH_TOL
 
-    for tool_dia, (variant, flute) in drills.items():
+    # A core left in a through hole drops out; in a blind hole it stays.
+    no_core = not hole.is_through
+
+    for tool_dia, (variant, flute) in (drills if PREFER_DRILLING else {}).items():
         if abs(diameter - tool_dia) < DRILL_MATCH_TOL:
             if depth_ok(flute):
-                return variant, tool_dia
-            bore_pick = _pick_bore(diameter, required_depth, bores, require_depth=True)
+                return variant, tool_dia, None
+            bore_pick = _pick_bore(diameter, BORE_CLEARANCE, required_depth, bores,
+                                   require_depth=True, no_core=no_core)
             if bore_pick:
                 warnings.append(
                     f'{hole.body.name}: hole ⌀{diameter * 10:.2f}mm is deeper '
                     f'({required_depth * 10:.1f}mm) than the drill tool allows '
                     f'({flute * 10:.1f}mm); boring with "{bore_pick[0].display_label}" instead.')
-                return bore_pick
+                return *bore_pick, None
             warnings.append(
                 f'{hole.body.name}: hole ⌀{diameter * 10:.2f}mm depth '
                 f'{required_depth * 10:.1f}mm exceeds the drill tool\'s maximum '
                 f'({flute * 10:.1f}mm) and no bore tool can reach it; check the operation.')
-            return variant, tool_dia
+            return variant, tool_dia, None
 
-    bore_pick = _pick_bore(diameter, required_depth, bores, require_depth=True)
+    bore_pick = _pick_bore(diameter, BORE_CLEARANCE, required_depth, bores,
+                           require_depth=True, no_core=no_core)
     if bore_pick:
-        return bore_pick
-    bore_pick = _pick_bore(diameter, required_depth, bores, require_depth=False)
+        return *bore_pick, None
+    bore_pick = _pick_bore(diameter, BORE_CLEARANCE, required_depth, bores,
+                           require_depth=False, no_core=no_core)
     if bore_pick:
         variant, tool_dia = bore_pick
         flute = bores[tool_dia][1]
@@ -509,24 +766,54 @@ def _pick_hole_template(hole, required_depth, drills, bores, warnings):
             f'{hole.body.name}: hole ⌀{diameter * 10:.2f}mm depth '
             f'{required_depth * 10:.1f}mm exceeds every bore tool\'s maximum '
             f'(using "{variant.display_label}", {flute * 10:.1f}mm); check the operation.')
-        return bore_pick
+        return *bore_pick, None
+
+    # No cutter has room in this hole - or, in a blind hole, none of those that
+    # have also reaches the centre. One that fits at all still opens it up, as
+    # deep as a tight cut goes without burning.
+    bore_pick = _pick_bore(diameter, TOOL_CLEARANCE, 0.0, bores, require_depth=False)
+    if bore_pick:
+        variant, tool_dia = bore_pick
+        if hole.depth <= TIGHT_CUT_DEPTH + DEPTH_TOL:
+            return variant, tool_dia, None  # no deeper than that anyway
+        _warn_once(
+            warnings,
+            f'{hole.body.name}: hole ⌀{diameter * 10:.2f}mm leaves the '
+            f'"{variant.display_label}" cutter less than {BORE_CLEARANCE * 10:g}mm of room; '
+            f'bored only {TIGHT_CUT_DEPTH * 10:g}mm deep to avoid burn marks.')
+        return variant, tool_dia, TIGHT_CUT_DEPTH
+
+    # No bore cutter fits into the hole at all. A cutter of exactly its
+    # diameter can still plunge it - the tightest cut of all.
+    for tool_dia, (variant, _) in drills.items():
+        if abs(diameter - tool_dia) < DRILL_MATCH_TOL:
+            if hole.depth <= TIGHT_CUT_DEPTH + DEPTH_TOL:
+                return variant, tool_dia, None
+            _warn_once(
+                warnings,
+                f'{hole.body.name}: hole ⌀{diameter * 10:.2f}mm is drilled with '
+                f'"{variant.display_label}", a cutter of its own diameter; only '
+                f'{TIGHT_CUT_DEPTH * 10:g}mm deep to avoid burn marks.')
+            return variant, tool_dia, TIGHT_CUT_DEPTH
     return None
 
 
-def _pick_bore(diameter, required_depth, bores, require_depth):
+def _pick_bore(diameter, clearance, required_depth, bores, require_depth, no_core=False):
+    """The widest bore cutter that is at least `clearance` smaller than the
+    hole: (template, tool diameter), or None. With no_core the cutter also has
+    to reach the centre of the hole, so that nothing is left standing in it."""
     candidates = []
     for tool_dia, (variant, flute) in bores.items():
-        if tool_dia > diameter - TOOL_CLEARANCE:
+        if tool_dia > diameter - clearance + FIT_TOL:
+            continue
+        if no_core and 2 * tool_dia < diameter - FIT_TOL:
             continue
         if require_depth and flute is not None and flute < required_depth - DEPTH_TOL:
             continue
         candidates.append(tool_dia)
     if not candidates:
         return None
-    # Smallest tool that leaves no standing core (tool > hole/2), otherwise the
-    # largest tool (core is accepted / falls out on through holes).
-    no_core = [t for t in candidates if 2 * t > diameter]
-    tool_dia = min(no_core) if no_core else max(candidates)
+    tool_dia = max(candidates)
     return bores[tool_dia][0], tool_dia
 
 
@@ -753,15 +1040,18 @@ def _plan_auto_tabs(result, cutouts, frame, tab_policy: TabPolicy,
     loop_feature: dict[int, tuple] = {}  # id(edges) -> ('outer', token) | ('cutout', index)
     points: dict[tuple, adsk.core.Point3D] = {}
     top_outlines: dict[str, list] = {}   # body entityToken -> full-height top outlines
+    rim_chamfers: dict[str, float] = {}  # body entityToken -> widest shallow rim chamfer
 
     def full_thickness(loop, position: float, body) -> bool:
         """True if the part carries the full sheet thickness above this stretch
         of the contour (THICKNESS_MARGIN to each side along the loop).
 
         Where nothing was milled off the top, the boundary of the body's top
-        face runs directly above the bottom contour; a pocket, rabbet or
-        chamfer reaching the contour makes it detour inward. A tab under such
-        thinned material can be taller than what is left above it.
+        face runs directly above the bottom contour; a pocket or rabbet
+        reaching the contour makes it detour inward. A tab under such thinned
+        material can be taller than what is left above it. A shallow rim
+        chamfer sets the boundary back as well, by its own width, and that
+        much is allowed for (see rim_chamfer).
         """
         token = body.entityToken
         if token not in top_outlines:
@@ -769,14 +1059,31 @@ def _plan_auto_tabs(result, cutouts, frame, tab_policy: TabPolicy,
         outlines = top_outlines[token]
         if not outlines:
             return False
+        tolerance = FULL_THICKNESS_TOL + rim_chamfer(body)
         for offset in (-THICKNESS_MARGIN, 0.0, THICKNESS_MARGIN):
             point = loop.point_at(position + offset)
             x = point.asVector().dotProduct(frame.x)
             y = point.asVector().dotProduct(frame.y)
-            if not any(_near_outline(x, y, outline, FULL_THICKNESS_TOL)
+            if not any(_near_outline(x, y, outline, tolerance)
                        for outline in outlines):
                 return False
         return True
+
+    def rim_chamfer(body) -> float:
+        """How far a rim chamfer sets the top face boundary back from the
+        contour below it. A chamfer only takes the top corner off, which a tab
+        does not need - unless it is so deep that it thins the sheet out like
+        a rabbet would (TAB_CHAMFER_SHARE)."""
+        token = body.entityToken
+        if token not in rim_chamfers:
+            z_low, z_high = [f(frame.height(v.geometry) for v in body.vertices)
+                             for f in (min, max)]
+            limit = (z_high - z_low) * TAB_CHAMFER_SHARE
+            rim_chamfers[token] = max(
+                (chamfer.height for chamfer in result.chamfers
+                 if chamfer.body.entityToken == token and chamfer.height <= limit),
+                default=0.0)
+        return rim_chamfers[token]
 
     def _top_face_outlines(body) -> list:
         """Every loop of the body's full-height top faces, projected to frame
@@ -1045,8 +1352,12 @@ def _drill_for_relief(relief: recognition.Relief,
 
 def _plan_milled_reliefs(reliefs: list[recognition.Relief], registry, cutter: str | None,
                          tool_limits, overcut: float, warnings: list[str]) -> list[Job]:
-    """Operations with the smallest available dogbone cutter, machining each
-    relief along its arc as an open chain.
+    """Operations with the dogbone cutters, machining each relief along its arc
+    as an open chain.
+
+    Each relief gets the widest dogbone cutter that still fits it: a small
+    cutter is slow and fragile, so it only takes the reliefs the next bigger
+    one cannot get into.
 
     One operation per cut depth: the dogbone template takes its bottom height
     from the selected contour, which is a single height for the whole
@@ -1061,23 +1372,38 @@ def _plan_milled_reliefs(reliefs: list[recognition.Relief], registry, cutter: st
             f'{len(reliefs)} dogbone(s) are too small for the contour tool, but no dogbone '
             'template is available; they are not machined.')
         return []
-    variant = min(candidates, key=lambda v: tool_limits(v).max_diameter or 0.0)
-    limits = tool_limits(variant)
+    candidates.sort(key=lambda v: tool_limits(v).max_diameter or 0.0)
+    smallest_variant = candidates[0]
+
+    def cutter_for(relief: recognition.Relief) -> templates.TemplateVariant:
+        fitting = [v for v in candidates
+                   if (tool_limits(v).max_diameter or 0.0) <= relief.diameter - RELIEF_TOL]
+        return fitting[-1] if fitting else smallest_variant
 
     smallest = min(relief.diameter for relief in reliefs)
+    limits = tool_limits(smallest_variant)
     if limits.max_diameter is not None and limits.max_diameter > smallest - RELIEF_TOL:
         warnings.append(
             f'The smallest dogbone (⌀{smallest * 10:.2f}mm) is not wider than the '
-            f'"{variant.display_label}" tool (⌀{limits.max_diameter * 10:.2f}mm), which '
-            'leaves it nothing to cut; check the operation.')
+            f'"{smallest_variant.display_label}" tool (⌀{limits.max_diameter * 10:.2f}mm), '
+            'which leaves it nothing to cut; check the operation.')
 
     # A relief hangs from the top face, so equal depths sit at equal heights.
-    levels: dict[tuple[float, bool], list[recognition.Relief]] = {}
+    levels: dict[tuple[float, str, float, bool], list[recognition.Relief]] = {}
+    variants: dict[str, templates.TemplateVariant] = {}
     for relief in reliefs:
-        levels.setdefault((round(relief.depth, 4), relief.is_through), []).append(relief)
+        variant = cutter_for(relief)
+        variants[variant.name] = variant
+        # Keyed by tool diameter first, so the operations come out widest
+        # cutter first like everything else.
+        key = (-(tool_limits(variant).max_diameter or 0.0), variant.name,
+               round(relief.depth, 4), relief.is_through)
+        levels.setdefault(key, []).append(relief)
 
     jobs: list[Job] = []
-    for (depth, is_through), group in sorted(levels.items()):
+    for (_, name, depth, is_through), group in sorted(levels.items()):
+        variant = variants[name]
+        limits = tool_limits(variant)
         required = depth + (overcut if is_through else 0.0)
         if limits.min_flute is not None and limits.min_flute < required - DEPTH_TOL:
             warnings.append(

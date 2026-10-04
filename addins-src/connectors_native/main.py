@@ -20,6 +20,7 @@ class ConnectorType(Enum):
     CABINEO_8 = 8
     CABINEO_12 = 12
     CABINEO_8_M6 = 9
+    DOMINO = 50
 
     @property
     def is_clamex(self) -> bool:
@@ -27,7 +28,15 @@ class ConnectorType(Enum):
 
     @property
     def is_cabineo(self) -> bool:
-        return not self.is_clamex
+        return self in (
+            ConnectorType.CABINEO_8,
+            ConnectorType.CABINEO_12,
+            ConnectorType.CABINEO_8_M6,
+        )
+
+    @property
+    def is_domino(self) -> bool:
+        return self == ConnectorType.DOMINO
 
 
 @unique
@@ -48,6 +57,106 @@ class CabineoInsert(Enum):
 class PositioningMode(Enum):
     NUMBER = 1
     CUSTOM_POINTS = 2
+
+
+@unique
+class DominoEndStop(Enum):
+    """Distance from the board end to the center of the first and last
+    Domino. The value is the distance in mm set by the Domino machine's own
+    stops: 37 mm for the built-in stop latches (stop pins on older machines),
+    20 mm with the additional stop ZA-DF 500/700 fitted. CUSTOM uses the
+    End Offset input instead."""
+
+    STOP_LATCH = 37
+    ADDITIONAL_STOP = 20
+    CUSTOM = 0
+
+
+@unique
+class DominoDepthMode(Enum):
+    HALF_LENGTH = 1
+    MATERIAL_REMAINING = 2
+
+
+@unique
+class DominoLooseSlots(Enum):
+    """Extra length of every slot but one per board, in mm. The two fixed
+    steps match the wider mortise settings of the Domino DF 500, which cuts
+    13, 19 or 23 mm plus the cutter diameter."""
+
+    NONE = 0
+    PLUS_6 = 6
+    PLUS_10 = 10
+    CUSTOM = 1
+
+
+@unique
+class DominoMarks(Enum):
+    NONE = 0
+    ALL = 1
+    SKIP_FIRST_AND_LAST = 2
+
+
+@dataclass(frozen=True)
+class _DominoFenceStop:
+    """A height stop of the Domino machine's fence. Stops are labelled with
+    the board thickness they center the mortise on, so the mortise ends up
+    half that far from the face the fence rests on."""
+
+    value: int
+    thickness: float
+    label: str
+
+    @property
+    def name(self) -> str:
+        return f"{self.thickness:g} mm ({self.label})"
+
+
+_DOMINO_FENCE_CENTERED = 0
+_DOMINO_FENCE_CUSTOM = 1
+_DOMINO_FENCE_STOPS = [
+    _DominoFenceStop(1000 + thickness, thickness, "Festool")
+    for thickness in (16, 20, 22, 25, 28, 36, 40)
+] + [
+    # Aftermarket (e.g. 3D-printed) stop gauges add further thicknesses.
+    _DominoFenceStop(2000 + thickness, thickness, "Alternative")
+    for thickness in (12, 15, 18, 22, 24, 30, 36)
+]
+
+
+@dataclass(frozen=True)
+class _DominoSize:
+    """Festool DOMINO tenon dimensions in mm, as published in Festool's
+    technical data ("thickness x length x width")."""
+
+    value: int
+    thickness: float
+    width: float
+    length: float
+
+    @property
+    def name(self) -> str:
+        return f"{self.thickness:g} x {self.length:g}"
+
+
+_DOMINO_SIZES = [
+    _DominoSize(420, 4, 16.6, 20),
+    _DominoSize(530, 5, 18.8, 30),
+    _DominoSize(640, 6, 19.8, 40),
+    _DominoSize(836, 8, 21.9, 36),
+    _DominoSize(840, 8, 21.9, 40),
+    _DominoSize(850, 8, 21.9, 50),
+    _DominoSize(880, 8, 21.9, 80),
+    _DominoSize(8100, 8, 21.9, 100),
+    _DominoSize(1050, 10, 23.9, 50),
+    _DominoSize(1080, 10, 23.9, 80),
+    _DominoSize(10100, 10, 23.9, 100),
+    _DominoSize(12100, 12, 25.9, 100),
+    _DominoSize(12140, 12, 25.9, 140),
+    _DominoSize(1475, 14, 27.9, 75),
+    _DominoSize(14100, 14, 27.9, 100),
+    _DominoSize(14140, 14, 27.9, 140),
+]
 
 
 @dataclass(frozen=True)
@@ -216,6 +325,60 @@ class ConnectorsNativeInputs(inputs.Inputs):
             "Cabineo 8 M6",
             ConnectorType.CABINEO_8_M6.value,
         )
+        DOMINO = inputs.DropDownInput.Item(
+            "Domino",
+            ConnectorType.DOMINO.value,
+        )
+
+    class DominoEndStops:
+        STOP_LATCH = inputs.DropDownInput.Item(
+            "37 mm (Stop Latch)",
+            DominoEndStop.STOP_LATCH.value,
+        )
+        ADDITIONAL_STOP = inputs.DropDownInput.Item(
+            "20 mm (Additional Stop)",
+            DominoEndStop.ADDITIONAL_STOP.value,
+        )
+        CUSTOM = inputs.DropDownInput.Item(
+            "Custom",
+            DominoEndStop.CUSTOM.value,
+        )
+
+    class DominoDepthModes:
+        HALF_LENGTH = inputs.DropDownInput.Item(
+            "Half Domino Length",
+            DominoDepthMode.HALF_LENGTH.value,
+        )
+        MATERIAL_REMAINING = inputs.DropDownInput.Item(
+            "Material Remaining",
+            DominoDepthMode.MATERIAL_REMAINING.value,
+        )
+
+    class DominoLooseSlotModes:
+        NONE = inputs.DropDownInput.Item(
+            "None",
+            DominoLooseSlots.NONE.value,
+        )
+        PLUS_6 = inputs.DropDownInput.Item(
+            "+6 mm",
+            DominoLooseSlots.PLUS_6.value,
+        )
+        PLUS_10 = inputs.DropDownInput.Item(
+            "+10 mm",
+            DominoLooseSlots.PLUS_10.value,
+        )
+        CUSTOM = inputs.DropDownInput.Item(
+            "Custom",
+            DominoLooseSlots.CUSTOM.value,
+        )
+
+    class DominoMarkModes:
+        NONE = inputs.DropDownInput.Item("None", DominoMarks.NONE.value)
+        ALL = inputs.DropDownInput.Item("All Dominos", DominoMarks.ALL.value)
+        SKIP_FIRST_AND_LAST = inputs.DropDownInput.Item(
+            "Skip First and Last",
+            DominoMarks.SKIP_FIRST_AND_LAST.value,
+        )
 
     class SurfaceTypes:
         NONE = inputs.DropDownInput.Item("None", CabineoSurface.NONE.value)
@@ -269,7 +432,19 @@ class ConnectorsNativeInputs(inputs.Inputs):
                 inputs.DropDownInput.Item,
             ),
             default_value=ConnectorsNativeInputs.Types.CLAMEX_P10.value,
-            tool_tip="Variant of the Clamex or Cabineo connector.",
+            tool_tip="Variant of the Clamex, Cabineo or Domino connector.",
+        )
+        is_domino = lambda: self.size.value == ConnectorType.DOMINO.value
+        self.domino_size = inputs.DropDownInput(
+            id="dominoSize",
+            name="Domino Size",
+            options=[
+                inputs.DropDownInput.Item(size.name, size.value)
+                for size in _DOMINO_SIZES
+            ],
+            default_value=530,
+            tool_tip="Festool DOMINO tenon size (thickness x length in mm).",
+            update_visibility=is_domino,
         )
         self.positioning = inputs.DropDownInput(
             id="positioning",
@@ -311,6 +486,27 @@ class ConnectorsNativeInputs(inputs.Inputs):
             tool_tip="Number of equally spaced connectors along the selected edge.",
             update_visibility=is_number_positioning,
         )
+        has_end_offset = lambda: (
+            is_number_positioning() and self.number_of_connectors.value > 1
+        )
+        self.domino_end_stop = inputs.DropDownInput(
+            id="dominoEndStop",
+            name="End Stop",
+            options=utils.misc.class_property_values(
+                ConnectorsNativeInputs.DominoEndStops,
+                inputs.DropDownInput.Item,
+            ),
+            default_value=(
+                ConnectorsNativeInputs.DominoEndStops.STOP_LATCH.value
+            ),
+            tool_tip=(
+                "Distance from each end of the selected edge to the center of "
+                "the first and last Domino. 37 mm matches the Domino "
+                "machine's stop latches, 20 mm the additional stop; Custom "
+                "uses the End Offset value."
+            ),
+            update_visibility=lambda: is_domino() and has_end_offset(),
+        )
         self.offset = inputs.FloatInput(
             id="offset",
             name="End Offset",
@@ -321,8 +517,12 @@ class ConnectorsNativeInputs(inputs.Inputs):
             ),
             units=units,
             update_visibility=lambda: (
-                is_number_positioning()
-                and self.number_of_connectors.value > 1
+                has_end_offset()
+                and (
+                    not is_domino()
+                    or self.domino_end_stop.value
+                    == DominoEndStop.CUSTOM.value
+                )
             ),
         )
         self.offset.minimum_value = 0
@@ -361,6 +561,7 @@ class ConnectorsNativeInputs(inputs.Inputs):
             name="Through Opposite Holes",
             default_value=False,
             tool_tip="Cut the holes in the adjacent board through its full thickness.",
+            update_visibility=lambda: not is_domino(),
         )
         self.cabineo_surface = inputs.DropDownInput(
             id="cabineoSurface",
@@ -454,6 +655,204 @@ class ConnectorsNativeInputs(inputs.Inputs):
         )
         self.threaded_insert_collar_depth.minimum_value = 0
 
+        self.domino_length_offset = inputs.FloatInput(
+            id="dominoLengthOffset",
+            name="Slot Length Offset",
+            default_value=0,
+            tool_tip=(
+                "Added to the Domino's width to get the slot length along "
+                "the edge. Negative values make the slot tighter."
+            ),
+            units=units,
+            update_visibility=is_domino,
+        )
+        # A value input created from the number 0 cannot report its
+        # expression until the dialog is on screen; the slot dimensions are
+        # built from these expressions, so give both an explicit one.
+        self.domino_length_offset.default_expression = "0 mm"
+        self.domino_loose_slots = inputs.DropDownInput(
+            id="dominoLooseSlots",
+            name="Loose Slots",
+            options=utils.misc.class_property_values(
+                ConnectorsNativeInputs.DominoLooseSlotModes,
+                inputs.DropDownInput.Item,
+            ),
+            default_value=(
+                ConnectorsNativeInputs.DominoLooseSlotModes.NONE.value
+            ),
+            tool_tip=(
+                "Makes every slot but one per board longer, like the wider "
+                "mortise settings of the Domino machine (+6 mm and +10 mm). "
+                "The one exact slot keeps the boards aligned, the loose "
+                "ones forgive small position errors."
+            ),
+            update_visibility=is_domino,
+        )
+        has_loose_slots = lambda: (
+            is_domino()
+            and self.domino_loose_slots.value != DominoLooseSlots.NONE.value
+        )
+        self.domino_loose_slot_extra = inputs.FloatInput(
+            id="dominoLooseSlotExtra",
+            name="Loose Slot Extra Length",
+            default_value=0.6,
+            tool_tip="Extra length of the loose slots.",
+            units=units,
+            update_visibility=lambda: (
+                is_domino()
+                and self.domino_loose_slots.value
+                == DominoLooseSlots.CUSTOM.value
+            ),
+        )
+        self.domino_loose_slot_extra.minimum_value = 0
+        self.domino_loose_slot_extra.minimum_inclusive = False
+        self.domino_exact_slot_last = inputs.CheckboxInput(
+            id="dominoExactSlotLast",
+            name="Exact Slot at Other End",
+            default_value=False,
+            tool_tip=(
+                "The exact slot is the first one along the edge. Tick this "
+                "to make it the one at the other end instead."
+            ),
+            update_visibility=has_loose_slots,
+        )
+        self.domino_height_offset = inputs.FloatInput(
+            id="dominoHeightOffset",
+            name="Slot Height Offset",
+            default_value=0,
+            tool_tip=(
+                "Added to the Domino's thickness to get the slot height. "
+                "Negative values make the slot tighter."
+            ),
+            units=units,
+            update_visibility=is_domino,
+        )
+        self.domino_height_offset.default_expression = "0 mm"
+        self.domino_fence_height = inputs.DropDownInput(
+            id="dominoFenceHeight",
+            name="Fence Height",
+            options=(
+                [inputs.DropDownInput.Item("Centered", _DOMINO_FENCE_CENTERED)]
+                + [
+                    inputs.DropDownInput.Item(stop.name, stop.value)
+                    for stop in _DOMINO_FENCE_STOPS
+                ]
+                + [inputs.DropDownInput.Item("Custom", _DOMINO_FENCE_CUSTOM)]
+            ),
+            default_value=_DOMINO_FENCE_CENTERED,
+            tool_tip=(
+                "Position of the slots across the board's thickness. "
+                "Centered follows the board. A fence stop is named after the "
+                "board thickness it is made for and puts the slot half that "
+                "far from the large face next to the selected edge - the "
+                "face the Domino machine's fence rests on. Custom takes that "
+                "distance directly."
+            ),
+            update_visibility=is_domino,
+        )
+        self.domino_fence_distance = inputs.FloatInput(
+            id="dominoFenceDistance",
+            name="Slot Center from Face",
+            default_value=1,
+            tool_tip=(
+                "Distance from the large face next to the selected edge to "
+                "the center of the slots."
+            ),
+            units=units,
+            update_visibility=lambda: (
+                is_domino()
+                and self.domino_fence_height.value == _DOMINO_FENCE_CUSTOM
+            ),
+        )
+        self.domino_fence_distance.minimum_value = 0
+        self.domino_fence_distance.minimum_inclusive = False
+        self.domino_depth_mode = inputs.DropDownInput(
+            id="dominoDepthMode",
+            name="Slot Depth",
+            options=utils.misc.class_property_values(
+                ConnectorsNativeInputs.DominoDepthModes,
+                inputs.DropDownInput.Item,
+            ),
+            default_value=(
+                ConnectorsNativeInputs.DominoDepthModes.HALF_LENGTH.value
+            ),
+            tool_tip=(
+                "Half Domino Length cuts the slot half the Domino's length "
+                "plus the Depth Offset deep. Material Remaining cuts as deep "
+                "as possible while leaving the given thickness of the "
+                "adjacent board."
+            ),
+            update_visibility=is_domino,
+        )
+        is_domino_half_length = lambda: (
+            self.domino_depth_mode.value == DominoDepthMode.HALF_LENGTH.value
+        )
+        self.domino_depth_offset = inputs.FloatInput(
+            id="dominoDepthOffset",
+            name="Depth Offset",
+            default_value=0.05,
+            tool_tip="Added to half the Domino's length to get the slot depth.",
+            units=units,
+            update_visibility=lambda: is_domino() and is_domino_half_length(),
+        )
+        self.domino_material_remaining = inputs.FloatInput(
+            id="dominoMaterialRemaining",
+            name="Material Remaining",
+            default_value=0.3,
+            tool_tip=(
+                "Thickness of the adjacent board left below the slot. The "
+                "slot depth follows the board's thickness."
+            ),
+            units=units,
+            update_visibility=lambda: (
+                is_domino() and not is_domino_half_length()
+            ),
+        )
+        self.domino_material_remaining.minimum_value = 0
+        self.domino_marks = inputs.DropDownInput(
+            id="dominoMarks",
+            name="Reference Marks",
+            options=utils.misc.class_property_values(
+                ConnectorsNativeInputs.DominoMarkModes,
+                inputs.DropDownInput.Item,
+            ),
+            default_value=ConnectorsNativeInputs.DominoMarkModes.NONE.value,
+            tool_tip=(
+                "Engraves V-grooves (for a 90 degree chamfer cutter) at the "
+                "Domino positions into the large face next to the selected "
+                "edge, as alignment marks for the Domino machine. Skip First "
+                "and Last leaves out the two end positions, which the "
+                "machine's stops locate."
+            ),
+            update_visibility=is_domino,
+        )
+        has_domino_marks = lambda: (
+            is_domino() and self.domino_marks.value != DominoMarks.NONE.value
+        )
+        self.domino_mark_depth = inputs.FloatInput(
+            id="dominoMarkDepth",
+            name="Mark Depth",
+            default_value=0.03,
+            tool_tip=(
+                "Depth of the V-grooves. Cut with a 90 degree cutter, a "
+                "groove is twice as wide as it is deep."
+            ),
+            units=units,
+            update_visibility=has_domino_marks,
+        )
+        self.domino_mark_depth.minimum_value = 0
+        self.domino_mark_depth.minimum_inclusive = False
+        self.domino_mark_length = inputs.FloatInput(
+            id="dominoMarkLength",
+            name="Mark Length",
+            default_value=0.4,
+            tool_tip="Length of the V-grooves, measured from the edge.",
+            units=units,
+            update_visibility=has_domino_marks,
+        )
+        self.domino_mark_length.minimum_value = 0
+        self.domino_mark_length.minimum_inclusive = False
+
         super().__init__()
 
 
@@ -469,13 +868,16 @@ class ConnectorsNative(addin.Addin):
 
     @property
     def plugin_desc(self) -> str:
-        return "Clamex and Cabineo connectors using native Fusion features."
+        return (
+            "Clamex, Cabineo and Domino connectors using native Fusion "
+            "features."
+        )
 
     @property
     def plugin_tooltip(self) -> str:
         return (
             "Creates fully constrained sketches and standard cut extrudes for "
-            "Clamex and Cabineo connectors."
+            "Clamex, Cabineo and Domino connectors."
         )
 
     @property
@@ -586,6 +988,18 @@ class ConnectorsNative(addin.Addin):
         opposite_cut_direction = utils.brep.normal_away_from_body(
             geometry.small_face
         )
+        if connector_type.is_domino:
+            self._execute_domino(
+                component,
+                geometry,
+                additional_boards,
+                positions,
+                edge_direction,
+                small_face_inward,
+                opposite_cut_direction,
+            )
+            return
+
         access_context = self._create_sketch(
             component,
             geometry.access_face,
@@ -764,6 +1178,465 @@ class ConnectorsNative(addin.Addin):
 
         self._group_features(component, access_context.sketch, last_feature)
 
+    def _execute_domino(
+        self,
+        component: adsk.fusion.Component,
+        geometry: _ResolvedGeometry,
+        additional_boards: list[_AdditionalBoard],
+        positions: list[adsk.core.Point3D],
+        edge_direction: adsk.core.Vector3D,
+        small_face_inward: adsk.core.Vector3D,
+        opposite_cut_direction: adsk.core.Vector3D,
+    ) -> None:
+        """Domino slots are cut into the adjacent board's face only. The
+        mortises in the selected boards' small faces are left to the Domino
+        machine; optional V-grooves on the large faces mark their positions.
+        """
+        size = self._domino_size()
+        self._start_face_tokens["guideOpposite"] = (
+            utils.brep.get_opposite_face(geometry.guide_face).entityToken
+        )
+
+        # The positions get a sketch of their own: the slot and mark
+        # sketches then only hold geometry hanging off projected points.
+        # Drawn into one sketch, the positions and around twenty slots are
+        # more than Fusion's sketch solver resolves.
+        position_context = self._create_sketch(
+            component,
+            geometry.small_face,
+            geometry.edge,
+            "Connector (Native) - Domino Positions",
+            "domino",
+        )
+        station_points = self._add_station_points(
+            position_context,
+            geometry.edge,
+            positions,
+        )
+        # Per board, first board first: the stations on the board's own
+        # selected edge (the marks are built on these) and the slot centers.
+        board_stations: list[list[adsk.fusion.SketchPoint]] = [
+            station_points
+        ] + [[] for _ in additional_boards]
+        board_centers: list[list[adsk.fusion.SketchPoint]]
+        fence_distance = self._domino_fence_distance()
+        if fence_distance is None:
+            centers, cross_lines = self._board_center_points(
+                position_context,
+                station_points,
+                geometry.small_face,
+                geometry.edge,
+                small_face_inward,
+            )
+            board_centers = [centers] + [
+                self._clamex_guide_centers_for_board(
+                    position_context,
+                    board,
+                    cross_lines,
+                    board_stations[board_index],
+                )
+                for board_index, board in enumerate(additional_boards, start=1)
+            ]
+        else:
+            centers, offset_lines = self._edge_offset_points(
+                position_context,
+                station_points,
+                small_face_inward,
+                fence_distance[0],
+                fence_distance[1],
+                "dominoFenceDistance",
+            )
+            board_centers = [centers] + [
+                self._cabineo_guide_centers_for_board(
+                    position_context,
+                    board,
+                    offset_lines,
+                    board_stations[board_index],
+                )
+                for board_index, board in enumerate(additional_boards, start=1)
+            ]
+        self._require_fully_constrained(position_context.sketch)
+
+        slot_context = self._create_sketch(
+            component,
+            geometry.small_face,
+            geometry.edge,
+            "Connector (Native) - Domino Slots",
+            "dominoSlot",
+        )
+        self._add_domino_slots(
+            slot_context,
+            self._project_points(
+                slot_context.sketch,
+                [center for centers in board_centers for center in centers],
+                "Domino slot centers",
+            ),
+            len(station_points),
+            edge_direction,
+            size,
+        )
+        self._require_fully_constrained(slot_context.sketch)
+
+        mark_context: _SketchContext | None = None
+        marked_stations = [
+            self._domino_marked_stations(stations)
+            for stations in board_stations
+        ]
+        if marked_stations[0]:
+            mark_context = self._create_sketch(
+                component,
+                geometry.small_face,
+                geometry.edge,
+                "Connector (Native) - Domino Marks",
+                "dominoMark",
+            )
+            self._add_domino_marks(
+                mark_context,
+                marked_stations,
+                edge_direction,
+                [geometry.edge] + [board.edge for board in additional_boards],
+                [small_face_inward]
+                + [
+                    utils.brep.normal_into_face(board.edge, board.small_face)
+                    for board in additional_boards
+                ],
+            )
+            self._require_fully_constrained(mark_context.sketch)
+
+        last_feature: adsk.fusion.Feature
+        if (
+            DominoDepthMode(self.inputs.domino_depth_mode.value)
+            == DominoDepthMode.MATERIAL_REMAINING
+        ):
+            # Cut up to the adjacent board's far face, so the remaining
+            # material survives a change of that board's thickness.
+            last_feature = self._create_cut_extrude_to_face(
+                component=component,
+                sketch=slot_context.sketch,
+                target_body=self._target_body(component, "guide"),
+                target_face=self._start_face(component, "guideOpposite"),
+                direction=opposite_cut_direction,
+                offset=self.inputs.domino_material_remaining.expression,
+                name="Connector (Native) - Domino Slot Cut",
+                parameter_role="dominoSlotRemaining",
+            )
+        else:
+            last_feature = self._create_cut_extrude(
+                component=component,
+                sketch=slot_context.sketch,
+                target_body=self._target_body(component, "guide"),
+                direction=opposite_cut_direction,
+                distance=(
+                    f"{size.length / 2:g} mm + "
+                    f"({self.inputs.domino_depth_offset.expression})"
+                ),
+                name="Connector (Native) - Domino Slot Cut",
+                parameter_role="dominoSlotDepth",
+            )
+
+        if mark_context:
+            last_feature = self._create_cut_extrude(
+                component=component,
+                sketch=mark_context.sketch,
+                target_body=[
+                    self._target_body(component, f"access{board_index}")
+                    for board_index in range(len(additional_boards) + 1)
+                ],
+                direction=self._opposite(opposite_cut_direction),
+                distance=self.inputs.domino_mark_length.expression,
+                name="Connector (Native) - Domino Mark Cut",
+                parameter_role="dominoMarkLength",
+            )
+
+        # No cut is made from the positions sketch, so nothing has hidden it.
+        position_context.sketch.isVisible = False
+        self._group_features(component, position_context.sketch, last_feature)
+
+    def _domino_size(self) -> _DominoSize:
+        value = self.inputs.domino_size.value
+        size = next(
+            (size for size in _DOMINO_SIZES if size.value == value),
+            None,
+        )
+        if not size:
+            raise ValueError("Select a Domino size.")
+        return size
+
+    def _domino_slot_height(self, size: _DominoSize) -> float:
+        return size.thickness / 10 + self.inputs.domino_height_offset.value
+
+    def _domino_slot_length(self, size: _DominoSize) -> float:
+        return size.width / 10 + self.inputs.domino_length_offset.value
+
+    def _domino_loose_slot_extra(self) -> tuple[float, str] | None:
+        """Extra length of the loose slots as value and expression, or None
+        when every slot is cut to the exact size."""
+        mode = DominoLooseSlots(self.inputs.domino_loose_slots.value)
+        if mode == DominoLooseSlots.NONE:
+            return None
+        if mode == DominoLooseSlots.CUSTOM:
+            return (
+                self.inputs.domino_loose_slot_extra.value,
+                self.inputs.domino_loose_slot_extra.expression,
+            )
+        return mode.value / 10, f"{mode.value} mm"
+
+    def _domino_fence_distance(self) -> tuple[float, str] | None:
+        """Distance from the selected edge's large face to the slot centers,
+        as value and expression. None centers the slots on each board."""
+        value = self.inputs.domino_fence_height.value
+        if value == _DOMINO_FENCE_CENTERED:
+            return None
+        if value == _DOMINO_FENCE_CUSTOM:
+            return (
+                self.inputs.domino_fence_distance.value,
+                self.inputs.domino_fence_distance.expression,
+            )
+        stop = next(
+            (stop for stop in _DOMINO_FENCE_STOPS if stop.value == value),
+            None,
+        )
+        if not stop:
+            raise ValueError("Select a Fence Height.")
+        return stop.thickness / 20, f"{stop.thickness / 2:g} mm"
+
+    def _domino_marked_stations(
+        self,
+        station_points: list[adsk.fusion.SketchPoint],
+    ) -> list[adsk.fusion.SketchPoint]:
+        marks = DominoMarks(self.inputs.domino_marks.value)
+        if marks == DominoMarks.NONE:
+            return []
+        # A single connector is centered on the edge, out of reach of the
+        # machine's end stops, so it always keeps its mark.
+        if marks == DominoMarks.SKIP_FIRST_AND_LAST and len(station_points) > 1:
+            return station_points[1:-1]
+        return list(station_points)
+
+    def _add_domino_slots(
+        self,
+        context: _SketchContext,
+        centers: list[adsk.fusion.SketchPoint],
+        station_count: int,
+        edge_direction: adsk.core.Vector3D,
+        size: _DominoSize,
+    ) -> None:
+        """`centers` holds `station_count` slot centers per board, each
+        board's in the same order along the edge."""
+        sketch = context.sketch
+        constraints = sketch.geometricConstraints
+        height = self._domino_slot_height(size)
+        exact_span = self._domino_slot_length(size) - height
+        loose_extra = self._domino_loose_slot_extra()
+        exact_station = (
+            station_count - 1
+            if self.inputs.domino_exact_slot_last.value
+            else 0
+        )
+        height_expression = (
+            f"{size.thickness:g} mm + "
+            f"({self.inputs.domino_height_offset.expression})"
+        )
+        first_width_parameter: adsk.fusion.ModelParameter | None = None
+        exact_reference: adsk.fusion.SketchLine | None = None
+        exact_span_parameter: adsk.fusion.ModelParameter | None = None
+        loose_reference: adsk.fusion.SketchLine | None = None
+        # Each board's exact slot comes first, so the loose slots can be
+        # dimensioned relative to it.
+        order = sorted(
+            range(len(centers)),
+            key=lambda index: index % station_count != exact_station,
+        )
+        for index in order:
+            center = centers[index]
+            is_loose = (
+                loose_extra is not None
+                and index % station_count != exact_station
+            )
+            span = exact_span
+            if loose_extra and is_loose:
+                span += loose_extra[0]
+            center_model = center.worldGeometry
+            width_dimension, centerline = self._add_center_to_center_slot(
+                sketch,
+                sketch.modelToSketchSpace(
+                    self._translated(center_model, edge_direction, -span / 2)
+                ),
+                sketch.modelToSketchSpace(
+                    self._translated(center_model, edge_direction, span / 2)
+                ),
+                (
+                    height_expression
+                    if first_width_parameter is None
+                    else first_width_parameter.name
+                ),
+                f"dominoSlot{index + 1}Height",
+            )
+            constraints.addParallel(centerline, context.edge_line)
+            constraints.addMidPoint(center, centerline)
+            if first_width_parameter is None:
+                first_width_parameter = width_dimension.parameter
+            if not is_loose and exact_reference is None:
+                # The slot's overall length is the Domino's width: the
+                # center-to-center span is that minus the slot's own height.
+                exact_span_parameter = self._add_distance_dimension(
+                    sketch,
+                    centerline.startSketchPoint,
+                    centerline.endSketchPoint,
+                    (
+                        f"{size.width:g} mm + "
+                        f"({self.inputs.domino_length_offset.expression})"
+                        f" - {first_width_parameter.name}"
+                    ),
+                    "dominoSlotSpan",
+                ).parameter
+                exact_reference = centerline
+            elif loose_extra and is_loose and loose_reference is None:
+                if exact_span_parameter is None:
+                    raise RuntimeError(
+                        "The exact Domino slot must precede the loose slots."
+                    )
+                self._add_distance_dimension(
+                    sketch,
+                    centerline.startSketchPoint,
+                    centerline.endSketchPoint,
+                    f"{exact_span_parameter.name} + ({loose_extra[1]})",
+                    "dominoLooseSlotSpan",
+                )
+                loose_reference = centerline
+            else:
+                constraints.addEqual(
+                    loose_reference if is_loose else exact_reference,
+                    centerline,
+                )
+
+    def _add_domino_marks(
+        self,
+        context: _SketchContext,
+        marked_stations: list[list[adsk.fusion.SketchPoint]],
+        edge_direction: adsk.core.Vector3D,
+        edges: list[adsk.fusion.BRepEdge],
+        inwards: list[adsk.core.Vector3D],
+    ) -> None:
+        """Draws one V-groove cross-section per marked station and board.
+
+        The sketch lies in the plane of the small faces, so each triangle is
+        the cross-section of a groove that the mark cut then runs into the
+        board, away from the selected edge.
+
+        `marked_stations` holds, per board, the stations to mark as points
+        of the positions sketch on that board's selected edge; `edges` and
+        `inwards` are the boards' selected edges and the directions from
+        them into the boards.
+        """
+        sketch = context.sketch
+        lines = sketch.sketchCurves.sketchLines
+        constraints = sketch.geometricConstraints
+        depth = self.inputs.domino_mark_depth.value
+        # Every board's stations are projected from the positions sketch, so
+        # all grooves are built the same way on points that follow that
+        # sketch.
+        projected = self._project_points(
+            sketch,
+            [station for stations in marked_stations for station in stations],
+            "Domino stations",
+        )
+        reference_depth_line: adsk.fusion.SketchLine | None = None
+        reference_flanks: list[adsk.fusion.SketchLine] | None = None
+        for board_index, (edge, inward) in enumerate(zip(edges, inwards)):
+            count = len(marked_stations[board_index])
+            stations, projected = projected[:count], projected[count:]
+            edge_line = (
+                context.edge_line
+                if board_index == 0
+                else self._project_reference_line(
+                    sketch,
+                    edge,
+                    "additional board edge",
+                )
+            )
+            for station in stations:
+                depth_line = lines.addByTwoPoints(
+                    station,
+                    sketch.modelToSketchSpace(
+                        self._translated(station.worldGeometry, inward, depth)
+                    ),
+                )
+                if not depth_line:
+                    raise RuntimeError(
+                        "Fusion failed to create a Domino mark depth line."
+                    )
+                depth_line.isConstruction = True
+                constraints.addPerpendicular(depth_line, edge_line)
+                if reference_depth_line is None:
+                    self._add_distance_dimension(
+                        sketch,
+                        depth_line.startSketchPoint,
+                        depth_line.endSketchPoint,
+                        self.inputs.domino_mark_depth.expression,
+                        "dominoMarkDepth",
+                    )
+                    reference_depth_line = depth_line
+                else:
+                    constraints.addEqual(reference_depth_line, depth_line)
+                flanks = self._add_domino_mark_groove(
+                    sketch,
+                    depth_line,
+                    edge_line,
+                    edge_direction,
+                    depth,
+                    reference_flanks,
+                )
+                if reference_flanks is None:
+                    reference_flanks = flanks
+
+    def _add_domino_mark_groove(
+        self,
+        sketch: adsk.fusion.Sketch,
+        depth_line: adsk.fusion.SketchLine,
+        edge_line: adsk.fusion.SketchLine,
+        edge_direction: adsk.core.Vector3D,
+        depth: float,
+        reference_flanks: list[adsk.fusion.SketchLine] | None,
+    ) -> list[adsk.fusion.SketchLine]:
+        """Closes a 90 degree V around `depth_line`, which runs from the
+        board's edge down to the bottom of the groove. Returns the two
+        flanks; later grooves pass the first groove's as `reference_flanks`
+        and copy its angle."""
+        lines = sketch.sketchCurves.sketchLines
+        constraints = sketch.geometricConstraints
+        top_model = depth_line.startSketchPoint.worldGeometry
+        # The groove's opening is created first and put on the edge while it
+        # is still free; the flanks then pin its two ends. Closing the V
+        # between two already positioned flank ends instead leaves a line
+        # that Fusion reports as unconstrained.
+        opening = lines.addByTwoPoints(
+            sketch.modelToSketchSpace(
+                self._translated(top_model, edge_direction, -depth)
+            ),
+            sketch.modelToSketchSpace(
+                self._translated(top_model, edge_direction, depth)
+            ),
+        )
+        if not opening:
+            raise RuntimeError("Fusion failed to create a Domino mark.")
+        constraints.addCollinear(opening, edge_line)
+        flanks = [
+            lines.addByTwoPoints(end, depth_line.endSketchPoint)
+            for end in (opening.startSketchPoint, opening.endSketchPoint)
+        ]
+        if not all(flanks):
+            raise RuntimeError("Fusion failed to create a Domino mark flank.")
+        if reference_flanks is None:
+            # Perpendicular flanks of equal length: a symmetric 90 degree V,
+            # whose width follows from the depth alone.
+            constraints.addPerpendicular(flanks[0], flanks[1])
+            constraints.addEqual(flanks[0], flanks[1])
+        else:
+            for flank, reference in zip(flanks, reference_flanks):
+                constraints.addParallel(flank, reference)
+        return flanks
+
     def _validation_error(self) -> str | None:
         design = adsk.fusion.Design.cast(self.app.activeProduct)
         if not design:
@@ -845,12 +1718,12 @@ class ConnectorsNative(addin.Addin):
                     "the selected edge."
                 )
         else:
-            if self.inputs.offset.value < 0:
+            end_offset, _ = self._end_offset()
+            if end_offset < 0:
                 return "End Offset cannot be negative."
             if (
                 self.inputs.number_of_connectors.value > 1
-                and 2 * self.inputs.offset.value
-                >= geometry.edge.length - 1e-6
+                and 2 * end_offset >= geometry.edge.length - 1e-6
             ):
                 return (
                     "End Offset must leave positive spacing between the first "
@@ -925,6 +1798,8 @@ class ConnectorsNative(addin.Addin):
 
         connector_type = ConnectorType(self.inputs.size.value)
         surface = CabineoSurface(self.inputs.cabineo_surface.value)
+        if connector_type.is_domino:
+            return self._domino_validation_error(geometry, additional_boards)
         if connector_type.is_clamex:
             if self.inputs.clamex_guide_hole_diameter.value <= 0:
                 return "Guide Hole Diameter must be greater than zero."
@@ -972,6 +1847,82 @@ class ConnectorsNative(addin.Addin):
                 < self.inputs.threaded_insert_core_diameter.value
             ):
                 return "Collar Diameter cannot be smaller than Core Diameter."
+        return None
+
+    def _domino_validation_error(
+        self,
+        geometry: _ResolvedGeometry,
+        additional_boards: list[_AdditionalBoard],
+    ) -> str | None:
+        try:
+            size = self._domino_size()
+        except Exception as exc:
+            return str(exc)
+        tolerance = self.app.pointTolerance * 10
+        access_thickness = min(
+            [geometry.access_thickness]
+            + [board.access_thickness for board in additional_boards]
+        )
+        height = self._domino_slot_height(size)
+        if height <= tolerance:
+            return "Slot Height Offset must leave a positive slot height."
+        if self._domino_slot_length(size) - height <= tolerance:
+            return (
+                "Slot Length Offset must leave the slot longer than it is "
+                "high."
+            )
+        if height >= access_thickness - tolerance:
+            return "The Domino slot is higher than the selected board is thick."
+        try:
+            fence_distance = self._domino_fence_distance()
+        except Exception as exc:
+            return str(exc)
+        if fence_distance is not None and (
+            fence_distance[0] - height / 2 < -tolerance
+            or fence_distance[0] + height / 2 > access_thickness + tolerance
+        ):
+            return (
+                "At this Fence Height the Domino slot does not fit within "
+                "the selected board's thickness."
+            )
+
+        if (
+            DominoDepthMode(self.inputs.domino_depth_mode.value)
+            == DominoDepthMode.MATERIAL_REMAINING
+        ):
+            remaining = self.inputs.domino_material_remaining.value
+            if remaining < 0:
+                return "Material Remaining cannot be negative."
+            if remaining >= geometry.guide_thickness - tolerance:
+                return (
+                    "Material Remaining must be less than the adjacent "
+                    "board's thickness."
+                )
+        else:
+            depth = size.length / 20 + self.inputs.domino_depth_offset.value
+            if depth <= tolerance:
+                return "Depth Offset must leave a positive slot depth."
+            if depth >= geometry.guide_thickness - tolerance:
+                return (
+                    "The Domino slot is deeper than the adjacent board is "
+                    "thick. Pick a shorter Domino or set Slot Depth to "
+                    "Material Remaining."
+                )
+
+        loose_extra = self._domino_loose_slot_extra()
+        if loose_extra is not None and loose_extra[0] <= 0:
+            return "Loose Slot Extra Length must be greater than zero."
+
+        if DominoMarks(self.inputs.domino_marks.value) != DominoMarks.NONE:
+            if self.inputs.domino_mark_depth.value <= 0:
+                return "Mark Depth must be greater than zero."
+            if self.inputs.domino_mark_length.value <= 0:
+                return "Mark Length must be greater than zero."
+            if (
+                self.inputs.domino_mark_depth.value
+                >= access_thickness - tolerance
+            ):
+                return "Mark Depth must be less than the board's thickness."
         return None
 
     def _resolve_additional_boards(
@@ -1126,16 +2077,27 @@ class ConnectorsNative(addin.Addin):
         if count == 1:
             distances = [edge.length / 2]
         else:
-            available = edge.length - 2 * self.inputs.offset.value
+            end_offset, _ = self._end_offset()
+            available = edge.length - 2 * end_offset
             spacing = available / (count - 1)
             distances = [
-                self.inputs.offset.value + index * spacing
+                end_offset + index * spacing
                 for index in range(count)
             ]
         return [
             self._translated(edge.startVertex.geometry, direction, distance)
             for distance in distances
         ]
+
+    def _end_offset(self) -> tuple[float, str]:
+        """Distance from the edge ends to the first and last connector, as
+        value and expression. Dominos can take it from the machine's stops
+        instead of the End Offset input."""
+        if ConnectorType(self.inputs.size.value).is_domino:
+            stop = DominoEndStop(self.inputs.domino_end_stop.value)
+            if stop != DominoEndStop.CUSTOM:
+                return stop.value / 10, f"{stop.value} mm"
+        return self.inputs.offset.value, self.inputs.offset.expression
 
     def _custom_point_positions(
         self,
@@ -1530,6 +2492,28 @@ class ConnectorsNative(addin.Addin):
             alignment_points,
             "access-hole midpoints",
         )
+        return self._board_center_points(
+            context,
+            projected_points,
+            small_face,
+            edge,
+            inward,
+        )
+
+    def _board_center_points(
+        self,
+        context: _SketchContext,
+        base_points: list[adsk.fusion.SketchPoint],
+        small_face: adsk.fusion.BRepFace,
+        edge: adsk.fusion.BRepEdge,
+        inward: adsk.core.Vector3D,
+    ) -> tuple[
+        list[adsk.fusion.SketchPoint],
+        list[adsk.fusion.SketchLine],
+    ]:
+        """Centers `base_points` (points of this sketch on the selected
+        edge) on the board's thickness. Returns the centers and the
+        construction lines that span the small face at each station."""
         opposite_edge = self._project_opposite_edge(
             context.sketch,
             small_face,
@@ -1539,14 +2523,14 @@ class ConnectorsNative(addin.Addin):
         constraints = context.sketch.geometricConstraints
         centers: list[adsk.fusion.SketchPoint] = []
         cross_lines: list[adsk.fusion.SketchLine] = []
-        for projected_point in projected_points:
+        for base_point in base_points:
             initial_end = self._translated(
-                projected_point.worldGeometry,
+                base_point.worldGeometry,
                 inward,
                 1,
             )
             cross_line = lines.addByTwoPoints(
-                projected_point,
+                base_point,
                 context.sketch.modelToSketchSpace(initial_end),
             )
             if not cross_line:
@@ -1582,7 +2566,11 @@ class ConnectorsNative(addin.Addin):
         context: _SketchContext,
         board: _AdditionalBoard,
         reference_cross_lines: list[adsk.fusion.SketchLine],
+        stations: list[adsk.fusion.SketchPoint] | None = None,
     ) -> list[adsk.fusion.SketchPoint]:
+        """Returns the board's hole centers. When `stations` is given, the
+        points where each station meets the board's edge are appended to
+        it."""
         sketch = context.sketch
         lines = sketch.sketchCurves.sketchLines
         constraints = sketch.geometricConstraints
@@ -1645,6 +2633,8 @@ class ConnectorsNative(addin.Addin):
                 )
             constraints.addMidPoint(midpoint, cross_line)
             centers.append(midpoint)
+            if stations is not None:
+                stations.append(cross_line.startSketchPoint)
         return centers
 
     def _cabineo_guide_center_points(
@@ -1662,26 +2652,46 @@ class ConnectorsNative(addin.Addin):
             alignment_points,
             "access-hole midpoints",
         )
-        edge_offset = 0.58 if surface == CabineoSurface.FLUSH else 0.5
-        edge_offset_expression = (
-            "0.58 cm" if surface == CabineoSurface.FLUSH else "0.5 cm"
+        return self._edge_offset_points(
+            context,
+            projected_points,
+            inward,
+            0.58 if surface == CabineoSurface.FLUSH else 0.5,
+            "0.58 cm" if surface == CabineoSurface.FLUSH else "0.5 cm",
+            "oppositeEdgeOffset",
         )
+
+    def _edge_offset_points(
+        self,
+        context: _SketchContext,
+        base_points: list[adsk.fusion.SketchPoint],
+        inward: adsk.core.Vector3D,
+        edge_offset: float,
+        edge_offset_expression: str,
+        parameter_role: str,
+    ) -> tuple[
+        list[adsk.fusion.SketchPoint],
+        list[adsk.fusion.SketchLine],
+    ]:
+        """Offsets `base_points` (points of this sketch on the selected
+        edge) into the small face by one shared distance. Returns the offset
+        points and the construction lines leading to them."""
         lines = context.sketch.sketchCurves.sketchLines
         constraints = context.sketch.geometricConstraints
         offset_lines: list[adsk.fusion.SketchLine] = []
-        for projected_point in projected_points:
+        for base_point in base_points:
             initial_end = self._translated(
-                projected_point.worldGeometry,
+                base_point.worldGeometry,
                 inward,
                 edge_offset,
             )
             offset_line = lines.addByTwoPoints(
-                projected_point,
+                base_point,
                 context.sketch.modelToSketchSpace(initial_end),
             )
             if not offset_line:
                 raise RuntimeError(
-                    "Fusion failed to create a Cabineo edge-offset line."
+                    "Fusion failed to create an edge-offset line."
                 )
             offset_line.isConstruction = True
             constraints.addPerpendicular(offset_line, context.edge_line)
@@ -1692,7 +2702,7 @@ class ConnectorsNative(addin.Addin):
             offset_lines[0].startSketchPoint,
             offset_lines[0].endSketchPoint,
             edge_offset_expression,
-            "oppositeEdgeOffset",
+            parameter_role,
         )
         for offset_line in offset_lines[1:]:
             constraints.addEqual(offset_lines[0], offset_line)
@@ -1706,7 +2716,11 @@ class ConnectorsNative(addin.Addin):
         context: _SketchContext,
         board: _AdditionalBoard,
         reference_offset_lines: list[adsk.fusion.SketchLine],
+        stations: list[adsk.fusion.SketchPoint] | None = None,
     ) -> list[adsk.fusion.SketchPoint]:
+        """Returns the board's hole centers. When `stations` is given, the
+        points where each station meets the board's edge are appended to
+        it."""
         sketch = context.sketch
         lines = sketch.sketchCurves.sketchLines
         constraints = sketch.geometricConstraints
@@ -1742,7 +2756,7 @@ class ConnectorsNative(addin.Addin):
             )
             if not offset_line:
                 raise RuntimeError(
-                    "Fusion failed to create a Cabineo edge-offset line."
+                    "Fusion failed to create an edge-offset line."
                 )
             offset_line.isConstruction = True
             constraints.addCoincident(
@@ -1752,6 +2766,8 @@ class ConnectorsNative(addin.Addin):
             constraints.addCollinear(offset_line, reference)
             constraints.addEqual(reference, offset_line)
             centers.append(offset_line.endSketchPoint)
+            if stations is not None:
+                stations.append(offset_line.startSketchPoint)
         return centers
 
     def _project_entities(
@@ -1923,7 +2939,19 @@ class ConnectorsNative(addin.Addin):
             raise RuntimeError(
                 f"Fusion failed to project the {description}."
             )
-        return projected
+        # project2 does not hand the projections back in the order of its
+        # input, so pair each source with the projection that landed on it.
+        ordered: list[adsk.fusion.SketchPoint] = []
+        for source in source_points:
+            target = sketch.modelToSketchSpace(source.worldGeometry)
+            target.z = 0
+            nearest = min(
+                projected,
+                key=lambda point: point.geometry.distanceTo(target),
+            )
+            projected.remove(nearest)
+            ordered.append(nearest)
+        return ordered
 
     def _guide_hole(
         self,
@@ -2086,7 +3114,8 @@ class ConnectorsNative(addin.Addin):
             return points
 
         first_margin_parameter: adsk.fusion.ModelParameter | None = None
-        if self.inputs.offset.value == 0:
+        end_offset, end_offset_expression = self._end_offset()
+        if end_offset == 0:
             constraints.addCoincident(points[0], context.edge_start)
             constraints.addCoincident(points[-1], context.edge_end)
         else:
@@ -2094,7 +3123,7 @@ class ConnectorsNative(addin.Addin):
                 sketch,
                 context.edge_start,
                 points[0],
-                self.inputs.offset.expression,
+                end_offset_expression,
                 f"{context.parameter_role}FirstMargin",
             )
             first_margin_parameter = first_margin.parameter
@@ -2303,8 +3332,8 @@ class ConnectorsNative(addin.Addin):
     def _add_center_to_center_slot(
         self,
         sketch: adsk.fusion.Sketch,
-        start: adsk.fusion.SketchPoint,
-        end: adsk.fusion.SketchPoint,
+        start: adsk.fusion.SketchPoint | adsk.core.Point3D,
+        end: adsk.fusion.SketchPoint | adsk.core.Point3D,
         width_expression: str,
         parameter_role: str,
     ) -> tuple[
@@ -2428,7 +3457,7 @@ class ConnectorsNative(addin.Addin):
         self,
         component: adsk.fusion.Component,
         sketch: adsk.fusion.Sketch,
-        target_body: adsk.fusion.BRepBody,
+        target_body: adsk.fusion.BRepBody | list[adsk.fusion.BRepBody],
         direction: adsk.core.Vector3D,
         distance: float | str,
         name: str,
@@ -2470,7 +3499,9 @@ class ConnectorsNative(addin.Addin):
         extent_direction = self._extent_direction(sketch, direction)
         if not extrude_input.setOneSideExtent(extent, extent_direction):
             raise RuntimeError(f"Fusion rejected the extent of '{name}'.")
-        extrude_input.participantBodies = [target_body]
+        extrude_input.participantBodies = (
+            target_body if isinstance(target_body, list) else [target_body]
+        )
 
         extrude = component.features.extrudeFeatures.add(extrude_input)
         if not extrude:
@@ -2498,6 +3529,61 @@ class ConnectorsNative(addin.Addin):
                 extrude.taperAngleOne,
                 f"{parameter_role}TaperAngle",
             )
+        return extrude
+
+    def _create_cut_extrude_to_face(
+        self,
+        component: adsk.fusion.Component,
+        sketch: adsk.fusion.Sketch,
+        target_body: adsk.fusion.BRepBody,
+        target_face: adsk.fusion.BRepFace,
+        direction: adsk.core.Vector3D,
+        offset: str,
+        name: str,
+        parameter_role: str,
+    ) -> adsk.fusion.ExtrudeFeature:
+        """Cuts from the sketch plane towards `target_face`, stopping
+        `offset` short of it."""
+        profiles = adsk.core.ObjectCollection.create()
+        for profile in sketch.profiles:
+            profiles.add(profile)
+        if profiles.count == 0:
+            raise RuntimeError(f"'{sketch.name}' did not create any profiles.")
+
+        extrude_input = component.features.extrudeFeatures.createInput(
+            profiles,
+            adsk.fusion.FeatureOperations.CutFeatureOperation,  # type: ignore
+        )
+        if not extrude_input:
+            raise RuntimeError(f"Fusion failed to initialize '{name}'.")
+        extent = adsk.fusion.ToEntityExtentDefinition.create(
+            target_face,
+            False,
+            adsk.core.ValueInput.createByString(f"-({offset})"),
+        )
+        if not extent:
+            raise RuntimeError(f"Fusion failed to define the depth of '{name}'.")
+        extent.directionHint = direction
+        if not extrude_input.setOneSideExtent(
+            extent,
+            self._extent_direction(sketch, direction),
+        ):
+            raise RuntimeError(f"Fusion rejected the extent of '{name}'.")
+        extrude_input.participantBodies = [target_body]
+
+        extrude = component.features.extrudeFeatures.add(extrude_input)
+        if not extrude:
+            raise RuntimeError(f"Fusion failed to create '{name}'.")
+        extrude.name = name
+        sketch.isVisible = False
+
+        final_extent = adsk.fusion.ToEntityExtentDefinition.cast(
+            extrude.extentOne
+        )
+        if final_extent:
+            final_offset = adsk.fusion.ModelParameter.cast(final_extent.offset)
+            if final_offset:
+                self._name_parameter(final_offset, parameter_role)
         return extrude
 
     def _extent_direction(

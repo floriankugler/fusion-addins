@@ -6,11 +6,15 @@ naming convention
 
     <kind>[.<tag>[.<tag>...]]_<label>.f3dhsm-template
 
-where kind is one of 'pocket', 'contour', 'drill', 'bore', 'dogbone'. The
-'dogbone' kind machines the inside corner reliefs that the contour tool is too
-wide for; it should carry the smallest cutter (reliefs that exactly match a
-drill template's tool are plunged with that drill instead). Tags encode
-machine-readable attributes; the label is purely cosmetic (shown in the UI):
+where kind is one of 'pocket', 'contour', 'drill', 'bore', 'dogbone',
+'chamfer', 'groove'. The 'dogbone' kind machines the inside corner reliefs that
+the contour tool is too wide for; with several of them, each relief gets the
+widest cutter that still fits it (reliefs that exactly match a drill template's
+tool are plunged with that drill instead). 'chamfer' and 'groove' belong to the
+90 degree V-bit: a 2D Chamfer operation for the 45 degree chamfers at the top
+face, and a Trace operation whose tool tip follows the bottom edge of a pointed
+90 degree groove. Tags encode machine-readable attributes; the label is purely
+cosmetic (shown in the UI):
 
     dc      spiral down-cut cutter variant
     udc     spiral up/down-cut cutter variant
@@ -25,10 +29,11 @@ template, e.g. rough + finish).
 """
 
 import adsk.core, adsk.cam
+import math
 import os
 from dataclasses import dataclass
 
-KINDS = ('pocket', 'contour', 'drill', 'bore', 'dogbone')
+KINDS = ('pocket', 'contour', 'drill', 'bore', 'dogbone', 'chamfer', 'groove')
 CUTTER_TAGS = ('dc', 'udc')
 VALID_TAGS = ('dc', 'udc', 'finish')
 FILE_EXT = '.f3dhsm-template'
@@ -78,6 +83,27 @@ class ToolLimits:
     max_diameter: float | None
     min_flute: float | None
     min_diameter: float | None
+
+
+@dataclass(frozen=True)
+class VBit:
+    """The tapered tool of a chamfer or groove template, as far as it decides
+    what the tool can cut. Lengths in cm, the angle in degrees."""
+    diameter: float | None
+    tip_diameter: float
+    taper_angle: float | None   # of the flank against the tool axis
+    flute: float | None
+    # How far a chamfer operation pushes the tip past the lower chamfer edge.
+    tip_offset: float
+
+    @property
+    def reach(self) -> float | None:
+        """How deep the flank can cut, measured from the tip: the height of
+        the cone, capped by the flute length."""
+        if self.diameter is None or not self.taper_angle:
+            return None
+        height = (self.diameter - self.tip_diameter) / 2 / math.tan(math.radians(self.taper_angle))
+        return height if self.flute is None else min(height, self.flute)
 
 
 def parse_stem(stem: str) -> tuple[str, tuple[str, ...], str] | None:
@@ -155,6 +181,47 @@ def tab_width(variant: TemplateVariant) -> float | None:
         if parameter:
             return parameter.value.value
     return None
+
+
+def v_bit(variant: TemplateVariant) -> VBit:
+    """The tapered tool of a chamfer or groove template (its first operation)."""
+    template = load(variant)
+    operations = template.operations
+    if not operations.count:
+        return VBit(None, 0.0, None, None, 0.0)
+    parameters = operations.get(0).parameters
+
+    def value(name: str) -> float | None:
+        parameter = parameters.itemByName(name)
+        return parameter.value.value if parameter else None
+
+    return VBit(
+        diameter=value('tool_diameter'),
+        tip_diameter=value('tool_tipDiameter') or 0.0,
+        taper_angle=value('tool_taperAngle'),
+        flute=value('tool_fluteLength'),
+        tip_offset=value('chamferTipOffset') or 0.0,
+    )
+
+
+def stepdown(variant: TemplateVariant) -> float | None:
+    """The maximum stepdown (cm) of a template that cuts in multiple depths,
+    None if its first operation cuts in a single pass.
+
+    Read for the groove templates: a Trace operation does not work its way down
+    from the stock top by itself, it only takes a fixed number of extra passes,
+    so that number has to be set for the groove at hand (see rules._plan_bevels).
+    """
+    template = load(variant)
+    operations = template.operations
+    if not operations.count:
+        return None
+    parameters = operations.get(0).parameters
+    enabled = parameters.itemByName('doMultipleDepths')
+    maximum = parameters.itemByName('maximumStepdown')
+    if not enabled or not maximum or not enabled.value.value:
+        return None
+    return maximum.value.value or None
 
 
 def is_adaptive(variant: TemplateVariant) -> bool:

@@ -1,14 +1,16 @@
 <?xml version="1.0" encoding="UTF-8" standalone="no" ?>
 <template-document xmlns="http://www.hsmworks.com/namespace/hsmworks/document/template" version="1.0">
 
+  <user-name>2D Contour</user-name>
+
   <user-description></user-description>
 
   <user-notes></user-notes>
 
   <iconID id="0"/>
 
-  <template description="Kontur 6mm|udc" isFallback="0" strategy="contour2d" toolPresetId="{3e0a43a5-2980-4021-9749-abf1d9df3787}" unit="millimeters" version="189">
-    <tool guid="0147e16a-5d32-4734-af6b-68e3da389b47" tool-library-version="36" type="flat end mill" unit="millimeters" version="1.5">
+  <template description="Kontur 6mm|udc" isFallback="0" strategy="contour2d" toolPresetId="{3e0a43a5-2980-4021-9749-abf1d9df3787}" unit="millimeters" version="190">
+    <tool guid="0147e16a-5d32-4734-af6b-68e3da389b47" tool-library-version="37" type="flat end mill" unit="millimeters" version="1.5">
       <description>Spiral Down/Up-Cut</description>
       <expressions>
         <expression parameterKey="tool_bodyLength" value="18 mm"/>
@@ -80,7 +82,7 @@
     <parameter expression="''" name="tool_productLink"/>
     <parameter expression="6." name="tool_diameter"/>
     <parameter expression="tool_diameter + 2*tool_fluteLength*Math.tan(tool_taperAngle)" name="tool_maximumCuttingDiameter"/>
-    <parameter expression="0.0" name="tool_tipDiameter"/>
+    <parameter expression="6." name="tool_tipDiameter"/>
     <parameter expression="0.0" name="tool_tipOffset"/>
     <parameter expression="0.0" name="tool_cornerRadius"/>
     <parameter expression="0.0" name="tool_taperAngle"/>
@@ -305,8 +307,7 @@
     <parameter expression="100" name="maximumIncreasedFeedrateExternalArcFinishing"/>
     <parameter expression="100" name="maximumReducedFeedrateInternalArc"/>
     <parameter expression="100" name="maximumIncreasedFeedrateExternalArc"/>
-    <parameter expression="multiAxisMachiningType == 'polar' &amp;&amp; usePolarRapidLinks ? 'always' : 'disabled'" name="highFeedrateMode"/>
-    <parameter expression="'always'" name="highFeedrateModeProxy"/>
+    <parameter expression="'disabled'" name="highFeedrateMode"/>
     <parameter expression="machine.defined &amp;&amp; machine.maxFeedrate > 0 ? machine.maxFeedrate : Math.max(tool_feedCutting; Math.max(tool_feedEntry; tool_feedExit))" name="highFeedrate"/>
     <parameter expression="true" name="allowRapidRetract"/>
     <parameter expression="Math.min(1.0mm; tool_diameter * 0.2)" name="safeDistance"/>
@@ -343,6 +344,14 @@
     <parameter expression="'setupAxisZ'" name="connectionMoveClearanceArea_orientation_mode"/>
     <parameter expression="false" name="connectionMoveClearanceArea_orientation_selAxis"/>
     <parameter expression="false" name="connectionMoveClearanceArea_orientation_flipAxis"/>
+    <parameter expression="false" name="connectionMoveClearanceArea_orientation_axisZ"/>
+    <parameter expression="false" name="connectionMoveClearanceArea_orientation_flipZ"/>
+    <parameter expression="false" name="connectionMoveClearanceArea_orientation_axisX"/>
+    <parameter expression="false" name="connectionMoveClearanceArea_orientation_flipX"/>
+    <parameter expression="'wcs'" name="connectionMoveClearanceArea_orientation_axesZX_unselected_default"/>
+    <parameter expression="false" name="connectionMoveClearanceArea_orientation_axisY"/>
+    <parameter expression="false" name="connectionMoveClearanceArea_orientation_flipY"/>
+    <parameter expression="'wcs'" name="connectionMoveClearanceArea_orientation_axesZY_unselected_default"/>
     <parameter expression="false" name="connectionMoveClearanceArea_flipDirection"/>
     <parameter expression="'setupAxisZ'" name="connectionMoveClearanceAreaUp_orientation_mode"/>
     <parameter expression="false" name="connectionMoveClearanceAreaUp_orientation_selAxis"/>
@@ -398,5 +407,7 @@
     <parameter expression="4." name="tool_rampAngle"/>
     <parameter expression="false" name="associatedView"/>
   </template>
+
+  <doubleSided value="false"/>
 
 </template-document>

@@ -1,16 +1,21 @@
 """Geometry recognition for automatic manufacturing setups.
 
-Detects machinable features (holes, pockets, through cutouts, outer contours)
-on bodies, relative to a user-defined machining frame. All lengths are in cm
-(Fusion internal units). Pure geometry - no CAM API calls.
+Detects machinable features (holes, pockets, through cutouts, outer contours,
+rim chamfers and V-grooves) on bodies, relative to a user-defined machining
+frame. All lengths are in cm (Fusion internal units). Pure geometry - no CAM
+API calls.
 """
 
+import math
 import adsk.core, adsk.fusion
 from dataclasses import dataclass, field
 
 # Tolerances (cm / dimensionless)
 HEIGHT_TOL = 1e-3
 DIRECTION_TOL = 1e-3
+# The vertical component of the normal of a face cut by a 90 degree V-bit: the
+# face stands at 45 degrees to the tool axis.
+BEVEL_NORMAL_Z = math.sqrt(0.5)
 
 
 class RecognitionError(Exception):
@@ -67,6 +72,9 @@ class Hole:
     # The circular edge at the hole bottom (used when large through holes are
     # machined as inner contours instead of bores).
     bottom_edge: adsk.fusion.BRepEdge | None = None
+    # How far below the top face the wall starts: the height of a chamfered or
+    # countersunk rim, 0 for a plain hole.
+    rim: float = 0.0
 
 
 @dataclass
@@ -106,11 +114,42 @@ class Contour:
 
 
 @dataclass
+class Chamfer:
+    """A 45 degree chamfer between the top face and a wall below it - the rim
+    of a hole (where it is a countersink), a pocket, a cutout or the outer
+    contour - machined with a 90 degree V-bit along its lower edge."""
+    # The lower edges in chain order, each with the chamfer face above it.
+    edges: list[adsk.fusion.BRepEdge]
+    faces: list[adsk.fusion.BRepFace]
+    height: float       # from the lower edge up to the top face; also its width
+    is_closed: bool
+    body: adsk.fusion.BRepBody
+    up: adsk.core.Vector3D   # the tool axis, pointing away from the part
+    # The walls below the lower edges; they tell which feature the chamfer
+    # belongs to.
+    walls: list[adsk.fusion.BRepFace] = field(default_factory=list)
+    # Radius of the lower edge when the chamfer runs around a round hole.
+    hole_radius: float | None = None
+
+
+@dataclass
+class Groove:
+    """A pointed 90 degree groove in the top face: two 45 degree flanks meeting
+    in a sharp bottom edge, which the tip of a 90 degree V-bit follows."""
+    edges: list[adsk.fusion.BRepEdge]   # the bottom edges in chain order
+    faces: list[adsk.fusion.BRepFace]   # the flanks
+    depth: float
+    body: adsk.fusion.BRepBody
+
+
+@dataclass
 class RecognitionResult:
     holes: list[Hole] = field(default_factory=list)
     pockets: list[Pocket] = field(default_factory=list)
     cutouts: list[Cutout] = field(default_factory=list)
     contours: list[Contour] = field(default_factory=list)
+    chamfers: list[Chamfer] = field(default_factory=list)
+    grooves: list[Groove] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
 
     def extend(self, other: 'RecognitionResult'):
@@ -118,6 +157,8 @@ class RecognitionResult:
         self.pockets.extend(other.pockets)
         self.cutouts.extend(other.cutouts)
         self.contours.extend(other.contours)
+        self.chamfers.extend(other.chamfers)
+        self.grooves.extend(other.grooves)
         self.warnings.extend(other.warnings)
 
 
@@ -186,6 +227,7 @@ def _recognize_body(body: adsk.fusion.BRepBody, frame: Frame) -> RecognitionResu
                 outer_edges = list(loop.edges)
                 break
     result.contours.append(Contour(body=body, edges=outer_edges, depth=z_max - z_min))
+    _recognize_bevels(body, frame, z_max, result)
     return result
 
 
@@ -242,7 +284,7 @@ def _hole_from_face(
     if not face_z:
         return None
     top, bottom = max(face_z), min(face_z)
-    if top < z_max - HEIGHT_TOL:
+    if top < z_max - HEIGHT_TOL and not _rim_reaches_top(face, frame, top, z_max):
         warnings.append(
             f'{body.name}: hole (d{cylinder.radius * 20:.1f}mm) does not start at the top face; skipped.')
         return None
@@ -257,11 +299,33 @@ def _hole_from_face(
     return Hole(
         face=face,
         diameter=2 * cylinder.radius,
-        depth=top - bottom,
+        # Measured from the top face, like a pocket: under a chamfered rim the
+        # wall itself starts lower, but the tool still comes in from the top.
+        depth=z_max - bottom,
         is_through=is_through,
         body=body,
         bottom_edge=bottom_edge,
+        rim=max(z_max - top, 0.0),
     )
+
+
+def _rim_reaches_top(face: adsk.fusion.BRepFace, frame: Frame, top: float,
+                     z_max: float) -> bool:
+    """True if a hole wall that stops short of the top face continues to it
+    through its rim - a chamfer, a countersink or a rounding.
+
+    A counterbore does not: there the wall ends on the flat floor of a wider
+    hole, and the narrow hole below it is not reachable as a hole of its own.
+    """
+    rim = [edge for edge in face.edges
+           if _edge_height_range(edge, frame)[0] >= top - HEIGHT_TOL]
+    if not rim:
+        return False
+    for edge in rim:
+        others = [f for f in edge.faces if f.tempId != face.tempId]
+        if not others or _face_top_height(others[0], frame) < z_max - HEIGHT_TOL:
+            return False
+    return True
 
 
 def _is_concave_cylinder(face: adsk.fusion.BRepFace, cylinder: adsk.core.Cylinder) -> bool:
@@ -452,3 +516,254 @@ def _loop_matches_hole(loop: adsk.fusion.BRepLoop, holes: list[Hole], frame: Fra
         if not any(f.entityToken in hole_face_tokens for f in edge.faces):
             return False
     return True
+
+
+# ---- Chamfers and V-grooves ---------------------------------------------------
+
+def _recognize_bevels(body: adsk.fusion.BRepBody, frame: Frame, z_max: float,
+                      result: RecognitionResult):
+    """Chamfers and V-grooves of the top face: what a 90 degree V-bit cuts.
+
+    Both are made of faces standing at 45 degrees that come down from the top
+    face. What such a face ends on at its lower edge tells them apart: a wall
+    dropping away below it makes it a chamfer, a second 45 degree face coming
+    down from the other side makes the two a pointed groove. A face that ends
+    on a floor or at the foot of a wall has no room for the tool tip and is
+    reported instead.
+    """
+    bevels: dict[int, adsk.fusion.BRepFace] = {}
+    other_angles = 0
+    for face in body.faces:
+        slope = _constant_slope(face, frame)
+        if slope is None or _face_top_height(face, frame) < z_max - HEIGHT_TOL:
+            continue
+        if abs(slope - BEVEL_NORMAL_Z) < DIRECTION_TOL:
+            bevels[face.tempId] = face
+        elif DIRECTION_TOL < slope < 1 - DIRECTION_TOL:
+            other_angles += 1
+    if other_angles:
+        result.warnings.append(
+            f'{body.name}: {other_angles} slanted face(s) at the top are not at 45° and '
+            'were not machined; the chamfer bit only cuts 45° chamfers and 90° grooves.')
+    if not bevels:
+        return
+
+    # Lower edge tempId -> (edge, chamfer face, wall), and the bottom edges of
+    # grooves with their two flanks.
+    chamfer_edges: dict[int, tuple] = {}
+    groove_edges: dict[int, tuple] = {}
+    heights: dict[int, float] = {}
+    blocked = 0
+    for face in bevels.values():
+        ranges = [(edge, _edge_height_range(edge, frame)) for edge in face.edges]
+        bottom = min(low for _, (low, _) in ranges)
+        for edge, (_, high) in ranges:
+            if high > bottom + HEIGHT_TOL or edge.tempId in groove_edges:
+                continue  # not a lower edge, or a groove seen from its other flank
+            others = [f for f in edge.faces if f.tempId != face.tempId]
+            if not others:
+                continue
+            other = others[0]
+            midpoint = _edge_midpoint(edge)
+            rise = _rise_direction(edge, face, midpoint, frame)
+            other_normal = _normal_at(other, midpoint)
+            if rise is None or other_normal is None:
+                continue
+            heights[edge.tempId] = z_max - bottom
+            if other.tempId in bevels:
+                normal = _normal_at(face, midpoint)
+                # Concave, and the flanks lean against each other: a groove
+                # with a different opening angle has flanks at other slopes
+                # and never gets here.
+                if (normal is not None and rise.dotProduct(other_normal) > 0
+                        and _horizontal_length(_sum(normal, other_normal), frame) < DIRECTION_TOL):
+                    groove_edges[edge.tempId] = (edge, face, other)
+                else:
+                    blocked += 1
+            elif (abs(other_normal.dotProduct(frame.z)) < DIRECTION_TOL
+                    and rise.dotProduct(other_normal) < 0):
+                # A vertical wall the chamfer leans away from: the wall drops
+                # away below the edge.
+                chamfer_edges[edge.tempId] = (edge, face, other)
+            else:
+                blocked += 1
+    if blocked:
+        result.warnings.append(
+            f'{body.name}: {blocked} 45° face(s) end on a floor or against a wall, which '
+            'leaves no room for the tip of the chamfer bit; not machined.')
+
+    for edges, is_closed in _chains_by_height(chamfer_edges, heights):
+        result.chamfers.append(Chamfer(
+            edges=edges,
+            faces=[chamfer_edges[edge.tempId][1] for edge in edges],
+            walls=[chamfer_edges[edge.tempId][2] for edge in edges],
+            height=heights[edges[0].tempId],
+            is_closed=is_closed,
+            body=body,
+            up=frame.z,
+            hole_radius=_hole_radius(edges) if is_closed else None,
+        ))
+    for edges, _ in _chains_by_height(groove_edges, heights):
+        flanks: dict[int, adsk.fusion.BRepFace] = {}
+        for edge in edges:
+            for flank in groove_edges[edge.tempId][1:]:
+                flanks[flank.tempId] = flank
+        result.grooves.append(Groove(
+            edges=edges, faces=list(flanks.values()),
+            depth=heights[edges[0].tempId], body=body))
+
+
+def _constant_slope(face: adsk.fusion.BRepFace, frame: Frame) -> float | None:
+    """The vertical component of the face normal if it is the same all over the
+    face, None otherwise.
+
+    Planes and upright cones have one; so does the chamfer along a curved
+    contour, whatever surface type it is modelled as, which is why this samples
+    the normal instead of looking at the geometry. Only up-facing slanted faces
+    are sampled beyond the first point - walls and floors are most of a body.
+    """
+    slope = _normal_at(face, face.pointOnFace)
+    if slope is None:
+        return None
+    slope = slope.dotProduct(frame.z)
+    if not DIRECTION_TOL < slope < 1 - DIRECTION_TOL:
+        return slope
+    for edge in face.edges:
+        normal = _normal_at(face, _edge_midpoint(edge))
+        if normal is None or abs(normal.dotProduct(frame.z) - slope) > DIRECTION_TOL:
+            return None
+    return slope
+
+
+def _normal_at(face: adsk.fusion.BRepFace,
+               point: adsk.core.Point3D) -> adsk.core.Vector3D | None:
+    ok, normal = face.evaluator.getNormalAtPoint(point)
+    return normal if ok else None
+
+
+def _rise_direction(edge: adsk.fusion.BRepEdge, face: adsk.fusion.BRepFace,
+                    midpoint: adsk.core.Point3D, frame: Frame) -> adsk.core.Vector3D | None:
+    """The direction in which a slanted face climbs away from its lower edge."""
+    normal = _normal_at(face, midpoint)
+    ok, tangent = edge.evaluator.getTangent(_edge_mid_parameter(edge))
+    if normal is None or not ok:
+        return None
+    rise = tangent.crossProduct(normal)
+    if rise.length < 1e-9:
+        return None
+    rise.normalize()
+    if rise.dotProduct(frame.z) < 0:
+        rise.scaleBy(-1.0)
+    return rise
+
+
+def _sum(a: adsk.core.Vector3D, b: adsk.core.Vector3D) -> adsk.core.Vector3D:
+    result = a.copy()
+    result.add(b)
+    return result
+
+
+def _horizontal_length(vector: adsk.core.Vector3D, frame: Frame) -> float:
+    return _perpendicular_component(vector, frame.z).length
+
+
+def _edge_mid_parameter(edge: adsk.fusion.BRepEdge) -> float:
+    _, param_min, param_max = edge.evaluator.getParameterExtents()
+    return (param_min + param_max) / 2
+
+
+def _edge_height_range(edge: adsk.fusion.BRepEdge, frame: Frame) -> tuple[float, float]:
+    """Lowest and highest point of an edge. Sampled strictly inside the
+    parameter range: the evaluator rejects a parameter that lands a rounding
+    error past either end."""
+    evaluator = edge.evaluator
+    _, param_min, param_max = evaluator.getParameterExtents()
+    heights = [frame.height(vertex.geometry)
+               for vertex in (edge.startVertex, edge.endVertex) if vertex]
+    for step in (0.25, 0.5, 0.75):
+        ok, point = evaluator.getPointAtParameter(param_min + (param_max - param_min) * step)
+        if ok:
+            heights.append(frame.height(point))
+    return min(heights), max(heights)
+
+
+def _chains_by_height(entries: dict[int, tuple],
+                      heights: dict[int, float]) -> list[tuple[list, bool]]:
+    """Chains of the collected edges, kept apart by height: edges at different
+    levels belong to different chamfers even where they happen to touch."""
+    levels: dict[float, list[adsk.fusion.BRepEdge]] = {}
+    for edge_id, entry in entries.items():
+        levels.setdefault(round(heights[edge_id], 4), []).append(entry[0])
+    chains: list[tuple[list, bool]] = []
+    for _, edges in sorted(levels.items()):
+        chains += _chains(edges)
+    return chains
+
+
+def _chains(edges: list[adsk.fusion.BRepEdge]) -> list[tuple[list[adsk.fusion.BRepEdge], bool]]:
+    """Sort edges into chains running end to end: (edges in chain order,
+    whether the chain closes on itself)."""
+    by_id = {edge.tempId: edge for edge in edges}
+    ends: dict[int, list[int]] = {}
+    at_vertex: dict[int, list[int]] = {}
+    for edge in edges:
+        vertices: list[int] = []
+        for vertex in (edge.startVertex, edge.endVertex):
+            if vertex and vertex.tempId not in vertices:
+                vertices.append(vertex.tempId)
+        ends[edge.tempId] = vertices
+        for vertex in vertices:
+            at_vertex.setdefault(vertex, []).append(edge.tempId)
+    unused = set(by_id)
+
+    def walk(edge_id: int, vertex: int | None) -> tuple[list[int], int | None]:
+        chain = [edge_id]
+        unused.discard(edge_id)
+        while vertex is not None:
+            following = [e for e in at_vertex[vertex] if e in unused]
+            if not following:
+                break
+            edge_id = following[0]
+            unused.discard(edge_id)
+            chain.append(edge_id)
+            vertex = next((v for v in ends[edge_id] if v != vertex), None)
+        return chain, vertex
+
+    chains: list[tuple[list[adsk.fusion.BRepEdge], bool]] = []
+    # Open chains first, each from one of its loose ends, so that a chain is
+    # not started in its middle and split in two.
+    for edge_id in list(by_id):
+        if edge_id not in unused or len(ends[edge_id]) < 2:
+            continue
+        loose = [v for v in ends[edge_id] if len(at_vertex[v]) == 1]
+        if loose:
+            chain, _ = walk(edge_id, next(v for v in ends[edge_id] if v != loose[0]))
+            chains.append(([by_id[e] for e in chain], False))
+    for edge_id in list(by_id):
+        if edge_id not in unused:
+            continue
+        if len(ends[edge_id]) < 2:
+            # A full circle: closed by itself.
+            unused.discard(edge_id)
+            chains.append(([by_id[edge_id]], True))
+            continue
+        first, second = ends[edge_id]
+        chain, last = walk(edge_id, second)
+        chains.append(([by_id[e] for e in chain], last == first and len(chain) > 1))
+    return chains
+
+
+def _hole_radius(edges: list[adsk.fusion.BRepEdge]) -> float | None:
+    """The radius of a closed chain that is one circle, None for any other shape."""
+    center = None
+    radius = None
+    for edge in edges:
+        geometry = adsk.core.Circle3D.cast(edge.geometry) or adsk.core.Arc3D.cast(edge.geometry)
+        if not geometry:
+            return None
+        if center is None:
+            center, radius = geometry.center, geometry.radius
+        elif (center.distanceTo(geometry.center) > HEIGHT_TOL
+                or abs(radius - geometry.radius) > HEIGHT_TOL):
+            return None
+    return radius

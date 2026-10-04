@@ -9,37 +9,38 @@
 
   <iconID id="0"/>
 
-  <template description="Bohrung exakt 1/8&quot;" isFallback="0" strategy="drill" toolPresetId="{de5941c9-276b-442b-a914-61c700b240ac}" unit="millimeters" version="190">
-    <tool guid="4a0f6b62-caca-48fb-9584-8ad1c37ac050" tool-library-version="37" type="flat end mill" unit="inches" version="1.5">
-      <description>1/8 Spiral Down-Cut</description>
+  <template description="Bohrung exakt 2mm" isFallback="0" strategy="drill" toolPresetId="{753cbff2-c1c2-4cbb-a332-777667770c20}" unit="millimeters" version="190">
+    <tool guid="d918d65a-2ed3-4da5-b0dd-598bad12b5c6" tool-library-version="37" type="flat end mill" unit="millimeters" version="1.5">
+      <description>2mm 2-Schneider gerade</description>
       <expressions>
-        <expression parameterKey="tool_bodyLength" value="17mm"/>
-        <expression parameterKey="tool_description" value="'1/8 Spiral Down-Cut'"/>
-        <expression parameterKey="tool_diameter" value="(1/8) in"/>
-        <expression parameterKey="tool_fluteLength" value="17mm"/>
+        <expression parameterKey="tool_bodyLength" value="20 mm"/>
+        <expression parameterKey="tool_description" value="'2mm 2-Schneider gerade'"/>
+        <expression parameterKey="tool_diameter" value="2 mm"/>
+        <expression parameterKey="tool_fluteLength" value="17 mm"/>
         <expression parameterKey="tool_numberOfFlutes" value="2"/>
-        <expression parameterKey="tool_shoulderLength" value="17mm"/>
-        <expression parameterKey="tool_unit" value="'inches'"/>
+        <expression parameterKey="tool_overallLength" value="38.1 mm"/>
+        <expression parameterKey="tool_shaftDiameter" value="3.175 mm"/>
+        <expression parameterKey="tool_shoulderLength" value="17 mm"/>
       </expressions>
-      <nc break-control="0" diameter-offset="12" length-offset="12" live-tool="1" manual-tool-change="0" number="12" turret="0"/>
+      <nc break-control="0" diameter-offset="16" length-offset="16" live-tool="1" manual-tool-change="0" number="16" turret="0"/>
       <coolant mode="disabled"/>
       <material name="hss"/>
-      <body assembly-gauge-length="0.6692913" body-length="0.6692913" coolant-support="no" diameter="0.125" flute-length="0.6692913" number-of-flutes="2" overall-length="1.417323" shaft-diameter="0.125" shoulder-diameter="0.125" shoulder-length="0.6692913" thread-pitch="0" thread-profile-angle="60"/>
-      <motion clockwise="yes" cutting-feedrate="0" entry-feedrate="0" exit-feedrate="0" feed-mode="per-minute" plunge-feedrate="32.283464566929" ramp-angle="2" ramp-feedrate="0" ramp-spindle-rpm="0" retract-feedrate="0" spindle-rpm="24000" transition-feedrate="0"/>
+      <body assembly-gauge-length="20" body-length="20" coolant-support="no" diameter="2" flute-length="17" number-of-flutes="2" overall-length="38.1" shaft-diameter="3.175" shoulder-diameter="2" shoulder-length="17" thread-pitch="0" thread-profile-angle="60"/>
+      <motion clockwise="yes" cutting-feedrate="0" entry-feedrate="0" exit-feedrate="0" feed-mode="per-minute" plunge-feedrate="800" ramp-angle="2" ramp-feedrate="0" ramp-spindle-rpm="0" retract-feedrate="0" spindle-rpm="24000" transition-feedrate="0"/>
       <presets>
-        <preset description="" id="{de5941c9-276b-442b-a914-61c700b240ac}" name="Default preset">
+        <preset description="" id="{753cbff2-c1c2-4cbb-a332-777667770c20}" name="Default preset">
           <parameter expression="'disabled'" key="tool_coolant" value="disabled"/>
           <parameter expression="24000 rpm" key="tool_spindleSpeed" value="24000"/>
-          <parameter expression="24000 rpm" key="tool_rampSpindleSpeed" value="24000"/>
-          <parameter expression="1500mm/min" key="tool_feedCutting" value="1500.0000000000002"/>
-          <parameter key="tool_feedEntry" value="1500.0000000000002"/>
-          <parameter key="tool_feedExit" value="1500.0000000000002"/>
-          <parameter expression="820mm/min" key="tool_feedPlunge" value="820.00000000000011"/>
-          <parameter key="tool_feedTransition" value="1500.0000000000002"/>
-          <parameter expression="500mm/min" key="tool_feedRamp" value="500"/>
+          <parameter key="tool_rampSpindleSpeed" value="24000"/>
+          <parameter expression="1500 mmpm" key="tool_feedCutting" value="1500"/>
+          <parameter key="tool_feedEntry" value="1500"/>
+          <parameter key="tool_feedExit" value="1500"/>
+          <parameter expression="800 mmpm" key="tool_feedPlunge" value="800"/>
+          <parameter key="tool_feedTransition" value="1500"/>
+          <parameter expression="800 mmpm" key="tool_feedRamp" value="800"/>
           <parameter key="tool_presetMaterialCategory" value="all"/>
           <parameter key="tool_presetMaterialQuery" value=""/>
-          <parameter expression="8 degrees" key="tool_rampAngle" value="8"/>
+          <parameter key="tool_rampAngle" value="2"/>
         </preset>
       </presets>
     </tool>
@@ -66,8 +67,8 @@
     <parameter expression="false" name="autoToolSelection"/>
     <parameter expression="'flat end mill'" name="tool_type"/>
     <parameter expression="'tapered_bull_nose'" name="tool_taperedType"/>
-    <parameter expression="'inches'" name="tool_unit"/>
-    <parameter expression="12" name="tool_number"/>
+    <parameter expression="'millimeters'" name="tool_unit"/>
+    <parameter expression="16" name="tool_number"/>
     <parameter expression="tool_number" name="tool_diameterOffset"/>
     <parameter expression="tool_number" name="tool_lengthOffset"/>
     <parameter expression="tool_number" name="tool_compensationOffset"/>
@@ -76,34 +77,34 @@
     <parameter expression="false" name="tool_breakControl"/>
     <parameter expression="true" name="tool_live"/>
     <parameter expression="'hss'" name="tool_material"/>
-    <parameter expression="'1/8 Spiral Down-Cut'" name="tool_description"/>
+    <parameter expression="'2mm 2-Schneider gerade'" name="tool_description"/>
     <parameter expression="''" name="tool_comment"/>
     <parameter expression="''" name="tool_vendor"/>
     <parameter expression="''" name="tool_productId"/>
     <parameter expression="''" name="tool_productLink"/>
-    <parameter expression="0.125in" name="tool_diameter"/>
+    <parameter expression="2." name="tool_diameter"/>
     <parameter expression="tool_diameter + 2*tool_fluteLength*Math.tan(tool_taperAngle)" name="tool_maximumCuttingDiameter"/>
-    <parameter expression="0.125in" name="tool_tipDiameter"/>
-    <parameter expression="0.0in" name="tool_tipOffset"/>
-    <parameter expression="0.0in" name="tool_cornerRadius"/>
+    <parameter expression="2." name="tool_tipDiameter"/>
+    <parameter expression="0.0" name="tool_tipOffset"/>
+    <parameter expression="0.0" name="tool_cornerRadius"/>
     <parameter expression="0.0" name="tool_taperAngle"/>
     <parameter expression="(tool_type == 'counter sink') ? 90.0deg : ((tool_type == 'spot drill') ? 120deg : 118.0deg)" name="tool_tipAngle"/>
     <parameter expression="tool_type == 'thread mill' ? 'point' : 'round'" name="tool_threadTipType"/>
     <parameter expression="tool_type == 'thread mill' ? tool_threadPitch / 4 : tool_maximumThreadPitch / 8" name="tool_threadTipWidth"/>
     <parameter expression="(((tool_type == 'thread mill' ? tool_threadPitch / 4 : tool_maximumThreadPitch / (tool_internalThread ? 8 : 4))) / 2) / Math.cos(tool_threadProfileAngle / 2 radians)" name="tool_threadTipRadius"/>
     <parameter expression="60." name="tool_threadProfileAngle"/>
-    <parameter expression="0.0in" name="tool_tipLength"/>
-    <parameter expression="0.6692913in" name="tool_fluteLength"/>
+    <parameter expression="0.0" name="tool_tipLength"/>
+    <parameter expression="17." name="tool_fluteLength"/>
     <parameter expression="tool_fluteLength" name="tool_shoulderLength"/>
-    <parameter expression="tool_shoulderLength" name="tool_bodyLength"/>
-    <parameter expression="1.417323in" name="tool_overallLength"/>
-    <parameter expression="tool_diameter" name="tool_shaftDiameter"/>
-    <parameter expression="0.0in" name="tool_threadPitch"/>
+    <parameter expression="20." name="tool_bodyLength"/>
+    <parameter expression="38.1" name="tool_overallLength"/>
+    <parameter expression="3.175" name="tool_shaftDiameter"/>
+    <parameter expression="0.0" name="tool_threadPitch"/>
     <parameter expression="1.0mm" name="tool_maximumThreadPitch"/>
     <parameter expression="1.0mm" name="tool_minimumThreadPitch"/>
     <parameter expression="1" name="tool_numberOfTeeth"/>
     <parameter expression="2" name="tool_numberOfFlutes"/>
-    <parameter expression="0.125in" name="tool_shoulderDiameter"/>
+    <parameter expression="2." name="tool_shoulderDiameter"/>
     <parameter expression="(tool_type == 'circle segment barrel' ? (tool_diameter / 12) : (tool_type == 'circle segment taper' ? (tool_diameter / 2) : 0mm))" name="tool_upperRadius"/>
     <parameter expression="(tool_type == 'circle segment taper' ? (tool_diameter * 31.25) : (tool_type == 'circle segment oval' ? (tool_diameter * 15) : (tool_type == 'circle segment barrel' ? (tool_diameter * 4) : (tool_diameter * 0.6))))" name="tool_profileRadius"/>
     <parameter expression="(tool_type == 'circle segment taper' ? (tool_upperRadius / 2) : ((tool_type == 'circle segment barrel' ? tool_upperRadius : ((tool_type == 'circle segment lens' ? (tool_diameter): (tool_diameter / 6))))))" name="tool_lowerRadius"/>
@@ -116,8 +117,8 @@
     <parameter expression="''" name="holder_productId"/>
     <parameter expression="''" name="holder_productLink"/>
     <parameter expression="''" name="holder_libraryName"/>
-    <parameter expression="0.0in" name="tool_holderGaugeLength"/>
-    <parameter expression="0.6692913in" name="tool_assemblyGaugeLength"/>
+    <parameter expression="0.0" name="tool_holderGaugeLength"/>
+    <parameter expression="20." name="tool_assemblyGaugeLength"/>
     <parameter expression="'default'" name="preset_search"/>
     <parameter expression="''" name="preset_contains"/>
     <parameter expression="24000." name="tool_spindleSpeed"/>
@@ -131,7 +132,7 @@
     <parameter expression="tool_isDepositing ? 1000mmpm : tool_feedCutting" name="tool_feedExit"/>
     <parameter expression="tool_feedCutting" name="tool_feedTransition"/>
     <parameter expression="tool_feedPlunge" name="tool_feedRamp"/>
-    <parameter expression="32.28346456692914in/min" name="tool_feedPlunge"/>
+    <parameter expression="800." name="tool_feedPlunge"/>
     <parameter expression="(tool_spindleSpeed > 0) ? tool_feedPlunge / tool_spindleSpeed : 0.0" name="tool_feedPerRevolution"/>
     <parameter expression="tool_feedPlunge" name="tool_feedRetract"/>
     <parameter expression="(tool_spindleSpeed > 0) ? tool_feedRetract / tool_spindleSpeed : 0.0" name="tool_feedRetractPerRevolution"/>
@@ -197,8 +198,8 @@
     <parameter expression="'selection-faces'" name="holeMode"/>
     <parameter expression="'none'" name="holeSignatureSelection"/>
     <parameter expression="false" name="operationHoleSignature"/>
-    <parameter expression="false" name="holePoints"/>
-    <parameter expression="false" name="holeFaces"/>
+    <parameter expression="true" name="holePoints"/>
+    <parameter expression="true" name="holeFaces"/>
     <parameter expression="true" name="selectSameDiameter"/>
     <parameter expression="false" name="selectSameOrientation"/>
     <parameter expression="false" name="selectSameDepth"/>
@@ -226,7 +227,48 @@
     <parameter expression="true" name="includeSetupModel"/>
     <parameter expression="0mm" name="modelRadialClearance"/>
     <parameter expression="0mm" name="modelAxialClearance"/>
-    <parameter expression="false" name="checkSurfaceSelectionSets"/>
+    <parameter expression="true" name="checkSurfaceSelectionSets">
+      <CadFaceSets name="cadobject">
+        <CadFaceGroupFromParam>
+          <Parameters>
+            <Parameter expression="''" name="userDefinedName"/>
+            <Parameter expression="'drill'" name="currentStrategy"/>
+            <Parameter expression="false" name="ignoreHoles"/>
+            <Parameter expression="false" name="flipFloorNormals"/>
+            <Parameter expression="false" name="flipCeilingNormals"/>
+            <Parameter expression="true" name="swarfTrackFloor"/>
+            <Parameter expression="true" name="allowTouch"/>
+            <Parameter expression="true" name="allowAvoid"/>
+            <Parameter expression="true" name="allowIgnore"/>
+            <Parameter expression="true" name="allowFixture"/>
+            <Parameter expression="false" name="allowTable"/>
+            <Parameter expression="false" name="allowNone"/>
+            <Parameter expression="'touch'" name="machineMode"/>
+            <Parameter expression="'separate'" name="clearanceType"/>
+            <Parameter expression="0 mm" name="radialClearance"/>
+            <Parameter expression="0 mm" name="radialFixtureClearance"/>
+            <Parameter expression="0 mm" name="radialStockToLeave"/>
+            <Parameter expression="0 mm" name="axialClearance"/>
+            <Parameter expression="0 mm" name="axialFixtureClearance"/>
+            <Parameter expression="0 mm" name="axialStockToLeave"/>
+            <Parameter expression="0 mm" name="totalRadialClearance"/>
+            <Parameter expression="0 mm" name="totalRadialFixtureClearance"/>
+            <Parameter expression="0 mm" name="totalRadialStockToLeave"/>
+            <Parameter expression="0 mm" name="totalAxialClearance"/>
+            <Parameter expression="0 mm" name="totalAxialFixtureClearance"/>
+            <Parameter expression="0 mm" name="totalAxialStockToLeave"/>
+            <Parameter expression="0 mm" name="combinedClearance"/>
+            <Parameter expression="0 mm" name="combinedFixtureClearance"/>
+            <Parameter expression="0 mm" name="combinedTableClearance"/>
+            <Parameter expression="0 mm" name="combinedStockToLeave"/>
+            <Parameter expression="0 mm" name="totalClearance"/>
+            <Parameter expression="0 mm" name="totalFixtureClearance"/>
+            <Parameter expression="0 mm" name="totalTableClearance"/>
+            <Parameter expression="0 mm" name="totalStockToLeave"/>
+          </Parameters>
+        </CadFaceGroupFromParam>
+      </CadFaceSets>
+    </parameter>
     <parameter expression="isDrillingRefTrimming ? drillingReference.clearanceAreaType : (multiAxisMachiningType == 'four_axis' ? 'cylinder' : 'plane')" name="clearanceAreaType"/>
     <parameter expression="isDrillingRefTrimming ? (drillingReference.clearanceArea_orientation_mode == 'selectedAxis' ? 'refOpSelection' : drillingReference.clearanceArea_orientation_mode) : ((multiAxisMachiningType == 'four_axis' &amp;&amp; clearanceAreaType == 'cylinder') ? 'rotaryAxis' : 'toolAxisZ')" name="clearanceArea_orientation_mode"/>
     <parameter expression="false" name="clearanceArea_orientation_selAxis"/>
@@ -280,15 +322,15 @@
     <parameter expression="isDrillingRefTrimming ? drillingReference.symmetricalOffsets : true" name="symmetricalOffsets"/>
     <parameter expression="10." name="clearanceAreaCuboidPosZ_value"/>
     <parameter expression="isDrillingRefTrimming ? drillingReference.clearanceAreaCuboidPosZ_offset : 10mm" name="clearanceAreaCuboidPosZ_offset"/>
-    <parameter expression="10." name="clearanceAreaCuboidNegZ_value"/>
+    <parameter expression="26." name="clearanceAreaCuboidNegZ_value"/>
     <parameter expression="isDrillingRefTrimming ? drillingReference.clearanceAreaCuboidNegZ_offset : 10mm" name="clearanceAreaCuboidNegZ_offset"/>
-    <parameter expression="17.5" name="clearanceAreaCuboidPosY_value"/>
+    <parameter expression="79.96933796316671" name="clearanceAreaCuboidPosY_value"/>
     <parameter expression="isDrillingRefTrimming ? drillingReference.clearanceAreaCuboidPosY_offset : 10mm" name="clearanceAreaCuboidPosY_offset"/>
-    <parameter expression="17.5" name="clearanceAreaCuboidNegY_value"/>
+    <parameter expression="79.96933796316671" name="clearanceAreaCuboidNegY_value"/>
     <parameter expression="isDrillingRefTrimming ? drillingReference.clearanceAreaCuboidNegY_offset : 10mm" name="clearanceAreaCuboidNegY_offset"/>
-    <parameter expression="17.5" name="clearanceAreaCuboidPosX_value"/>
+    <parameter expression="78.36752688430632" name="clearanceAreaCuboidPosX_value"/>
     <parameter expression="isDrillingRefTrimming ? drillingReference.clearanceAreaCuboidPosX_offset : 10mm" name="clearanceAreaCuboidPosX_offset"/>
-    <parameter expression="17.5" name="clearanceAreaCuboidNegX_value"/>
+    <parameter expression="78.36752688430632" name="clearanceAreaCuboidNegX_value"/>
     <parameter expression="isDrillingRefTrimming ? drillingReference.clearanceAreaCuboidNegX_offset : 10mm" name="clearanceAreaCuboidNegX_offset"/>
     <parameter expression="isDrillingRefTrimming ? (drillingReference.retractHeight_mode == 'from point' ? 'from reference operation' : drillingReference.retractHeight_mode) : 'from stock top'" name="retractHeight_mode"/>
     <parameter expression="'1'" name="retractHeight_segmentIndex"/>
@@ -376,7 +418,7 @@
     <parameter expression="1mm" name="pitch"/>
     <parameter expression="true" name="useHoleDiameter"/>
     <parameter expression="2 * tool_diameter" name="diameter"/>
-    <parameter expression="4mm" name="peckingDepth"/>
+    <parameter expression="3mm" name="peckingDepth"/>
     <parameter expression="1mm" name="peckingDepthReduction"/>
     <parameter expression="1mm" name="minimumPeckingDepth"/>
     <parameter expression="Math.max(tool_diameter * 2.5; peckingDepth)" name="accumulatedPeckingDepth"/>
@@ -463,17 +505,17 @@
     <parameter expression="10." name="connectionMoveClearanceAreaSphereRadius_value"/>
     <parameter expression="'from stock box'" name="connectionMoveClearanceAreaCuboid_mode"/>
     <parameter expression="true" name="connectionMoveClearanceAreaCuboid_symmetricalOffsets"/>
-    <parameter expression="17.5" name="connectionMoveClearanceAreaCuboidPosX_value"/>
+    <parameter expression="78.36752688430632" name="connectionMoveClearanceAreaCuboidPosX_value"/>
     <parameter expression="10mm" name="connectionMoveClearanceAreaCuboidPosX_offset"/>
-    <parameter expression="17.5" name="connectionMoveClearanceAreaCuboidNegX_value"/>
+    <parameter expression="78.36752688430632" name="connectionMoveClearanceAreaCuboidNegX_value"/>
     <parameter expression="10mm" name="connectionMoveClearanceAreaCuboidNegX_offset"/>
-    <parameter expression="17.5" name="connectionMoveClearanceAreaCuboidPosY_value"/>
+    <parameter expression="79.96933796316671" name="connectionMoveClearanceAreaCuboidPosY_value"/>
     <parameter expression="10mm" name="connectionMoveClearanceAreaCuboidPosY_offset"/>
-    <parameter expression="17.5" name="connectionMoveClearanceAreaCuboidNegY_value"/>
+    <parameter expression="79.96933796316671" name="connectionMoveClearanceAreaCuboidNegY_value"/>
     <parameter expression="10mm" name="connectionMoveClearanceAreaCuboidNegY_offset"/>
     <parameter expression="10." name="connectionMoveClearanceAreaCuboidPosZ_value"/>
     <parameter expression="10mm" name="connectionMoveClearanceAreaCuboidPosZ_offset"/>
-    <parameter expression="10." name="connectionMoveClearanceAreaCuboidNegZ_value"/>
+    <parameter expression="26." name="connectionMoveClearanceAreaCuboidNegZ_value"/>
     <parameter expression="10mm" name="connectionMoveClearanceAreaCuboidNegZ_offset"/>
     <parameter expression="false" name="use_tool_stepdown"/>
     <parameter expression="4.2" name="tool_stepdown"/>
