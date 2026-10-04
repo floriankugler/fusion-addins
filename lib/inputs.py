@@ -44,6 +44,18 @@ class Input(ABC):
     def create_named_values(self, feature: adsk.fusion.CustomFeature):
         pass
 
+    def save_state(self) -> Any:
+        """JSON-serializable snapshot of the current value, stored with a
+        group of native features so the dialog can edit it again (see
+        lib/group_edit.py). None leaves the input out of that state."""
+        return None
+
+    def restore_state(self, state: Any, design: adsk.fusion.Design) -> bool:
+        """Applies a snapshot taken by save_state, to the dialog control too
+        once it exists. Returns False when the value could not be
+        restored."""
+        return False
+
     def _update_visibility(self):
         if self.input:
             self.input.isVisible = self.update_visibility()
@@ -96,6 +108,18 @@ class CheckboxInput(Input):
         if val is not None:
             self.value = val
 
+    def save_state(self) -> Any:
+        return bool(self.value)
+
+    def restore_state(self, state: Any, design: adsk.fusion.Design) -> bool:
+        if not isinstance(state, bool):
+            return False
+        self.default_value = state
+        self.value = state
+        if self.input:
+            self.input.value = state
+        return True
+
 
 class StringInput(Input):
     default_value: str
@@ -134,6 +158,18 @@ class StringInput(Input):
         val = self.input.value
         if val is not None:
             self.value = val
+
+    def save_state(self) -> Any:
+        return self.value
+
+    def restore_state(self, state: Any, design: adsk.fusion.Design) -> bool:
+        if not isinstance(state, str):
+            return False
+        self.default_value = state
+        self.value = state
+        if self.input:
+            self.input.value = state
+        return True
 
 
 class FloatInput(Input):
@@ -194,6 +230,20 @@ class FloatInput(Input):
             except:
                 pass
 
+    def save_state(self) -> Any:
+        # The expression, not the value: it keeps references to user
+        # parameters alive across an edit.
+        return self.expression or None
+
+    def restore_state(self, state: Any, design: adsk.fusion.Design) -> bool:
+        if not isinstance(state, str) or not design.unitsManager.isValidExpression(state, self.units):
+            return False
+        self.default_expression = state
+        self.expression = state
+        if self.input:
+            self.input.expression = state
+        return True
+
 class IntegerInput(Input):
     default_value: int
     value: int
@@ -227,6 +277,22 @@ class IntegerInput(Input):
         val = self.input.value
         if val is not None:
             self.value = val
+
+    def save_state(self) -> Any:
+        return int(self.value)
+
+    def restore_state(self, state: Any, design: adsk.fusion.Design) -> bool:
+        if (
+            not isinstance(state, int)
+            or isinstance(state, bool)
+            or not self.minimum_value <= state <= self.maximum_value
+        ):
+            return False
+        self.default_value = state
+        self.value = state
+        if self.input:
+            self.input.value = state
+        return True
 
 class DropDownInput(Input):
     @dataclass
@@ -273,6 +339,20 @@ class DropDownInput(Input):
             raise errors.InvalidInputError(f"Dropdown '{self.name}' has no selected item.")
         val = self._option_value_for_name(selected.name)
         self.value = val
+
+    def save_state(self) -> Any:
+        return int(self.value)
+
+    def restore_state(self, state: Any, design: adsk.fusion.Design) -> bool:
+        if not any(option.value == state for option in self.options):
+            return False
+        self.default_value = state
+        self.value = state
+        if self.input:
+            name = self._option_name_for_value(state)
+            for item in self.input.listItems:
+                item.isSelected = item.name == name
+        return True
 
     def _option_name_for_value(self, value: int) -> str:
         for item in self.options:
@@ -432,6 +512,33 @@ class SelectionByEntityTokenInput(Input):
                 fresh_tokens.append(token)
         self.value = fresh
         self.tokens = fresh_tokens
+
+    def save_state(self) -> Any:
+        return [token for token in self.tokens if token]
+
+    def restore_state(self, state: Any, design: adsk.fusion.Design) -> bool:
+        """Resolves the saved entity tokens. Must run while the timeline is
+        rolled back to where the entities were selected: features after
+        that point can split or consume them."""
+        if not isinstance(state, list):
+            return False
+        entities = []
+        tokens = []
+        for token in state:
+            try:
+                found = design.findEntityByToken(token)
+            except RuntimeError:
+                found = []
+            if found:
+                entities.append(found[0])
+                tokens.append(token)
+        self.value = entities
+        self.tokens = tokens
+        if self.input:
+            self.input.clearSelection()
+            for entity in entities:
+                self.input.addSelection(entity)
+        return len(entities) == len(state)
 
     @property
     def dependency_id_prefix(self):

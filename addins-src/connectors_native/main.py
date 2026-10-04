@@ -260,6 +260,17 @@ class _OptionalFloatInput(inputs.Input):
         )
         self.input.isValueError = False
 
+    def save_state(self) -> str:
+        return self.expression or ""
+
+    def restore_state(self, state, design: adsk.fusion.Design) -> bool:
+        if not isinstance(state, str):
+            return False
+        self.expression = state or None
+        if self.input:
+            self.input.value = state
+        return True
+
     def create_in_feature_input(
         self,
         feature_input: adsk.fusion.CustomFeatureInput,
@@ -888,6 +899,12 @@ class ConnectorsNative(addin.Addin):
     def preview_enabled(self) -> bool:
         # All of execute() is native features (sketches + cut extrudes), so
         # the shared executePreview support can run it as a live preview.
+        return True
+
+    @property
+    def group_edit_enabled(self) -> bool:
+        # Experiment: execute() builds every feature at the marker and
+        # stores its state on the group's first sketch.
         return True
 
     def get_ui_placement(self) -> ui_placement.UIPlacement:
@@ -3670,6 +3687,7 @@ class ConnectorsNative(addin.Addin):
         if group:
             group.name = "Connector (Native)"
             group.isCollapsed = True
+        self.store_edit_state(first_sketch)
 
     def _require_fully_constrained(
         self,
