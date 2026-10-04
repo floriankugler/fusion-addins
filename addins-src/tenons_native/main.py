@@ -8,7 +8,7 @@ from typing import cast
 import adsk.core
 import adsk.fusion
 
-from lib import addin, inputs, ui_placement, utils
+from lib import addin, domino, edge_sketch, inputs, ui_placement, utils
 from lib.fusionbootstrap.runtime import RuntimeInfo
 
 
@@ -19,6 +19,28 @@ _addin: addin.Addin | None = None
 # instead of dimensioned - an offset dimension between coincident lines is
 # degenerate.
 _ZERO_OFFSET = 1e-6
+
+# Countersunk screw heads (SPAX Universal) are about twice as wide as the
+# thread: 3.5 -> 7.0, 4.0 -> 8.0, 4.5 -> 8.8, 5.0 -> 9.7 mm. A 90 degree
+# countersink twice the Screw Diameter plus this margin wide lets the head
+# sit a hair (0.2 to 0.35 mm) below the surface.
+_COUNTERSINK_ANGLE = "90 deg"
+_COUNTERSINK_MARGIN = "0.4 mm"
+
+
+def _countersink_diameter_expression(screw_diameter: str) -> str:
+    return f"2 * ({screw_diameter}) + {_COUNTERSINK_MARGIN}"
+
+
+@unique
+class TenonType(Enum):
+    """INTEGRAL tenons grow out of the selected board into mortises cut
+    into the mating board. DOMINO tenons are loose Festool DOMINOs: the
+    mating board gets the slots, and the mortises in the selected board's
+    end are left to the Domino machine (see lib/domino.py)."""
+
+    INTEGRAL = 1
+    DOMINO = 2
 
 
 @unique
@@ -130,6 +152,9 @@ class _HoleSpec:
     depth: str | None  # None cuts through the whole target body.
     name: str
     parameter_role: str
+    # A 90 degree countersink at the start of the hole, sized for the
+    # screw's head (see _countersink_diameter_expression).
+    countersink: bool = False
 
 
 def run(context, runtime_info: RuntimeInfo):
@@ -152,7 +177,14 @@ def stop(context):
     _addin = None
 
 
-class TenonsNativeInputs(inputs.Inputs):
+class TenonsNativeInputs(domino.DominoInputs, inputs.Inputs):
+    class TenonTypes:
+        INTEGRAL = inputs.DropDownInput.Item(
+            "Integral",
+            TenonType.INTEGRAL.value,
+        )
+        DOMINO = inputs.DropDownInput.Item("Domino", TenonType.DOMINO.value)
+
     class Positioning:
         NUMBER = inputs.DropDownInput.Item("Number of Tenons", 1)
         POINTS = inputs.DropDownInput.Item("Custom Points", 2)
@@ -225,6 +257,23 @@ class TenonsNativeInputs(inputs.Inputs):
             upper_bound=1,
             tool_tip="Select one straight edge along which to create tenons.",
         )
+        self.tenon_type = inputs.DropDownInput(
+            id="tenonType",
+            name="Tenon Type",
+            options=utils.misc.class_property_values(
+                TenonsNativeInputs.TenonTypes,
+                inputs.DropDownInput.Item,
+            ),
+            default_value=TenonsNativeInputs.TenonTypes.INTEGRAL.value,
+            tool_tip=(
+                "Integral tenons grow out of the selected board into "
+                "mortises cut into the mating board. Domino cuts slots for "
+                "Festool DOMINO tenons into the mating board; the mortises in "
+                "the selected board's end are left to the Domino machine."
+            ),
+        )
+        is_integral = lambda: not self.is_domino()
+        self.add_domino_size_input(self.is_domino)
         self.positioning = inputs.DropDownInput(
             id="positioning",
             name="Positioning",
@@ -264,6 +313,31 @@ class TenonsNativeInputs(inputs.Inputs):
                 == TenonsNativeInputs.Positioning.NUMBER.value
             ),
         )
+        has_end_distance = lambda: (
+            self.positioning.value
+            == TenonsNativeInputs.Positioning.NUMBER.value
+            and self.number_of_tenons.value > 1
+        )
+        self.add_domino_end_stop_input(
+            lambda: self.is_domino() and has_end_distance()
+        )
+        self.domino_offset = inputs.FloatInput(
+            id="dominoOffset",
+            name="End Offset",
+            default_value=5.0,
+            tool_tip=(
+                "Distance from each end of the selected edge to the center of "
+                "the first and last Domino."
+            ),
+            units=units,
+            update_visibility=lambda: (
+                self.is_domino()
+                and has_end_distance()
+                and self.domino_end_stop.value
+                == domino.EndStop.CUSTOM.value
+            ),
+        )
+        self.domino_offset.minimum_value = 0
         self.distance_from_edge = inputs.FloatInput(
             id="distanceFromEdge",
             name="End Margin",
@@ -272,11 +346,7 @@ class TenonsNativeInputs(inputs.Inputs):
                 "Distance from each edge endpoint to the nearest tenon edge."
             ),
             units=units,
-            update_visibility=lambda: (
-                self.positioning.value
-                == TenonsNativeInputs.Positioning.NUMBER.value
-                and self.number_of_tenons.value > 1
-            ),
+            update_visibility=lambda: is_integral() and has_end_distance(),
         )
         self.distance_from_edge.minimum_value = 0
         self.distribute_evenly = inputs.CheckboxInput(
@@ -288,11 +358,7 @@ class TenonsNativeInputs(inputs.Inputs):
                 "between two tenons is equally wide. The End Margin stays a "
                 "manual input and is not part of the pattern."
             ),
-            update_visibility=lambda: (
-                self.positioning.value
-                == TenonsNativeInputs.Positioning.NUMBER.value
-                and self.number_of_tenons.value > 1
-            ),
+            update_visibility=lambda: is_integral() and has_end_distance(),
         )
         self.width = inputs.FloatInput(
             id="width",
@@ -300,7 +366,9 @@ class TenonsNativeInputs(inputs.Inputs):
             default_value=5.0,
             tool_tip="Width of every tenon along the selected edge.",
             units=units,
-            update_visibility=lambda: not self.distributing_evenly(),
+            update_visibility=lambda: (
+                is_integral() and not self.distributing_evenly()
+            ),
         )
         self.width.minimum_value = 0
         self.remaining_material = inputs.FloatInput(
@@ -309,6 +377,7 @@ class TenonsNativeInputs(inputs.Inputs):
             default_value=0,
             tool_tip="Material to leave at the back of the mortise board.",
             units=units,
+            update_visibility=is_integral,
         )
         self.remaining_material.minimum_value = 0
         self.mortise_length_offset = inputs.FloatInput(
@@ -317,6 +386,7 @@ class TenonsNativeInputs(inputs.Inputs):
             default_value=0.01,
             tool_tip="Clearance added to the mortise along the selected edge.",
             units=units,
+            update_visibility=is_integral,
         )
         # Zero is allowed: the mortise then matches the tenon exactly, and the
         # rectangle side is constrained collinear with the projected tenon
@@ -328,6 +398,7 @@ class TenonsNativeInputs(inputs.Inputs):
             default_value=0.01,
             tool_tip="Clearance added across the tenon-board thickness.",
             units=units,
+            update_visibility=is_integral,
         )
         self.mortise_width_offset.minimum_value = 0
         self.mortise_depth_offset = inputs.FloatInput(
@@ -336,6 +407,7 @@ class TenonsNativeInputs(inputs.Inputs):
             default_value=0.05,
             tool_tip="Extra depth added beyond the tenon length.",
             units=units,
+            update_visibility=is_integral,
         )
         self.tool_diameter = inputs.FloatInput(
             id="toolDiameter",
@@ -343,6 +415,7 @@ class TenonsNativeInputs(inputs.Inputs):
             default_value=0.6,
             tool_tip="Router diameter used for the tenon and mortise dog bones.",
             units=units,
+            update_visibility=is_integral,
         )
         self.tool_diameter.minimum_value = 0
         self.dog_bone_offset = inputs.FloatInput(
@@ -351,6 +424,7 @@ class TenonsNativeInputs(inputs.Inputs):
             default_value=0.01,
             tool_tip="Extra diameter added to every dog-bone relief.",
             units=units,
+            update_visibility=is_integral,
         )
         self.hide_dogbones = inputs.CheckboxInput(
             id="hideDogbones",
@@ -362,7 +436,9 @@ class TenonsNativeInputs(inputs.Inputs):
                 "grows past its short edge and the relief bites into the tenon "
                 "instead of the board shoulder."
             ),
+            update_visibility=is_integral,
         )
+        self.add_domino_slot_inputs(units, self.is_domino, "mortise board")
 
         self.connector = inputs.DropDownInput(
             id="connector",
@@ -396,6 +472,21 @@ class TenonsNativeInputs(inputs.Inputs):
             tool_tip="Screw-hole placement in the mortise board.",
             update_visibility=is_screw,
         )
+        self.countersink_screws = inputs.CheckboxInput(
+            id="countersinkScrews",
+            name="Countersink",
+            default_value=False,
+            tool_tip=(
+                "Countersinks the mortise screw holes at 90 degrees on the "
+                "mortise board's outer face, so a countersunk screw head "
+                "(e.g. SPAX) sits just below flush. The countersink is twice "
+                "the Screw Diameter plus 0.4 mm wide."
+            ),
+            update_visibility=lambda: (
+                is_screw()
+                and self.mortise_screw.value != ScrewType.NONE.value
+            ),
+        )
         self.tenon_screw = inputs.DropDownInput(
             id="tenonScrew",
             name="Tenon Screw",
@@ -405,7 +496,7 @@ class TenonsNativeInputs(inputs.Inputs):
             ),
             default_value=TenonsNativeInputs.Screws.NONE.value,
             tool_tip="Screw-hole placement through the tenons.",
-            update_visibility=is_screw,
+            update_visibility=lambda: is_screw() and is_integral(),
         )
         self.screw_offset = inputs.FloatInput(
             id="screwOffset",
@@ -417,7 +508,7 @@ class TenonsNativeInputs(inputs.Inputs):
                 is_screw()
                 and (
                     self.mortise_screw.value == ScrewType.TWO_SIDES.value
-                    or self.tenon_screw.value == ScrewType.TWO_SIDES.value
+                    or self.tenon_screw_type() == ScrewType.TWO_SIDES
                 )
             ),
         )
@@ -540,16 +631,29 @@ class TenonsNativeInputs(inputs.Inputs):
 
         super().__init__()
 
+    def is_domino(self) -> bool:
+        return self.tenon_type.value == TenonType.DOMINO.value
+
     def distributing_evenly(self) -> bool:
         """True while the tenon width is derived from the edge instead of
         typed in. Only an exact number of tenons can be distributed, and a
-        single tenon has no gap to match, so the option is inert otherwise."""
+        single tenon has no gap to match, so the option is inert otherwise.
+        Dominos have a fixed width."""
         return (
-            self.positioning.value
+            not self.is_domino()
+            and self.positioning.value
             == TenonsNativeInputs.Positioning.NUMBER.value
             and self.number_of_tenons.value > 1
             and self.distribute_evenly.value
         )
+
+    def tenon_screw_type(self) -> ScrewType:
+        """The Tenon Screw setting, NONE for Dominos: a Domino is a loose
+        tenon, so there is no tenon of the selected board to drill
+        through."""
+        if self.is_domino():
+            return ScrewType.NONE
+        return ScrewType(self.tenon_screw.value)
 
 
 class TenonsNative(addin.Addin):
@@ -573,13 +677,18 @@ class TenonsNative(addin.Addin):
 
     @property
     def plugin_desc(self) -> str:
-        return "Create sheet-good tenons and mortises with native Fusion features."
+        return (
+            "Create sheet-good tenons and mortises, or Domino slots, with "
+            "native Fusion features."
+        )
 
     @property
     def plugin_tooltip(self) -> str:
         return (
             "Creates fully constrained sketches, join and cut extrudes, dog "
-            "bones, and optional connector holes in the standard timeline."
+            "bones, and optional connector holes in the standard timeline. "
+            "Domino tenons cut Festool DOMINO slots into the mating board "
+            "instead."
         )
 
     @property
@@ -644,6 +753,10 @@ class TenonsNative(addin.Addin):
         }
 
         positions = self._tenon_positions(geometry.edge)
+        if self.inputs.is_domino():
+            self._execute_domino(component, geometry, positions)
+            return
+
         tenon_through_direction = utils.brep.normal_towards_face(
             geometry.tenon_face,
             geometry.tenon_opposite_face,
@@ -693,33 +806,12 @@ class TenonsNative(addin.Addin):
         )
         self._require_fully_constrained(root_dogbone_sketch)
 
-        connector_type = ConnectorType(self.inputs.connector.value)
-        connector_sketches: list[adsk.fusion.Sketch] = []
-        connector_specs: list[_CutSpec] = []
-        connector_holes: list[_HoleSpec] = []
-        if connector_type == ConnectorType.SCREW:
-            (
-                connector_sketches,
-                connector_specs,
-                connector_holes,
-            ) = self._create_screw_sketches(
-                component,
-                geometry,
-                layout,
-            )
-        elif connector_type.is_clamex or connector_type.is_cabineo:
-            (
-                connector_sketches,
-                connector_specs,
-                connector_holes,
-            ) = self._create_lamello_sketches(
-                component,
-                geometry,
-                layout,
-                connector_type,
-            )
-        for sketch in connector_sketches:
-            self._require_fully_constrained(sketch)
+        connector_specs, connector_holes = self._create_connector_sketches(
+            component,
+            geometry,
+            layout.bases,
+            layout.outers,
+        )
 
         last_feature = self._create_join_combine(
             component,
@@ -755,6 +847,140 @@ class TenonsNative(addin.Addin):
             name="Tenons (Native) - Mortise Cut",
             parameter_role="mortiseDepth",
         )
+        last_feature = self._cut_connectors(
+            component,
+            connector_specs,
+            connector_holes,
+            last_feature,
+        )
+
+        self.group_features(
+            layout.context.sketch,
+            last_feature,
+            "Tenons (Native)",
+        )
+
+    def _execute_domino(
+        self,
+        component: adsk.fusion.Component,
+        geometry: _ResolvedGeometry,
+        positions: list[adsk.core.Point3D],
+    ) -> None:
+        """Dominos are loose tenons: instead of growing tenons out of the
+        selected board and cutting mortises around them, the mortise board
+        gets Domino slots. The mortises in the selected board's end are left
+        to the Domino machine; optional V-grooves next to the selected edge
+        mark their positions. The connectors go between the Dominos, the
+        way they go between integral tenons."""
+        builder = domino.DominoBuilder(
+            edge_sketch.EdgeSketcher(
+                self._set_parameter_expression,
+                self._name_parameter,
+            ),
+            self.inputs,
+            "Tenons (Native)",
+        )
+        custom_points: list[adsk.core.Base] | None = None
+        if (
+            self.inputs.positioning.value
+            == TenonsNativeInputs.Positioning.POINTS.value
+        ):
+            custom_points = list(self._sorted_custom_points(geometry.edge))
+        sketches = builder.create_sketches(
+            component,
+            [
+                domino.Board(
+                    geometry.edge,
+                    geometry.small_face,
+                    geometry.tenon_thickness,
+                )
+            ],
+            positions,
+            custom_points,
+            self.inputs.domino_end_offset(self.inputs.domino_offset),
+            footprints=(
+                ConnectorType(self.inputs.connector.value)
+                != ConnectorType.NONE
+            ),
+        )
+        # The connector sketches project the Domino footprints like they
+        # project integral tenon bases. Dominos have no outer ends: there is
+        # no tenon screw to center on them.
+        connector_specs, connector_holes = self._create_connector_sketches(
+            component,
+            geometry,
+            sketches.footprints,
+            [],
+        )
+        last_feature = builder.cut(
+            component,
+            sketches,
+            self._body_tokens["mortise"],
+            geometry.mortise_opposite_face.entityToken,
+            [self._body_tokens["tenon"]],
+        )
+        last_feature = self._cut_connectors(
+            component,
+            connector_specs,
+            connector_holes,
+            last_feature,
+        )
+        self.group_features(
+            sketches.positions,
+            last_feature,
+            "Tenons (Native)",
+        )
+
+    def _create_connector_sketches(
+        self,
+        component: adsk.fusion.Component,
+        geometry: _ResolvedGeometry,
+        bases: list[adsk.fusion.SketchLine],
+        outers: list[adsk.fusion.SketchLine],
+    ) -> tuple[list[_CutSpec], list[_HoleSpec]]:
+        """Sketches the connector holes against the tenons' `bases` on the
+        selected edge (and, for tenon screws, their `outers`). Returns the
+        cuts and holes to create from them once every sketch exists."""
+        connector_type = ConnectorType(self.inputs.connector.value)
+        connector_sketches: list[adsk.fusion.Sketch] = []
+        connector_specs: list[_CutSpec] = []
+        connector_holes: list[_HoleSpec] = []
+        if connector_type == ConnectorType.SCREW:
+            (
+                connector_sketches,
+                connector_specs,
+                connector_holes,
+            ) = self._create_screw_sketches(
+                component,
+                geometry,
+                bases,
+                outers,
+            )
+        elif connector_type.is_clamex or connector_type.is_cabineo:
+            (
+                connector_sketches,
+                connector_specs,
+                connector_holes,
+            ) = self._create_lamello_sketches(
+                component,
+                geometry,
+                bases,
+                outers,
+                connector_type,
+            )
+        for sketch in connector_sketches:
+            self._require_fully_constrained(sketch)
+        return connector_specs, connector_holes
+
+    def _cut_connectors(
+        self,
+        component: adsk.fusion.Component,
+        connector_specs: list[_CutSpec],
+        connector_holes: list[_HoleSpec],
+        last_feature: adsk.fusion.Feature,
+    ) -> adsk.fusion.Feature:
+        """Creates the connector cuts and holes. Returns the last feature
+        created, `last_feature` when there are none."""
         for spec in connector_specs:
             target_body = self._target_body(component, spec.body_role)
             if spec.distance is None:
@@ -786,12 +1012,7 @@ class TenonsNative(addin.Addin):
                 hole_spec,
                 self._target_body(component, hole_spec.body_role),
             )
-
-        self.group_features(
-            layout.context.sketch,
-            last_feature,
-            "Tenons (Native)",
-        )
+        return last_feature
 
     def _validation_error(self) -> str | None:
         design = adsk.fusion.Design.cast(self.app.activeProduct)
@@ -827,7 +1048,138 @@ class TenonsNative(addin.Addin):
         if geometry.tenon_face.body == geometry.mortise_face.body:
             return "The mortises must be cut into a second solid body."
 
-        tenon_width = self._tenon_width(geometry.edge)
+        if self.inputs.is_domino():
+            error = self._domino_validation_error(geometry)
+            if error:
+                return error
+            size = self.inputs.domino_size_spec()
+            loose_extra = self.inputs.domino_loose_extra()
+            # The checks below judge each tenon by its footprint along the
+            # edge. Loose slots are longer than the exact one, so a Domino
+            # takes up the longest slot's length.
+            tenon_width = self.inputs.domino_slot_length(size) + (
+                loose_extra[0] if loose_extra else 0
+            )
+            tenon_noun = "Domino"
+        else:
+            tenon_width = self._tenon_width(geometry.edge)
+            error = self._integral_validation_error(geometry, tenon_width)
+            if error:
+                return error
+            tenon_noun = "tenon"
+
+        intervals = sorted(
+            self._distance_from_edge_start(geometry.edge, point)
+            for point in positions
+        )
+        half_width = tenon_width / 2
+        if intervals[0] < half_width - 1e-6:
+            return f"The first {tenon_noun} extends beyond the selected edge."
+        if intervals[-1] > geometry.edge.length - half_width + 1e-6:
+            return f"The last {tenon_noun} extends beyond the selected edge."
+        if any(
+            right - left < tenon_width - 1e-6
+            for left, right in zip(intervals, intervals[1:])
+        ):
+            return f"The selected {tenon_noun} positions overlap."
+
+        connector = ConnectorType(self.inputs.connector.value)
+        if connector.is_clamex or connector.is_cabineo:
+            minimum_gap = 12.0 if connector.is_clamex else 4.0
+            gaps = [
+                intervals[0] - half_width,
+                *[
+                    right - left - tenon_width
+                    for left, right in zip(intervals, intervals[1:])
+                ],
+                geometry.edge.length - intervals[-1] - half_width,
+            ]
+            if min(gaps) < minimum_gap - 1e-6:
+                return (
+                    f"Every connector gap must be at least "
+                    f"{minimum_gap * 10:g} mm."
+                )
+            if connector.is_clamex and (
+                self.inputs.clamex_guide_hole_diameter.value <= 0
+            ):
+                return "Guide Hole Diameter must be greater than zero."
+            if (
+                connector.is_cabineo
+                and self.inputs.cabineo_surface.value
+                == CabineoSurface.ANTI_BREAK.value
+                and self.inputs.cabineo_anti_break_depth.value <= 0
+            ):
+                return "Anti-Break Depth must be greater than zero."
+        if connector == ConnectorType.SCREW:
+            if self.inputs.screw_diameter.value <= 0:
+                return "Screw Diameter must be greater than zero."
+            if (
+                self.inputs.mortise_screw.value != ScrewType.NONE.value
+                and self.inputs.countersink_screws.value
+            ):
+                # A 90 degree countersink is half as deep as it is wider
+                # than the hole.
+                countersink_depth = (
+                    self.inputs.screw_diameter.value
+                    + design.unitsManager.evaluateExpression(
+                        _COUNTERSINK_MARGIN,
+                        "cm",
+                    )
+                ) / 2
+                if countersink_depth >= geometry.mortise_thickness - 1e-6:
+                    return (
+                        "The screw countersink is deeper than the mortise "
+                        "board is thick."
+                    )
+            if (
+                self.inputs.mortise_screw.value == ScrewType.TWO_SIDES.value
+                or self.inputs.tenon_screw_type() == ScrewType.TWO_SIDES
+            ) and self.inputs.screw_offset.value <= 0:
+                return (
+                    "Screw Offset must be greater than zero for two-sided "
+                    "screws."
+                )
+            if (
+                self.inputs.tenon_screw_type() == ScrewType.TWO_SIDES
+                and 2 * self.inputs.screw_offset.value
+                >= tenon_width - 1e-6
+            ):
+                return (
+                    "Screw Offset must be smaller than half the Tenon Width "
+                    "for two-sided tenon screws."
+                )
+        if (
+            connector == ConnectorType.CABINEO_8_M6
+            and self.inputs.cabineo_insert_type.value
+            == CabineoInsert.THREADED_INSERT.value
+        ):
+            values = [
+                (self.inputs.threaded_insert_core_diameter.value, "Core Diameter"),
+                (self.inputs.threaded_insert_core_depth.value, "Core Depth"),
+                (
+                    self.inputs.threaded_insert_collar_diameter.value,
+                    "Collar Diameter",
+                ),
+                (
+                    self.inputs.threaded_insert_collar_depth.value,
+                    "Collar Depth",
+                ),
+            ]
+            for value, name in values:
+                if value <= 0:
+                    return f"{name} must be greater than zero."
+            if (
+                self.inputs.threaded_insert_collar_diameter.value
+                < self.inputs.threaded_insert_core_diameter.value
+            ):
+                return "Collar Diameter cannot be smaller than Core Diameter."
+        return None
+
+    def _integral_validation_error(
+        self,
+        geometry: _ResolvedGeometry,
+        tenon_width: float,
+    ) -> str | None:
         if tenon_width <= 0:
             if self.inputs.distributing_evenly():
                 return (
@@ -886,95 +1238,32 @@ class TenonsNative(addin.Addin):
                     "Hidden dog bones would reach past the end of the tenon: "
                     "reduce Tool Diameter or Remaining Material."
                 )
-
-        intervals = sorted(
-            self._distance_from_edge_start(geometry.edge, point)
-            for point in positions
-        )
-        half_width = tenon_width / 2
-        if intervals[0] < half_width - 1e-6:
-            return "The first tenon extends beyond the selected edge."
-        if intervals[-1] > geometry.edge.length - half_width + 1e-6:
-            return "The last tenon extends beyond the selected edge."
-        if any(
-            right - left < tenon_width - 1e-6
-            for left, right in zip(intervals, intervals[1:])
-        ):
-            return "The selected tenon positions overlap."
-
-        connector = ConnectorType(self.inputs.connector.value)
-        if connector.is_clamex or connector.is_cabineo:
-            minimum_gap = 12.0 if connector.is_clamex else 4.0
-            gaps = [
-                intervals[0] - half_width,
-                *[
-                    right - left - tenon_width
-                    for left, right in zip(intervals, intervals[1:])
-                ],
-                geometry.edge.length - intervals[-1] - half_width,
-            ]
-            if min(gaps) < minimum_gap - 1e-6:
-                return (
-                    f"Every connector gap must be at least "
-                    f"{minimum_gap * 10:g} mm."
-                )
-            if connector.is_clamex and (
-                self.inputs.clamex_guide_hole_diameter.value <= 0
-            ):
-                return "Guide Hole Diameter must be greater than zero."
-            if (
-                connector.is_cabineo
-                and self.inputs.cabineo_surface.value
-                == CabineoSurface.ANTI_BREAK.value
-                and self.inputs.cabineo_anti_break_depth.value <= 0
-            ):
-                return "Anti-Break Depth must be greater than zero."
-        if connector == ConnectorType.SCREW:
-            if self.inputs.screw_diameter.value <= 0:
-                return "Screw Diameter must be greater than zero."
-            if (
-                self.inputs.mortise_screw.value == ScrewType.TWO_SIDES.value
-                or self.inputs.tenon_screw.value == ScrewType.TWO_SIDES.value
-            ) and self.inputs.screw_offset.value <= 0:
-                return (
-                    "Screw Offset must be greater than zero for two-sided "
-                    "screws."
-                )
-            if (
-                self.inputs.tenon_screw.value == ScrewType.TWO_SIDES.value
-                and 2 * self.inputs.screw_offset.value
-                >= tenon_width - 1e-6
-            ):
-                return (
-                    "Screw Offset must be smaller than half the Tenon Width "
-                    "for two-sided tenon screws."
-                )
-        if (
-            connector == ConnectorType.CABINEO_8_M6
-            and self.inputs.cabineo_insert_type.value
-            == CabineoInsert.THREADED_INSERT.value
-        ):
-            values = [
-                (self.inputs.threaded_insert_core_diameter.value, "Core Diameter"),
-                (self.inputs.threaded_insert_core_depth.value, "Core Depth"),
-                (
-                    self.inputs.threaded_insert_collar_diameter.value,
-                    "Collar Diameter",
-                ),
-                (
-                    self.inputs.threaded_insert_collar_depth.value,
-                    "Collar Depth",
-                ),
-            ]
-            for value, name in values:
-                if value <= 0:
-                    return f"{name} must be greater than zero."
-            if (
-                self.inputs.threaded_insert_collar_diameter.value
-                < self.inputs.threaded_insert_core_diameter.value
-            ):
-                return "Collar Diameter cannot be smaller than Core Diameter."
         return None
+
+    def _domino_validation_error(
+        self,
+        geometry: _ResolvedGeometry,
+    ) -> str | None:
+        if (
+            self.inputs.positioning.value
+            == TenonsNativeInputs.Positioning.NUMBER.value
+            and self.inputs.number_of_tenons.value > 1
+        ):
+            end_offset, _ = self.inputs.domino_end_offset(
+                self.inputs.domino_offset
+            )
+            if end_offset < 0:
+                return "End Offset cannot be negative."
+            if 2 * end_offset >= geometry.edge.length - 1e-6:
+                return (
+                    "End Offset must leave positive spacing between the first "
+                    "and last Domino."
+                )
+        return self.inputs.domino_validation_error(
+            geometry.tenon_thickness,
+            geometry.mortise_thickness,
+            self.app.pointTolerance * 10,
+        )
 
     def _resolve_geometry(self) -> _ResolvedGeometry:
         selected = cast(adsk.fusion.BRepEdge, self.inputs.edge.value[0])
@@ -1052,6 +1341,13 @@ class TenonsNative(addin.Addin):
             return result
 
         count = self.inputs.number_of_tenons.value
+        if self.inputs.is_domino():
+            # Dominos are placed by their centers, which is what the Domino
+            # machine's end stops locate.
+            end_offset, _ = self.inputs.domino_end_offset(
+                self.inputs.domino_offset
+            )
+            return edge_sketch.evenly_spaced_positions(edge, count, end_offset)
         if count == 1:
             distances = [edge.length / 2]
         else:
@@ -1436,7 +1732,8 @@ class TenonsNative(addin.Addin):
             component,
             geometry.tenon_face,
             geometry.edge,
-            layout,
+            layout.bases,
+            layout.outers,
             "Tenons (Native) - Root Dog Bones",
             "rootDogBone",
         )
@@ -1497,7 +1794,8 @@ class TenonsNative(addin.Addin):
         self,
         component: adsk.fusion.Component,
         geometry: _ResolvedGeometry,
-        layout: _TenonLayout,
+        bases: list[adsk.fusion.SketchLine],
+        outers: list[adsk.fusion.SketchLine],
     ) -> tuple[
         list[adsk.fusion.Sketch],
         list[_CutSpec],
@@ -1507,11 +1805,15 @@ class TenonsNative(addin.Addin):
         holes: list[_HoleSpec] = []
         mortise_type = ScrewType(self.inputs.mortise_screw.value)
         if mortise_type != ScrewType.NONE:
+            # The screws go in from the mortise board's outer face, so the
+            # holes are drilled from there: a hole's countersink is always
+            # at its start.
             context, projected_bases, _ = self._create_layout_reference_sketch(
                 component,
-                geometry.small_face,
+                geometry.mortise_opposite_face,
                 geometry.edge,
-                layout,
+                bases,
+                outers,
                 "Tenons (Native) - Mortise Screws",
                 "mortiseScrew",
             )
@@ -1540,18 +1842,20 @@ class TenonsNative(addin.Addin):
                 _HoleSpec(
                     sketch=sketch,
                     body_role="mortise",
-                    direction=utils.brep.normal_away_from_body(
-                        geometry.small_face
+                    direction=utils.brep.normal_towards_face(
+                        geometry.mortise_opposite_face,
+                        geometry.mortise_face,
                     ),
                     center_points=centers,
                     diameter_expression=self.inputs.screw_diameter.expression,
                     depth=None,
                     name="Tenons (Native) - Mortise Screw Holes",
                     parameter_role="mortiseScrew",
+                    countersink=self.inputs.countersink_screws.value,
                 )
             )
 
-        tenon_type = ScrewType(self.inputs.tenon_screw.value)
+        tenon_type = self.inputs.tenon_screw_type()
         if tenon_type != ScrewType.NONE:
             (
                 context,
@@ -1561,7 +1865,8 @@ class TenonsNative(addin.Addin):
                 component,
                 geometry.tenon_face,
                 geometry.edge,
-                layout,
+                bases,
+                outers,
                 "Tenons (Native) - Tenon Screws",
                 "tenonScrew",
             )
@@ -1604,7 +1909,8 @@ class TenonsNative(addin.Addin):
         self,
         component: adsk.fusion.Component,
         geometry: _ResolvedGeometry,
-        layout: _TenonLayout,
+        bases: list[adsk.fusion.SketchLine],
+        outers: list[adsk.fusion.SketchLine],
         connector_type: ConnectorType,
     ) -> tuple[
         list[adsk.fusion.Sketch],
@@ -1622,7 +1928,8 @@ class TenonsNative(addin.Addin):
             component,
             geometry.tenon_face,
             geometry.edge,
-            layout,
+            bases,
+            outers,
             "Tenons (Native) - Connector Access",
             "connectorAccess",
         )
@@ -1694,7 +2001,8 @@ class TenonsNative(addin.Addin):
                     component,
                     geometry.tenon_face,
                     geometry.edge,
-                    layout,
+                    bases,
+                    outers,
                     "Tenons (Native) - Connector Relief",
                     "connectorRelief",
                 )
@@ -2127,7 +2435,8 @@ class TenonsNative(addin.Addin):
         component: adsk.fusion.Component,
         face: adsk.fusion.BRepFace,
         edge: adsk.fusion.BRepEdge,
-        layout: _TenonLayout,
+        bases: list[adsk.fusion.SketchLine],
+        outers: list[adsk.fusion.SketchLine],
         name: str,
         parameter_role: str,
     ) -> tuple[
@@ -2158,9 +2467,9 @@ class TenonsNative(addin.Addin):
         # the input order - and that is not possible here:
         #
         #   - This sketch is not always coplanar with the layout the lines
-        #     come from. The mortise-screw sketch is built on the board's
-        #     END face, perpendicular to the tenon face, so the projections
-        #     land nowhere near their sources.
+        #     come from. The mortise-screw sketch is built on the mortise
+        #     board's outer face, perpendicular to the tenon face, so the
+        #     projections land nowhere near their sources.
         #   - On that perpendicular plane the bases and outers project onto
         #     each other, so even a plane-aware match would be ambiguous.
         #
@@ -2168,10 +2477,10 @@ class TenonsNative(addin.Addin):
         # Fusion exposes no way to read it back, so the mapping has to come
         # from asking for one line at a time.
         projected_base_lines = [
-            self._project_line(sketch, line) for line in layout.bases
+            self._project_line(sketch, line) for line in bases
         ]
         projected_outer_lines = [
-            self._project_line(sketch, line) for line in layout.outers
+            self._project_line(sketch, line) for line in outers
         ]
         for line in [*projected_base_lines, *projected_outer_lines]:
             line.isConstruction = True
@@ -3160,9 +3469,18 @@ class TenonsNative(addin.Addin):
                 f"'{spec.name}' requires at least one hole center."
             )
         hole_features = component.features.holeFeatures
-        hole_input = hole_features.createSimpleInput(
-            adsk.core.ValueInput.createByString(spec.diameter_expression)
-        )
+        if spec.countersink:
+            hole_input = hole_features.createCountersinkInput(
+                adsk.core.ValueInput.createByString(spec.diameter_expression),
+                adsk.core.ValueInput.createByString(
+                    _countersink_diameter_expression(spec.diameter_expression)
+                ),
+                adsk.core.ValueInput.createByString(_COUNTERSINK_ANGLE),
+            )
+        else:
+            hole_input = hole_features.createSimpleInput(
+                adsk.core.ValueInput.createByString(spec.diameter_expression)
+            )
         if not hole_input:
             raise RuntimeError(f"Fusion failed to initialize '{spec.name}'.")
         if not hole_input.setPositionBySketchPoints(
@@ -3217,6 +3535,17 @@ class TenonsNative(addin.Addin):
             self._name_parameter(
                 hole.holeDiameter,
                 f"{spec.parameter_role}Diameter",
+            )
+        if spec.countersink and hole.holeDiameter and hole.countersinkDiameter:
+            # Follow the hole's own diameter, so a later edit of the hole
+            # in the timeline resizes the countersink with it.
+            self._set_parameter_expression(
+                hole.countersinkDiameter,
+                _countersink_diameter_expression(hole.holeDiameter.name),
+            )
+            self._name_parameter(
+                hole.countersinkDiameter,
+                f"{spec.parameter_role}CountersinkDiameter",
             )
         depth_extent = adsk.fusion.DistanceExtentDefinition.cast(
             hole.extentDefinition

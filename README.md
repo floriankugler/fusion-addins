@@ -13,7 +13,7 @@ Furthermore, updates to this code might break existing usages of the addins.
   Creates mortise and tenon connections between sheet good boards and also (optionally) places the holes for screw, Clamex or Cabineo connectors in one go.
 - **Tenons (Native)**
 
-  Creates fully constrained tenon, mortise, and dog-bone sketches with standard Fusion extrude and combine features. Select one straight joint edge, then position tenons by count with dimensioned equal spacing or by projected custom sketch points. Optional screw, Clamex, and Cabineo connector cuts use native features and reference the generated tenon geometry.
+  Creates fully constrained tenon, mortise, and dog-bone sketches with standard Fusion extrude and combine features. Select one straight joint edge, then position tenons by count with dimensioned equal spacing or by projected custom sketch points. Optional screw, Clamex, and Cabineo connector cuts use native features and reference the generated tenon geometry; mortise screw holes can be countersunk for countersunk-head screws. With the Domino tenon type it cuts Festool DOMINO slots into the mating board instead, with the same Domino options as Connector (Native) (sizes, machine end stops, fence heights, loose slots and reference marks), and places the connectors between the Dominos.
 - **Pattern Cutouts**
 
   This is a collection of differently shaped pattern cutouts, e.g. triangles, rhombuses etc. The cutouts take existing inner features of the selected faces into account.

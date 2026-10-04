@@ -4,6 +4,8 @@
 
 - `addins-src/` contains the editable Fusion 360 add-ins. Each add-in has a `main.py`, `<addin>.py`, a `<addin>.manifest`, and `Resources/` icons.
 - `lib/` is the shared Python library used by add-ins (utility modules, Fusion helpers).
+  - `lib/domino.py` holds all Festool Domino code (sizes, machine stops, dialog inputs, validation, sketches and cuts), shared by `connectors_native` (Domino connector type) and `tenons_native` (Domino tenon type). Change Domino behavior there, not in the add-ins.
+  - `lib/edge_sketch.py` holds the fully constrained sketch and cut helpers along a selected edge that `connectors_native` and `lib/domino.py` build with.
 - `_build/` holds versioned, self-contained add-in builds produced for distribution.
 - `tools/` includes helper scripts for symlinking and vendoring builds.
 - `img/` contains documentation screenshots referenced in `README.md`.
@@ -122,7 +124,8 @@ Native-feature add-ins (`connectors_native`, `tenons_native`, `box_joint`, `cuto
 ### Testing Group Edit Through MCP
 
 - Add-ins that Fusion has not started can be driven within one script execution: load `addins-src/<addin>/main.py` with `importlib`, construct the `Addin` subclass with a `RuntimeInfo` (id from `bootstrap._load_id`), run the scenario, then call `addin.shutdown()`.
-- Create: `commandDefinitions.itemById(addin.create_command_id).execute()`, pump `adsk.doEvents()`, fill the inputs (`input.addSelection`, values), then `parentCommand.doExecute(True)`.
+- With Fusion's native MCP server, `commandDefinitions.itemById(...).execute()` opens the dialog only after the script returns, and while a dialog is open only read-only scripts run. Never press OK (`doExecute`) from a read-only script: it crashed Fusion (2026-10-04), because validation reads entity tokens, which writes. Instead build the inputs with `addin.create_inputs()`, seed `.value` of dropdown/integer/checkbox inputs from `default_value` and FloatInput `.expression`, assign `addin.inputs`, and call `addin._validation_error()` and `addin.execute()` directly. Visibility rules can be checked by calling each input's `update_visibility()`.
+- Create (older MCP add-in, where commands ran inside the script): `commandDefinitions.itemById(addin.create_command_id).execute()`, pump `adsk.doEvents()`, fill the inputs (`input.addSelection`, values), then `parentCommand.doExecute(True)`.
 - Edit: `ui.activeSelections.add(<group member>)` before executing the command definition. The API cannot select a `TimelineGroup` itself ("invalid argument entity").
 - Check the validation verdict before `doExecute(True)`: with invalid inputs it ends the command with the timeline roll committed, leaving the marker rolled back. The OK button is disabled in that state, so users cannot hit this.
 
