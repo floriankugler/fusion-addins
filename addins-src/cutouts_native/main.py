@@ -337,6 +337,10 @@ class CutoutsNative(addin.Addin):
         return True
 
     @property
+    def group_edit_enabled(self) -> bool:
+        return True
+
+    @property
     def plugin_name(self) -> str:
         return "Face Cutout (Native)"
 
@@ -718,7 +722,7 @@ class CutoutsNative(addin.Addin):
             )
         if not last_combine:
             raise RuntimeError("Face Cutout (Native) did not create a final cut.")
-        self._group_features(component, sketch, last_combine)
+        self.group_features(sketch, last_combine, "Face Cutout (Native)")
 
     def _body_locator(
         self,
@@ -4231,19 +4235,6 @@ class CutoutsNative(addin.Addin):
             else f"Face Cutout (Native) - Cut (Body {body_index})"
         )
         return combine
-
-    def _group_features(
-        self,
-        component: adsk.fusion.Component,
-        sketch: adsk.fusion.Sketch,
-        combine: adsk.fusion.CombineFeature,
-    ) -> None:
-        start_index = sketch.timelineObject.index
-        end_index = combine.timelineObject.index
-        group = component.parentDesign.timeline.timelineGroups.add(start_index, end_index)
-        if group:
-            group.name = "Face Cutout (Native)"
-            group.isCollapsed = True
 
     def _largest_profile(self, sketch: adsk.fusion.Sketch) -> adsk.fusion.Profile | None:
         profiles = utils.fusion.as_list(sketch.profiles)

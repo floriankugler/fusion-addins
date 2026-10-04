@@ -167,6 +167,10 @@ class DoorLatchNative(addin.Addin):
         return True
 
     @property
+    def group_edit_enabled(self) -> bool:
+        return True
+
+    @property
     def plugin_name(self) -> str:
         return "Door Latch (Native)"
 
@@ -425,7 +429,14 @@ class DoorLatchNative(addin.Addin):
             name="Door Latch (Native) - Carcass Pilot Holes",
             parameter_role="carcassPilot",
         )
-        self._group_features(design, first_sketch, carcass_cut)
+        if not self.group_features(
+            first_sketch,
+            carcass_cut,
+            "Door Latch (Native)",
+        ):
+            raise RuntimeError(
+                "Fusion created the latch features but could not group them."
+            )
 
     def _validation_error(self) -> str | None:
         design = adsk.fusion.Design.cast(self.app.activeProduct)
@@ -2333,20 +2344,3 @@ class DoorLatchNative(addin.Addin):
             f"'{sketch.name}' is under-constrained "
             f"({len(unconstrained)} unconstrained curves: {details})."
         )
-
-    def _group_features(
-        self,
-        design: adsk.fusion.Design,
-        first_sketch: adsk.fusion.Sketch,
-        last_feature: adsk.fusion.Feature,
-    ) -> None:
-        group = design.timeline.timelineGroups.add(
-            first_sketch.timelineObject.index,
-            last_feature.timelineObject.index,
-        )
-        if not group:
-            raise RuntimeError(
-                "Fusion created the latch features but could not group them."
-            )
-        group.name = "Door Latch (Native)"
-        group.isCollapsed = True

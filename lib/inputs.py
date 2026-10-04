@@ -522,23 +522,30 @@ class SelectionByEntityTokenInput(Input):
         that point can split or consume them."""
         if not isinstance(state, list):
             return False
-        entities = []
-        tokens = []
+        resolved = []
         for token in state:
             try:
                 found = design.findEntityByToken(token)
             except RuntimeError:
                 found = []
             if found:
-                entities.append(found[0])
-                tokens.append(token)
-        self.value = entities
-        self.tokens = tokens
+                resolved.append((found[0], token))
         if self.input:
+            # addSelection runs the add-in's preSelect like a click does,
+            # and that check reads `value` (e.g. "a face only while nothing
+            # else is selected"). Start empty and select one entity at a
+            # time, so it sees the same sequence as the original picks.
+            self.value = []
+            self.tokens = []
             self.input.clearSelection()
-            for entity in entities:
-                self.input.addSelection(entity)
-        return len(entities) == len(state)
+            resolved = [
+                (entity, token)
+                for entity, token in resolved
+                if self.input.addSelection(entity)
+            ]
+        self.value = [entity for entity, _ in resolved]
+        self.tokens = [token for _, token in resolved]
+        return len(resolved) == len(state)
 
     @property
     def dependency_id_prefix(self):

@@ -55,6 +55,14 @@ Furthermore, updates to this code might break existing usages of the addins.
 
   Applies one combine setup to multiple target bodies. Select one or more targets (bodies and/or component occurrences), one or more tools, and an operation (join/cut/intersect). The add-in expands target selections to bodies, creates one combine feature per target body, and always keeps tool bodies so they can be reused across all targets.
 
+### Editing Results of the Native Add-Ins
+
+Box Joint, Connector (Native), Tenons (Native), Face Cutout (Native), Concealed Hinge (Native), Door Latch (Native) and Dog Bones (Native) can edit a result they created earlier. Select one of its sketches or features (in the expanded timeline group or in the browser), then start the add-in's command. The dialog opens with the original settings and the timeline rolled back to the result. OK rebuilds the result in place; Cancel leaves it unchanged.
+
+- The edit is refused when later features use geometry the result created, e.g. a fillet on one of its cut edges, because rebuilding would delete them.
+- Changes you made to the result's own sketch dimensions or feature parameters after creating it are overwritten. Box Joint is the exception: it reads its `boxJoint…` user parameters back.
+- Results created before this feature existed cannot be edited.
+
 ## Installation
 
 To install release builds, either copy add-in folders from `_build` manually into the Fusion Addin directory, or symlink the contents of `_build` into that directory. On macOS the AddIns folder is `~/Library/Application Support/Autodesk/Autodesk Fusion 360/API/AddIns`.

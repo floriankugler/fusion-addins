@@ -57,7 +57,7 @@ visible on the finished joint - no through dog bones on either face):
 from dataclasses import dataclass
 import math
 import os
-from typing import cast
+from typing import Any, cast
 
 import adsk.core
 import adsk.fusion
@@ -269,6 +269,10 @@ class BoxJoint(addin.Addin):
     def preview_enabled(self) -> bool:
         # execute() builds native features only, so Fusion's executePreview
         # transaction can run it as a live preview and roll it back again.
+        return True
+
+    @property
+    def group_edit_enabled(self) -> bool:
         return True
 
     @property
@@ -860,11 +864,42 @@ class BoxJoint(addin.Addin):
             placeholder_spacing=f"({params.width}) / 2",
         )
 
-        self._group_features(component, notch.sketch, finger_pattern)
+        self.group_features(notch.sketch, finger_pattern, "Box Joint")
 
     # ------------------------------------------------------------------
     # Parameters
     # ------------------------------------------------------------------
+
+    def edit_state_extra(self) -> dict[str, Any]:
+        return {"parameterPrefix": self._session_prefix}
+
+    def restore_edit_state_extra(self, extra: dict[str, Any]) -> None:
+        """An edit keeps the joint's user parameters instead of minting a
+        second set, and starts from their current values: changes made in
+        Change Parameters since the joint was built win over the dialog
+        state stored with it."""
+        prefix = extra.get("parameterPrefix")
+        design = adsk.fusion.Design.cast(self.app.activeProduct)
+        if not isinstance(prefix, str) or not design:
+            return
+        parameters = design.userParameters
+        fingers = parameters.itemByName(f"{prefix}Fingers")
+        if not fingers:
+            return
+        self._session_prefix = prefix
+        self.inputs.number_of_fingers.restore_state(
+            int(round(fingers.value)),
+            design,
+        )
+        for suffix, source in (
+            ("Margin", self.inputs.margin),
+            ("ToolDiameter", self.inputs.tool_diameter),
+            ("ClearanceAxial", self.inputs.clearance_axial),
+            ("ClearanceLateral", self.inputs.clearance_lateral),
+        ):
+            parameter = parameters.itemByName(f"{prefix}{suffix}")
+            if parameter:
+                source.restore_state(parameter.expression, design)
 
     def _create_user_parameters(
         self,
@@ -2385,20 +2420,6 @@ class BoxJoint(addin.Addin):
             f"({len(unconstrained_curves)} curves and "
             f"{len(unconstrained_points)} points)."
         )
-
-    def _group_features(
-        self,
-        component: adsk.fusion.Component,
-        first_sketch: adsk.fusion.Sketch,
-        last_feature: adsk.fusion.Feature,
-    ) -> None:
-        group = component.parentDesign.timeline.timelineGroups.add(
-            first_sketch.timelineObject.index,
-            last_feature.timelineObject.index,
-        )
-        if group:
-            group.name = "Box Joint"
-            group.isCollapsed = True
 
     def _opposite(
         self,

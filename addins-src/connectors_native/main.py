@@ -903,8 +903,6 @@ class ConnectorsNative(addin.Addin):
 
     @property
     def group_edit_enabled(self) -> bool:
-        # Experiment: execute() builds every feature at the marker and
-        # stores its state on the group's first sketch.
         return True
 
     def get_ui_placement(self) -> ui_placement.UIPlacement:
@@ -1193,7 +1191,11 @@ class ConnectorsNative(addin.Addin):
                 parameter_role="collarDepth",
             )
 
-        self._group_features(component, access_context.sketch, last_feature)
+        self.group_features(
+            access_context.sketch,
+            last_feature,
+            "Connector (Native)",
+        )
 
     def _execute_domino(
         self,
@@ -1367,7 +1369,11 @@ class ConnectorsNative(addin.Addin):
 
         # No cut is made from the positions sketch, so nothing has hidden it.
         position_context.sketch.isVisible = False
-        self._group_features(component, position_context.sketch, last_feature)
+        self.group_features(
+            position_context.sketch,
+            last_feature,
+            "Connector (Native)",
+        )
 
     def _domino_size(self) -> _DominoSize:
         value = self.inputs.domino_size.value
@@ -3673,21 +3679,6 @@ class ConnectorsNative(addin.Addin):
         To restore human-readable names, delete this early return.
         """
         return
-
-    def _group_features(
-        self,
-        component: adsk.fusion.Component,
-        first_sketch: adsk.fusion.Sketch,
-        last_feature: adsk.fusion.Feature,
-    ) -> None:
-        group = component.parentDesign.timeline.timelineGroups.add(
-            first_sketch.timelineObject.index,
-            last_feature.timelineObject.index,
-        )
-        if group:
-            group.name = "Connector (Native)"
-            group.isCollapsed = True
-        self.store_edit_state(first_sketch)
 
     def _require_fully_constrained(
         self,

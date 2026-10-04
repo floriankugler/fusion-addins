@@ -95,6 +95,37 @@
 - Fixed-depth hole features must always be flat-bottomed (tip angle 180 deg) instead of using the default drill point.
 
 
+## Editable Results (Group Edit)
+
+Native-feature add-ins (`connectors_native`, `tenons_native`, `box_joint`, `cutouts_native`, `concealed_hinge_native`, `door_latch_native`, `dog_bones_native`) can edit a result they created earlier. Implemented in `lib/group_edit.py` and `lib/addin.py`.
+
+- User flow: select any sketch or feature of the add-in's timeline group, then start the command. The dialog opens with the stored settings and the timeline rolled back to just before the group. OK deletes the old group and rebuilds it at the same position, keeping the group's name. Cancel leaves everything untouched. Without such a selection the command creates a new result as usual.
+- Mechanics: `Addin.group_features()` creates the timeline group and stores the dialog state as a JSON attribute (`<add-in id>` / `editState`) on the group's first member. Each input contributes `Input.save_state()`; selections are stored as entity tokens. Starting the command with a member selected restores the state in the command's `activate` event, after `group.rollTo(True)` + `command.beginStep()`, so tokens resolve to the entities as they were before the group modified them.
+
+### Opting In a Native Add-In
+
+- `execute()` must create every feature at the timeline marker and must not modify anything outside the features it creates (user parameters excepted, see below).
+- Finish `execute()` with `self.group_features(first, last, name)` instead of creating the timeline group yourself, then override `group_edit_enabled` to return `True`.
+- Every input must implement `save_state()` / `restore_state()`. The `lib.inputs` types do; custom `Input` subclasses need their own (e.g. `_OptionalFloatInput` in `connectors_native`).
+- `restore_state()` re-selects entities through `SelectionCommandInput.addSelection`, which runs the add-in's `pre_select` like a click does. `pre_select` must accept the stored entities one at a time, in their original order, judged against what is selected so far.
+- State that lives outside the inputs goes through `edit_state_extra()` / `restore_edit_state_extra()`. Example: `box_joint` stores its user-parameter prefix, so an edit updates the existing `boxJoint…` parameters instead of minting a second set, and it loads the dialog from those parameters' current values, so changes made in Change Parameters win over the stored state.
+
+### Limitations
+
+- A rebuild gives every face and edge a new identity. Deleting the old group makes Fusion silently delete later features that reference its geometry (e.g. a fillet on a cut edge). `Addin` detects this and refuses the edit with a message naming those features; later features that only reference the bodies, or faces that existed before the group, survive.
+- The stored state wins over manual changes to the group's own sketch dimensions or feature parameters made after creation, unless the add-in reads them back in `restore_edit_state_extra()`.
+- Features a user moved into the group are deleted with it on rebuild.
+- Only groups created with state are editable. For older groups, the command just opens in create mode.
+- If an upstream change means a stored entity token no longer resolves, that selection stays empty and the user selects it again.
+- `command.beginStep()` is a preview API. Inside a command, `rollTo` takes effect only after it; Cancel still undoes the roll.
+
+### Testing Group Edit Through MCP
+
+- Add-ins that Fusion has not started can be driven within one script execution: load `addins-src/<addin>/main.py` with `importlib`, construct the `Addin` subclass with a `RuntimeInfo` (id from `bootstrap._load_id`), run the scenario, then call `addin.shutdown()`.
+- Create: `commandDefinitions.itemById(addin.create_command_id).execute()`, pump `adsk.doEvents()`, fill the inputs (`input.addSelection`, values), then `parentCommand.doExecute(True)`.
+- Edit: `ui.activeSelections.add(<group member>)` before executing the command definition. The API cannot select a `TimelineGroup` itself ("invalid argument entity").
+- Check the validation verdict before `doExecute(True)`: with invalid inputs it ends the command with the timeline roll committed, leaving the marker rolled back. The OK button is disabled in that state, so users cannot hit this.
+
 ## Testing Guidelines
 
 - No automated test suite is present. Validate changes by loading the add-in in Fusion 360 and running the command interactively.

@@ -2,16 +2,16 @@
 
 Native-feature add-ins leave plain sketches and features behind, collected
 in one timeline group. To make such a group editable again, the add-in
-stores its dialog state as an attribute on one member of the group. Picking
-any member later restores the dialog from that state with the timeline
-rolled back to just before the group; OK then deletes the old group and
-builds the features afresh at that position.
+stores its dialog state as an attribute on the group's first member.
+Starting the command while any member is selected restores the dialog from
+that state with the timeline rolled back to just before the group; OK then
+deletes the old group and builds the features afresh at that position.
 
 Rebuilding gives every face and edge a new identity, and deleting the old
 group silently deletes later features that reference its geometry, so
 Addin refuses the edit when that would happen.
 
-Experimental: see Addin.group_edit_enabled.
+See Addin.group_edit_enabled and "Editable Results" in AGENTS.md.
 """
 import json
 from dataclasses import dataclass
@@ -28,13 +28,17 @@ STATE_VERSION = 1
 @dataclass
 class EditTarget:
     group: adsk.fusion.TimelineGroup
+    #: Input id -> Input.save_state() snapshot.
     state: dict[str, Any]
+    #: Addin.edit_state_extra() at the time the group was built.
+    extra: dict[str, Any]
 
 
 def write_state(
     entity: adsk.core.Base,
     attribute_group: str,
     inputs: inp.Inputs,
+    extra: dict[str, Any],
 ) -> None:
     values = {}
     for source in inputs.inputs:
@@ -47,7 +51,7 @@ def write_state(
     entity.attributes.add(
         attribute_group,
         STATE_ATTRIBUTE,
-        json.dumps({'version': STATE_VERSION, 'inputs': values}),
+        json.dumps({'version': STATE_VERSION, 'inputs': values, 'extra': extra}),
     )
 
 
@@ -77,7 +81,11 @@ def find_target(
             return None
         if payload.get('version') != STATE_VERSION:
             return None
-        return EditTarget(group, payload.get('inputs', {}))
+        return EditTarget(
+            group,
+            payload.get('inputs', {}),
+            payload.get('extra', {}),
+        )
     return None
 
 

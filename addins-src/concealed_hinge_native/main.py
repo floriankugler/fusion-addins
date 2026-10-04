@@ -140,6 +140,10 @@ class ConcealedHingeNative(addin.Addin):
         return True
 
     @property
+    def group_edit_enabled(self) -> bool:
+        return True
+
+    @property
     def plugin_name(self) -> str:
         return "Concealed Hinge (Native)"
 
@@ -280,7 +284,14 @@ class ConcealedHingeNative(addin.Addin):
             name="Concealed Hinge - Carcass Holes",
             parameter_role="carcassDepth",
         )
-        self._group_features(design, door_sketch, carcass_cut)
+        if not self.group_features(
+            door_sketch,
+            carcass_cut,
+            "Concealed Hinge (Native)",
+        ):
+            raise RuntimeError(
+                "Fusion created the hinge features but could not group them."
+            )
 
     def _validation_error(self) -> str | None:
         design = adsk.fusion.Design.cast(self.app.activeProduct)
@@ -1289,20 +1300,3 @@ class ConcealedHingeNative(addin.Addin):
             f"'{sketch.name}' is under-constrained "
             f"({unconstrained_curves} unconstrained curves)."
         )
-
-    def _group_features(
-        self,
-        design: adsk.fusion.Design,
-        first_sketch: adsk.fusion.Sketch,
-        last_feature: adsk.fusion.Feature,
-    ) -> None:
-        group = design.timeline.timelineGroups.add(
-            first_sketch.timelineObject.index,
-            last_feature.timelineObject.index,
-        )
-        if not group:
-            raise RuntimeError(
-                "Fusion created the hinge features but could not group them."
-            )
-        group.name = "Concealed Hinge (Native)"
-        group.isCollapsed = True

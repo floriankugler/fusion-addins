@@ -564,6 +564,10 @@ class TenonsNative(addin.Addin):
         return True
 
     @property
+    def group_edit_enabled(self) -> bool:
+        return True
+
+    @property
     def plugin_name(self) -> str:
         return "Tenons (Native)"
 
@@ -783,10 +787,10 @@ class TenonsNative(addin.Addin):
                 self._target_body(component, hole_spec.body_role),
             )
 
-        self._group_features(
-            component,
+        self.group_features(
             layout.context.sketch,
             last_feature,
+            "Tenons (Native)",
         )
 
     def _validation_error(self) -> str | None:
@@ -3858,20 +3862,6 @@ class TenonsNative(addin.Addin):
             f"({len(unconstrained_curves)} curves and "
             f"{len(unconstrained_points)} points)."
         )
-
-    def _group_features(
-        self,
-        component: adsk.fusion.Component,
-        first_sketch: adsk.fusion.Sketch,
-        last_feature: adsk.fusion.Feature,
-    ) -> None:
-        group = component.parentDesign.timeline.timelineGroups.add(
-            first_sketch.timelineObject.index,
-            last_feature.timelineObject.index,
-        )
-        if group:
-            group.name = "Tenons (Native)"
-            group.isCollapsed = True
 
     def _distance_from_edge_start(
         self,

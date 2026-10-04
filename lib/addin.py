@@ -1,5 +1,5 @@
 import adsk.core, adsk.fusion
-from typing import Callable, cast
+from typing import Any, Callable, cast
 from abc import ABC, abstractmethod
 import re
 import traceback
@@ -30,11 +30,9 @@ class Addin(ABC):
     #: opt-in per command invocation: in large documents building the
     #: preview costs many seconds per input change.
     _preview_checkbox: adsk.core.BoolValueCommandInput | None = None
-    #: Group edit (see group_edit_enabled). The "Edit Existing" selection
-    #: input, a target picked before the command started (applied once the
-    #: command is active), the group being edited, and where the timeline
-    #: marker returns to after the edit.
-    _group_edit_input: adsk.core.SelectionCommandInput | None = None
+    #: Group edit (see group_edit_enabled). The target selected before the
+    #: command started (applied once the command is active), the group
+    #: being edited, and where the timeline marker returns to afterwards.
     _group_edit_pending: group_edit.EditTarget | None = None
     _group_edit_target: group_edit.EditTarget | None = None
     _group_edit_restore: adsk.fusion.TimelineObject | None = None
@@ -90,17 +88,27 @@ class Addin(ABC):
 
     @property
     def group_edit_enabled(self) -> bool:
-        """Experimental opt-in: lets the dialog edit a timeline group this
-        add-in created earlier (see lib/group_edit.py). Picking a member of
-        the group - before starting the command or in the dialog's "Edit
-        Existing" input - restores the dialog and rolls the timeline back to
-        the group; OK rebuilds the group there and deletes the old one.
+        """Opt-in: lets the command edit a timeline group it created earlier
+        (see lib/group_edit.py and "Editable Results" in AGENTS.md).
+        Starting the command while a sketch or feature of such a group is
+        selected restores the dialog and rolls the timeline back to the
+        group; OK deletes the old group and rebuilds it in place.
 
         Requires execute() to create all its features at the timeline
-        marker and to call store_edit_state() on one member of the group it
-        creates.
+        marker and to finish with group_features(), which stores the dialog
+        state in the group.
         """
         return False
+
+    def edit_state_extra(self) -> dict[str, Any]:
+        """Add-in state outside the dialog inputs that an edit needs, stored
+        with the group (JSON-serializable)."""
+        return {}
+
+    def restore_edit_state_extra(self, extra: dict[str, Any]) -> None:
+        """Applies edit_state_extra() when an edit starts, after the inputs
+        were restored from the group."""
+        pass
 
     def __init__(self, runtime_info: RuntimeInfo):
         try:
@@ -123,12 +131,18 @@ class Addin(ABC):
                 existing_cmd_def.deleteMe()
 
             # Create the command definition for the creation command.
+            tooltip = self.plugin_tooltip
+            if self.group_edit_enabled:
+                tooltip += (
+                    " To edit an earlier result, select one of its sketches "
+                    "or features before starting the command."
+                )
             create_cmd_def = self.ui.commandDefinitions.addButtonDefinition(
                 self.create_command_id,
                 self.plugin_name,
-                self.plugin_tooltip,
+                tooltip,
                 self.resource_dir,
-            )        
+            )
 
             # Add the create button to its panel(s).
             for placement in self.get_ui_placements():
@@ -224,9 +238,6 @@ class Addin(ABC):
         self.update_inputs_from_ui()
         if self.inputs:
             self.inputs.update_visibilities()
-        if self._group_edit_input and args.input.id == self._group_edit_input.id:
-            self._group_edit_selected(args.input)
-            return
         if self._defaults_ui.handle_input_changed(args.input):
             return
         self.input_changed(args.input)
@@ -252,13 +263,35 @@ class Addin(ABC):
             self.inputs = None
             self._group_edit_target = None
 
-    def store_edit_state(self, entity: adsk.core.Base) -> None:
-        """Stores the dialog state on `entity`, a member of the timeline
-        group execute() creates, so that group can be edited later. Skipped
-        during previews, which Fusion rolls back anyway."""
-        if not self.group_edit_enabled or self.is_previewing or self.inputs is None:
-            return
-        group_edit.write_state(entity, self.runtime_info.id, self.inputs)
+    def group_features(
+        self,
+        first: adsk.fusion.Sketch | adsk.fusion.Feature,
+        last: adsk.fusion.Sketch | adsk.fusion.Feature,
+        name: str,
+    ) -> adsk.fusion.TimelineGroup | None:
+        """Collects the timeline from `first` to `last` - everything
+        execute() created - into a collapsed group named `name`. With
+        group_edit_enabled it also stores the dialog state on `first`, which
+        makes the group editable later. Returns None when Fusion could not
+        create the group."""
+        design = adsk.fusion.Design.cast(self.app.activeProduct)
+        group = design.timeline.timelineGroups.add(
+            first.timelineObject.index,
+            last.timelineObject.index,
+        )
+        if group:
+            group.name = name
+            group.isCollapsed = True
+        # Previews are rolled back anyway, and the attribute write is a
+        # document update whose cost grows with the model.
+        if self.group_edit_enabled and not self.is_previewing and self.inputs is not None:
+            group_edit.write_state(
+                first,
+                self.runtime_info.id,
+                self.inputs,
+                self.edit_state_extra(),
+            )
+        return group
 
     def _preselected_edit_target(self) -> group_edit.EditTarget | None:
         selections = self.ui.activeSelections
@@ -276,27 +309,10 @@ class Addin(ABC):
         # pending target is consumed on the first activation.
         target = self._group_edit_pending
         self._group_edit_pending = None
-        if target is None or self._group_edit_target is not None:
-            return
-        try:
-            self._begin_group_edit(args.command, target)
-        except Exception as error:
-            self.log_exception_traceback("group edit", error)
-            self.showError(f"Could not edit the selected group: {error}")
-
-    def _group_edit_selected(self, selection_input: adsk.core.SelectionCommandInput):
-        # Rolling the timeline back can drop the picked member from the
-        # input again; edit mode lasts until the command ends either way.
-        if self._group_edit_target is not None or selection_input.selectionCount == 0:
-            return
-        target = group_edit.find_target(
-            selection_input.selection(0).entity,
-            self.runtime_info.id,
-        )
         if target is None:
             return
         try:
-            self._begin_group_edit(selection_input.parentCommand, target)
+            self._begin_group_edit(args.command, target)
         except Exception as error:
             self.log_exception_traceback("group edit", error)
             self.showError(f"Could not edit the selected group: {error}")
@@ -321,6 +337,7 @@ class Addin(ABC):
         command.beginStep()
         self._group_edit_target = target
         failed = group_edit.restore_state(self.inputs, target.state, design)
+        self.restore_edit_state_extra(target.extra)
         self.update_inputs_from_ui()
         self.inputs.update_visibilities()
         if failed:
@@ -420,14 +437,7 @@ class Addin(ABC):
     
     def _pre_select(self, args: adsk.core.EventArgs):
         event_args = adsk.core.SelectionEventArgs.cast(args)
-        active_input = event_args.activeInput
-        if self._group_edit_input and active_input and active_input.id == self._group_edit_input.id:
-            event_args.isSelectable = group_edit.find_target(
-                event_args.selection.entity,
-                self.runtime_info.id,
-            ) is not None
-            return
-        event_args.isSelectable = self.pre_select(active_input, event_args.selection.entity)
+        event_args.isSelectable = self.pre_select(event_args.activeInput, event_args.selection.entity)
 
     def _initialize_inputs(self, command: adsk.core.Command, params: adsk.fusion.CustomFeatureParameters | None) -> None:
         self._preview_error = None
@@ -454,18 +464,6 @@ class Addin(ABC):
 
         for input in self.inputs.inputs:
             input.create_input(values_inputs, params)
-        self._group_edit_input = None
-        if self.group_edit_enabled:
-            # Below the add-in's own inputs, so its first selection input
-            # keeps the initial focus.
-            self._group_edit_input = values_inputs.addSelectionInput(
-                'groupEditTarget',
-                'Edit Existing',
-                'Select a feature or sketch of an earlier result to edit it.',
-            )
-            self._group_edit_input.addSelectionFilter('Features')
-            self._group_edit_input.addSelectionFilter('Sketches')
-            self._group_edit_input.setSelectionLimits(0, 1)
         self._defaults_ui.create_ui(defaults_inputs, self.inputs)
         self._error_field = values_inputs.addTextBoxCommandInput('errorMessage', 'Error', '', 3, True)
         self._error_field.isVisible = False

@@ -96,6 +96,10 @@ class DogBonesNative(addin.Addin):
         return True
 
     @property
+    def group_edit_enabled(self) -> bool:
+        return True
+
+    @property
     def plugin_name(self) -> str:
         return "Dog Bones (Native)"
 
@@ -231,7 +235,7 @@ class DogBonesNative(addin.Addin):
             )
         if not last_extrude:
             raise RuntimeError("Dog Bones (Native) did not create any cut.")
-        self._group_features(component, sketch, last_extrude)
+        self.group_features(sketch, last_extrude, "Dog Bones (Native)")
 
     def _extent_face_for_corner(
         self,
@@ -1103,20 +1107,6 @@ class DogBonesNative(addin.Addin):
         )
         sketch.isVisible = False
         return extrude
-
-    def _group_features(
-        self,
-        component: adsk.fusion.Component,
-        sketch: adsk.fusion.Sketch,
-        extrude: adsk.fusion.ExtrudeFeature,
-    ) -> None:
-        group = component.parentDesign.timeline.timelineGroups.add(
-            sketch.timelineObject.index,
-            extrude.timelineObject.index,
-        )
-        if group:
-            group.name = "Dog Bones (Native)"
-            group.isCollapsed = True
 
     def _require_fully_constrained(
         self,
