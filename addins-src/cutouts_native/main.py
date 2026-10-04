@@ -29,6 +29,8 @@ class _FaceTarget:
     opposite_face: adsk.fusion.BRepFace
     target_body: adsk.fusion.BRepBody
     cut_direction: adsk.core.Vector3D
+    #: The selected face's plane, captured before the cut changes the face.
+    plane: adsk.core.Plane
 
 
 @dataclass(frozen=True)
@@ -42,6 +44,9 @@ class _BodyLocator:
 class _BodyCut:
     target_body_locator: _BodyLocator
     tool_body_locators: list[_BodyLocator]
+    #: Planes of the selected faces on this body - where its cutout edges
+    #: get chamfered.
+    face_planes: list[adsk.core.Plane]
 
 
 @dataclass(frozen=True)
@@ -193,6 +198,29 @@ class CutoutsNativeInputs(inputs.Inputs):
             units=units,
         )
         self.fillet_radius.minimum_value = 0
+        self.chamfer = inputs.CheckboxInput(
+            id="chamfer",
+            name="Chamfer Edges",
+            default_value=False,
+            tool_tip=(
+                "Chamfer the cutout rims at the selected faces at 45 "
+                "degrees. Edges at the opposite face stay sharp, also on "
+                "cutouts that go all the way through."
+            ),
+        )
+        self.chamfer_size = inputs.FloatInput(
+            id="chamfer_size",
+            name="Chamfer Size",
+            default_value=0.1,
+            tool_tip=(
+                "Distance the 45 degree chamfer reaches into the face and "
+                "down the cutout wall."
+            ),
+            units=units,
+            update_visibility=lambda: self.chamfer.value,
+        )
+        self.chamfer_size.minimum_value = 0
+        self.chamfer_size.minimum_inclusive = False
         self.tabs = inputs.CheckboxInput(
             id="tabs",
             name="Create Tabs",
@@ -350,7 +378,7 @@ class CutoutsNative(addin.Addin):
 
     @property
     def plugin_tooltip(self) -> str:
-        return "Creates a sketch, extrude, optional fillet, and cut combine in the timeline."
+        return "Creates a sketch, extrude, optional fillet, cut combine, and optional chamfer in the timeline."
 
     def get_ui_placement(self) -> ui_placement.UIPlacement:
         section = ui_placement.PlacementSpec(
@@ -684,15 +712,20 @@ class CutoutsNative(addin.Addin):
             ]
             if body_cut:
                 body_cut.tool_body_locators.extend(tool_body_locators)
+                body_cut.face_planes.append(target.plane)
             else:
                 cuts_by_body[target_body_index] = _BodyCut(
                     target_body_locator=target_body_locators[
                         target_body_index
                     ],
                     tool_body_locators=tool_body_locators,
+                    face_planes=[target.plane],
                 )
 
         last_combine = None
+        combines: list[
+            tuple[adsk.fusion.CombineFeature, list[adsk.core.Plane]]
+        ] = []
         body_cut_count = len(cuts_by_body)
         for body_index, body_cut in enumerate(
             cuts_by_body.values(),
@@ -720,9 +753,16 @@ class CutoutsNative(addin.Addin):
                 body_index,
                 body_cut_count,
             )
+            combines.append((last_combine, body_cut.face_planes))
         if not last_combine:
             raise RuntimeError("Face Cutout (Native) did not create a final cut.")
-        self.group_features(sketch, last_combine, "Face Cutout (Native)")
+        last_feature: adsk.fusion.Feature = last_combine
+        if self.inputs.chamfer.value:
+            last_feature = (
+                self._create_cutout_chamfer(component, combines)
+                or last_combine
+            )
+        self.group_features(sketch, last_feature, "Face Cutout (Native)")
 
     def _body_locator(
         self,
@@ -790,6 +830,9 @@ class CutoutsNative(addin.Addin):
                 raise ValueError("Every selected entity must be a planar face.")
             face = selected_face.nativeObject or selected_face
             opposite_face = utils.brep.get_opposite_face(face)
+            plane = adsk.core.Plane.cast(face.geometry)
+            if not plane:
+                raise ValueError("Every selected entity must be a planar face.")
             targets.append(
                 _FaceTarget(
                     face=face,
@@ -799,6 +842,7 @@ class CutoutsNative(addin.Addin):
                         face,
                         opposite_face,
                     ),
+                    plane=plane,
                 )
             )
         return targets
@@ -946,6 +990,20 @@ class CutoutsNative(addin.Addin):
                     "Remaining Material must be smaller than the body "
                     f"thickness at selected face {index}."
                 )
+            if (
+                self.inputs.chamfer.value
+                and self.inputs.chamfer_size.value
+                >= thickness - self.inputs.remaining_material.value - 1e-6
+            ):
+                return (
+                    "Chamfer Size must be smaller than the cut depth at "
+                    f"selected face {index}."
+                )
+        if (
+            self.inputs.chamfer.value
+            and self.inputs.chamfer_size.value <= 1e-6
+        ):
+            return "Chamfer Size must be greater than zero."
         if (
             self.inputs.pattern_type.value == CutoutsNativeInputs.TRIANGLES.value
             and self.inputs.triangle_spacing.value <= 1e-6
@@ -4235,6 +4293,180 @@ class CutoutsNative(addin.Addin):
             else f"Face Cutout (Native) - Cut (Body {body_index})"
         )
         return combine
+
+    def _create_cutout_chamfer(
+        self,
+        component: adsk.fusion.Component,
+        combines: list[
+            tuple[adsk.fusion.CombineFeature, list[adsk.core.Plane]]
+        ],
+    ) -> adsk.fusion.ChamferFeature | None:
+        """Chamfers the cutout edges at the selected faces, at 45 degrees.
+
+        Returns the last chamfer feature, or None when the cut left no
+        edge to chamfer, e.g. a pocket without an Outer Inset that removed
+        the face's material entirely.
+        """
+        loops = self._cutout_rim_loops(combines)
+        if not loops:
+            return None
+        # Rims too small for the chamfer are the short ones. Sorted, they
+        # end up on one side of every split below, so the larger rims take
+        # the chamfer together instead of in many separate features.
+        perimeters = [sum(edge.length for edge in loop) for loop in loops]
+        loops = [
+            loop
+            for _, loop in sorted(
+                zip(perimeters, loops),
+                key=lambda item: item[0],
+            )
+        ]
+        chamfers: list[adsk.fusion.ChamferFeature] = []
+        self._chamfer_rim_loops(component, loops, chamfers)
+        if not chamfers:
+            raise RuntimeError(
+                "Fusion could not chamfer the cutout edges. Try a smaller "
+                "Chamfer Size."
+            )
+        for index, chamfer in enumerate(chamfers, start=1):
+            chamfer.name = (
+                "Face Cutout (Native) - Chamfer"
+                if len(chamfers) == 1
+                else f"Face Cutout (Native) - Chamfer Part {index}"
+            )
+            edge_set = (
+                adsk.fusion.EqualDistanceChamferEdgeSet.cast(
+                    chamfer.edgeSets.item(0)
+                )
+                if chamfer.edgeSets.count
+                else None
+            )
+            if edge_set and edge_set.distance:
+                self._name_parameter(
+                    edge_set.distance,
+                    "chamferSize"
+                    if len(chamfers) == 1
+                    else f"chamferSizePart{index}",
+                )
+        return chamfers[-1]
+
+    def _cutout_rim_loops(
+        self,
+        combines: list[
+            tuple[adsk.fusion.CombineFeature, list[adsk.core.Plane]]
+        ],
+    ) -> list[list[adsk.fusion.BRepEdge]]:
+        """The cutout edges at the selected faces, grouped into connected
+        rims - one per cutout or island.
+
+        Those are the edges where a face the cut created - a cutout wall -
+        meets a selected face's plane. The walls also end at the pocket
+        floor or at the opposite face, and the floor is a cut face too, but
+        all of those edges lie in other planes. Edges the face had before
+        the cut (its outer border, inner holes) belong to no cut face, so
+        they stay sharp.
+        """
+        tolerance = self.app.pointTolerance * 100
+        loops: list[list[adsk.fusion.BRepEdge]] = []
+        for combine, planes in combines:
+            normals = [plane.normal.copy() for plane in planes]
+            for normal in normals:
+                normal.normalize()
+            # tempIds are unique per body, and each combine cuts one body.
+            # An edge bounds two faces, both of which may be cut faces.
+            edges: list[adsk.fusion.BRepEdge] = []
+            seen: set[int] = set()
+            for face in combine.faces:
+                for edge in face.edges:
+                    if edge.tempId in seen:
+                        continue
+                    seen.add(edge.tempId)
+                    points = utils.brep.sample_points_along_edge(edge, 3)
+                    if points and any(
+                        all(
+                            abs(plane.origin.vectorTo(point).dotProduct(normal))
+                            <= tolerance
+                            for point in points
+                        )
+                        for plane, normal in zip(planes, normals)
+                    ):
+                        edges.append(edge)
+
+            # Union-find over shared vertices.
+            parents = list(range(len(edges)))
+
+            def root(index: int) -> int:
+                while parents[index] != index:
+                    parents[index] = parents[parents[index]]
+                    index = parents[index]
+                return index
+
+            first_edge_at_vertex: dict[int, int] = {}
+            for index, edge in enumerate(edges):
+                for vertex in (edge.startVertex, edge.endVertex):
+                    if not vertex:
+                        continue
+                    other = first_edge_at_vertex.setdefault(vertex.tempId, index)
+                    parents[root(index)] = root(other)
+            grouped: dict[int, list[adsk.fusion.BRepEdge]] = {}
+            for index, edge in enumerate(edges):
+                grouped.setdefault(root(index), []).append(edge)
+            loops.extend(grouped.values())
+        return loops
+
+    def _chamfer_rim_loops(
+        self,
+        component: adsk.fusion.Component,
+        loops: list[list[adsk.fusion.BRepEdge]],
+        chamfers: list[adsk.fusion.ChamferFeature],
+    ) -> None:
+        """Chamfers all loops in one feature, or - when Fusion rejects that -
+        splits them and retries each half. A loop that fails on its own is
+        left sharp: a sliver cut where a pattern meets an inset ring can be
+        too small for the chamfer even when every other cutout takes it.
+
+        Edges of the remaining loops stay valid after a chamfer modified the
+        body elsewhere. Later chamfers reference the first one's distance
+        parameter instead of repeating the user expression.
+        """
+        if not loops:
+            return
+        distance = (
+            self.inputs.chamfer_size.expression
+            if not chamfers
+            else adsk.fusion.EqualDistanceChamferEdgeSet.cast(
+                chamfers[0].edgeSets.item(0)
+            ).distance.name
+        )
+        chamfer_input = component.features.chamferFeatures.createInput2()
+        added = chamfer_input.chamferEdgeSets.addEqualDistanceChamferEdgeSet(
+            adsk.core.ObjectCollection.createWithArray(
+                cast(list[adsk.core.Base], [edge for loop in loops for edge in loop])
+            ),
+            adsk.core.ValueInput.createByString(distance),
+            False,
+        )
+        chamfer = None
+        if added:
+            try:
+                chamfer = component.features.chamferFeatures.add(chamfer_input)
+            except RuntimeError:
+                chamfer = None
+        if (
+            chamfer
+            and chamfer.healthState
+            == adsk.fusion.FeatureHealthStates.ErrorFeatureHealthState  # type: ignore
+        ):
+            chamfer.deleteMe()
+            chamfer = None
+        if chamfer:
+            chamfers.append(chamfer)
+            return
+        if len(loops) == 1:
+            return
+        midpoint = len(loops) // 2
+        self._chamfer_rim_loops(component, loops[:midpoint], chamfers)
+        self._chamfer_rim_loops(component, loops[midpoint:], chamfers)
 
     def _largest_profile(self, sketch: adsk.fusion.Sketch) -> adsk.fusion.Profile | None:
         profiles = utils.fusion.as_list(sketch.profiles)
