@@ -79,7 +79,7 @@ FENCE_STOPS = [
 ] + [
     # Aftermarket (e.g. 3D-printed) stop gauges add further thicknesses.
     FenceStop(2000 + thickness, thickness, "Alternative")
-    for thickness in (9, 11, 12, 13, 16, 18)
+    for thickness in (10, 12, 13, 16, 18)
 ]
 
 

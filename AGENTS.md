@@ -6,6 +6,8 @@
 - `lib/` is the shared Python library used by add-ins (utility modules, Fusion helpers).
   - `lib/domino.py` holds all Festool Domino code (sizes, machine stops, dialog inputs, validation, sketches and cuts), shared by `connectors_native` (Domino connector type) and `tenons_native` (Domino tenon type). Change Domino behavior there, not in the add-ins.
   - `lib/edge_sketch.py` holds the fully constrained sketch and cut helpers along a selected edge that `connectors_native` and `lib/domino.py` build with.
+  - `lib/drawer_slides.py` holds the cabinet hole patterns of the drawer slides (Blum Movento, Grass Dynapro) and the odd/even hole choice used by `drawer_slides`. It is plain Python without Fusion imports; `python3 -m lib.drawer_slides` runs its self-checks.
+  - `lib/hole_features.py` creates native Hole features from sketch points (flat-bottomed fixed depth or through to the opposite face).
 - `_build/` holds versioned, self-contained add-in builds produced for distribution.
 - `tools/` includes helper scripts for symlinking and vendoring builds.
 - `img/` contains documentation screenshots referenced in `README.md`.
@@ -69,7 +71,8 @@
 
 - Always make sure that sketches are fully constrained, unless told otherwise.
 - Never use fixed geometry, unless you're explicitly instructed to do so.
-- Give every created parameter and feature a stable, human-readable name that describes its purpose. This includes naming the model parameters associated with sketch dimensions.
+- Give every created sketch and feature a stable, human-readable name that describes its purpose.
+- Name model parameters selectively, not by default. Each rename forces a document update that scales with the model (~0.5 s per rename in a large assembly), so the native add-ins route renames through a `_name_parameter` hook that is disabled. Only name a parameter when a user is expected to find and edit it in Change Parameters, e.g. a value that drives several features and can't be changed through the add-in's dialog or group edit. Cross-references between parameters must read `parameter.name` at runtime instead of relying on a chosen name.
 - Minimize the amount of explicit dimensions within a sketch within reason.
 
     Leverage all the other constraints available to position and dimension sketch geometry relative to each other instead of using explicit dimensions over and over. For example use the following constraints: equal, horizontal/vertical, colinear, parallel, perpendicular, tangent, etc.
@@ -99,7 +102,7 @@
 
 ## Editable Results (Group Edit)
 
-Native-feature add-ins (`connectors_native`, `tenons_native`, `box_joint`, `cutouts_native`, `concealed_hinge_native`, `door_latch_native`, `dog_bones_native`) can edit a result they created earlier. Implemented in `lib/group_edit.py` and `lib/addin.py`.
+Native-feature add-ins (`connectors_native`, `tenons_native`, `box_joint`, `cutouts_native`, `concealed_hinge_native`, `hatch_hinge`, `ball_catch`, `door_latch_native`, `dog_bones_native`, `drawer_slides`) can edit a result they created earlier. Implemented in `lib/group_edit.py` and `lib/addin.py`.
 
 - User flow: select any sketch or feature of the add-in's timeline group, then start the command. The dialog opens with the stored settings and the timeline rolled back to just before the group. OK deletes the old group and rebuilds it at the same position, keeping the group's name. Cancel leaves everything untouched. Without such a selection the command creates a new result as usual.
 - Mechanics: `Addin.group_features()` creates the timeline group and stores the dialog state as a JSON attribute (`<add-in id>` / `editState`) on the group's first member. Each input contributes `Input.save_state()`; selections are stored as entity tokens. Starting the command with a member selected restores the state in the command's `activate` event, after `group.rollTo(True)` + `command.beginStep()`, so tokens resolve to the entities as they were before the group modified them.

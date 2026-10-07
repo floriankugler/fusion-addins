@@ -1,0 +1,13 @@
+{
+  "autodeskProduct": "Fusion360",
+  "type": "addin",
+  "id": "com.floriankugler.ball-catch",
+  "author": "",
+  "description": {
+    "": "Creates the pilot holes for Ganter GN 450 ball catches that hold an inspection hatch in its opening, using fully constrained sketches and native Fusion hole features."
+  },
+  "version": "",
+  "runOnStartup": false,
+  "supportedOS": "windows|mac",
+  "editEnabled": true
+}

@@ -1,0 +1,13 @@
+{
+  "autodeskProduct": "Fusion360",
+  "type": "addin",
+  "id": "com.floriankugler.drawer-slides",
+  "author": "",
+  "description": {
+    "": "Creates the cabinet pre-drill holes for Blum Movento and Grass Dynapro drawer slides using fully constrained sketches and native Fusion hole features."
+  },
+  "version": "",
+  "runOnStartup": false,
+  "supportedOS": "windows|mac",
+  "editEnabled": true
+}
