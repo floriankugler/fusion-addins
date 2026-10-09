@@ -720,8 +720,9 @@ def solve(root: adsk.fusion.Component, proxies: list[Proxy],
     copies, booleans and even export/import roundtrips) — so grain alignment
     cannot be guaranteed by construction. Instead, each pass measures every
     placement's deviation from its allowed orientation set (flip and in-plane
-    angle) and feeds the negated deviation back through isDirectionFlipped and
-    the per-component rotation offset, both of which act as clean offsets on
+    angle) and feeds the deviation back through isDirectionFlipped and the
+    per-component rotation offset (which turns clockwise, so the angular
+    deviation goes in with its own sign), both of which act as clean offsets on
     the solver's default. The solver is deterministic, so this converges —
     typically in a single extra pass, and only when a part deviates at all.
 
@@ -759,7 +760,13 @@ def solve(root: adsk.fusion.Component, proxies: list[Proxy],
             residue = _orientation_residue(
                 placement, _allowed_rotation_modulus(proxy.rotation_type))
             if abs(residue) > 0.01:
-                correction = proxy.rotation_correction - residue
+                # A positive rotation offset turns the part CLOCKWISE in the
+                # sheet frame (placed angle = default - offset), flipped or
+                # not, so the residue is ADDED. Subtracting it doubled the
+                # error every pass (a 6.8 deg tilted board went 13 -> 27 ->
+                # 55 deg); parts with +-90 deg residues hid this, since both
+                # signs land on an allowed angle.
+                correction = proxy.rotation_correction + residue
                 proxy.rotation_correction = math.atan2(math.sin(correction), math.cos(correction))
                 compliant = False
         if compliant:
