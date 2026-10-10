@@ -139,6 +139,12 @@ class Box:
                 lo[d.axis] += amount
         return Box(lo, hi)
 
+    def grown(self, **by_direction: float) -> Box:
+        """A copy with sides moved outward by the given amounts, keyed by
+        direction name; the mirror image of `shrunk`. This is how a part
+        gets room around it: `floor.box().grown(top=0.5)`."""
+        return self.shrunk(**{name: -amount for name, amount in by_direction.items()})
+
     def with_side(self, direction: str | Direction, value: float) -> Box:
         d = directions.frame.direction(direction)
         lo, hi = dict(self.lo), dict(self.hi)

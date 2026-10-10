@@ -13,6 +13,7 @@ through `face()` and `edge()`.
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Self, Union, overload
 
 from . import directions
@@ -28,7 +29,7 @@ from .refs import Affine, AtSpec, DepthSpec, HasPosition, Pos, PosLike, Side, Th
 from .shapes import Anchor, Shape, parse_anchor, rect
 
 Point2 = tuple[float, float]
-Limit = Union[Pos, Affine, HasPosition, "Board"]
+Limit = Union[Pos, Affine, HasPosition, "Board", "PartLimit"]
 
 
 class Face:
@@ -225,11 +226,22 @@ class Board:
 
     def between(self, *limits: Limit) -> Self:
         """Limits on the in-plane axes: positions, box sides, faces or
-        parts. A part means its face nearest to this board. Missing limits
-        default to the enclosing scope's box."""
+        parts. A part means its face nearest to this board; `part.into(n)`
+        and `part.gap(n)` move that face. Missing limits default to the
+        enclosing scope's box."""
         self._placement("between")
         self._limits = list(limits)
         return self
+
+    def into(self, n: float) -> PartLimit:
+        """As a limit for another board: this board's nearest face, moved
+        `n` into this board, e.g. a floor reaching into a groove."""
+        return PartLimit(self, float(n))
+
+    def gap(self, n: float) -> PartLimit:
+        """As a limit for another board: this board's nearest face, moved
+        `n` away from this board."""
+        return PartLimit(self, -float(n))
 
     def center(self, pos: PosLike) -> Self:
         """The board's thickness is centred on this position; the position's
@@ -357,14 +369,19 @@ class Board:
     def _limit_values(self, axis: Axis, scope_box: Box | None) -> list[float]:
         values: list[float] = []
         for limit in self._limits:
-            if isinstance(limit, Board):
-                lb = limit.box()
-                if limit.t_axis != axis:
+            if isinstance(limit, (Board, PartLimit)):
+                part, offset = (limit, 0.0) if isinstance(limit, Board) else (limit.part, limit.offset)
+                lb = part.box()
+                if part.t_axis != axis:
                     continue
-                # the face of `limit` nearest to this board's side of the box
+                # the face of `part` nearest to this board's side of the box,
+                # moved by `offset` into the part
                 centre = ((scope_box.lo[axis] + scope_box.hi[axis]) / 2 if scope_box
                           else (lb.lo[axis] + lb.hi[axis]) / 2)
-                values.append(lb.hi[axis] if lb.hi[axis] <= centre else lb.lo[axis])
+                if lb.hi[axis] <= centre:
+                    values.append(lb.hi[axis] - offset)
+                else:
+                    values.append(lb.lo[axis] + offset)
                 continue
             pos = as_pos(limit, f"between() limit {limit!r}")
             if pos.axis == axis:
@@ -535,13 +552,76 @@ class Board:
     def _face_for(self, face: str | Face) -> Face:
         return self.show_face if face == "show" else self.face(face)
 
-    def cut(self, shape: Shape, at: AtSpec = "center", name: str | None = None, chamfer: float = 0.0) -> Self:
-        """A through cut, positioned on the show face; it changes the outline."""
+    def cut(self, shape: Shape | Board | Box, at: AtSpec = "center", name: str | None = None,
+            chamfer: float = 0.0) -> Self:
+        """With a shape: a through cut, positioned on the show face; it
+        changes the outline. With a part or a box: removes the region that
+        part occupies inside this board (its outline through its
+        thickness) or that box covers; a pocket from the face the region
+        enters through, or a through cut when it passes the whole
+        thickness. Room around a part comes from `part.box().grown(...)`."""
+        if isinstance(shape, (Board, Box)):
+            if at != "center":
+                raise LangError("cut(): at= is not used when cutting with a part or box.", self.path)
+            return self._cut_region(shape, name, chamfer)
         placed = self._place_shape(self.show_face, shape, at)
+        self._cut_through(placed, name, chamfer)
+        return self
+
+    def _cut_through(self, placed: Shape, name: str | None, chamfer: float) -> None:
         self.outline = self.outline.difference(placed)
         if self.outline.is_empty():
             raise LangError("the cut removes the whole board.", self.path)
         self._record(Cut(placed, name, chamfer), name)
+
+    def _cut_region(self, region: Board | Box, name: str | None, chamfer: float) -> Self:
+        b = self.box()
+        t, u, v = self.t_axis, self.u_axis, self.v_axis
+        rb = region.box() if isinstance(region, Board) else region
+        label = region.path if isinstance(region, Board) else "box"
+        if not b.overlaps(rb):
+            raise LangError(f"cut(): {label} does not reach into this board.", self.path)
+        overlap = b.intersection(rb)
+        if isinstance(region, Box):
+            shape = rect(rb.hi[u] - rb.lo[u], rb.hi[v] - rb.lo[v]).moved(rb.lo[u], rb.lo[v])
+            t0, t1 = overlap.lo[t], overlap.hi[t]
+        elif region.t_axis == t:
+            # Parallel boards share the (u, v) frame: the outline as it is.
+            shape = region.outline
+            t0, t1 = overlap.lo[t], overlap.hi[t]
+        else:
+            # Perpendicular: the other board's plane contains this board's
+            # thickness axis. Take its outline within this thickness, and
+            # that section's extent along the axis the two planes share.
+            ru, rv = region.u_axis, region.v_axis
+            lo = {ru: rb.lo[ru], rv: rb.lo[rv]}
+            hi = {ru: rb.hi[ru], rv: rb.hi[rv]}
+            lo[t], hi[t] = b.lo[t], b.hi[t]
+            strip = rect(hi[ru] - lo[ru], hi[rv] - lo[rv]).moved(lo[ru], lo[rv])
+            section = region.outline.intersection(strip)
+            if section.is_empty():
+                raise LangError(f"cut(): {label} does not reach into this board.", self.path)
+            s0, s1, s2, s3 = section.bounds
+            bounds = {ru: (s0, s2), rv: (s1, s3)}
+            free = rv if ru == t else ru              # the in-plane axis shared with this board
+            span = {free: bounds[free], region.t_axis: (rb.lo[region.t_axis], rb.hi[region.t_axis])}
+            shape = rect(span[u][1] - span[u][0], span[v][1] - span[v][0]).moved(span[u][0], span[v][0])
+            t0, t1 = max(bounds[t][0], b.lo[t]), min(bounds[t][1], b.hi[t])
+        eps = 1e-6
+        if t0 <= b.lo[t] + eps and t1 >= b.hi[t] - eps:
+            self._cut_through(shape, name, chamfer)
+            return self
+        if t1 >= b.hi[t] - eps:
+            face = directions.frame.direction_of(t, 1)
+            depth = b.hi[t] - t0
+        elif t0 <= b.lo[t] + eps:
+            face = directions.frame.direction_of(t, -1)
+            depth = t1 - b.lo[t]
+        else:
+            raise LangError(
+                f"cut(): {label} lies inside the thickness and reaches neither face; "
+                "a pocket must start at a face.", self.path)
+        self._record(Pocket(shape, face.name, depth, f"cut({label})", name, chamfer), name)
         return self
 
     def pocket(self, shape: Shape, face: str | Face = "show", at: AtSpec = "center",
@@ -617,6 +697,15 @@ class Board:
             "manual": self.manual_part,
             "ops": [_op_to_layout(op) for op in self.ops],
         }
+
+
+@dataclass(frozen=True)
+class PartLimit:
+    """A part as a `between()` limit with its nearest face moved: a
+    positive `offset` into the part (`part.into(n)`), a negative one away
+    from it (`part.gap(n)`)."""
+    part: Board
+    offset: float
 
 
 def _in_plane(t_axis: Axis) -> tuple[Axis, Axis]:

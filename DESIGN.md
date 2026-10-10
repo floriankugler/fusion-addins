@@ -250,6 +250,15 @@ proposed]
   layout. Operations on the narrow faces (Domino, Cabineo, screws into an edge)
   are allowed; the one-side check counts them as secondary operations, not as a
   flip.
+- **Cutting with a part or a box** [decided 2026-10-10]: `side.cut(floor)`
+  removes the region the floor occupies inside the side, its outline through
+  its thickness; a pocket from the face the region enters through, or a
+  through cut when it passes the whole thickness. `cut(box)` does the same
+  with a box. Room for a fit is stated on the region, not on the operation:
+  `side.cut(floor.box().grown(top=0.5, left=0.5))`, so the gap is explicit
+  per side and the operation stays a plain cut. A part as a `between()`
+  limit means its nearest face; `part.into(n)` and `part.gap(n)` move it.
+  This is the primitive the `groove` joint will reduce to.
 - **Positioning an operation, `at=`** [proposed]: an operation is positioned in
   the 2D frame of the face it is on. `at=` names an anchor of that face by
   directions, `"bottom.front"` for a corner, `"front"` for the middle of an

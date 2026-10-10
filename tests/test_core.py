@@ -214,6 +214,58 @@ def test_layout_json_roundtrip(tmp_path: Path) -> None:
     assert layout["problems"] == []
 
 
+def test_box_grown_mirrors_shrunk():
+    b = Box.from_size(width=100, depth=100, height=100)
+    g = b.grown(top=0.5, left=1)
+    assert g.hi["z"] == 100.5 and g.hi["y"] == 101 and g.lo["y"] == 0
+
+
+def test_part_limits_into_and_gap():
+    with module("box", Box.from_size(width=400, depth=300, height=100)) as m:
+        left = board("left", ply15).on(m.left)
+        right = board("right", ply15).on(m.right)
+        floor = board("floor", ply9).on(m.bottom).between(left.into(5), right.gap(2))
+    fb = floor.box()
+    assert fb.hi["y"] == 385 + 5 and fb.lo["y"] == 15 + 2
+
+
+def test_cut_with_a_perpendicular_part_is_a_pocket_from_the_entered_face():
+    with module("box", Box.from_size(width=400, depth=300, height=100)) as m:
+        side = board("side", ply15).on(m.left)
+        floor = board("floor", ply9).on(m.bottom + 10).between(side.into(5), m.right, m.front + 12, m.back)
+        side.cut(floor, name="groove")
+        side.cut(floor.box().grown(top=0.5, left=0.5), name="roomy")
+    groove, roomy = side.ops
+    assert isinstance(groove, Pocket) and groove.face == "right" and groove.depth == 5
+    assert groove.shape.bounds == (12.0, 10.0, 300.0, 19.0)
+    assert groove.depth_spec == "cut(box.floor)"
+    assert isinstance(roomy, Pocket) and roomy.depth == 5.5
+    assert roomy.shape.bounds == (12.0, 10.0, 300.0, 19.5)
+
+
+def test_cut_with_a_parallel_part_through_the_thickness_changes_the_outline():
+    with module("box", Box.from_size(width=400, depth=300, height=100)) as m:
+        shelf = board("shelf", ply15).on(m.bottom)
+        block = board("block", ply15).on(m.bottom).between(m.left, m.left - 50, m.front, m.front + 15)
+        shelf.cut(block, name="notch")
+    notch = shelf.ops[0]
+    assert isinstance(notch, Cut)
+    assert shelf.outline.bounds == (0.0, 0.0, 300.0, 400.0)
+    assert shelf.outline.area == 300 * 400 - 15 * 50
+
+
+def test_cut_with_a_part_that_misses_or_floats_is_an_error():
+    with module("box", Box.from_size(width=400, depth=300, height=100)) as m:
+        side = board("side", ply15).on(m.left)
+        away = board("away", ply9).on(m.bottom).between(m.right, m.right + 100)
+        with pytest.raises(LangError):
+            side.cut(away)
+        with pytest.raises(LangError):
+            side.cut(Box.from_size(width=5, depth=100, height=9, origin=(0, 390, 20)))
+        with pytest.raises(LangError):
+            side.cut(away, at="bottom")   # at= belongs to shapes only
+
+
 def test_interference_ignores_overlap_inside_a_pocket():
     with module("box", Box.from_size(width=400, depth=300, height=100)) as m:
         side = board("side", ply15).on(m.left)
