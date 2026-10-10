@@ -1,10 +1,14 @@
-"""Scopes and modules: namespaces of parts with a path and a box.
+"""Scopes and modules: namespaces of parts with a path, a box and a frame.
 
-A module is a scope with a box that compiles into its own document. Parts
-register in the current scope under their name. Direction names on a scope
-are its box's sides (`cab.left`), since carcass parts are usually named
-after directions too; such parts are reached with `cab["left"]`. Other
-names resolve to parts, child scopes and exports through attribute access.
+A module is a scope with a box that compiles into its own document. It is
+written in its own frame: `module(name, box, front=box.right)` makes it
+face the box's right side, and inside it front, back, left, right, width
+and depth are the module's own (see `directions`). Without `front=` it
+uses the enclosing frame. Parts register in the current scope under their
+name. Direction names on a scope are its box's sides (`cab.left`), since
+carcass parts are usually named after directions too; such parts are
+reached with `cab["left"]`. Other names resolve to parts, child scopes and
+exports through attribute access.
 """
 from __future__ import annotations
 
@@ -12,7 +16,7 @@ from typing import TYPE_CHECKING, Any, Callable
 
 from . import directions
 from .box import Box
-from .directions import Axis
+from .directions import Axis, Direction, ExtentName, Frame
 from .errors import LangError
 from .refs import Pos, Side
 
@@ -38,11 +42,16 @@ _stack: list[Scope] = []
 
 
 class _Root:
-    """The implicit scope outside any `with module()`: no box, no path."""
+    """The implicit scope outside any `with module()`: no box, no path, the
+    world frame."""
     path = ""
     box: Box | None = None
     default_grain: Axis | None = None
     is_module = False
+
+    @property
+    def frame(self) -> Frame:
+        return directions.frame
 
     def register(self, part: Board) -> None:
         registry.root_parts.append(part)
@@ -55,14 +64,19 @@ def current() -> Scope | _Root:
     return _stack[-1] if _stack else _root
 
 
+directions.set_current_frame_provider(lambda: current().frame)
+
+
 class Scope:
-    def __init__(self, name: str, box: Box | None = None, is_module: bool = False):
+    def __init__(self, name: str, box: Box | None = None, is_module: bool = False,
+                 frame: Frame | None = None):
         if not name or "." in name:
             raise LangError(f"Scope name {name!r} must be non-empty and contain no dots.")
         self.name = name
         self.parent: Scope | None = _stack[-1] if _stack else None
         self.is_module = is_module
-        self._box = box
+        self.frame: Frame = frame if frame is not None else current().frame
+        self._box = box.in_frame(self.frame) if box is not None else None
         self.parts: dict[str, Board] = {}
         self.children: dict[str, Scope] = {}
         self.exports: dict[str, Any] = {}
@@ -123,8 +137,8 @@ class Scope:
     def bottom(self) -> Side:
         return self.side("bottom")
 
-    def extent(self, axis_or_name: str) -> float:
-        return self._need_box("extent").extent(axis_or_name)
+    def extent(self, name: ExtentName) -> float:
+        return self._need_box("extent").extent(name)
 
     @property
     def width(self) -> float:
@@ -138,8 +152,8 @@ class Scope:
     def height(self) -> float:
         return self.extent("height")
 
-    def center(self, axis_or_name: str) -> Pos:
-        return self._need_box("center").center(axis_or_name)
+    def center(self, name: ExtentName) -> Pos:
+        return self._need_box("center").center(name)
 
     @property
     def interior(self) -> Box:
@@ -151,9 +165,9 @@ class Scope:
             pb = part.box()
             t = part.t_axis
             if abs(pb.lo[t] - b.lo[t]) < 1e-9 and pb.hi[t] < b.hi[t]:
-                inner = inner.with_side(directions.frame.direction_of(t, -1), max(inner.lo[t], pb.hi[t]))
+                inner = inner.with_side(self.frame.direction_of(t, -1), max(inner.lo[t], pb.hi[t]))
             elif abs(pb.hi[t] - b.hi[t]) < 1e-9 and pb.lo[t] > b.lo[t]:
-                inner = inner.with_side(directions.frame.direction_of(t, 1), min(inner.hi[t], pb.lo[t]))
+                inner = inner.with_side(self.frame.direction_of(t, 1), min(inner.hi[t], pb.lo[t]))
         return inner
 
     # -- registration -----------------------------------------------------------------------
@@ -243,9 +257,19 @@ class Scope:
         return f"Scope({self.path})"
 
 
-def module(name: str, box: Box) -> Scope:
-    """A module: a scope with a box that compiles into its own document."""
-    return Scope(name, box, is_module=True)
+def module(name: str, box: Box, front: Side | Direction | None = None, mirrored: bool = False) -> Scope:
+    """A module: a scope with a box that compiles into its own document,
+    written in its own frame. `front=` says which way it opens, as a side
+    of its box (`front=box.right`) or a direction; top stays up and left is
+    a cabinetmaker's, standing in front of the module. `mirrored=True`
+    swaps left and right. Without `front=` the enclosing frame is used."""
+    parent_frame = current().frame
+    if front is None:
+        frame = parent_frame.mirrored() if mirrored else parent_frame
+    else:
+        facing = front.outward if isinstance(front, Side) else front
+        frame = Frame.derived(facing, parent_frame.direction("top"), mirrored)
+    return Scope(name, box, is_module=True, frame=frame)
 
 
 def scope(name: str, box: Box | None = None) -> Scope:

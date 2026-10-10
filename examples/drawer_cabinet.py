@@ -16,13 +16,15 @@ class StandInSlide:
     recess = 10
 
     def box_space(self, bay: Box, behind: Board, height: float) -> Box:
-        inner = bay.with_side("front", behind.back.value)
-        return inner.shrunk(left=self.side_clearance, right=self.side_clearance).with_side(
-            "top", inner.bottom.value + height)
+        inner = bay.with_sides(front=behind.back)
+        return (inner.shrunk(left=self.side_clearance, right=self.side_clearance)
+                .with_sides(top=inner.bottom + height))
 
 
-def drawer_cabinet(name: str, box: Box, n: int, slide: StandInSlide) -> Scope:
-    with module(name, box) as cab:
+def drawer_cabinet(name: str, box: Box, n: int, slide: StandInSlide, front: Side | None = None) -> Scope:
+    """A drawer cabinet in its own frame: front is where the drawers open,
+    wherever the cabinet stands. `front=` places it (see `module`)."""
+    with module(name, box, front=front) as cab:
         left = board("left", ply15).on(cab.left)
         right = board("right", ply15).on(cab.right)
         bottom = board("bottom", ply15).on(cab.bottom).between(left, right)
@@ -38,7 +40,7 @@ def drawer_cabinet(name: str, box: Box, n: int, slide: StandInSlide) -> Scope:
             for z in spread(bottom.top + 100, top.bottom - 100, pitch=32):
                 side.hole(d=5, depth=10, at=side.inner.front(37).bottom(z))
 
-        for i, bay in enumerate(cab.interior.split("z", n), 1):
+        for i, bay in enumerate(cab.interior.split("height", n), 1):
             drawer(f"drawer{i}", bay, slide)
 
         cab.export("worktop", top.top)   # for whatever stands on the cabinet
@@ -67,4 +69,9 @@ def drawer(name: str, bay: Box, slide: StandInSlide) -> Scope:
     return d
 
 
-cabinet = drawer_cabinet("drawercab", Box.from_size(width=600, depth=500, height=720), 3, StandInSlide())
+# The cabinet stands against the driver's wall (left, -y) and opens toward the
+# aisle. Its 600 mm front runs along the vehicle, so in world terms the box is
+# 500 wide (across the vehicle) and 600 deep (along it); inside the module the
+# cabinet is 600 wide and 500 deep.
+box = Box.from_size(width=500, depth=600, height=720)
+cabinet = drawer_cabinet("drawercab", box, 3, StandInSlide(), front=box.right)

@@ -24,7 +24,7 @@ from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
 
 from . import directions
-from .directions import AXES, Axis
+from .directions import AXES, Axis, ExtentName
 from .errors import LangError
 
 Ring = list[tuple[float, float]]
@@ -195,7 +195,7 @@ class Shape:
 
 
 def _extent_name(axis: Axis) -> str:
-    for name, a in directions.frame.extents.items():
+    for name, a in directions.current_frame().extents.items():
         if a == axis:
             return name
     return axis
@@ -216,15 +216,15 @@ def rect(*, width: float | None = None, depth: float | None = None, height: floa
     `width`, `depth` and `height`, e.g. `rect(depth=60, height=100)`. It
     lies in the plane of those two axes and can only be placed on a face in
     that plane. Its corner nearest the origin sits at (0, 0)."""
-    given = {name: size for name, size in (("width", width), ("depth", depth), ("height", height))
-             if size is not None}
+    candidates: list[tuple[ExtentName, float | None]] = [("width", width), ("depth", depth), ("height", height)]
+    given: dict[ExtentName, float] = {name: size for name, size in candidates if size is not None}
     if len(given) != 2:
         raise LangError("rect: name exactly two extents, e.g. rect(depth=60, height=100).")
     for name, size in given.items():
         if size <= 0:
             raise LangError(f"rect: {name} must be positive, got {size}.")
-    by_axis: dict[Axis, float] = {directions.frame.axis_of_extent(name): float(size)
-                                  for name, size in given.items()}
+    f = directions.current_frame()
+    by_axis: dict[Axis, float] = {f.axis_of_extent(name): float(size) for name, size in given.items()}
     if len(by_axis) != 2:
         raise LangError("rect: the two extents name the same axis in this frame.")
     u, v = cast(tuple[Axis, Axis], tuple(sorted(by_axis, key=AXES.index)))

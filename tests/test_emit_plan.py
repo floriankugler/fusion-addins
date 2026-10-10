@@ -34,7 +34,7 @@ def test_body_is_outline_on_lower_face_extruded_along_thickness():
     assert p.body.thickness == 15
     assert p.body.direction == (0.0, 1.0, 0.0)
     ring = p.body.rings[0]
-    assert all(pt[1] == 585.0 for pt in ring)
+    assert all(pt[1] == 0.0 for pt in ring)
     assert {(pt[0], pt[2]) for pt in ring} == {(0.0, 0.0), (500.0, 0.0), (500.0, 720.0), (0.0, 720.0)}
 
 
@@ -48,9 +48,9 @@ def test_holes_batch_by_face_diameter_and_depth():
     assert len(steps) == 2
     first, second = steps
     assert isinstance(first, HoleStep) and isinstance(second, HoleStep)
-    assert first.face == FaceRef("y", -1, 585.0)
-    assert first.face.into == (0.0, 1.0, 0.0)
-    assert first.points == [(37.0, 585.0, 120.0), (37.0, 585.0, 152.0)]
+    assert first.face == FaceRef("y", 1, 15.0)
+    assert first.face.into == (0.0, -1.0, 0.0)
+    assert first.points == [(37.0, 15.0, 120.0), (37.0, 15.0, 152.0)]
     assert first.depth == 10 and second.depth == 12
 
 
@@ -79,15 +79,15 @@ def test_cut_chamfer_and_named_contours():
              .chamfer(left.pin, 0.5))
     steps = _plan_of(left).steps
     cut_chamfer, outline, edge, _hole, pin = steps
-    show = FaceRef("y", 1, 600.0)
+    show = FaceRef("y", -1, 0.0)
     assert isinstance(cut_chamfer, ChamferStep) and isinstance(cut_chamfer.contour, ShapeContour)
     assert cut_chamfer.contour.face == show
-    assert all(pt[1] == 600.0 for pt in cut_chamfer.contour.rings[0])
+    assert all(pt[1] == 0.0 for pt in cut_chamfer.contour.rings[0])
     assert isinstance(outline, ChamferStep) and outline.contour == OutlineContour(show)
     assert isinstance(edge, ChamferStep)
-    assert edge.contour == EdgeContour(FaceRef("x", -1, 0.0), FaceRef("y", -1, 585.0))
+    assert edge.contour == EdgeContour(FaceRef("x", -1, 0.0), FaceRef("y", 1, 15.0))
     assert isinstance(pin, ChamferStep)
-    assert pin.contour == CircleContour(FaceRef("y", -1, 585.0), (250.0, 585.0, 360.0), 2.5)
+    assert pin.contour == CircleContour(FaceRef("y", 1, 15.0), (250.0, 15.0, 360.0), 2.5)
 
 
 def test_narrow_face_operations_map_to_the_face_plane():
@@ -98,13 +98,13 @@ def test_narrow_face_operations_map_to_the_face_plane():
     hole, pocket = _plan_of(left).steps
     assert isinstance(hole, HoleStep)
     assert hole.face == FaceRef("x", -1, 0.0)
-    assert hole.points == [(0.0, 592.5, 50.0)]
+    assert hole.points == [(0.0, 7.5, 50.0)]
     assert hole.depth == 30  # deeper than the thickness, but not through the 500 mm board
     assert isinstance(pocket, PocketStep)
     assert pocket.face == FaceRef("z", 1, 720.0)
     xs = {pt[0] for pt in pocket.shapes[0][0]}
     ys = {pt[1] for pt in pocket.shapes[0][0]}
-    assert xs == {240.0, 260.0} and ys == {589.5, 595.5}
+    assert xs == {240.0, 260.0} and ys == {4.5, 10.5}
     assert all(pt[2] == 720.0 for pt in pocket.shapes[0][0])
 
 

@@ -10,7 +10,7 @@ from lang import *
 ply15 = material("birch", t=15, sheet=(2500, 1250))
 
 with module("ops", Box.from_size(width=400, depth=300, height=100)) as m:
-    with board("panel", ply15).on(m.bottom).show("top") as panel:
+    with board("panel", ply15).on(m.bottom).show(m.top) as panel:
         top = panel.top
         panel.cut(rect(depth=60, width=40), at=top.front.left, name="notch")
         panel.cut(circle(30), at=top.back(50).right(50), name="port", chamfer=1)

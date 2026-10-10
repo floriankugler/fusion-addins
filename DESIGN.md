@@ -198,9 +198,19 @@ proposed]
   - a board is a body inside its module's component, not a component of its own
     (Florian does not rely on Fusion's parts list or on drawings per part);
   - bought parts (slides, hinges) are linked components, as in existing documents.
-- Directions are defined once per project, for example `left = -x`. Aliases are
-  possible (`fs`, `bfs` for driver and passenger side). [decided]
-  In the existing "Planung" document x appears to run along the vehicle and z is up.
+- The world frame is defined once per project: front is -x (toward the
+  vehicle's front), left is -y (the driver's side), top is +z, as in the
+  Planung document. Aliases are possible (`fs`, `bfs` for driver and passenger
+  side). [decided; the axes confirmed 2026-10-10]
+- A module is written in its own frame and placed: `module(name, box,
+  front=box.right)` makes it open toward the box's right side; top stays up,
+  left and right are a cabinetmaker's, standing in front of it; `mirrored=True`
+  swaps them. Inside, `cab.back`, `side.inner.front(37)`, `rect(depth=...)`
+  and `width`, `depth`, `height` are the module's own, child scopes inherit
+  the frame, and the layout file carries world names, so the preview and the
+  emitter never see module frames. A cabinet type is written once and placed
+  on either wall, rotated or mirrored, which is the usual case when a module
+  is designed before it has a project. [decided 2026-10-10]
 - A face of a part is named by direction. An edge is named by two faces
   (`front.inner`), a corner by three. This is the scheme BOSL2 uses for anchors.
   [proposed]
@@ -225,7 +235,9 @@ proposed]
 - Geometry made by an operation takes the operation's name (`left.toekick.top`).
   A side made by a reference takes the reference's name (`batten3.floor_profile`).
   [proposed]
-- Mirrored modules practically never occur, so they get no special handling. [decided]
+- Mirroring is a placement option of a module (`mirrored=True`) and nothing
+  more: mirrored parts come out of the layout step like any other. [decided
+  2026-10-10, replacing the earlier view that mirrored modules never occur]
 - Wanted helpers [proposed]: a command that copies the path of the current selection
   to the clipboard; nested copies of parts carry the full path as body name, which
   is also the part label at the machine.
@@ -310,15 +322,25 @@ proposed]
   default to the enclosing scope's box. When a part is given as a limit, its
   nearest face is meant. [proposed]
 - The constructor is `board(name, material, shape=None)`; the placement
-  modifiers are `.on(ref)`, `.between(*limits)`, `.center(pos)`, `.inset(n)`,
-  `.grain(axis)`, `.show(face)`, `.manual()`. `.inset(n)` shrinks the outline
-  by `n` on every side of its box, which is how an inset front gets its gap;
-  there are no one-off modifiers such as margin or lift, because
-  `.on(box.bottom + slide.recess)` already says lift. [proposed]
+  modifiers are `.on(ref, toward=)`, `.between(*limits)`, `.center(pos)`,
+  `.inset(n)`, `.grain(along)`, `.show(face)`, `.manual()`. `.inset(n)` shrinks
+  the outline by `n` on every side of its box, which is how an inset front
+  gets its gap; there are no one-off modifiers such as margin or lift,
+  because `.on(box.bottom + slide.recess)` already says lift. [proposed]
 - A box exposes its sides as positions (`box.left`, `box.top`) and its lengths
-  as `box.extent(direction)`. `width`, `depth` and `height` are per-project
-  aliases bound to axes where the directions are defined, so `bay.height` is
-  `bay.extent("z")` in a project where z is up. [proposed]
+  as `box.width`, `box.depth`, `box.height`, which measure along the
+  left-right, front-back and top-bottom axes of the box's frame. Where an
+  extent is an argument it is one of those three names, checked by the type
+  checker: `bay.split("height", 3)`, `.grain("depth")`. Axis letters do not
+  appear in build files. [decided 2026-10-10]
+- Strings in the API are either names checked as literals by the type
+  checker (`width`/`depth`/`height`, `"inner"`/`"outer"` in `show()` and
+  `to()` for the chained form) or lookups for computed names
+  (`box.side(name)`, `part.face(name)`); everything else is an object: box
+  sides (`show(cab.front)`, `on(pos, toward=cab.top)`, `grain(cab.top)`),
+  faces, edges, anchors, operations. Side keywords (`shrunk(left=5)`,
+  `with_sides(front=...)`, `Box.from_sides(...)`) are explicit parameters,
+  so a misspelt side is a type error. [decided 2026-10-10]
 - Contour limits: a contour in the part's own plane bounds the outline directly;
   a contour in a perpendicular plane is sectioned at both big faces of the part
   and the tighter result wins, so the part fits over its whole thickness. Both
@@ -614,7 +636,7 @@ These show the intended feel. None of the functions exist.
 
 ```python
 with board("left", ply15, rect(depth=500, height=720)) as side:
-    side.show("outer").grain("z")
+    side.show("outer").grain("height")
     side.cut(rect(depth=60, height=100), at=side.outer.bottom.front, name="toekick")
     side.pocket(rect(depth=200, height=12), at=side.inner.front.bottom(shelf.bottom),
                 depth=to(side.outer, -3), chamfer=0.5)    # dado whose bottom is the shelf's
@@ -632,7 +654,7 @@ edge of the part needs the part's name, so a part with operations is
 written as a block or assigned first:
 
 ```python
-side = board("left", ply15, rect(depth=500, height=720)).show("outer").grain("z")
+side = board("left", ply15, rect(depth=500, height=720)).show("outer").grain("height")
 side.cut(rect(depth=60, height=100), at=side.outer.bottom.front, name="toekick")
 ```
 
@@ -659,8 +681,8 @@ ply9 = material("birch", t=9)
 GAP = 3  # between fronts
 
 
-def drawer_cabinet(name, box, n, slide):
-    with module(name, box) as cab:
+def drawer_cabinet(name, box, n, slide, front=None):
+    with module(name, box, front=front) as cab:          # written in its own frame
         left   = board("left", ply15).on(cab.left)
         right  = board("right", ply15).on(cab.right)
         bottom = board("bottom", ply15).on(cab.bottom).between(left, right)
@@ -673,7 +695,7 @@ def drawer_cabinet(name, box, n, slide):
         bottom.join(tenons(count=3))          # at every contact it has: left and right
         top.join(tenons(count=3))
 
-        for i, bay in enumerate(cab.interior.split("z", n), 1):
+        for i, bay in enumerate(cab.interior.split("height", n), 1):
             d = drawer(f"drawer{i}", bay, slide)
             d.mount(slide, sides=(left, right))        # Drawer Slides add-in
             d.face.latch(right, "pull_lock_44")        # Door Latch add-in

@@ -14,7 +14,6 @@ import trimesh
 from shapely.geometry import Polygon
 from trimesh.creation import extrude_polygon
 
-from ..core import directions
 from ..core.layout_types import Layout, PartLayout, Rings
 
 AXES = ("x", "y", "z")
@@ -38,17 +37,18 @@ def _part_transform(part: PartLayout) -> Any:
     return m
 
 
-def _from_face(tool: Any, face: str, t_axis: str, t: float, depth: float) -> Any:
+def _from_face(tool: Any, face: str, frame: dict[str, str], t_axis: str, t: float, depth: float) -> Any:
     """Moves a tool built upward from z=0 so that it starts at the named big
-    face and goes into the part. A narrow face yields an empty tool."""
-    d = directions.frame.direction(face)
-    if d.axis != t_axis:
+    face and goes into the part. A narrow face yields an empty tool. Face
+    names are the layout's world names, decoded with its frame."""
+    code = frame[face]
+    if code[1] != t_axis:
         return trimesh.Trimesh()
-    tool.apply_translation([0, 0, t - depth - 0.005 if d.sign > 0 else -0.005])
+    tool.apply_translation([0, 0, t - depth - 0.005 if code[0] == "+" else -0.005])
     return tool
 
 
-def mesh_part(part: PartLayout) -> Any:
+def mesh_part(part: PartLayout, frame: dict[str, str]) -> Any:
     t = part["thickness"]
     outline = _polygon(part["outline"])
     if outline.is_empty:
@@ -60,12 +60,12 @@ def mesh_part(part: PartLayout) -> Any:
         if op["kind"] == "pocket":
             depth = min(op["depth"], t)
             tool = extrude_polygon(_polygon(op["shape"]), depth + 0.01)
-            tools.append(_from_face(tool, op["face"], t_axis, t, depth))
+            tools.append(_from_face(tool, op["face"], frame, t_axis, t, depth))
         elif op["kind"] == "hole":
             depth = min(op["depth"], t)
             tool = trimesh.creation.cylinder(radius=op["d"] / 2, height=depth + 0.01, sections=24)
             tool.apply_translation([op["u"], op["v"], (depth + 0.01) / 2])
-            tools.append(_from_face(tool, op["face"], t_axis, t, depth))
+            tools.append(_from_face(tool, op["face"], frame, t_axis, t, depth))
     tools = [tool for tool in tools if len(tool.faces)]
     if tools:
         try:
@@ -81,7 +81,7 @@ def build_scene(layout: Layout) -> Any:
     scene = trimesh.Scene()
     for module in layout["modules"]:
         for part in module["parts"]:
-            mesh = mesh_part(part)
+            mesh = mesh_part(part, layout["frame"])
             if mesh is not None and len(mesh.faces):
                 scene.add_geometry(mesh, node_name=part["path"], geom_name=part["path"])
     return scene

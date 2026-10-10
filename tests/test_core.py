@@ -37,7 +37,7 @@ def test_mix_of_positions_needs_weights_summing_to_one():
     assert isinstance(Pos("z", 100) + Pos("z", 200), Affine)
     with pytest.raises(LangError):
         # a bare sum of positions is not a position
-        board("x", ply15).on(Pos("z", 1) + Pos("z", 2), side="top")
+        board("x", ply15).on(Pos("z", 1) + Pos("z", 2), toward=frame.direction("top"))
 
 
 def test_mixing_axes_is_an_error():
@@ -54,11 +54,16 @@ def test_spread():
 
 def test_box_sides_and_extents():
     b = Box.from_size(width=600, depth=500, height=720)
-    assert b.left.axis == "y" and b.left.value == 600 and b.left.inward.name == "right"
+    assert b.left.axis == "y" and b.left.value == 0 and b.left.inward.name == "right"
+    assert b.right.value == 600 and b.front.value == 0 and b.back.value == 500
     assert b.bottom.value == 0 and b.top.value == 720
     assert b.height == 720 and b.width == 600 and b.depth == 500
-    bays = b.split("z", 3)
+    bays = b.split("height", 3)
     assert [bay.bottom.value for bay in bays] == [0, 240, 480]
+    moved = b.with_sides(front=Pos("x", 100), top=b.bottom + 50)
+    assert moved.front.value == 100 and moved.top.value == 50
+    with pytest.raises(TypeError):
+        b.shrunk(lefft=5)  # type: ignore[call-arg]  -- a misspelt side is a type error
 
 
 # -- placement ----------------------------------------------------------------
@@ -76,9 +81,9 @@ def test_on_puts_thickness_inward():
     cab = carcass()
     left = cab["left"]
     assert left.t_axis == "y"
-    assert left.box().hi["y"] == 600 and left.box().lo["y"] == 585
-    assert left.inner.value == 585 and left.outer.value == 600
-    assert left.right.value == 585  # global direction names work everywhere
+    assert left.box().lo["y"] == 0 and left.box().hi["y"] == 15
+    assert left.inner.value == 15 and left.outer.value == 0
+    assert left.right.value == 15  # direction names work on every part
     assert left.show_face.name == "left"
 
 
@@ -95,7 +100,7 @@ def test_between_parts_uses_nearest_faces_and_box_defaults():
 def test_interior_is_inside_the_carcass():
     cab = carcass()
     inner = cab.interior
-    assert inner.left.value == 585 and inner.right.value == 15
+    assert inner.left.value == 15 and inner.right.value == 585
     assert inner.bottom.value == 15 and inner.top.value == 720
     assert inner.back.value == 491 and inner.front.value == 0
 
@@ -120,10 +125,25 @@ def test_missing_placement_errors_with_path():
 
 def test_inner_outer_ambiguous_for_a_shelf_at_mid_height():
     with module("m", Box.from_size(600, 500, 720)) as m:
-        shelf = board("shelf", ply15).center(m.center("z"))
+        shelf = board("shelf", ply15).center(m.center("height"))
         with pytest.raises(LangError):
             shelf.inner
         assert shelf.top.value == 367.5
+
+
+def test_show_and_grain_take_objects():
+    with module("m", Box.from_size(width=600, depth=500, height=720)) as m:
+        a = board("a", ply15).on(m.left).show(m.right).grain("height")
+        b = board("b", ply15).on(m.left).show("inner").grain(m.top)
+        c = board("c", ply15).on(m.bottom)
+        c.show(c.top).grain(c.front)
+        d = board("d", ply15).on(m.bottom).show(m.front.outward)
+    assert a.show_face.name == "right" and b.show_face.name == "right"
+    assert a.to_layout()["grain"] == "z" and b.to_layout()["grain"] == "z"
+    assert c.show_face.name == "top" and c.to_layout()["grain"] == "x"
+    assert d.show_face.name == "front"
+    with pytest.raises(LangError):
+        c.show(a.top)   # another board's face
 
 
 def test_scope_registration_and_paths():
@@ -206,7 +226,7 @@ def test_shapes_name_their_plane():
     bottom.pocket(rect(depth=100, width=20), at=bottom.top.front.left, depth=3)
     a, b = bottom.ops[-2:]
     assert isinstance(a, Pocket) and isinstance(b, Pocket)
-    assert a.shape.bounds == b.shape.bounds == (0.0, 565.0, 100.0, 585.0)
+    assert a.shape.bounds == b.shape.bounds == (0.0, 15.0, 100.0, 35.0)
     with pytest.raises(LangError):
         rect(width=10)
 
@@ -217,11 +237,11 @@ def test_edge_face_hole():
     bottom.hole(d=8, depth=20, at=bottom.front.left(50))        # centred in the thickness
     op = bottom.ops[-1]
     assert isinstance(op, EdgeOp) and op.face == "front"
-    assert (op.s, op.t) == pytest.approx((535, 7.5))
+    assert (op.s, op.t) == pytest.approx((65, 7.5))
     bottom.hole(d=8, depth=20, at=bottom.front.left(50).bottom(5))
     op = bottom.ops[-1]
     assert isinstance(op, EdgeOp)
-    assert (op.s, op.t) == pytest.approx((535, 5))
+    assert (op.s, op.t) == pytest.approx((65, 5))
 
 
 def test_chamfer_targets():
@@ -261,7 +281,7 @@ def test_layout_json_roundtrip(tmp_path: Path) -> None:
 def test_box_grown_mirrors_shrunk():
     b = Box.from_size(width=100, depth=100, height=100)
     g = b.grown(top=0.5, left=1)
-    assert g.hi["z"] == 100.5 and g.hi["y"] == 101 and g.lo["y"] == 0
+    assert g.hi["z"] == 100.5 and g.lo["y"] == -1 and g.hi["y"] == 100
 
 
 def test_part_limits_into_and_gap():
@@ -270,7 +290,7 @@ def test_part_limits_into_and_gap():
         right = board("right", ply15).on(m.right)
         floor = board("floor", ply9).on(m.bottom).between(left.into(5), right.gap(2))
     fb = floor.box()
-    assert fb.hi["y"] == 385 + 5 and fb.lo["y"] == 15 + 2
+    assert fb.lo["y"] == 15 - 5 and fb.hi["y"] == 385 - 2
 
 
 def test_cut_with_a_perpendicular_part_is_a_pocket_from_the_entered_face():
@@ -290,7 +310,7 @@ def test_cut_with_a_perpendicular_part_is_a_pocket_from_the_entered_face():
 def test_cut_with_a_parallel_part_through_the_thickness_changes_the_outline():
     with module("box", Box.from_size(width=400, depth=300, height=100)) as m:
         shelf = board("shelf", ply15).on(m.bottom)
-        block = board("block", ply15).on(m.bottom).between(m.left, m.left - 50, m.front, m.front + 15)
+        block = board("block", ply15).on(m.bottom).between(m.left, m.left.into(50), m.front, m.front.into(15))
         shelf.cut(block, name="notch")
     notch = shelf.ops[0]
     assert isinstance(notch, Cut)
@@ -308,6 +328,43 @@ def test_cut_with_a_part_that_misses_or_floats_is_an_error():
             side.cut(Box.from_size(width=5, depth=100, height=9, origin=(0, 390, 20)))
         with pytest.raises(LangError):
             side.cut(away, at=side.inner.center)   # at= belongs to shapes only
+
+
+def test_module_frame_follows_placement():
+    # a cabinet against the driver's wall (left, -y) that opens toward the aisle
+    box = Box.from_size(width=500, depth=600, height=720)
+    with module("cab", box, front=box.right) as cab:
+        assert cab.front.value == 500 and cab.front.axis == "y"
+        assert cab.back.value == 0
+        # a cabinetmaker's left, standing in front of it: toward the vehicle's rear (+x)
+        assert cab.left.axis == "x" and cab.left.value == 600 and cab.right.value == 0
+        assert cab.top.value == 720
+        assert cab.width == 600 and cab.depth == 500 and cab.height == 720
+        back = board("back", ply9).on(cab.back)
+        assert back.t_axis == "y" and back.box().hi["y"] == 9
+        assert back.inner.name == "front" and back.inner.world_name == "right"
+        back.hole(d=5, depth=5, at=back.inner.center)
+        with scope("drawer1") as d:
+            assert d.left.value == 600     # a child scope inherits the frame
+            front = board("front", ply9).on(cab.front).between(cab.left.into(100), cab.right)
+            assert front.box().lo["x"] == 0 and front.box().hi["x"] == 500
+        assert rect(width=100, depth=50).axes == ("x", "y")
+    layout_back = back.to_layout()
+    assert layout_back["show"] == "left"
+    op = layout_back["ops"][0]
+    assert op["kind"] == "hole" and op["face"] == "right"   # world names in the layout
+    assert not cab.frame.is_mirrored
+
+
+def test_module_frame_mirrored_and_default():
+    box = Box.from_size(width=500, depth=600, height=720)
+    with module("cab", box, front=box.right, mirrored=True) as cab:
+        assert cab.left.value == 0 and cab.right.value == 600 and cab.front.value == 500
+        assert cab.frame.is_mirrored
+    with module("plain", box) as plain:
+        assert plain.left.value == 0 and plain.left.axis == "y"   # the world frame
+    with pytest.raises(ValueError):
+        module("up", box, front=box.top)
 
 
 def test_interference_ignores_overlap_inside_a_pocket():

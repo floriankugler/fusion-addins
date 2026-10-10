@@ -19,7 +19,7 @@ position is expected; `as_pos` does the coercion.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol, overload, runtime_checkable
+from typing import Literal, Protocol, overload, runtime_checkable
 
 from . import directions
 from .directions import Axis, Direction
@@ -176,6 +176,14 @@ class Side:
     def outward(self) -> Direction:
         return -self.inward
 
+    def into(self, n: float) -> Pos:
+        """A position `n` inside the box, past this side."""
+        return Pos(self.axis, self.value + self.inward.sign * n)
+
+    def gap(self, n: float) -> Pos:
+        """A position `n` outside the box, before this side."""
+        return Pos(self.axis, self.value - self.inward.sign * n)
+
     @overload
     def __add__(self, other: Number) -> Side: ...
     @overload
@@ -236,10 +244,10 @@ class ToFace:
     offset: float = 0.0
 
 
-def to(face: str | HasName, offset: float = 0.0) -> ToFace:
-    """A depth reaching the given face of the same part, `to(side.outer,
-    -3)` stopping 3 mm short of it. A direction name, `"inner"` or
-    `"outer"` as a string is resolved on the part the operation is on."""
+def to(face: HasName | Literal["inner", "outer"], offset: float = 0.0) -> ToFace:
+    """A depth reaching a face of the same part, `to(side.outer, -3)`
+    stopping 3 mm short of it. `"inner"` and `"outer"` name the face
+    without naming the part, for the chained form."""
     return ToFace(face if isinstance(face, str) else face.name, offset)
 
 

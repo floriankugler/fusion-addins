@@ -17,12 +17,12 @@ corner (see `Anchor`).
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Self, Union, overload
+from typing import Any, Literal, Self, Union, overload
 
 from . import directions
 from . import scope as scopes
 from .box import Box
-from .directions import AXES, Axis, Direction
+from .directions import AXES, Axis, Direction, ExtentName
 from .errors import LangError
 from .layout_types import (ChamferLayout, CutLayout, EdgeOpLayout, HoleLayout, OpLayout,
                            PartLayout, PocketLayout, Rings)
@@ -71,7 +71,13 @@ class Face:
 
     @property
     def name(self) -> str:
+        """The direction name in the part's frame."""
         return self.direction.name
+
+    @property
+    def world_name(self) -> str:
+        """The direction name in the world frame, as the layout stores it."""
+        return directions.frame.name_of(self.direction)
 
     # -- edges: this face with another ---------------------------------------------
 
@@ -170,6 +176,10 @@ class Edge:
     @property
     def name(self) -> str:
         return f"{self.a.name}.{self.b.name}"
+
+    @property
+    def world_name(self) -> str:
+        return f"{self.a.world_name}.{self.b.world_name}"
 
     def __repr__(self) -> str:
         return f"Edge({self.part.path}.{self.name})"
@@ -359,7 +369,7 @@ class Board:
         self._center: Pos | None = None
         self._inset: float = 0.0
         self._grain: Axis | None = None
-        self._show: str | None = None
+        self._show: str | Direction | None = None
         self.manual_part: bool = False
         self._set: set[str] = set()
         # resolved
@@ -394,23 +404,24 @@ class Board:
             raise LangError(f"{key}() given twice.", self.path)
         self._set.add(key)
 
-    def on(self, ref: Side | Face | PosLike, side: str | Direction | None = None) -> Self:
+    def on(self, ref: Side | Face | PosLike, toward: Side | Direction | None = None) -> Self:
         """Which plane the board's outer big face lies in, and where the
         thickness goes. A box side knows its inward direction; a part's face
         puts the thickness away from that part; a bare position needs
-        `side=`, the direction the thickness extends to."""
+        `toward=`, the direction the thickness extends to, as a box side
+        (`toward=cab.top`) or a direction."""
         self._placement("on")
-        if isinstance(ref, Side) and side is None:
+        if isinstance(ref, Side) and toward is None:
             self._on = ref
-        elif isinstance(ref, Face) and side is None:
+        elif isinstance(ref, Face) and toward is None:
             self._on = Side(ref.axis, ref.value, inward=ref.direction)
         else:
-            if side is None:
-                raise LangError("on(): a bare position needs side=, the direction the thickness goes.", self.path)
-            d = directions.frame.direction(side)
+            if toward is None:
+                raise LangError("on(): a bare position needs toward=, the direction the thickness goes.", self.path)
+            d = toward.outward if isinstance(toward, Side) else toward
             pos = as_pos(ref, "on()")
             if d.axis != pos.axis:
-                raise LangError(f"on(): side {d.name} is not on the axis of {pos}.", self.path)
+                raise LangError(f"on(): toward={d.name} is not on the axis of {pos}.", self.path)
             self._on = Side(pos.axis, pos.value, inward=d)
         return self
 
@@ -446,15 +457,31 @@ class Board:
         self._inset = float(n)
         return self
 
-    def grain(self, axis_or_direction: str) -> Self:
+    def grain(self, along: ExtentName | Side | Direction | Face) -> Self:
+        """The grain direction: an extent (`grain("height")`), a box side or
+        a direction (`grain(cab.top)`), or a face of a part."""
         self._placement("grain")
-        self._grain = directions.frame.axis_of(axis_or_direction)
+        if isinstance(along, str):
+            self._grain = self.scope.frame.axis_of_extent(along)
+        else:
+            self._grain = along.axis
         return self
 
-    def show(self, face: str) -> Self:
-        """The visible big face: `outer`, `inner`, or a direction."""
+    def show(self, face: Face | Side | Direction | Literal["inner", "outer"]) -> Self:
+        """The visible big face: `"inner"` or `"outer"` relative to the
+        enclosing box, a box side or direction (`show(cab.front)`), or one
+        of this board's own faces (`side.show(side.inner)`)."""
         self._placement("show")
-        self._show = face
+        if isinstance(face, str):
+            self._show = face
+        elif isinstance(face, Face):
+            if face.part is not self:
+                raise LangError(f"show(): {face!r} is not a face of this board.", self.path)
+            self._show = face.direction
+        elif isinstance(face, Side):
+            self._show = face.outward
+        else:
+            self._show = face
         return self
 
     def manual(self) -> Self:
@@ -588,7 +615,7 @@ class Board:
             return name
         if isinstance(name, str) and name in ("inner", "outer"):
             return self._inner_outer(name)
-        return Face(self, directions.frame.direction(name))
+        return Face(self, self.scope.frame.direction(name))
 
     def _inner_outer(self, which: str) -> Face:
         """The big face toward (inner) or away from (outer) the enclosing
@@ -601,7 +628,7 @@ class Board:
         centre = (sb.lo[t] + sb.hi[t]) / 2
         if b.lo[t] < centre < b.hi[t]:
             raise LangError(f"{which} is ambiguous: the board straddles the centre on {t}.", self.path)
-        toward_centre = directions.frame.direction_of(t, 1 if centre > b.hi[t] else -1)
+        toward_centre = self.scope.frame.direction_of(t, 1 if centre > b.hi[t] else -1)
         return Face(self, toward_centre if which == "inner" else -toward_centre)
 
     @property
@@ -643,11 +670,11 @@ class Board:
         try:
             return self.face("outer")
         except LangError:
-            return Face(self, directions.frame.direction_of(self.t_axis, 1))
+            return Face(self, self.scope.frame.direction_of(self.t_axis, 1))
 
     def big_faces(self) -> tuple[Face, Face]:
-        return (Face(self, directions.frame.direction_of(self.t_axis, 1)),
-                Face(self, directions.frame.direction_of(self.t_axis, -1)))
+        return (Face(self, self.scope.frame.direction_of(self.t_axis, 1)),
+                Face(self, self.scope.frame.direction_of(self.t_axis, -1)))
 
     def op(self, name: str) -> Op:
         """A named operation, e.g. the cut called "toekick"."""
@@ -701,7 +728,8 @@ class Board:
                 raise LangError(f"depth to({depth.face!r}) is not opposite the face the operation is on.", self.path)
             if target.direction == face.direction:
                 raise LangError(f"depth to({depth.face!r}) names the face itself.", self.path)
-            extent = self.box().extent(face.axis)
+            b = self.box()
+            extent = b.hi[face.axis] - b.lo[face.axis]
             return extent + depth.offset, f"to({depth.face}, {depth.offset:g})", abs(depth.offset) < 1e-9
         if depth <= 0:
             raise LangError(f"depth must be positive, got {depth}.", self.path)
@@ -789,6 +817,7 @@ class Board:
             raise LangError(
                 f"cut(): {label} lies inside the thickness and reaches neither face; "
                 "a pocket must start at a face.", self.path)
+        # `face` is a world direction, as operations store their faces.
         self._record(Pocket(shape, face.name, depth, f"cut({label})", name, chamfer), name)
         return self
 
@@ -801,15 +830,16 @@ class Board:
         if depth is None:
             raise LangError("pocket() needs a depth.", self.path)
         d, spec, _ = self._depth(f, depth)
+        world = f.world_name
         if f.is_big:
             placed = self._place_shape(shape, anchor)
-            self._record(Pocket(placed, f.name, d, spec, name, chamfer), name)
+            self._record(Pocket(placed, world, d, spec, name, chamfer), name)
         else:
             sa, ta = self.face_axes(f)
             oriented = shape.in_plane(sa, ta, self.path)
             point, shape_anchor = anchor.resolve()
             su, sv = oriented.anchor_point(shape_anchor)
-            self._record(EdgeOp(f.name, Pocket(oriented.moved(-su, -sv), f.name, d, spec, name, chamfer),
+            self._record(EdgeOp(world, Pocket(oriented.moved(-su, -sv), world, d, spec, name, chamfer),
                                 point[0], point[1]), name)
         return self
 
@@ -825,10 +855,11 @@ class Board:
             raise LangError(f"hole diameter must be positive, got {d}.", self.path)
         dep, spec, thru = self._depth(f, depth)
         point, _ = anchor.resolve()
+        world = f.world_name
         if f.is_big:
-            self._record(Hole(point[0], point[1], float(d), f.name, dep, spec, name, chamfer, thru), name)
+            self._record(Hole(point[0], point[1], float(d), world, dep, spec, name, chamfer, thru), name)
         else:
-            self._record(EdgeOp(f.name, Hole(0.0, 0.0, float(d), f.name, dep, spec, name, chamfer, thru),
+            self._record(EdgeOp(world, Hole(0.0, 0.0, float(d), world, dep, spec, name, chamfer, thru),
                                 point[0], point[1]), name)
         return self
 
@@ -839,16 +870,16 @@ class Board:
         if isinstance(what, Edge):
             if what.part is not self:
                 raise LangError(f"chamfer(): {what!r} is not an edge of this board.", self.path)
-            self._record(Chamfer(what.name, float(size), what.a.name), None)
+            self._record(Chamfer(what.world_name, float(size), what.a.world_name), None)
         elif isinstance(what, Outline):
             if what.face.part is not self:
                 raise LangError(f"chamfer(): {what.face!r} is not a face of this board.", self.path)
-            self._record(Chamfer("outline", float(size), what.face.name), None)
+            self._record(Chamfer("outline", float(size), what.face.world_name), None)
         else:
             name = next((n for n, op in self._named_ops.items() if op is what), None)
             if name is None:
                 raise LangError("chamfer(): the operation is not a named operation of this board.", self.path)
-            face = self.show_face.name if isinstance(what, Cut) else what.face
+            face = self.show_face.world_name if isinstance(what, Cut) else what.face
             self._record(Chamfer(name, float(size), face), None)
         return self
 
@@ -874,7 +905,7 @@ class Board:
             "origin": [b.lo[a] for a in AXES],
             "outline": _rings(self.outline),
             "grain": self._grain,
-            "show": self.show_face.name,
+            "show": self.show_face.world_name,
             "manual": self.manual_part,
             "ops": [_op_to_layout(op) for op in self.ops],
         }
