@@ -78,7 +78,7 @@
     <parameter expression="''" name="tool_productLink"/>
     <parameter expression="2." name="tool_diameter"/>
     <parameter expression="tool_diameter + 2*tool_fluteLength*Math.tan(tool_taperAngle)" name="tool_maximumCuttingDiameter"/>
-    <parameter expression="2." name="tool_tipDiameter"/>
+    <parameter expression="0.0" name="tool_tipDiameter"/>
     <parameter expression="0.0" name="tool_tipOffset"/>
     <parameter expression="0.0" name="tool_cornerRadius"/>
     <parameter expression="0.0" name="tool_taperAngle"/>
@@ -226,7 +226,7 @@
     <parameter expression="0.01*calculationTolerance" name="thinningTolerance"/>
     <parameter expression="0.01mm" name="chainingTolerance"/>
     <parameter expression="false" name="useAngle"/>
-    <parameter expression="tool_diameter " name="threadPitch"/>
+    <parameter expression="tool_diameter/2 " name="threadPitch"/>
     <parameter expression="8" name="plungeAngle"/>
     <parameter expression="'computer'" name="compensationType"/>
     <parameter expression="false" name="doMultiplePasses"/>

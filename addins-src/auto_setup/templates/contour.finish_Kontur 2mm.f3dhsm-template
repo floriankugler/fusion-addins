@@ -14,18 +14,13 @@
       <description>2mm 2-Schneider gerade</description>
       <expressions>
         <expression parameterKey="tool_bodyLength" value="20 mm"/>
-        <expression parameterKey="tool_coolant" value="'disabled'"/>
         <expression parameterKey="tool_description" value="'2mm 2-Schneider gerade'"/>
         <expression parameterKey="tool_diameter" value="2 mm"/>
-        <expression parameterKey="tool_feedCutting" value="1500 mmpm"/>
-        <expression parameterKey="tool_feedPlunge" value="800 mmpm"/>
-        <expression parameterKey="tool_feedRamp" value="800 mmpm"/>
         <expression parameterKey="tool_fluteLength" value="17 mm"/>
         <expression parameterKey="tool_numberOfFlutes" value="2"/>
         <expression parameterKey="tool_overallLength" value="38.1 mm"/>
         <expression parameterKey="tool_shaftDiameter" value="3.175 mm"/>
         <expression parameterKey="tool_shoulderLength" value="17 mm"/>
-        <expression parameterKey="tool_spindleSpeed" value="24000 rpm"/>
       </expressions>
       <nc break-control="0" diameter-offset="16" length-offset="16" live-tool="1" manual-tool-change="0" number="16" turret="0"/>
       <coolant mode="disabled"/>
@@ -86,7 +81,7 @@
     <parameter expression="''" name="tool_productLink"/>
     <parameter expression="2." name="tool_diameter"/>
     <parameter expression="tool_diameter + 2*tool_fluteLength*Math.tan(tool_taperAngle)" name="tool_maximumCuttingDiameter"/>
-    <parameter expression="2." name="tool_tipDiameter"/>
+    <parameter expression="0.0" name="tool_tipDiameter"/>
     <parameter expression="0.0" name="tool_tipOffset"/>
     <parameter expression="0.0" name="tool_cornerRadius"/>
     <parameter expression="0.0" name="tool_taperAngle"/>

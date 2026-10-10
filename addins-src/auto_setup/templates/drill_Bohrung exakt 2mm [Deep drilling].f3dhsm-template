@@ -84,7 +84,7 @@
     <parameter expression="''" name="tool_productLink"/>
     <parameter expression="2." name="tool_diameter"/>
     <parameter expression="tool_diameter + 2*tool_fluteLength*Math.tan(tool_taperAngle)" name="tool_maximumCuttingDiameter"/>
-    <parameter expression="2." name="tool_tipDiameter"/>
+    <parameter expression="0.0" name="tool_tipDiameter"/>
     <parameter expression="0.0" name="tool_tipOffset"/>
     <parameter expression="0.0" name="tool_cornerRadius"/>
     <parameter expression="0.0" name="tool_taperAngle"/>
@@ -198,7 +198,7 @@
     <parameter expression="'selection-faces'" name="holeMode"/>
     <parameter expression="'none'" name="holeSignatureSelection"/>
     <parameter expression="false" name="operationHoleSignature"/>
-    <parameter expression="true" name="holePoints"/>
+    <parameter expression="false" name="holePoints"/>
     <parameter expression="true" name="holeFaces"/>
     <parameter expression="true" name="selectSameDiameter"/>
     <parameter expression="false" name="selectSameOrientation"/>
@@ -418,7 +418,7 @@
     <parameter expression="1mm" name="pitch"/>
     <parameter expression="true" name="useHoleDiameter"/>
     <parameter expression="2 * tool_diameter" name="diameter"/>
-    <parameter expression="3mm" name="peckingDepth"/>
+    <parameter expression="2mm" name="peckingDepth"/>
     <parameter expression="1mm" name="peckingDepthReduction"/>
     <parameter expression="1mm" name="minimumPeckingDepth"/>
     <parameter expression="Math.max(tool_diameter * 2.5; peckingDepth)" name="accumulatedPeckingDepth"/>

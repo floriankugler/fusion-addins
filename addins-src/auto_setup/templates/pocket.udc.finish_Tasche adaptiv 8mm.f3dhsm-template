@@ -78,7 +78,7 @@
     <parameter expression="''" name="tool_productLink"/>
     <parameter expression="8." name="tool_diameter"/>
     <parameter expression="tool_diameter + 2*tool_fluteLength*Math.tan(tool_taperAngle)" name="tool_maximumCuttingDiameter"/>
-    <parameter expression="8." name="tool_tipDiameter"/>
+    <parameter expression="0.0" name="tool_tipDiameter"/>
     <parameter expression="0.0" name="tool_tipOffset"/>
     <parameter expression="0.0" name="tool_cornerRadius"/>
     <parameter expression="0.0" name="tool_taperAngle"/>
@@ -334,17 +334,17 @@
     <parameter expression="10." name="connectionMoveClearanceAreaSphereRadius_value"/>
     <parameter expression="'from stock box'" name="connectionMoveClearanceAreaCuboid_mode"/>
     <parameter expression="true" name="connectionMoveClearanceAreaCuboid_symmetricalOffsets"/>
-    <parameter expression="17.5" name="connectionMoveClearanceAreaCuboidPosX_value"/>
+    <parameter expression="78.36752688430632" name="connectionMoveClearanceAreaCuboidPosX_value"/>
     <parameter expression="10mm" name="connectionMoveClearanceAreaCuboidPosX_offset"/>
-    <parameter expression="17.5" name="connectionMoveClearanceAreaCuboidNegX_value"/>
+    <parameter expression="78.36752688430632" name="connectionMoveClearanceAreaCuboidNegX_value"/>
     <parameter expression="10mm" name="connectionMoveClearanceAreaCuboidNegX_offset"/>
-    <parameter expression="17.5" name="connectionMoveClearanceAreaCuboidPosY_value"/>
+    <parameter expression="26." name="connectionMoveClearanceAreaCuboidPosY_value"/>
     <parameter expression="10mm" name="connectionMoveClearanceAreaCuboidPosY_offset"/>
-    <parameter expression="17.5" name="connectionMoveClearanceAreaCuboidNegY_value"/>
+    <parameter expression="26." name="connectionMoveClearanceAreaCuboidNegY_value"/>
     <parameter expression="10mm" name="connectionMoveClearanceAreaCuboidNegY_offset"/>
     <parameter expression="10." name="connectionMoveClearanceAreaCuboidPosZ_value"/>
     <parameter expression="10mm" name="connectionMoveClearanceAreaCuboidPosZ_offset"/>
-    <parameter expression="10." name="connectionMoveClearanceAreaCuboidNegZ_value"/>
+    <parameter expression="133.93867592633342" name="connectionMoveClearanceAreaCuboidNegZ_value"/>
     <parameter expression="10mm" name="connectionMoveClearanceAreaCuboidNegZ_offset"/>
     <parameter expression="false" name="use_tool_stepdown"/>
     <parameter expression="tool_fluteLength * 0.9" name="tool_stepdown"/>
@@ -430,7 +430,7 @@
     <parameter expression="''" name="tool_productLink"/>
     <parameter expression="6." name="tool_diameter"/>
     <parameter expression="tool_diameter + 2*tool_fluteLength*Math.tan(tool_taperAngle)" name="tool_maximumCuttingDiameter"/>
-    <parameter expression="6." name="tool_tipDiameter"/>
+    <parameter expression="0.0" name="tool_tipDiameter"/>
     <parameter expression="0.0" name="tool_tipOffset"/>
     <parameter expression="0.0" name="tool_cornerRadius"/>
     <parameter expression="0.0" name="tool_taperAngle"/>
@@ -733,17 +733,17 @@
     <parameter expression="10." name="connectionMoveClearanceAreaSphereRadius_value"/>
     <parameter expression="'from stock box'" name="connectionMoveClearanceAreaCuboid_mode"/>
     <parameter expression="true" name="connectionMoveClearanceAreaCuboid_symmetricalOffsets"/>
-    <parameter expression="17.5" name="connectionMoveClearanceAreaCuboidPosX_value"/>
+    <parameter expression="78.36752688430632" name="connectionMoveClearanceAreaCuboidPosX_value"/>
     <parameter expression="10mm" name="connectionMoveClearanceAreaCuboidPosX_offset"/>
-    <parameter expression="17.5" name="connectionMoveClearanceAreaCuboidNegX_value"/>
+    <parameter expression="78.36752688430632" name="connectionMoveClearanceAreaCuboidNegX_value"/>
     <parameter expression="10mm" name="connectionMoveClearanceAreaCuboidNegX_offset"/>
-    <parameter expression="17.5" name="connectionMoveClearanceAreaCuboidPosY_value"/>
+    <parameter expression="26." name="connectionMoveClearanceAreaCuboidPosY_value"/>
     <parameter expression="10mm" name="connectionMoveClearanceAreaCuboidPosY_offset"/>
-    <parameter expression="17.5" name="connectionMoveClearanceAreaCuboidNegY_value"/>
+    <parameter expression="26." name="connectionMoveClearanceAreaCuboidNegY_value"/>
     <parameter expression="10mm" name="connectionMoveClearanceAreaCuboidNegY_offset"/>
     <parameter expression="10." name="connectionMoveClearanceAreaCuboidPosZ_value"/>
     <parameter expression="10mm" name="connectionMoveClearanceAreaCuboidPosZ_offset"/>
-    <parameter expression="10." name="connectionMoveClearanceAreaCuboidNegZ_value"/>
+    <parameter expression="133.93867592633342" name="connectionMoveClearanceAreaCuboidNegZ_value"/>
     <parameter expression="10mm" name="connectionMoveClearanceAreaCuboidNegZ_offset"/>
     <parameter expression="true" name="use_tool_stepdown"/>
     <parameter expression="4.2" name="tool_stepdown"/>

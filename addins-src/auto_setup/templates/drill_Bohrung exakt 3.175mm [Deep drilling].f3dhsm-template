@@ -83,7 +83,7 @@
     <parameter expression="''" name="tool_productLink"/>
     <parameter expression="0.125in" name="tool_diameter"/>
     <parameter expression="tool_diameter + 2*tool_fluteLength*Math.tan(tool_taperAngle)" name="tool_maximumCuttingDiameter"/>
-    <parameter expression="0.125in" name="tool_tipDiameter"/>
+    <parameter expression="0.0in" name="tool_tipDiameter"/>
     <parameter expression="0.0in" name="tool_tipOffset"/>
     <parameter expression="0.0in" name="tool_cornerRadius"/>
     <parameter expression="0.0" name="tool_taperAngle"/>
@@ -226,7 +226,48 @@
     <parameter expression="true" name="includeSetupModel"/>
     <parameter expression="0mm" name="modelRadialClearance"/>
     <parameter expression="0mm" name="modelAxialClearance"/>
-    <parameter expression="false" name="checkSurfaceSelectionSets"/>
+    <parameter expression="true" name="checkSurfaceSelectionSets">
+      <CadFaceSets name="cadobject">
+        <CadFaceGroupFromParam>
+          <Parameters>
+            <Parameter expression="''" name="userDefinedName"/>
+            <Parameter expression="'drill'" name="currentStrategy"/>
+            <Parameter expression="false" name="ignoreHoles"/>
+            <Parameter expression="false" name="flipFloorNormals"/>
+            <Parameter expression="false" name="flipCeilingNormals"/>
+            <Parameter expression="true" name="swarfTrackFloor"/>
+            <Parameter expression="true" name="allowTouch"/>
+            <Parameter expression="true" name="allowAvoid"/>
+            <Parameter expression="true" name="allowIgnore"/>
+            <Parameter expression="true" name="allowFixture"/>
+            <Parameter expression="false" name="allowTable"/>
+            <Parameter expression="false" name="allowNone"/>
+            <Parameter expression="'touch'" name="machineMode"/>
+            <Parameter expression="'separate'" name="clearanceType"/>
+            <Parameter expression="0 mm" name="radialClearance"/>
+            <Parameter expression="0 mm" name="radialFixtureClearance"/>
+            <Parameter expression="0 mm" name="radialStockToLeave"/>
+            <Parameter expression="0 mm" name="axialClearance"/>
+            <Parameter expression="0 mm" name="axialFixtureClearance"/>
+            <Parameter expression="0 mm" name="axialStockToLeave"/>
+            <Parameter expression="0 mm" name="totalRadialClearance"/>
+            <Parameter expression="0 mm" name="totalRadialFixtureClearance"/>
+            <Parameter expression="0 mm" name="totalRadialStockToLeave"/>
+            <Parameter expression="0 mm" name="totalAxialClearance"/>
+            <Parameter expression="0 mm" name="totalAxialFixtureClearance"/>
+            <Parameter expression="0 mm" name="totalAxialStockToLeave"/>
+            <Parameter expression="0 mm" name="combinedClearance"/>
+            <Parameter expression="0 mm" name="combinedFixtureClearance"/>
+            <Parameter expression="0 mm" name="combinedTableClearance"/>
+            <Parameter expression="0 mm" name="combinedStockToLeave"/>
+            <Parameter expression="0 mm" name="totalClearance"/>
+            <Parameter expression="0 mm" name="totalFixtureClearance"/>
+            <Parameter expression="0 mm" name="totalTableClearance"/>
+            <Parameter expression="0 mm" name="totalStockToLeave"/>
+          </Parameters>
+        </CadFaceGroupFromParam>
+      </CadFaceSets>
+    </parameter>
     <parameter expression="isDrillingRefTrimming ? drillingReference.clearanceAreaType : (multiAxisMachiningType == 'four_axis' ? 'cylinder' : 'plane')" name="clearanceAreaType"/>
     <parameter expression="isDrillingRefTrimming ? (drillingReference.clearanceArea_orientation_mode == 'selectedAxis' ? 'refOpSelection' : drillingReference.clearanceArea_orientation_mode) : ((multiAxisMachiningType == 'four_axis' &amp;&amp; clearanceAreaType == 'cylinder') ? 'rotaryAxis' : 'toolAxisZ')" name="clearanceArea_orientation_mode"/>
     <parameter expression="false" name="clearanceArea_orientation_selAxis"/>
@@ -280,15 +321,15 @@
     <parameter expression="isDrillingRefTrimming ? drillingReference.symmetricalOffsets : true" name="symmetricalOffsets"/>
     <parameter expression="10." name="clearanceAreaCuboidPosZ_value"/>
     <parameter expression="isDrillingRefTrimming ? drillingReference.clearanceAreaCuboidPosZ_offset : 10mm" name="clearanceAreaCuboidPosZ_offset"/>
-    <parameter expression="10." name="clearanceAreaCuboidNegZ_value"/>
+    <parameter expression="133.93867592633342" name="clearanceAreaCuboidNegZ_value"/>
     <parameter expression="isDrillingRefTrimming ? drillingReference.clearanceAreaCuboidNegZ_offset : 10mm" name="clearanceAreaCuboidNegZ_offset"/>
-    <parameter expression="17.5" name="clearanceAreaCuboidPosY_value"/>
+    <parameter expression="26." name="clearanceAreaCuboidPosY_value"/>
     <parameter expression="isDrillingRefTrimming ? drillingReference.clearanceAreaCuboidPosY_offset : 10mm" name="clearanceAreaCuboidPosY_offset"/>
-    <parameter expression="17.5" name="clearanceAreaCuboidNegY_value"/>
+    <parameter expression="26." name="clearanceAreaCuboidNegY_value"/>
     <parameter expression="isDrillingRefTrimming ? drillingReference.clearanceAreaCuboidNegY_offset : 10mm" name="clearanceAreaCuboidNegY_offset"/>
-    <parameter expression="17.5" name="clearanceAreaCuboidPosX_value"/>
+    <parameter expression="78.36752688430632" name="clearanceAreaCuboidPosX_value"/>
     <parameter expression="isDrillingRefTrimming ? drillingReference.clearanceAreaCuboidPosX_offset : 10mm" name="clearanceAreaCuboidPosX_offset"/>
-    <parameter expression="17.5" name="clearanceAreaCuboidNegX_value"/>
+    <parameter expression="78.36752688430632" name="clearanceAreaCuboidNegX_value"/>
     <parameter expression="isDrillingRefTrimming ? drillingReference.clearanceAreaCuboidNegX_offset : 10mm" name="clearanceAreaCuboidNegX_offset"/>
     <parameter expression="isDrillingRefTrimming ? (drillingReference.retractHeight_mode == 'from point' ? 'from reference operation' : drillingReference.retractHeight_mode) : 'from stock top'" name="retractHeight_mode"/>
     <parameter expression="'1'" name="retractHeight_segmentIndex"/>
@@ -463,17 +504,17 @@
     <parameter expression="10." name="connectionMoveClearanceAreaSphereRadius_value"/>
     <parameter expression="'from stock box'" name="connectionMoveClearanceAreaCuboid_mode"/>
     <parameter expression="true" name="connectionMoveClearanceAreaCuboid_symmetricalOffsets"/>
-    <parameter expression="17.5" name="connectionMoveClearanceAreaCuboidPosX_value"/>
+    <parameter expression="78.36752688430632" name="connectionMoveClearanceAreaCuboidPosX_value"/>
     <parameter expression="10mm" name="connectionMoveClearanceAreaCuboidPosX_offset"/>
-    <parameter expression="17.5" name="connectionMoveClearanceAreaCuboidNegX_value"/>
+    <parameter expression="78.36752688430632" name="connectionMoveClearanceAreaCuboidNegX_value"/>
     <parameter expression="10mm" name="connectionMoveClearanceAreaCuboidNegX_offset"/>
-    <parameter expression="17.5" name="connectionMoveClearanceAreaCuboidPosY_value"/>
+    <parameter expression="26." name="connectionMoveClearanceAreaCuboidPosY_value"/>
     <parameter expression="10mm" name="connectionMoveClearanceAreaCuboidPosY_offset"/>
-    <parameter expression="17.5" name="connectionMoveClearanceAreaCuboidNegY_value"/>
+    <parameter expression="26." name="connectionMoveClearanceAreaCuboidNegY_value"/>
     <parameter expression="10mm" name="connectionMoveClearanceAreaCuboidNegY_offset"/>
     <parameter expression="10." name="connectionMoveClearanceAreaCuboidPosZ_value"/>
     <parameter expression="10mm" name="connectionMoveClearanceAreaCuboidPosZ_offset"/>
-    <parameter expression="10." name="connectionMoveClearanceAreaCuboidNegZ_value"/>
+    <parameter expression="133.93867592633342" name="connectionMoveClearanceAreaCuboidNegZ_value"/>
     <parameter expression="10mm" name="connectionMoveClearanceAreaCuboidNegZ_offset"/>
     <parameter expression="false" name="use_tool_stepdown"/>
     <parameter expression="4.2" name="tool_stepdown"/>

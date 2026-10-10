@@ -77,7 +77,7 @@
     <parameter expression="''" name="tool_productLink"/>
     <parameter expression="0.125in" name="tool_diameter"/>
     <parameter expression="tool_diameter + 2*tool_fluteLength*Math.tan(tool_taperAngle)" name="tool_maximumCuttingDiameter"/>
-    <parameter expression="0.125in" name="tool_tipDiameter"/>
+    <parameter expression="0.0in" name="tool_tipDiameter"/>
     <parameter expression="0.0in" name="tool_tipOffset"/>
     <parameter expression="0.0in" name="tool_cornerRadius"/>
     <parameter expression="0.0" name="tool_taperAngle"/>
