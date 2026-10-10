@@ -31,12 +31,12 @@ def drawer_cabinet(name: str, box: Box, n: int, slide: StandInSlide) -> Scope:
 
         # toe kick notch in both sides, named so its faces can be referenced
         for side in (left, right):
-            side.cut(rect(60, 100), at="bottom.front", name="toekick")
+            side.cut(rect(depth=60, height=100), at=side.outer.bottom.front, name="toekick")
 
         # shelf-pin holes on the inner faces, lined up on both sides
         for side in (left, right):
             for z in spread(bottom.top + 100, top.bottom - 100, pitch=32):
-                side.hole(d=5, depth=10, face="inner", at=("front", 37, z))
+                side.hole(d=5, depth=10, at=side.inner.front(37).bottom(z))
 
         for i, bay in enumerate(cab.interior.split("z", n), 1):
             drawer(f"drawer{i}", bay, slide)

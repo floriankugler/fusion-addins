@@ -10,21 +10,22 @@ from lang import *
 ply15 = material("birch", t=15, sheet=(2500, 1250))
 
 with module("ops", Box.from_size(width=400, depth=300, height=100)) as m:
-    panel = (board("panel", ply15).on(m.bottom).show("top")
-             .cut(rect(60, 40), at="front.left", name="notch")
-             .cut(circle(30), at=("back.right", 50, 50), name="port", chamfer=1)
-             .pocket(rect(120, 20), at=("front", 30), depth=5, name="dado", chamfer=1)
-             .pocket(rect(40, 40), at=("back.left", 40, 40), depth=through, name="window")
-             .hole(d=10, at="center", depth=through, name="bolt", chamfer=1)
-             .chamfer("outline", 2)                     # the show face's outer contour
-             .chamfer("back.bottom", 1)                 # an edge of the other big face
-             .hole(d=8, depth=30, face="front", at=("right", 50))      # into the front narrow face
-             .pocket(rect(40, 6), face="right", at="center", depth=10))  # slot in the right narrow face
-    for x in spread(panel.front + 40, panel.back - 40, pitch=100):
-        panel.hole(d=5, depth=8, at=("right", 25, x))   # a column 25 mm from the right edge
+    with board("panel", ply15).on(m.bottom).show("top") as panel:
+        top = panel.top
+        panel.cut(rect(depth=60, width=40), at=top.front.left, name="notch")
+        panel.cut(circle(30), at=top.back(50).right(50), name="port", chamfer=1)
+        panel.pocket(rect(depth=120, width=20), at=top.front(30), depth=5, name="dado", chamfer=1)
+        panel.pocket(rect(depth=40, width=40), at=top.back(40).left(40), depth=through, name="window")
+        panel.hole(d=10, at=top.center, depth=through, name="bolt", chamfer=1)
+        panel.chamfer(top.outline, 2)                               # the show face's outer contour
+        panel.chamfer(panel.back.bottom, 1)                         # an edge of the other big face
+        panel.hole(d=8, depth=30, at=panel.front.right(50))         # into the front narrow face
+        panel.pocket(rect(depth=40, height=6), at=panel.right.center, depth=10)   # slot in the right narrow face
+        for x in spread(panel.front + 40, panel.back - 40, pitch=100):
+            panel.hole(d=5, depth=8, at=top.right(25).front(x))     # a column 25 mm from the right edge
 
     # a standing board, to check that a vertical show face and its edges resolve
-    side = (board("side", ply15).on(m.left).between(m.front, m.back, m.bottom, m.top).show("inner")
-            .chamfer("outline", 1)
-            .chamfer("front.outer", 1)
-            .hole(d=5, depth=10, face="inner", at=("front", 37, Pos("z", 50))))
+    with board("side", ply15).on(m.left).between(m.front, m.back, m.bottom, m.top).show("inner") as side:
+        side.chamfer(side.inner.outline, 1)
+        side.chamfer(side.front.outer, 1)
+        side.hole(d=5, depth=10, at=side.inner.front(37).bottom(50))

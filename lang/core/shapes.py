@@ -1,9 +1,16 @@
 """2D shapes in a local (u, v) frame, in millimetres, backed by shapely.
 
-A shape has no world directions of its own. Its anchors are named in the
-2D sense: `left`/`right` along u, `bottom`/`top` along v, `center`, and
-corners such as `bottom.left`. When a shape is placed on a face of a part,
-the face maps world direction names to u and v.
+A rectangle names its extents the way the project names them,
+`rect(depth=60, height=100)`, and so knows which two world axes it lies in;
+when it is placed on a face, `in_plane` turns it so that its u and v are the
+face's axes, or fails when the face lies in another plane. A circle has no
+orientation, and `polygon(points)` is the raw escape hatch whose u and v are
+the face's axes in x, y, z order.
+
+Anchors of a shape are named in the 2D sense: `left`/`right` along u,
+`bottom`/`top` along v, `center`, and corners such as `bottom.left`. When a
+shape is placed on a face of a part, the face maps world direction names
+to u and v.
 """
 from __future__ import annotations
 
@@ -16,9 +23,13 @@ from shapely.geometry import box as shapely_box
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
 
+from . import directions
+from .directions import AXES, Axis
 from .errors import LangError
 
 Ring = list[tuple[float, float]]
+#: The two world axes a shape's u and v are bound to, or None for a raw shape.
+Axes = tuple[Axis, Axis] | None
 _ANCHOR_U: dict[str, float] = {"left": 0.0, "right": 1.0}
 _ANCHOR_V: dict[str, float] = {"bottom": 0.0, "top": 1.0}
 
@@ -60,10 +71,31 @@ def parse_anchor(name: str, u_names: dict[str, float] = _ANCHOR_U,
 
 
 class Shape:
-    def __init__(self, geometry: BaseGeometry):
+    def __init__(self, geometry: BaseGeometry, axes: Axes = None):
         if isinstance(geometry, MultiPolygon) and len(geometry.geoms) == 1:
             geometry = geometry.geoms[0]
         self.geometry: BaseGeometry = geometry
+        self.axes: Axes = axes
+
+    def _derived(self, geometry: BaseGeometry, other: Shape | None = None) -> Shape:
+        """A shape made from this one (and `other`), keeping the axes."""
+        axes = self.axes
+        if other is not None and other.axes is not None:
+            if axes is not None and other.axes != axes:
+                raise LangError(f"Shapes lie in different planes: {_plane(axes)} and {_plane(other.axes)}.")
+            axes = other.axes
+        return Shape(geometry, axes)
+
+    def in_plane(self, u: Axis, v: Axis, path: str | None = None) -> Shape:
+        """This shape with its u and v along the world axes `u` and `v`: as
+        it is for a raw shape, turned over when its extents were named the
+        other way round, an error when it lies in another plane."""
+        if self.axes is None or self.axes == (u, v):
+            return self
+        if self.axes == (v, u):
+            return Shape(affinity.affine_transform(self.geometry, [0, 1, 1, 0, 0, 0]), (u, v))
+        raise LangError(
+            f"a shape in {_plane(self.axes)} cannot be placed on a face in {_plane((u, v))}.", path)
 
     @property
     def bounds(self) -> tuple[float, float, float, float]:
@@ -89,20 +121,20 @@ class Shape:
         return (x0 + anchor.fu * (x1 - x0), y0 + anchor.fv * (y1 - y0))
 
     def moved(self, du: float, dv: float) -> Shape:
-        return Shape(affinity.translate(self.geometry, du, dv))
+        return self._derived(affinity.translate(self.geometry, du, dv))
 
     def union(self, other: Shape) -> Shape:
-        return Shape(unary_union([self.geometry, other.geometry]))
+        return self._derived(unary_union([self.geometry, other.geometry]), other)
 
     def difference(self, other: Shape) -> Shape:
-        return Shape(self.geometry.difference(other.geometry))
+        return self._derived(self.geometry.difference(other.geometry), other)
 
     def intersection(self, other: Shape) -> Shape:
-        return Shape(self.geometry.intersection(other.geometry))
+        return self._derived(self.geometry.intersection(other.geometry), other)
 
     def offset(self, distance: float) -> Shape:
         """Outward offset (negative inward), with sharp corners kept."""
-        return Shape(self.geometry.buffer(distance, join_style="mitre"))
+        return self._derived(self.geometry.buffer(distance, join_style="mitre"))
 
     def clip(self, corner: str, **sizes: float) -> Shape:
         """Cuts a corner off along a diagonal. `corner` names a corner in the
@@ -124,13 +156,13 @@ class Shape:
         su = -1 if anchor.fu > 0.5 else 1
         sv = -1 if anchor.fv > 0.5 else 1
         triangle = Polygon([(cx, cy), (cx + su * along_u, cy), (cx, cy + sv * along_v)])
-        return Shape(self.geometry.difference(triangle))
+        return self._derived(self.geometry.difference(triangle))
 
     def rounded(self, radius: float) -> Shape:
         """Rounds every corner, the inside ones as a cutter would leave
         them."""
         g = self.geometry.buffer(-radius, join_style="round").buffer(radius, join_style="round")
-        return Shape(g)
+        return self._derived(g)
 
     # -- export ---------------------------------------------------------------------
 
@@ -158,14 +190,45 @@ class Shape:
 
     def __repr__(self) -> str:
         x0, y0, x1, y1 = self.bounds
-        return f"Shape({x1 - x0:g} x {y1 - y0:g})"
+        plane = f" in {_plane(self.axes)}" if self.axes else ""
+        return f"Shape({x1 - x0:g} x {y1 - y0:g}{plane})"
 
 
-def rect(width: float, height: float) -> Shape:
-    """A rectangle with its bottom-left corner at the origin."""
-    if width <= 0 or height <= 0:
-        raise LangError(f"rect: width and height must be positive ({width} x {height}).")
-    return Shape(shapely_box(0.0, 0.0, float(width), float(height)))
+def _extent_name(axis: Axis) -> str:
+    for name, a in directions.frame.extents.items():
+        if a == axis:
+            return name
+    return axis
+
+
+def _plane(axes: tuple[Axis, Axis]) -> str:
+    return f"{_extent_name(axes[0])} x {_extent_name(axes[1])}"
+
+
+def box_shape(u0: float, v0: float, u1: float, v1: float, axes: Axes = None) -> Shape:
+    """A raw rectangle by its corners in a (u, v) frame; for internal use,
+    build files say `rect(depth=..., height=...)`."""
+    return Shape(shapely_box(u0, v0, u1, v1), axes)
+
+
+def rect(*, width: float | None = None, depth: float | None = None, height: float | None = None) -> Shape:
+    """A rectangle with its extents named as the project names them, two of
+    `width`, `depth` and `height`, e.g. `rect(depth=60, height=100)`. It
+    lies in the plane of those two axes and can only be placed on a face in
+    that plane. Its corner nearest the origin sits at (0, 0)."""
+    given = {name: size for name, size in (("width", width), ("depth", depth), ("height", height))
+             if size is not None}
+    if len(given) != 2:
+        raise LangError("rect: name exactly two extents, e.g. rect(depth=60, height=100).")
+    for name, size in given.items():
+        if size <= 0:
+            raise LangError(f"rect: {name} must be positive, got {size}.")
+    by_axis: dict[Axis, float] = {directions.frame.axis_of_extent(name): float(size)
+                                  for name, size in given.items()}
+    if len(by_axis) != 2:
+        raise LangError("rect: the two extents name the same axis in this frame.")
+    u, v = cast(tuple[Axis, Axis], tuple(sorted(by_axis, key=AXES.index)))
+    return box_shape(0.0, 0.0, by_axis[u], by_axis[v], (u, v))
 
 
 def circle(diameter: float, center: tuple[float, float] = (0.0, 0.0), resolution: int = 32) -> Shape:
@@ -173,5 +236,6 @@ def circle(diameter: float, center: tuple[float, float] = (0.0, 0.0), resolution
 
 
 def polygon(points: list[tuple[float, float]]) -> Shape:
-    """A raw point list, the escape hatch."""
+    """A raw point list, the escape hatch: u and v are the face's two world
+    axes in x, y, z order."""
     return Shape(Polygon([(float(u), float(v)) for u, v in points]))

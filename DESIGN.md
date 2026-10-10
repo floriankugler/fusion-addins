@@ -144,11 +144,16 @@ proposed]
   must read naturally. Parts with such names are reached as `cab["left"]`;
   other names resolve to parts, child scopes and exports. An export cannot
   take a part's name. [decided while implementing phase 1]
-- **`at=` offsets.** A number moves inward from the edge the anchor names on
-  that axis; on an axis the anchor does not name, a number moves from the
-  face's centre, and a position replaces the coordinate. Narrow-face
-  operations are therefore centred in the thickness by `at="left"` alone.
-  [decided while implementing phase 1]
+- **`at=` is an anchor named through its face.** `side.inner.front(37).bottom(z)`
+  is 37 mm behind the front edge of the inner face at the position `z`;
+  `side.outer.bottom.front` is a corner; `side.front.right(50)` is a point
+  on a narrow face, centred in the thickness because the thickness axis is
+  not named. A number measures from the edge it follows, a position is
+  taken as it is, an unnamed axis stays centred. The anchor also says which
+  face the operation is on, so there is no `face=`. Strings and bare
+  direction names were rejected: no autocomplete, and carcass parts are
+  named after directions, so `bottom.front` would read as a face of the
+  bottom board. [decided 2026-10-10, replacing the string form]
 - What this is not: free functions for everything (no autocomplete entry point),
   operators such as `left @ cab.left` (cryptic), or dataclass specs (that is
   what the layout JSON is for, and the language should not look like it).
@@ -259,23 +264,29 @@ proposed]
   per side and the operation stays a plain cut. A part as a `between()`
   limit means its nearest face; `part.into(n)` and `part.gap(n)` move it.
   This is the primitive the `groove` joint will reduce to.
-- **Positioning an operation, `at=`** [proposed]: an operation is positioned in
-  the 2D frame of the face it is on. `at=` names an anchor of that face by
-  directions, `"bottom.front"` for a corner, `"front"` for the middle of an
-  edge, `"center"`, and the shape's matching anchor is placed on it, so
-  `.cut(rect(60, 100), at="bottom.front")` is a toe kick notch. Offsets move
-  inward from the anchor: `at=("bottom.front", 20, 30)`. Positions from the
-  reference algebra may replace either offset, `at=("front", shelf.top + 10)`,
-  which is how a hole lines up with another part. Patterns come from `spread()`
-  along one axis of the face.
+- **Positioning an operation, `at=`** [decided 2026-10-10]: an operation is
+  positioned on a face by an anchor named through that face:
+  `side.outer.bottom.front` is the corner, `side.outer.front` the middle of
+  the front edge, `side.outer.center` the centre, and the shape's matching
+  side or corner is placed on it, so `.cut(rect(depth=60, height=100),
+  at=side.outer.bottom.front)` is a toe kick notch. Distances follow the
+  edge they are measured from, `side.inner.front(37).bottom(z)`, and a
+  position from the reference algebra may stand in for a distance, which is
+  how a hole lines up with another part. Patterns come from `spread()` along
+  one axis of the face.
+- **Shapes name their extents** [decided 2026-10-10]: `rect(depth=60,
+  height=100)` says which plane it lies in and reads the same on every face;
+  placing it on a face in another plane is an error. `circle(d)` has no
+  orientation; `polygon(points)` is the raw escape hatch in the face's
+  (u, v), its two world axes in x, y, z order.
 - **Chamfers** are modeled geometry: along outer contours, along pocket contours,
   and on holes. [decided]
   A chamfer belongs to a contour on a face. Operations from two big faces, of any
   kind, mean the board must be flipped on the machine. [proposed]
-  One spelling [proposed]: `.chamfer(what, size, face=)`, where `what` is an
-  edge (`side.front.inner` or `"front.inner"`), `"outline"`, or the name of a
-  pocket or hole, and `face=` defaults to the show face. `.pocket()` and
-  `.hole()` accept `chamfer=` as sugar for a chamfer along their own contour.
+  Spelling [decided 2026-10-10]: `.chamfer(what, size)`, where `what` is an
+  edge (`side.front.inner`), a face's outline (`side.outer.outline`), or a
+  named operation (`side.toekick`). `.cut()`, `.pocket()` and `.hole()`
+  accept `chamfer=` as sugar for a chamfer along their own contour.
   The constructor takes no chamfer; a build-wide default such as "1 mm on the
   outline of every show face" is a rule in `rules.py`.
 - **Roundovers** are not modeled. [decided]
@@ -602,28 +613,27 @@ These show the intended feel. None of the functions exist.
 ### Board with operations
 
 ```python
-side = (board("left", ply15, rect(500, 720))
-        .show("outer").grain("z")
-        .cut(rect(60, 100), at="bottom.front", name="toekick")
-        .pocket(rect(200, 12), face="inner", at=("front", shelf.bottom),
-                depth=to("outer", -3), chamfer=0.5)       # dado lined up with the shelf
-        .chamfer("outline", 1)                            # the show face's outer contour
-        .chamfer("front.inner", 1))                       # one edge, named by its two faces
+with board("left", ply15, rect(depth=500, height=720)) as side:
+    side.show("outer").grain("z")
+    side.cut(rect(depth=60, height=100), at=side.outer.bottom.front, name="toekick")
+    side.pocket(rect(depth=200, height=12), at=side.inner.front.bottom(shelf.bottom),
+                depth=to(side.outer, -3), chamfer=0.5)    # dado whose bottom is the shelf's
+    side.chamfer(side.outer.outline, 1)                   # the show face's outer contour
+    side.chamfer(side.front.inner, 1)                     # one edge, named by its two faces
+    side.chamfer(side.toekick, 1)                         # the contour a named cut made
+    for z in spread(side.bottom + 100, side.top - 100, pitch=32):
+        side.hole(d=5, depth=10, at=side.inner.front(37).bottom(z))   # a shelf-pin column
 
-side.chamfer(side.back.inner, 1)        # the same edge kind, as an attribute
-for z in spread(side.bottom + 100, side.top - 100, pitch=32):
-    side.hole(d=5, depth=10, face="inner", at=("front", 37, z))   # a shelf-pin column
-
-shape = rect(500, 720).clip("top.back", top=380, back=120)   # polygon
+shape = rect(depth=500, height=720).clip("top.back", top=380, back=120)   # polygon
 ```
 
-The same part as a block, for when the list of operations is long:
+Placement modifiers chain freely; an operation that names a point or an
+edge of the part needs the part's name, so a part with operations is
+written as a block or assigned first:
 
 ```python
-with board("left", ply15, rect(500, 720)) as side:
-    side.show("outer").grain("z")
-    side.cut(rect(60, 100), at="bottom.front", name="toekick")
-    side.chamfer("outline", 1)
+side = board("left", ply15, rect(depth=500, height=720)).show("outer").grain("z")
+side.cut(rect(depth=60, height=100), at=side.outer.bottom.front, name="toekick")
 ```
 
 ### References

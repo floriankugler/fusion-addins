@@ -41,9 +41,9 @@ def test_body_is_outline_on_lower_face_extruded_along_thickness():
 def test_holes_batch_by_face_diameter_and_depth():
     with module("cab", CAB) as cab:
         left = board("left", ply15).on(cab.left)
-        left.hole(d=5, depth=10, face="inner", at=("front", 37, Pos("z", 120)))
-        left.hole(d=5, depth=10, face="inner", at=("front", 37, Pos("z", 152)))
-        left.hole(d=5, depth=12, face="inner", at=("front", 37, Pos("z", 184)))
+        left.hole(d=5, depth=10, at=left.inner.front(37).bottom(Pos("z", 120)))
+        left.hole(d=5, depth=10, at=left.inner.front(37).bottom(Pos("z", 152)))
+        left.hole(d=5, depth=12, at=left.inner.front(37).bottom(Pos("z", 184)))
     steps = _plan_of(left).steps
     assert len(steps) == 2
     first, second = steps
@@ -57,8 +57,8 @@ def test_holes_batch_by_face_diameter_and_depth():
 def test_through_depth_is_none_and_pocket_chamfer_follows_pocket():
     with module("cab", CAB) as cab:
         bottom = board("bottom", ply15).on(cab.bottom)
-        bottom.pocket(rect(100, 20), face="top", at="center", depth=through, chamfer=1)
-        bottom.hole(d=6, face="top", at="center", depth=to("bottom"))
+        bottom.pocket(rect(depth=100, width=20), at=bottom.top.center, depth=through, chamfer=1)
+        bottom.hole(d=6, at=bottom.top.center, depth=to(bottom.bottom))
     steps = _plan_of(bottom).steps
     pocket, chamfer, hole = steps
     assert isinstance(pocket, PocketStep) and pocket.depth is None
@@ -71,12 +71,12 @@ def test_through_depth_is_none_and_pocket_chamfer_follows_pocket():
 
 def test_cut_chamfer_and_named_contours():
     with module("cab", CAB) as cab:
-        left = (board("left", ply15).on(cab.left)
-                .cut(rect(60, 100), at="bottom.front", name="toekick", chamfer=1)
-                .chamfer("outline", 1)
-                .chamfer("front.inner", 0.5)
-                .hole(d=5, depth=10, face="inner", at="center", name="pin")
-                .chamfer("pin", 0.5))
+        left = board("left", ply15).on(cab.left)
+        (left.cut(rect(depth=60, height=100), at=left.outer.bottom.front, name="toekick", chamfer=1)
+             .chamfer(left.outer.outline, 1)
+             .chamfer(left.front.inner, 0.5)
+             .hole(d=5, depth=10, at=left.inner.center, name="pin")
+             .chamfer(left.pin, 0.5))
     steps = _plan_of(left).steps
     cut_chamfer, outline, edge, _hole, pin = steps
     show = FaceRef("y", 1, 600.0)
@@ -93,8 +93,8 @@ def test_cut_chamfer_and_named_contours():
 def test_narrow_face_operations_map_to_the_face_plane():
     with module("cab", CAB) as cab:
         left = board("left", ply15).on(cab.left)
-        left.hole(d=8, depth=30, face="front", at=("bottom", 50))
-        left.pocket(rect(20, 6), face="top", at="center", depth=10)
+        left.hole(d=8, depth=30, at=left.front.bottom(50))
+        left.pocket(rect(depth=20, width=6), at=left.top.center, depth=10)
     hole, pocket = _plan_of(left).steps
     assert isinstance(hole, HoleStep)
     assert hole.face == FaceRef("x", -1, 0.0)

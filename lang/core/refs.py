@@ -223,6 +223,11 @@ def spread(start: PosLike, end: PosLike, pitch: float | None = None, count: int 
     return [Pos(a.axis, lo + rest / 2 + i * pitch) for i in range(n)]
 
 
+class HasName(Protocol):
+    @property
+    def name(self) -> str: ...
+
+
 @dataclass(frozen=True)
 class ToFace:
     """Depth of a cut or hole: to the named face of the same part, plus an
@@ -231,8 +236,11 @@ class ToFace:
     offset: float = 0.0
 
 
-def to(face: str, offset: float = 0.0) -> ToFace:
-    return ToFace(face, offset)
+def to(face: str | HasName, offset: float = 0.0) -> ToFace:
+    """A depth reaching the given face of the same part, `to(side.outer,
+    -3)` stopping 3 mm short of it. A direction name, `"inner"` or
+    `"outer"` as a string is resolved on the part the operation is on."""
+    return ToFace(face if isinstance(face, str) else face.name, offset)
 
 
 class Through:
@@ -244,15 +252,8 @@ through = Through()
 
 DepthSpec = Number | ToFace | Through
 
-# `at=` for an operation: an anchor name, or the anchor with one or two
-# offsets. A number moves inward from the edge the anchor names on that axis
-# (from the centre on an axis it does not name); a position replaces the
-# coordinate.
-Offset = Number | Pos | Affine | HasPosition
-AtSpec = str | tuple[str, Offset] | tuple[str, Offset, Offset]
-
 __all__ = [
-    "Pos", "Affine", "Side", "HasPosition", "PosLike", "Number", "Offset", "AtSpec",
+    "Pos", "Affine", "Side", "HasPosition", "HasName", "PosLike", "Number",
     "DepthSpec", "ToFace", "Through", "to", "through", "spread", "as_pos",
 ]
 

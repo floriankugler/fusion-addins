@@ -9,7 +9,10 @@ placement modifiers are frozen.
 
 Faces and edges are properties named by world direction (`side.front`,
 `side.front.inner`), so editors can complete them; project aliases go
-through `face()` and `edge()`.
+through `face()` and `edge()`. A point on a face for `at=` is named
+through the face: `side.inner.front(37).bottom(z)` is 37 mm behind the
+front edge of the inner face at height `z`, `side.outer.bottom.front` the
+corner (see `Anchor`).
 """
 from __future__ import annotations
 
@@ -25,8 +28,9 @@ from .layout_types import (ChamferLayout, CutLayout, EdgeOpLayout, HoleLayout, O
                            PartLayout, PocketLayout, Rings)
 from .material import Material
 from .ops import Chamfer, Cut, EdgeOp, Hole, Op, Pocket
-from .refs import Affine, AtSpec, DepthSpec, HasPosition, Pos, PosLike, Side, Through, ToFace, as_pos
-from .shapes import Anchor, Shape, parse_anchor, rect
+from .refs import Affine, DepthSpec, HasPosition, Number, Pos, PosLike, Side, Through, ToFace, as_pos
+from .shapes import Anchor as ShapeAnchor
+from .shapes import Shape, box_shape
 
 Point2 = tuple[float, float]
 Limit = Union[Pos, Affine, HasPosition, "Board", "PartLimit"]
@@ -107,6 +111,18 @@ class Face:
     def outer(self) -> Edge:
         return self.edge("outer")
 
+    # -- points and contours on this face -------------------------------------------
+
+    @property
+    def center(self) -> Anchor:
+        """The middle of the face, as an `at=` anchor."""
+        return Anchor(self)
+
+    @property
+    def outline(self) -> Outline:
+        """The face's outer contour, for `chamfer()`."""
+        return Outline(self)
+
     # -- arithmetic as a position ------------------------------------------------------
 
     @overload
@@ -141,6 +157,11 @@ class Face:
 
 
 class Edge:
+    """The edge where face `a` meets face `b`. For `chamfer()` it is that
+    edge; for `at=` it is the middle of that edge of face `a`, from which
+    an offset, `side.inner.front(37)`, or a corner, `side.outer.bottom.front`,
+    continues as an `Anchor`."""
+
     def __init__(self, part: Board, a: Face, b: Face):
         if a.axis == b.axis:
             raise LangError(f"{a.name}.{b.name} is not an edge: both faces lie on {a.axis}.", part.path)
@@ -152,6 +173,175 @@ class Edge:
 
     def __repr__(self) -> str:
         return f"Edge({self.part.path}.{self.name})"
+
+    # -- as an anchor on face a -----------------------------------------------------
+
+    @property
+    def anchor(self) -> Anchor:
+        return Anchor(self.a).toward(self.b.direction)
+
+    def __call__(self, value: Number | Pos | HasPosition) -> Anchor:
+        """A point `value` inside this edge: a number is a distance from the
+        edge, a position is taken as it is."""
+        return self.anchor(value)
+
+    def _corner(self, name: str) -> Anchor:
+        return self.anchor.toward(name)
+
+    @property
+    def front(self) -> Anchor:
+        return self._corner("front")
+
+    @property
+    def back(self) -> Anchor:
+        return self._corner("back")
+
+    @property
+    def left(self) -> Anchor:
+        return self._corner("left")
+
+    @property
+    def right(self) -> Anchor:
+        return self._corner("right")
+
+    @property
+    def top(self) -> Anchor:
+        return self._corner("top")
+
+    @property
+    def bottom(self) -> Anchor:
+        return self._corner("bottom")
+
+    @property
+    def inner(self) -> Anchor:
+        return self._corner("inner")
+
+    @property
+    def outer(self) -> Anchor:
+        return self._corner("outer")
+
+
+class Anchor:
+    """A point on a face for `at=`, named by the edges it is measured from.
+
+    `face.center` is the middle; `face.front` the middle of the front edge;
+    `face.front(37)` 37 mm inside that edge; `face.bottom.front` the corner;
+    `face.front(37).bottom(z)` 37 mm behind the front edge at the position
+    `z`. A number measures from the edge it follows, a position is taken as
+    it is and must lie on that edge's axis. An axis that is not named stays
+    centred. When a shape is placed, the shape's own side or corner of the
+    same name goes onto the point, so the shape extends into the face.
+    """
+
+    def __init__(self, face: Face, named: dict[Axis, tuple[Direction, float | Pos | None]] | None = None,
+                 last: Axis | None = None):
+        self.face = face
+        self._named: dict[Axis, tuple[Direction, float | Pos | None]] = dict(named or {})
+        self._last: Axis | None = last
+
+    @property
+    def part(self) -> Board:
+        return self.face.part
+
+    def __repr__(self) -> str:
+        parts = [f"{d.name}({v})" if v is not None else d.name for d, v in self._named.values()]
+        return f"Anchor({self.part.path}.{self.face.name}" + "".join("." + p for p in parts) + ")"
+
+    def toward(self, name: str | Direction) -> Anchor:
+        """This anchor moved onto the edge of its face in the given
+        direction (`inner`/`outer` and aliases included)."""
+        d = self.part.face(name).direction
+        if d.axis == self.face.axis:
+            raise LangError(f"{self!r}: {d.name} is not an edge of the {self.face.name} face.", self.part.path)
+        if d.axis in self._named:
+            raise LangError(f"{self!r}: {d.name} and {self._named[d.axis][0].name} lie on the same axis.",
+                            self.part.path)
+        named = dict(self._named)
+        named[d.axis] = (d, None)
+        return Anchor(self.face, named, d.axis)
+
+    def __call__(self, value: Number | Pos | HasPosition) -> Anchor:
+        last = self._last
+        if last is None:
+            raise LangError(f"{self!r}: name an edge to measure from, e.g. face.front(37).", self.part.path)
+        d, existing = self._named[last]
+        if existing is not None:
+            raise LangError(f"{self!r}: {d.name} already has a value.", self.part.path)
+        if isinstance(value, (int, float)):
+            resolved: float | Pos = float(value)
+        else:
+            pos = as_pos(value, "anchor")
+            if pos.axis != d.axis:
+                raise LangError(f"{self!r}: position {pos} is not on the axis of {d.name}.", self.part.path)
+            resolved = pos
+        named = dict(self._named)
+        named[last] = (d, resolved)
+        return Anchor(self.face, named, last)
+
+    @property
+    def front(self) -> Anchor:
+        return self.toward("front")
+
+    @property
+    def back(self) -> Anchor:
+        return self.toward("back")
+
+    @property
+    def left(self) -> Anchor:
+        return self.toward("left")
+
+    @property
+    def right(self) -> Anchor:
+        return self.toward("right")
+
+    @property
+    def top(self) -> Anchor:
+        return self.toward("top")
+
+    @property
+    def bottom(self) -> Anchor:
+        return self.toward("bottom")
+
+    @property
+    def inner(self) -> Anchor:
+        return self.toward("inner")
+
+    @property
+    def outer(self) -> Anchor:
+        return self.toward("outer")
+
+    def resolve(self) -> tuple[Point2, ShapeAnchor]:
+        """The point in the face's 2D frame (world coordinates on its two
+        axes) and the matching anchor of a shape placed there."""
+        b = self.part.box()
+        axes = self.part.face_axes(self.face)
+        coords: list[float] = []
+        fractions: list[float] = []
+        flags: list[bool] = []
+        for axis in axes:
+            if axis in self._named:
+                d, value = self._named[axis]
+                edge = b.hi[axis] if d.sign > 0 else b.lo[axis]
+                if value is None:
+                    coord = edge
+                elif isinstance(value, Pos):
+                    coord = value.value
+                else:
+                    coord = edge - d.sign * value
+                coords.append(coord)
+                fractions.append(1.0 if d.sign > 0 else 0.0)
+                flags.append(True)
+            else:
+                coords.append((b.lo[axis] + b.hi[axis]) / 2)
+                fractions.append(0.5)
+                flags.append(False)
+        return (coords[0], coords[1]), ShapeAnchor(fractions[0], fractions[1], flags[0], flags[1])
+
+
+@dataclass(frozen=True)
+class Outline:
+    """A face's outer contour, as a `chamfer()` target."""
+    face: Face
 
 
 class Board:
@@ -329,6 +519,7 @@ class Board:
         lo: dict[Axis, float] = {t_axis: t_lo}
         hi: dict[Axis, float] = {t_axis: t_hi}
         scope_box = self.scope.box
+        shape = self._shape.in_plane(u_axis, v_axis, self.path) if self._shape is not None else None
         axis: Axis
         for axis in (u_axis, v_axis):
             values = self._limit_values(axis, scope_box)
@@ -340,11 +531,11 @@ class Board:
                 v = values[0]
                 centre = (scope_box.lo[axis] + scope_box.hi[axis]) / 2
                 a, b = (v, scope_box.hi[axis]) if v < centre else (scope_box.lo[axis], v)
-            elif self._shape is not None:
+            elif shape is not None:
                 # An explicit shape carries its own extent; it sits at the box
                 # minimum, or at the origin without a box.
                 base = scope_box.lo[axis] if scope_box is not None else 0.0
-                size = self._shape.width if axis == u_axis else self._shape.height
+                size = shape.width if axis == u_axis else shape.height
                 a, b = base, base + size
             elif scope_box is None:
                 raise LangError(f"no limits on {axis} and no enclosing box.", self.path)
@@ -356,11 +547,11 @@ class Board:
                 raise LangError(f"extent on {axis} is not positive ({a:g} to {b:g}).", self.path)
             lo[axis], hi[axis] = a, b
         self._box = Box(lo, hi)
-        if self._shape is not None:
-            sb = self._shape.bounds
-            self._outline = self._shape.moved(lo[u_axis] - sb[0], lo[v_axis] - sb[1])
+        if shape is not None:
+            sb = shape.bounds
+            self._outline = shape.moved(lo[u_axis] - sb[0], lo[v_axis] - sb[1])
         else:
-            self._outline = rect(hi[u_axis] - lo[u_axis], hi[v_axis] - lo[v_axis]).moved(lo[u_axis], lo[v_axis])
+            self._outline = box_shape(lo[u_axis], lo[v_axis], hi[u_axis], hi[v_axis])
         if self._grain is None and self.material.grain:
             self._grain = self.scope.default_grain
         if self._grain is not None and self._grain == t_axis:
@@ -474,54 +665,30 @@ class Board:
 
     # -- 2D frames ------------------------------------------------------------------------------
 
-    def _face_frame(self, face: Face) -> tuple[dict[str, float], dict[str, float], tuple[Axis, Axis]]:
-        """Anchor names for a face: for a big face the outline's (u, v) axes,
-        for a narrow face (s along the face, t across the thickness)."""
-        f = directions.frame
+    def face_axes(self, face: Face) -> tuple[Axis, Axis]:
+        """The two world axes of a face's 2D frame: for a big face the
+        outline's (u, v), for a narrow face (s along the face, t across the
+        thickness)."""
         if face.is_big:
-            u_names = {f.direction_of(self.u_axis, -1).name: 0.0, f.direction_of(self.u_axis, 1).name: 1.0}
-            v_names = {f.direction_of(self.v_axis, -1).name: 0.0, f.direction_of(self.v_axis, 1).name: 1.0}
-            return u_names, v_names, (self.u_axis, self.v_axis)
+            return (self.u_axis, self.v_axis)
         s_axis = self.v_axis if face.axis == self.u_axis else self.u_axis
-        s_names = {f.direction_of(s_axis, -1).name: 0.0, f.direction_of(s_axis, 1).name: 1.0}
-        t_names = {f.direction_of(self.t_axis, -1).name: 0.0, f.direction_of(self.t_axis, 1).name: 1.0}
-        return s_names, t_names, (s_axis, self.t_axis)
+        return (s_axis, self.t_axis)
 
-    def _resolve_at(self, face: Face, at: AtSpec) -> tuple[Point2, Anchor]:
-        """Resolves an `at=` spec on a face to a point in that face's frame
-        (world coordinates on its two axes) and the shape's matching anchor."""
-        u_names, v_names, (ua, va) = self._face_frame(face)
-        b = self.box()
-        if isinstance(at, str):
-            name, extras = at, ()
-        else:
-            name, extras = at[0], at[1:]
-        anchor = parse_anchor(name, u_names, v_names)
-        point = [b.lo[ua] + anchor.fu * (b.hi[ua] - b.lo[ua]),
-                 b.lo[va] + anchor.fv * (b.hi[va] - b.lo[va])]
-        # Offsets apply in the order of the axes the anchor names, then the
-        # rest; numbers move inward from the named edge or away from the
-        # centre, positions replace the coordinate.
-        order: list[Axis] = [ua if part in u_names else va for part in name.split(".") if name != "center"]
-        for axis in (ua, va):
-            if axis not in order:
-                order.append(axis)
-        for axis, extra in zip(order, extras):
-            idx = 0 if axis == ua else 1
-            frac = anchor.fu if axis == ua else anchor.fv
-            if isinstance(extra, (int, float)):
-                point[idx] += -extra if frac == 1.0 else extra
-            else:
-                pos = as_pos(extra, "at= offset")
-                if pos.axis != axis:
-                    raise LangError(f"at=: position {pos} is not on this face's {axis} axis.", self.path)
-                point[idx] = pos.value
-        return (point[0], point[1]), anchor
+    def _anchor(self, at: Anchor | None) -> Anchor:
+        if at is None:
+            return self.show_face.center
+        if at.part is not self:
+            raise LangError(f"at= names a point on {at.part.path}, not on this board.", self.path)
+        return at
 
-    def _place_shape(self, face: Face, shape: Shape, at: AtSpec) -> Shape:
-        point, anchor = self._resolve_at(face, at)
-        su, sv = shape.anchor_point(anchor)
-        return shape.moved(point[0] - su, point[1] - sv)
+    def _place_shape(self, shape: Shape, anchor: Anchor) -> Shape:
+        """The shape in the frame of the anchor's face, with its matching
+        side or corner on the anchor's point."""
+        ua, va = self.face_axes(anchor.face)
+        placed = shape.in_plane(ua, va, self.path)
+        point, shape_anchor = anchor.resolve()
+        su, sv = placed.anchor_point(shape_anchor)
+        return placed.moved(point[0] - su, point[1] - sv)
 
     def _depth(self, face: Face, depth: DepthSpec) -> tuple[float, str, bool]:
         """Depth in mm from `face`, its spec as text, and whether it goes through."""
@@ -549,22 +716,23 @@ class Board:
                 raise LangError(f"operation name {name!r} used twice.", self.path)
             self._named_ops[name] = op
 
-    def _face_for(self, face: str | Face) -> Face:
-        return self.show_face if face == "show" else self.face(face)
-
-    def cut(self, shape: Shape | Board | Box, at: AtSpec = "center", name: str | None = None,
+    def cut(self, shape: Shape | Board | Box, at: Anchor | None = None, name: str | None = None,
             chamfer: float = 0.0) -> Self:
-        """With a shape: a through cut, positioned on the show face; it
-        changes the outline. With a part or a box: removes the region that
-        part occupies inside this board (its outline through its
-        thickness) or that box covers; a pocket from the face the region
-        enters through, or a through cut when it passes the whole
-        thickness. Room around a part comes from `part.box().grown(...)`."""
+        """With a shape: a through cut at an anchor on a big face (the
+        centre of the show face by default); it changes the outline. With
+        a part or a box: removes the region that part occupies inside this
+        board (its outline through its thickness) or that box covers; a
+        pocket from the face the region enters through, or a through cut
+        when it passes the whole thickness. Room around a part comes from
+        `part.box().grown(...)`."""
         if isinstance(shape, (Board, Box)):
-            if at != "center":
+            if at is not None:
                 raise LangError("cut(): at= is not used when cutting with a part or box.", self.path)
             return self._cut_region(shape, name, chamfer)
-        placed = self._place_shape(self.show_face, shape, at)
+        anchor = self._anchor(at)
+        if not anchor.face.is_big:
+            raise LangError("cut(): a cut goes through the board; anchor it on a big face.", self.path)
+        placed = self._place_shape(shape, anchor)
         self._cut_through(placed, name, chamfer)
         return self
 
@@ -583,7 +751,7 @@ class Board:
             raise LangError(f"cut(): {label} does not reach into this board.", self.path)
         overlap = b.intersection(rb)
         if isinstance(region, Box):
-            shape = rect(rb.hi[u] - rb.lo[u], rb.hi[v] - rb.lo[v]).moved(rb.lo[u], rb.lo[v])
+            shape = box_shape(rb.lo[u], rb.lo[v], rb.hi[u], rb.hi[v])
             t0, t1 = overlap.lo[t], overlap.hi[t]
         elif region.t_axis == t:
             # Parallel boards share the (u, v) frame: the outline as it is.
@@ -597,7 +765,7 @@ class Board:
             lo = {ru: rb.lo[ru], rv: rb.lo[rv]}
             hi = {ru: rb.hi[ru], rv: rb.hi[rv]}
             lo[t], hi[t] = b.lo[t], b.hi[t]
-            strip = rect(hi[ru] - lo[ru], hi[rv] - lo[rv]).moved(lo[ru], lo[rv])
+            strip = box_shape(lo[ru], lo[rv], hi[ru], hi[rv])
             section = region.outline.intersection(strip)
             if section.is_empty():
                 raise LangError(f"cut(): {label} does not reach into this board.", self.path)
@@ -605,7 +773,7 @@ class Board:
             bounds = {ru: (s0, s2), rv: (s1, s3)}
             free = rv if ru == t else ru              # the in-plane axis shared with this board
             span = {free: bounds[free], region.t_axis: (rb.lo[region.t_axis], rb.hi[region.t_axis])}
-            shape = rect(span[u][1] - span[u][0], span[v][1] - span[v][0]).moved(span[u][0], span[v][0])
+            shape = box_shape(span[u][0], span[v][0], span[u][1], span[v][1])
             t0, t1 = max(bounds[t][0], b.lo[t]), min(bounds[t][1], b.hi[t])
         eps = 1e-6
         if t0 <= b.lo[t] + eps and t1 >= b.hi[t] - eps:
@@ -624,31 +792,39 @@ class Board:
         self._record(Pocket(shape, face.name, depth, f"cut({label})", name, chamfer), name)
         return self
 
-    def pocket(self, shape: Shape, face: str | Face = "show", at: AtSpec = "center",
-               depth: DepthSpec | None = None, name: str | None = None, chamfer: float = 0.0) -> Self:
-        f = self._face_for(face)
+    def pocket(self, shape: Shape, at: Anchor | None = None, depth: DepthSpec | None = None,
+               name: str | None = None, chamfer: float = 0.0) -> Self:
+        """A pocket of `shape` from the face the anchor names (the centre of
+        the show face by default), `depth` deep."""
+        anchor = self._anchor(at)
+        f = anchor.face
         if depth is None:
             raise LangError("pocket() needs a depth.", self.path)
         d, spec, _ = self._depth(f, depth)
         if f.is_big:
-            placed = self._place_shape(f, shape, at)
+            placed = self._place_shape(shape, anchor)
             self._record(Pocket(placed, f.name, d, spec, name, chamfer), name)
         else:
-            point, anchor = self._resolve_at(f, at)
-            su, sv = shape.anchor_point(anchor)
-            self._record(EdgeOp(f.name, Pocket(shape.moved(-su, -sv), f.name, d, spec, name, chamfer),
+            sa, ta = self.face_axes(f)
+            oriented = shape.in_plane(sa, ta, self.path)
+            point, shape_anchor = anchor.resolve()
+            su, sv = oriented.anchor_point(shape_anchor)
+            self._record(EdgeOp(f.name, Pocket(oriented.moved(-su, -sv), f.name, d, spec, name, chamfer),
                                 point[0], point[1]), name)
         return self
 
-    def hole(self, d: float, face: str | Face = "show", at: AtSpec = "center",
-             depth: DepthSpec | None = None, name: str | None = None, chamfer: float = 0.0) -> Self:
-        f = self._face_for(face)
+    def hole(self, d: float, at: Anchor | None = None, depth: DepthSpec | None = None,
+             name: str | None = None, chamfer: float = 0.0) -> Self:
+        """A hole of diameter `d` at the anchor's point, into the face the
+        anchor names (the centre of the show face by default)."""
+        anchor = self._anchor(at)
+        f = anchor.face
         if depth is None:
             raise LangError("hole() needs a depth.", self.path)
         if d <= 0:
             raise LangError(f"hole diameter must be positive, got {d}.", self.path)
         dep, spec, thru = self._depth(f, depth)
-        point, _ = self._resolve_at(f, at)
+        point, _ = anchor.resolve()
         if f.is_big:
             self._record(Hole(point[0], point[1], float(d), f.name, dep, spec, name, chamfer, thru), name)
         else:
@@ -656,19 +832,24 @@ class Board:
                                 point[0], point[1]), name)
         return self
 
-    def chamfer(self, what: str | Edge, size: float, face: str | Face = "show") -> Self:
-        """A chamfer along an edge (`side.front.inner` or `"front.inner"`),
-        along `"outline"`, or along a named pocket or hole."""
-        f = self._face_for(face)
+    def chamfer(self, what: Edge | Outline | Op, size: float) -> Self:
+        """A chamfer along an edge (`side.front.inner`), along a face's
+        outline (`side.outer.outline`), or along a named operation of this
+        board (`side.toekick`)."""
         if isinstance(what, Edge):
-            what = what.name
-        if what != "outline" and what not in self._named_ops:
-            parts = what.split(".")
-            if len(parts) != 2:
-                raise LangError(f"chamfer(): {what!r} is neither an edge, 'outline' nor an operation name.", self.path)
-            # Stored with inner/outer and aliases resolved to directions.
-            what = self.face(parts[0]).edge(parts[1]).name
-        self._record(Chamfer(what, float(size), f.name), None)
+            if what.part is not self:
+                raise LangError(f"chamfer(): {what!r} is not an edge of this board.", self.path)
+            self._record(Chamfer(what.name, float(size), what.a.name), None)
+        elif isinstance(what, Outline):
+            if what.face.part is not self:
+                raise LangError(f"chamfer(): {what.face!r} is not a face of this board.", self.path)
+            self._record(Chamfer("outline", float(size), what.face.name), None)
+        else:
+            name = next((n for n, op in self._named_ops.items() if op is what), None)
+            if name is None:
+                raise LangError("chamfer(): the operation is not a named operation of this board.", self.path)
+            face = self.show_face.name if isinstance(what, Cut) else what.face
+            self._record(Chamfer(name, float(size), face), None)
         return self
 
     # -- block form -------------------------------------------------------------------------------

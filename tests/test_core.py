@@ -140,7 +140,7 @@ def test_cut_changes_outline_and_names_the_op():
     cab = carcass()
     left = cab["left"]
     area_before = left.outline.area
-    left.cut(rect(60, 100), at="bottom.front", name="toekick")
+    left.cut(rect(depth=60, height=100), at=left.outer.bottom.front, name="toekick")
     assert left.outline.area == pytest.approx(area_before - 60 * 100)
     toekick = left.op("toekick")
     assert isinstance(toekick, Cut)
@@ -151,37 +151,74 @@ def test_cut_changes_outline_and_names_the_op():
 def test_hole_anchor_offsets_and_positions():
     cab = carcass()
     left = cab["left"]
-    left.hole(d=5, depth=10, face="inner", at=("front", 37, Pos("z", 300)))
+    left.hole(d=5, depth=10, at=left.inner.front(37).bottom(Pos("z", 300)))
     hole = left.ops[-1]
     assert isinstance(hole, Hole)
     assert (hole.u, hole.v) == pytest.approx((37, 300))
     assert hole.face == "right" and hole.depth == 10
-    left.hole(d=5, depth=through, face="inner", at=("back.top", 20, 30))
+    left.hole(d=5, depth=through, at=left.inner.back(20).top(30))
     hole = left.ops[-1]
     assert isinstance(hole, Hole)
     assert (hole.u, hole.v) == pytest.approx((480, 690))
     assert hole.through and hole.depth == 15
+    left.hole(d=5, depth=10)   # the centre of the show face by default
+    hole = left.ops[-1]
+    assert isinstance(hole, Hole)
+    assert (hole.u, hole.v, hole.face) == (250, 360, "left")
+
+
+def test_anchor_errors_name_the_problem():
+    cab = carcass()
+    left, right = cab["left"], cab["right"]
+    with pytest.raises(LangError):
+        left.inner.left                     # the face's own axis is not an edge of it
+    with pytest.raises(LangError):
+        left.inner.front.back               # two edges on one axis
+    with pytest.raises(LangError):
+        left.inner.front(37)(5)             # a value given twice
+    with pytest.raises(LangError):
+        left.inner.center(5)                # nothing to measure from
+    with pytest.raises(LangError):
+        left.inner.front(Pos("z", 5))       # a position on the wrong axis
+    with pytest.raises(LangError):
+        left.hole(d=5, depth=5, at=right.inner.center)   # another board's face
 
 
 def test_pocket_depth_to_face():
     cab = carcass()
     left = cab["left"]
-    left.pocket(rect(200, 12), face="inner", at="center", depth=to("outer", -3))
+    left.pocket(rect(depth=200, height=12), at=left.inner.center, depth=to(left.outer, -3))
     pocket = left.ops[-1]
     assert isinstance(pocket, Pocket)
     assert pocket.depth == pytest.approx(12)
     with pytest.raises(LangError):
-        left.pocket(rect(10, 10), face="inner", depth=to("front"))
+        left.pocket(rect(depth=10, height=10), at=left.inner.center, depth=to(left.front))
+
+
+def test_shapes_name_their_plane():
+    cab = carcass()
+    left, bottom = cab["left"], cab["bottom"]
+    # a rect in the wrong plane for the face
+    with pytest.raises(LangError):
+        left.pocket(rect(width=10, height=10), at=left.inner.center, depth=3)
+    # the same rect reads the same whichever way its extents were given
+    bottom.pocket(rect(width=20, depth=100), at=bottom.top.front.left, depth=3)
+    bottom.pocket(rect(depth=100, width=20), at=bottom.top.front.left, depth=3)
+    a, b = bottom.ops[-2:]
+    assert isinstance(a, Pocket) and isinstance(b, Pocket)
+    assert a.shape.bounds == b.shape.bounds == (0.0, 565.0, 100.0, 585.0)
+    with pytest.raises(LangError):
+        rect(width=10)
 
 
 def test_edge_face_hole():
     cab = carcass()
     bottom = cab["bottom"]
-    bottom.hole(d=8, depth=20, face="front", at=("left", 50))        # centred in the thickness
+    bottom.hole(d=8, depth=20, at=bottom.front.left(50))        # centred in the thickness
     op = bottom.ops[-1]
     assert isinstance(op, EdgeOp) and op.face == "front"
     assert (op.s, op.t) == pytest.approx((535, 7.5))
-    bottom.hole(d=8, depth=20, face="front", at=("left.bottom", 50, 5))
+    bottom.hole(d=8, depth=20, at=bottom.front.left(50).bottom(5))
     op = bottom.ops[-1]
     assert isinstance(op, EdgeOp)
     assert (op.s, op.t) == pytest.approx((535, 5))
@@ -189,11 +226,18 @@ def test_edge_face_hole():
 
 def test_chamfer_targets():
     cab = carcass()
-    left = cab["left"]
-    left.chamfer("outline", 1).chamfer(left.front.inner, 1).chamfer("front.top", 0.5)
-    assert [op.what for op in left.ops if isinstance(op, Chamfer)] == ["outline", "front.right", "front.top"]
+    left, right = cab["left"], cab["right"]
+    left.cut(rect(depth=60, height=100), at=left.outer.bottom.front, name="toekick")
+    left.hole(d=5, depth=5, at=left.inner.center)
+    left.chamfer(left.outer.outline, 1).chamfer(left.front.inner, 1).chamfer(left.front.top, 0.5)
+    left.chamfer(left.toekick, 1)
+    chamfers = [op for op in left.ops if isinstance(op, Chamfer)]
+    assert [op.what for op in chamfers] == ["outline", "front.right", "front.top", "toekick"]
+    assert [op.face for op in chamfers] == ["left", "front", "front", "left"]
     with pytest.raises(LangError):
-        left.chamfer("nonsense", 1)
+        left.chamfer(left.ops[1], 1)          # the unnamed hole
+    with pytest.raises(LangError):
+        left.chamfer(right.front.inner, 1)    # another board's edge
 
 
 # -- layout --------------------------------------------------------------------
@@ -201,7 +245,7 @@ def test_chamfer_targets():
 def test_layout_json_roundtrip(tmp_path: Path) -> None:
     from lang.core.layout import write_layout
     cab = carcass()
-    cab["left"].cut(rect(60, 100), at="bottom.front", name="toekick")
+    cab["left"].cut(rect(depth=60, height=100), at=cab["left"].outer.bottom.front, name="toekick")
     cab.export("top", cab.top)
     cab.check(no_interference)
     layout = write_layout(tmp_path / "layout.json")
@@ -263,20 +307,20 @@ def test_cut_with_a_part_that_misses_or_floats_is_an_error():
         with pytest.raises(LangError):
             side.cut(Box.from_size(width=5, depth=100, height=9, origin=(0, 390, 20)))
         with pytest.raises(LangError):
-            side.cut(away, at="bottom")   # at= belongs to shapes only
+            side.cut(away, at=side.inner.center)   # at= belongs to shapes only
 
 
 def test_interference_ignores_overlap_inside_a_pocket():
     with module("box", Box.from_size(width=400, depth=300, height=100)) as m:
         side = board("side", ply15).on(m.left)
         floor = board("floor", ply9).on(m.bottom + 10).between(side.inner.into(5), m.right)
-        side.pocket(rect(300, 9.5), face="inner", at=("bottom.front", floor.bottom, 0),
+        side.pocket(rect(depth=300, height=9.5), at=side.inner.bottom(floor.bottom).front,
                     depth=5, name="groove")
     assert no_interference(m) == []
     # a floor reaching deeper than the groove hits material
     with module("box2", Box.from_size(width=400, depth=300, height=100)) as m2:
         side = board("side", ply15).on(m2.left)
         floor = board("floor", ply9).on(m2.bottom + 10).between(side.inner.into(6), m2.right)
-        side.pocket(rect(300, 9.5), face="inner", at=("bottom.front", floor.bottom, 0),
+        side.pocket(rect(depth=300, height=9.5), at=side.inner.bottom(floor.bottom).front,
                     depth=5, name="groove")
     assert no_interference(m2) == ["box2.side overlaps box2.floor"]
