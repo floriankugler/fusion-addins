@@ -8,15 +8,19 @@ the face maps world direction names to u and v.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import cast
 
 from shapely import affinity
-from shapely.geometry import Polygon, MultiPolygon, Point, box as shapely_box
+from shapely.geometry import MultiPolygon, Point, Polygon
+from shapely.geometry import box as shapely_box
+from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
 
 from .errors import LangError
 
-_ANCHOR_U = {"left": 0.0, "right": 1.0}
-_ANCHOR_V = {"bottom": 0.0, "top": 1.0}
+Ring = list[tuple[float, float]]
+_ANCHOR_U: dict[str, float] = {"left": 0.0, "right": 1.0}
+_ANCHOR_V: dict[str, float] = {"bottom": 0.0, "top": 1.0}
 
 
 @dataclass(frozen=True)
@@ -56,17 +60,15 @@ def parse_anchor(name: str, u_names: dict[str, float] = _ANCHOR_U,
 
 
 class Shape:
-    def __init__(self, geometry):
-        if isinstance(geometry, MultiPolygon):
-            if len(geometry.geoms) == 1:
-                geometry = geometry.geoms[0]
-        self.geometry = geometry
-
-    # -- construction ------------------------------------------------------
+    def __init__(self, geometry: BaseGeometry):
+        if isinstance(geometry, MultiPolygon) and len(geometry.geoms) == 1:
+            geometry = geometry.geoms[0]
+        self.geometry: BaseGeometry = geometry
 
     @property
     def bounds(self) -> tuple[float, float, float, float]:
-        return self.geometry.bounds
+        x0, y0, x1, y1 = self.geometry.bounds
+        return (float(x0), float(y0), float(x1), float(y1))
 
     @property
     def width(self) -> float:
@@ -80,29 +82,29 @@ class Shape:
 
     @property
     def area(self) -> float:
-        return self.geometry.area
+        return float(self.geometry.area)
 
     def anchor_point(self, anchor: Anchor) -> tuple[float, float]:
         x0, y0, x1, y1 = self.bounds
         return (x0 + anchor.fu * (x1 - x0), y0 + anchor.fv * (y1 - y0))
 
-    def moved(self, du: float, dv: float) -> "Shape":
+    def moved(self, du: float, dv: float) -> Shape:
         return Shape(affinity.translate(self.geometry, du, dv))
 
-    def union(self, other: "Shape") -> "Shape":
+    def union(self, other: Shape) -> Shape:
         return Shape(unary_union([self.geometry, other.geometry]))
 
-    def difference(self, other: "Shape") -> "Shape":
+    def difference(self, other: Shape) -> Shape:
         return Shape(self.geometry.difference(other.geometry))
 
-    def intersection(self, other: "Shape") -> "Shape":
+    def intersection(self, other: Shape) -> Shape:
         return Shape(self.geometry.intersection(other.geometry))
 
-    def offset(self, distance: float) -> "Shape":
+    def offset(self, distance: float) -> Shape:
         """Outward offset (negative inward), with sharp corners kept."""
         return Shape(self.geometry.buffer(distance, join_style="mitre"))
 
-    def clip(self, corner: str, **sizes: float) -> "Shape":
+    def clip(self, corner: str, **sizes: float) -> Shape:
         """Cuts a corner off along a diagonal. `corner` names a corner in the
         2D sense (`"top.right"`) and `sizes` the leg lengths along the two
         edges it names, keyed by those edge names: `.clip("top.right", top=380,
@@ -124,29 +126,35 @@ class Shape:
         triangle = Polygon([(cx, cy), (cx + su * along_u, cy), (cx, cy + sv * along_v)])
         return Shape(self.geometry.difference(triangle))
 
-    def rounded(self, radius: float) -> "Shape":
+    def rounded(self, radius: float) -> Shape:
         """Rounds every corner, the inside ones as a cutter would leave
         them."""
         g = self.geometry.buffer(-radius, join_style="round").buffer(radius, join_style="round")
         return Shape(g)
 
-    # -- export ------------------------------------------------------------
-
-    def rings(self) -> list[list[tuple[float, float]]]:
-        """Exterior ring first, then holes, each as a list of (u, v)."""
-        polys = self.geometry.geoms if isinstance(self.geometry, MultiPolygon) else [self.geometry]
-        out = []
-        for poly in polys:
-            out.append([tuple(map(float, p)) for p in poly.exterior.coords[:-1]])
-            for hole in poly.interiors:
-                out.append([tuple(map(float, p)) for p in hole.coords[:-1]])
-        return out
+    # -- export ---------------------------------------------------------------------
 
     def polygons(self) -> list[Polygon]:
-        return list(self.geometry.geoms) if isinstance(self.geometry, MultiPolygon) else [self.geometry]
+        g = self.geometry
+        if isinstance(g, MultiPolygon):
+            return list(g.geoms)
+        if isinstance(g, Polygon):
+            return [g]
+        if g.is_empty:
+            return []
+        raise LangError(f"Shape is not an area: {g.geom_type}.")
+
+    def rings(self) -> list[Ring]:
+        """Exterior ring first, then holes, each as a list of (u, v)."""
+        out: list[Ring] = []
+        for poly in self.polygons():
+            out.append([(float(x), float(y)) for x, y in cast(list[tuple[float, float]], list(poly.exterior.coords))[:-1]])
+            for hole in poly.interiors:
+                out.append([(float(x), float(y)) for x, y in cast(list[tuple[float, float]], list(hole.coords))[:-1]])
+        return out
 
     def is_empty(self) -> bool:
-        return self.geometry.is_empty
+        return bool(self.geometry.is_empty)
 
     def __repr__(self) -> str:
         x0, y0, x1, y1 = self.bounds
@@ -160,10 +168,10 @@ def rect(width: float, height: float) -> Shape:
     return Shape(shapely_box(0.0, 0.0, float(width), float(height)))
 
 
-def circle(diameter: float, center=(0.0, 0.0), resolution: int = 32) -> Shape:
+def circle(diameter: float, center: tuple[float, float] = (0.0, 0.0), resolution: int = 32) -> Shape:
     return Shape(Point(*center).buffer(diameter / 2.0, resolution=resolution))
 
 
-def polygon(points) -> Shape:
+def polygon(points: list[tuple[float, float]]) -> Shape:
     """A raw point list, the escape hatch."""
     return Shape(Polygon([(float(u), float(v)) for u, v in points]))

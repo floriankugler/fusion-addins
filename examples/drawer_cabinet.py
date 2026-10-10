@@ -15,13 +15,13 @@ class StandInSlide:
     side_clearance = 13
     recess = 10
 
-    def box_space(self, bay, behind, height):
+    def box_space(self, bay: Box, behind: Board, height: float) -> Box:
         inner = bay.with_side("front", behind.back.value)
         return inner.shrunk(left=self.side_clearance, right=self.side_clearance).with_side(
             "top", inner.bottom.value + height)
 
 
-def drawer_cabinet(name, box, n, slide):
+def drawer_cabinet(name: str, box: Box, n: int, slide: StandInSlide) -> Scope:
     with module(name, box) as cab:
         left = board("left", ply15).on(cab.left)
         right = board("right", ply15).on(cab.right)
@@ -46,7 +46,7 @@ def drawer_cabinet(name, box, n, slide):
     return cab
 
 
-def drawer(name, bay, slide):
+def drawer(name: str, bay: Box, slide: StandInSlide) -> Scope:
     with scope(name, bay) as d:
         board("face", ply15).on(bay.front).inset(GAP / 2)
         box = slide.box_space(bay, behind=d.face, height=bay.height - 30)

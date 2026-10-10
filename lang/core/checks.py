@@ -1,11 +1,13 @@
 """Checks that run on the layout, before any geometry exists."""
 from __future__ import annotations
 
+from .scope import Scope
 
-def no_interference(scope) -> list[str]:
+
+def no_interference(scope: Scope) -> list[str]:
     """Pairs of parts in the scope (and below) whose boxes overlap."""
     parts = scope.all_parts()
-    problems = []
+    problems: list[str] = []
     for i, a in enumerate(parts):
         for b in parts[i + 1:]:
             if a.box().overlaps(b.box()):
@@ -13,8 +15,8 @@ def no_interference(scope) -> list[str]:
     return problems
 
 
-def fits_sheet(scope) -> list[str]:
-    problems = []
+def fits_sheet(scope: Scope) -> list[str]:
+    problems: list[str] = []
     for part in scope.all_parts():
         sheet = part.material.sheet
         if sheet is None:

@@ -1,6 +1,9 @@
+from pathlib import Path
+
 import pytest
 
 from lang import *
+from lang.core.ops import Chamfer, Cut, EdgeOp, Hole, Pocket
 from lang.core.refs import Affine
 from lang.core.scope import registry
 
@@ -39,7 +42,7 @@ def test_mix_of_positions_needs_weights_summing_to_one():
 
 def test_mixing_axes_is_an_error():
     with pytest.raises(LangError):
-        Pos("x", 1) - Pos("z", 1)
+        _ = Pos("x", 1) - Pos("z", 1)
 
 
 def test_spread():
@@ -139,7 +142,10 @@ def test_cut_changes_outline_and_names_the_op():
     area_before = left.outline.area
     left.cut(rect(60, 100), at="bottom.front", name="toekick")
     assert left.outline.area == pytest.approx(area_before - 60 * 100)
-    assert left.toekick.shape.bounds == pytest.approx((0, 0, 60, 100))
+    toekick = left.op("toekick")
+    assert isinstance(toekick, Cut)
+    assert toekick.shape.bounds == pytest.approx((0, 0, 60, 100))
+    assert left.toekick is toekick
 
 
 def test_hole_anchor_offsets_and_positions():
@@ -147,10 +153,12 @@ def test_hole_anchor_offsets_and_positions():
     left = cab["left"]
     left.hole(d=5, depth=10, face="inner", at=("front", 37, Pos("z", 300)))
     hole = left.ops[-1]
+    assert isinstance(hole, Hole)
     assert (hole.u, hole.v) == pytest.approx((37, 300))
     assert hole.face == "right" and hole.depth == 10
     left.hole(d=5, depth=through, face="inner", at=("back.top", 20, 30))
     hole = left.ops[-1]
+    assert isinstance(hole, Hole)
     assert (hole.u, hole.v) == pytest.approx((480, 690))
     assert hole.through and hole.depth == 15
 
@@ -159,7 +167,9 @@ def test_pocket_depth_to_face():
     cab = carcass()
     left = cab["left"]
     left.pocket(rect(200, 12), face="inner", at="center", depth=to("outer", -3))
-    assert left.ops[-1].depth == pytest.approx(12)
+    pocket = left.ops[-1]
+    assert isinstance(pocket, Pocket)
+    assert pocket.depth == pytest.approx(12)
     with pytest.raises(LangError):
         left.pocket(rect(10, 10), face="inner", depth=to("front"))
 
@@ -169,24 +179,26 @@ def test_edge_face_hole():
     bottom = cab["bottom"]
     bottom.hole(d=8, depth=20, face="front", at=("left", 50))        # centred in the thickness
     op = bottom.ops[-1]
-    assert op.kind == "edge" and op.face == "front"
+    assert isinstance(op, EdgeOp) and op.face == "front"
     assert (op.s, op.t) == pytest.approx((535, 7.5))
     bottom.hole(d=8, depth=20, face="front", at=("left.bottom", 50, 5))
-    assert (bottom.ops[-1].s, bottom.ops[-1].t) == pytest.approx((535, 5))
+    op = bottom.ops[-1]
+    assert isinstance(op, EdgeOp)
+    assert (op.s, op.t) == pytest.approx((535, 5))
 
 
 def test_chamfer_targets():
     cab = carcass()
     left = cab["left"]
     left.chamfer("outline", 1).chamfer(left.front.inner, 1).chamfer("front.top", 0.5)
-    assert [op.what for op in left.ops] == ["outline", "front.right", "front.top"]
+    assert [op.what for op in left.ops if isinstance(op, Chamfer)] == ["outline", "front.right", "front.top"]
     with pytest.raises(LangError):
         left.chamfer("nonsense", 1)
 
 
 # -- layout --------------------------------------------------------------------
 
-def test_layout_json_roundtrip(tmp_path):
+def test_layout_json_roundtrip(tmp_path: Path) -> None:
     from lang.core.layout import write_layout
     cab = carcass()
     cab["left"].cut(rect(60, 100), at="bottom.front", name="toekick")

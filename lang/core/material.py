@@ -18,5 +18,6 @@ class Material:
         return f"{self.name} {self.t:g}"
 
 
-def material(name: str, t: float, grain: bool = True, sheet=None) -> Material:
+def material(name: str, t: float, grain: bool = True,
+             sheet: tuple[float, float] | None = None) -> Material:
     return Material(name, float(t), grain, sheet)

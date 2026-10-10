@@ -2,37 +2,41 @@
 from __future__ import annotations
 
 from . import directions
-from .directions import AXES
+from .directions import AXES, Axis, Direction
 from .errors import LangError
-from .refs import Pos, Side, as_pos
+from .refs import Pos, PosLike, Side, as_pos
 
 
 class Box:
-    def __init__(self, lo: dict[str, float], hi: dict[str, float]):
-        self.lo = {a: float(lo[a]) for a in AXES}
-        self.hi = {a: float(hi[a]) for a in AXES}
+    def __init__(self, lo: dict[Axis, float], hi: dict[Axis, float]):
+        self.lo: dict[Axis, float] = {a: float(lo[a]) for a in AXES}
+        self.hi: dict[Axis, float] = {a: float(hi[a]) for a in AXES}
         for a in AXES:
             if self.hi[a] < self.lo[a]:
                 raise LangError(f"Box: {a} extent is negative ({self.lo[a]} > {self.hi[a]}).")
 
     @classmethod
-    def from_size(cls, width: float, depth: float, height: float, origin=(0.0, 0.0, 0.0)) -> "Box":
+    def from_size(cls, width: float, depth: float, height: float,
+                  origin: tuple[float, float, float] = (0.0, 0.0, 0.0)) -> Box:
         """A box by extents named as the frame names them, with its minimum
         corner at `origin`."""
         f = directions.frame
-        size = {f.axis_of_extent("width"): width,
-                f.axis_of_extent("depth"): depth,
-                f.axis_of_extent("height"): height}
-        lo = dict(zip(AXES, origin))
-        hi = {a: lo[a] + size[a] for a in AXES}
+        size: dict[Axis, float] = {
+            f.axis_of_extent("width"): width,
+            f.axis_of_extent("depth"): depth,
+            f.axis_of_extent("height"): height,
+        }
+        lo: dict[Axis, float] = {"x": origin[0], "y": origin[1], "z": origin[2]}
+        hi: dict[Axis, float] = {a: lo[a] + size[a] for a in AXES}
         return cls(lo, hi)
 
     @classmethod
-    def from_sides(cls, **sides) -> "Box":
+    def from_sides(cls, **sides: PosLike) -> Box:
         """A box from positions named by direction, e.g.
         `Box.from_sides(left=..., right=..., ...)`. All six are required."""
         f = directions.frame
-        lo, hi = {}, {}
+        lo: dict[Axis, float] = {}
+        hi: dict[Axis, float] = {}
         for name, value in sides.items():
             d = f.direction(name)
             pos = as_pos(value, f"Box side {name}")
@@ -44,51 +48,77 @@ class Box:
             raise LangError(f"Box.from_sides: missing sides on {', '.join(missing)}.")
         return cls(lo, hi)
 
-    # -- sides and extents -------------------------------------------------
+    # -- sides -----------------------------------------------------------------
 
-    def side(self, direction) -> Side:
+    def side(self, direction: str | Direction) -> Side:
         d = directions.frame.direction(direction)
         value = self.hi[d.axis] if d.sign > 0 else self.lo[d.axis]
         return Side(d.axis, value, inward=-d)
 
-    def __getattr__(self, name: str):
-        f = directions.frame
-        if f.is_direction(name):
-            return self.side(name)
-        if name in f.extents:
-            return self.extent(name)
-        raise AttributeError(name)
+    @property
+    def front(self) -> Side:
+        return self.side("front")
+
+    @property
+    def back(self) -> Side:
+        return self.side("back")
+
+    @property
+    def left(self) -> Side:
+        return self.side("left")
+
+    @property
+    def right(self) -> Side:
+        return self.side("right")
+
+    @property
+    def top(self) -> Side:
+        return self.side("top")
+
+    @property
+    def bottom(self) -> Side:
+        return self.side("bottom")
+
+    # -- extents ----------------------------------------------------------------
 
     def extent(self, axis_or_name: str) -> float:
-        f = directions.frame
-        if axis_or_name in f.extents:
-            axis = f.axis_of_extent(axis_or_name)
-        elif axis_or_name in AXES:
-            axis = axis_or_name
-        else:
-            axis = f.direction(axis_or_name).axis
+        axis = directions.frame.axis_of(axis_or_name)
         return self.hi[axis] - self.lo[axis]
 
+    @property
+    def width(self) -> float:
+        return self.extent("width")
+
+    @property
+    def depth(self) -> float:
+        return self.extent("depth")
+
+    @property
+    def height(self) -> float:
+        return self.extent("height")
+
     def center(self, axis_or_name: str) -> Pos:
-        axis = axis_or_name if axis_or_name in AXES else directions.frame.direction(axis_or_name).axis
+        axis = directions.frame.axis_of(axis_or_name)
         return Pos(axis, (self.lo[axis] + self.hi[axis]) / 2)
 
     def center_point(self) -> tuple[float, float, float]:
-        return tuple((self.lo[a] + self.hi[a]) / 2 for a in AXES)
+        return ((self.lo["x"] + self.hi["x"]) / 2,
+                (self.lo["y"] + self.hi["y"]) / 2,
+                (self.lo["z"] + self.hi["z"]) / 2)
 
-    # -- derived boxes -----------------------------------------------------
+    # -- derived boxes ------------------------------------------------------------
 
-    def split(self, axis_or_name: str, n: int, gap: float = 0.0) -> list["Box"]:
+    def split(self, axis_or_name: str, n: int, gap: float = 0.0) -> list[Box]:
         """`n` equal boxes along an axis, from its minimum to its maximum,
         with `gap` between them."""
-        axis = axis_or_name if axis_or_name in AXES else directions.frame.direction(axis_or_name).axis
+        axis = directions.frame.axis_of(axis_or_name)
         if n < 1:
             raise LangError("split: n must be at least 1.")
         total = self.extent(axis) - gap * (n - 1)
         if total <= 0:
             raise LangError(f"split: {n} bays with gap {gap} do not fit in {self.extent(axis)}.")
         size = total / n
-        boxes = []
+        boxes: list[Box] = []
         for i in range(n):
             lo = dict(self.lo)
             hi = dict(self.hi)
@@ -97,7 +127,7 @@ class Box:
             boxes.append(Box(lo, hi))
         return boxes
 
-    def shrunk(self, **by_direction) -> "Box":
+    def shrunk(self, **by_direction: float) -> Box:
         """A copy with sides moved inward by the given amounts, keyed by
         direction name."""
         lo, hi = dict(self.lo), dict(self.hi)
@@ -109,17 +139,17 @@ class Box:
                 lo[d.axis] += amount
         return Box(lo, hi)
 
-    def with_side(self, direction, value: float) -> "Box":
+    def with_side(self, direction: str | Direction, value: float) -> Box:
         d = directions.frame.direction(direction)
         lo, hi = dict(self.lo), dict(self.hi)
         (hi if d.sign > 0 else lo)[d.axis] = float(value)
         return Box(lo, hi)
 
-    def overlaps(self, other: "Box", tolerance: float = 1e-6) -> bool:
+    def overlaps(self, other: Box, tolerance: float = 1e-6) -> bool:
         return all(self.lo[a] < other.hi[a] - tolerance and other.lo[a] < self.hi[a] - tolerance
                    for a in AXES)
 
-    def as_dict(self) -> dict:
+    def as_dict(self) -> dict[str, list[float]]:
         return {"min": [self.lo[a] for a in AXES], "max": [self.hi[a] for a in AXES]}
 
     def __repr__(self) -> str:

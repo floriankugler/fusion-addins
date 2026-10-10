@@ -11,76 +11,73 @@ floats. The rules (DESIGN.md, Placement and references):
 `Pos + Pos` therefore yields an intermediate `Affine` sum that only becomes
 a position once it is scaled so that its weights add up to one, as in
 `(a + b) / 2`.
+
+`Side` is a position with an inward direction, the face of a box. Anything
+with a `position` attribute (a `Side`, a part's `Face`) is accepted where a
+position is expected; `as_pos` does the coercion.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Union
+from typing import Protocol, overload, runtime_checkable
 
 from . import directions
+from .directions import Axis, Direction
 from .errors import LangError
 
-Number = Union[int, float]
+Number = int | float
 EPS = 1e-9
 
 
-def _is_number(value) -> bool:
-    return isinstance(value, (int, float)) and not isinstance(value, bool)
+@runtime_checkable
+class HasPosition(Protocol):
+    @property
+    def position(self) -> Pos: ...
 
 
 @dataclass(frozen=True)
 class Pos:
-    axis: str
+    axis: Axis
     value: float
 
-    def __post_init__(self):
-        if self.axis not in directions.AXES:
-            raise ValueError(f"Unknown axis {self.axis!r}.")
+    @overload
+    def __add__(self, other: Number) -> Pos: ...
+    @overload
+    def __add__(self, other: Pos | Affine | HasPosition) -> Pos | Affine: ...
 
-    # position +/- length
-    def __add__(self, other):
-        if _is_number(other):
+    def __add__(self, other: Number | Pos | Affine | HasPosition) -> Pos | Affine:
+        if isinstance(other, (int, float)):
             return Pos(self.axis, self.value + other)
-        if isinstance(other, Pos):
-            return Affine(self.axis, [(1.0, self.value), (1.0, _same_axis(self, other).value)])
         if isinstance(other, Affine):
             return other + self
-        return NotImplemented
+        other_pos = as_pos(other)
+        _same_axis(self, other_pos)
+        return Affine(self.axis, [(1.0, self.value), (1.0, other_pos.value)])
 
-    def __radd__(self, other):
-        if _is_number(other):
-            return Pos(self.axis, self.value + other)
-        return NotImplemented
+    def __radd__(self, other: Number) -> Pos:
+        return Pos(self.axis, self.value + other)
 
-    def __sub__(self, other):
-        if _is_number(other):
+    @overload
+    def __sub__(self, other: Number) -> Pos: ...
+    @overload
+    def __sub__(self, other: Pos | HasPosition) -> float: ...
+
+    def __sub__(self, other: Number | Pos | HasPosition) -> Pos | float:
+        if isinstance(other, (int, float)):
             return Pos(self.axis, self.value - other)
-        if isinstance(other, Pos):
-            return self.value - _same_axis(self, other).value
-        return NotImplemented
+        other_pos = as_pos(other)
+        _same_axis(self, other_pos)
+        return self.value - other_pos.value
 
-    def __rsub__(self, other):
-        raise LangError(
-            f"A length minus a position ({other} - {self}) has no meaning; "
-            "subtract positions from positions or lengths from positions."
-        )
-
-    def __mul__(self, other):
-        if _is_number(other):
-            return Affine(self.axis, [(float(other), self.value)])
-        return NotImplemented
+    def __mul__(self, other: Number) -> Affine:
+        return Affine(self.axis, [(float(other), self.value)])
 
     __rmul__ = __mul__
 
-    def __truediv__(self, other):
-        if _is_number(other):
-            return Affine(self.axis, [(1.0 / other, self.value)]).resolved()
-        return NotImplemented
+    def __truediv__(self, other: Number) -> Affine:
+        return Affine(self.axis, [(1.0 / other, self.value)])
 
-    def __neg__(self):
-        raise LangError(f"A negated position (-{self}) has no meaning.")
-
-    def __float__(self):
+    def __float__(self) -> float:
         return float(self.value)
 
     def __str__(self) -> str:
@@ -90,65 +87,60 @@ class Pos:
         return f"Pos({self.axis}, {self.value:g})"
 
 
-def _same_axis(a: Pos, b: Pos) -> Pos:
+def _same_axis(a: Pos, b: Pos) -> None:
     if a.axis != b.axis:
         raise LangError(f"Cannot combine positions on different axes ({a} and {b}).")
-    return b
 
 
 @dataclass(frozen=True)
 class Affine:
     """A weighted sum of positions on one axis. It is a position only when
-    the weights add up to one."""
+    the weights add up to one; `as_pos` checks that."""
 
-    axis: str
-    terms: list
+    axis: Axis
+    terms: list[tuple[float, float]]
 
     @property
     def weight(self) -> float:
         return sum(w for w, _ in self.terms)
 
-    def resolved(self):
+    def resolved(self) -> Pos | Affine:
         if abs(self.weight - 1.0) < EPS:
             return Pos(self.axis, sum(w * v for w, v in self.terms))
         return self
 
-    def __add__(self, other):
-        if isinstance(other, Pos):
-            _same_axis(Pos(self.axis, 0.0), other)
-            return Affine(self.axis, self.terms + [(1.0, other.value)]).resolved()
+    def __add__(self, other: Pos | Affine | HasPosition) -> Pos | Affine:
         if isinstance(other, Affine):
-            _same_axis(Pos(self.axis, 0.0), Pos(other.axis, 0.0))
+            if other.axis != self.axis:
+                raise LangError(f"Cannot combine positions on different axes ({self.axis} and {other.axis}).")
             return Affine(self.axis, self.terms + other.terms).resolved()
-        if _is_number(other):
-            raise LangError(
-                "Adding a length to a sum of positions is ambiguous; "
-                "divide the sum first, then add the length."
-            )
-        return NotImplemented
+        other_pos = as_pos(other)
+        if other_pos.axis != self.axis:
+            raise LangError(f"Cannot combine positions on different axes ({self.axis} and {other_pos.axis}).")
+        return Affine(self.axis, self.terms + [(1.0, other_pos.value)]).resolved()
 
     __radd__ = __add__
 
-    def __mul__(self, other):
-        if _is_number(other):
-            return Affine(self.axis, [(w * other, v) for w, v in self.terms]).resolved()
-        return NotImplemented
+    def __mul__(self, other: Number) -> Pos | Affine:
+        return Affine(self.axis, [(w * other, v) for w, v in self.terms]).resolved()
 
     __rmul__ = __mul__
 
-    def __truediv__(self, other):
-        if _is_number(other):
-            return self * (1.0 / other)
-        return NotImplemented
+    def __truediv__(self, other: Number) -> Pos | Affine:
+        return self * (1.0 / other)
 
     def __str__(self) -> str:
         return f"<sum of positions on {self.axis}, weights {self.weight:g}>"
 
 
-def as_pos(value, what: str = "position") -> Pos:
-    """Coerces a Pos, Side, Face or resolved Affine to a Pos."""
+PosLike = Pos | Affine | HasPosition
+
+
+def as_pos(value: object, what: str = "position") -> Pos:
+    """Coerces a Pos, an Affine whose weights add up to one, or anything with
+    a `position` (Side, Face) to a Pos."""
     if isinstance(value, Pos):
-        return Pos(value.axis, value.value)
+        return value
     if isinstance(value, Affine):
         resolved = value.resolved()
         if isinstance(resolved, Pos):
@@ -157,49 +149,58 @@ def as_pos(value, what: str = "position") -> Pos:
             f"{what}: the weights of a sum of positions must add up to 1 "
             f"(they add up to {value.weight:g})."
         )
-    if hasattr(value, "position"):
-        return as_pos(value.position, what)
+    if isinstance(value, HasPosition):
+        return value.position
     raise LangError(f"{what}: expected a position, got {value!r}.")
 
 
-class Side(Pos):
-    """A position with a direction pointing inward, into the box or part
-    it bounds. `on()` uses the direction to decide where a board's
-    thickness goes. Moving a side keeps its direction."""
+@dataclass(frozen=True)
+class Side:
+    """A position with a direction pointing inward, into the box it bounds.
+    `on()` uses the direction to decide where a board's thickness goes.
+    Moving a side by a length keeps its direction."""
 
-    def __init__(self, axis: str, value: float, inward: "directions.Direction"):
-        object.__setattr__(self, "axis", axis)
-        object.__setattr__(self, "value", float(value))
-        object.__setattr__(self, "inward", inward)
-        if inward.axis != axis:
+    axis: Axis
+    value: float
+    inward: Direction
+
+    def __post_init__(self) -> None:
+        if self.inward.axis != self.axis:
             raise ValueError("A side's inward direction must lie on its axis.")
 
-    def __add__(self, other):
-        if _is_number(other):
-            return Side(self.axis, self.value + other, self.inward)
-        return Pos.__add__(self, other)
-
-    def __sub__(self, other):
-        if _is_number(other):
-            return Side(self.axis, self.value - other, self.inward)
-        return Pos.__sub__(self, other)
+    @property
+    def position(self) -> Pos:
+        return Pos(self.axis, self.value)
 
     @property
-    def outward(self) -> "directions.Direction":
+    def outward(self) -> Direction:
         return -self.inward
+
+    @overload
+    def __add__(self, other: Number) -> Side: ...
+    @overload
+    def __add__(self, other: Pos | Affine | HasPosition) -> Pos | Affine: ...
+
+    def __add__(self, other: Number | Pos | Affine | HasPosition) -> Side | Pos | Affine:
+        if isinstance(other, (int, float)):
+            return Side(self.axis, self.value + other, self.inward)
+        return self.position + other
+
+    @overload
+    def __sub__(self, other: Number) -> Side: ...
+    @overload
+    def __sub__(self, other: Pos | HasPosition) -> float: ...
+
+    def __sub__(self, other: Number | Pos | HasPosition) -> Side | float:
+        if isinstance(other, (int, float)):
+            return Side(self.axis, self.value - other, self.inward)
+        return self.position - other
 
     def __repr__(self) -> str:
         return f"Side({self.axis}, {self.value:g}, inward={self.inward.name})"
 
-    def __eq__(self, other):
-        return isinstance(other, Side) and (self.axis, self.value, self.inward) == (
-            other.axis, other.value, other.inward)
 
-    def __hash__(self):
-        return hash((self.axis, self.value, self.inward))
-
-
-def spread(start, end, pitch: float | None = None, count: int | None = None) -> list[Pos]:
+def spread(start: PosLike, end: PosLike, pitch: float | None = None, count: int | None = None) -> list[Pos]:
     """Positions from `start` to `end` on one axis.
 
     With `count`, that many positions including both ends (one position is
@@ -234,9 +235,26 @@ def to(face: str, offset: float = 0.0) -> ToFace:
     return ToFace(face, offset)
 
 
-class _Through:
-    def __repr__(self):
+class Through:
+    def __repr__(self) -> str:
         return "through"
 
 
-through = _Through()
+through = Through()
+
+DepthSpec = Number | ToFace | Through
+
+# `at=` for an operation: an anchor name, or the anchor with one or two
+# offsets. A number moves inward from the edge the anchor names on that axis
+# (from the centre on an axis it does not name); a position replaces the
+# coordinate.
+Offset = Number | Pos | Affine | HasPosition
+AtSpec = str | tuple[str, Offset] | tuple[str, Offset, Offset]
+
+__all__ = [
+    "Pos", "Affine", "Side", "HasPosition", "PosLike", "Number", "Offset", "AtSpec",
+    "DepthSpec", "ToFace", "Through", "to", "through", "spread", "as_pos",
+]
+
+# re-exported for callers that only need the frame
+_ = directions

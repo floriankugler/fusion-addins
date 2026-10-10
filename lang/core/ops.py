@@ -6,7 +6,8 @@ resolved to millimetres from the face, with the original spec kept.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from typing import Literal
 
 from .shapes import Shape
 
@@ -17,8 +18,7 @@ class Cut:
     shape: Shape
     name: str | None = None
     chamfer: float = 0.0
-
-    kind = "cut"
+    kind: Literal["cut"] = "cut"
 
 
 @dataclass
@@ -29,8 +29,7 @@ class Pocket:
     depth_spec: str
     name: str | None = None
     chamfer: float = 0.0
-
-    kind = "pocket"
+    kind: Literal["pocket"] = "pocket"
 
 
 @dataclass
@@ -44,8 +43,7 @@ class Hole:
     name: str | None = None
     chamfer: float = 0.0
     through: bool = False
-
-    kind = "hole"
+    kind: Literal["hole"] = "hole"
 
 
 @dataclass
@@ -54,8 +52,7 @@ class Chamfer:
     what: str
     size: float
     face: str
-
-    kind = "chamfer"
+    kind: Literal["chamfer"] = "chamfer"
 
 
 @dataclass
@@ -66,8 +63,7 @@ class EdgeOp:
     op: Hole | Pocket
     s: float = 0.0
     t: float = 0.0
-
-    kind = "edge"
+    kind: Literal["edge"] = "edge"
 
 
 Op = Cut | Pocket | Hole | Chamfer | EdgeOp

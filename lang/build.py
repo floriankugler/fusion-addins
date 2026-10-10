@@ -15,28 +15,29 @@ from pathlib import Path
 
 from .core.errors import LangError
 from .core.layout import write_layout
+from .core.layout_types import Layout
 from .core.scope import registry
 
 
-def run_build(build_file: str | Path, out_dir: str | Path, scene: bool = True) -> dict:
+def run_build(build_file: str | Path, out_dir: str | Path, scene: bool = True) -> Layout:
     registry.reset()
-    build_file = Path(build_file).resolve()
-    out_dir = Path(out_dir)
-    sys.path.insert(0, str(build_file.parent))
+    build_path = Path(build_file).resolve()
+    out_path = Path(out_dir)
+    sys.path.insert(0, str(build_path.parent))
     try:
-        runpy.run_path(str(build_file), run_name="__build__")
+        runpy.run_path(str(build_path), run_name="__build__")
     finally:
         sys.path.pop(0)
-    layout = write_layout(out_dir / "layout.json")
+    layout = write_layout(out_path / "layout.json")
     if scene:
         from .preview.mesh import write_scene
-        write_scene(layout, out_dir / "scene.glb")
-    (out_dir / "version.txt").write_text(str(time.time_ns()))
+        write_scene(layout, out_path / "scene.glb")
+    (out_path / "version.txt").write_text(str(time.time_ns()))
     return layout
 
 
-def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Run a build file and write its layout.")
     parser.add_argument("build_file")
     parser.add_argument("--out", default="out")
     parser.add_argument("--no-scene", action="store_true", help="write the layout only")

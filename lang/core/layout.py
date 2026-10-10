@@ -1,7 +1,7 @@
 """The layout step: resolve every part and write the layout JSON.
 
 The layout file is the contract between the language and its consumers
-(preview, emitter). Version it on every incompatible change.
+(preview, emitter); its shape is in `layout_types.py`.
 """
 from __future__ import annotations
 
@@ -9,22 +9,23 @@ import json
 from pathlib import Path
 
 from . import directions
+from .layout_types import LAYOUT_VERSION, ExportValue, Layout, ModuleLayout
+from .refs import Pos, as_pos
 from .scope import registry
 
-LAYOUT_VERSION = 1
 
-
-def build_layout() -> dict:
+def build_layout() -> Layout:
     """Resolves all registered modules and parts into one layout dict."""
     f = directions.frame
-    modules = []
-    problems = []
+    modules: list[ModuleLayout] = []
+    problems: list[str] = []
     for root in registry.roots:
         parts = [part.to_layout() for part in root.all_parts()]
         problems.extend(root.run_checks())
+        box = root.box
         modules.append({
             "path": root.path,
-            "box": root.box.as_dict() if root.box else None,
+            "box": box.as_dict() if box else None,  # type: ignore[typeddict-item]
             "parts": parts,
             "exports": {k: _export_value(v) for k, v in root.exports.items()},
             "problems": list(root.problems),
@@ -41,16 +42,17 @@ def build_layout() -> dict:
     }
 
 
-def _export_value(value):
-    if hasattr(value, "axis") and hasattr(value, "value"):
-        return {"axis": value.axis, "value": float(value.value)}
-    try:
+def _export_value(value: object) -> ExportValue | float | str:
+    if isinstance(value, (int, float)):
         return float(value)
-    except (TypeError, ValueError):
+    try:
+        pos: Pos = as_pos(value)
+        return {"axis": pos.axis, "value": pos.value}
+    except Exception:
         return str(value)
 
 
-def write_layout(path: str | Path) -> dict:
+def write_layout(path: str | Path) -> Layout:
     layout = build_layout()
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     Path(path).write_text(json.dumps(layout, indent=1))

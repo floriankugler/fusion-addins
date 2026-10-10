@@ -120,8 +120,9 @@ To work on the addins, make sure you have VS Code installed, right-click on the 
 `lang/` is a Python-embedded language for flat furniture that compiles into Fusion documents; the design is in `DESIGN.md`. Phase 1 contains the core (`lang/core`) and a browser preview (`lang/preview`), nothing in Fusion yet. It runs outside Fusion's Python:
 
 ```bash
-python3 -m venv .venv && .venv/bin/pip install shapely trimesh manifold3d scipy watchfiles pytest numpy
+python3 -m venv .venv && .venv/bin/pip install shapely trimesh manifold3d scipy watchfiles pytest pyright numpy
 .venv/bin/python -m pytest tests                                  # unit tests
+.venv/bin/pyright                                                 # strict type check of lang, tests and examples
 .venv/bin/python -m lang.build examples/drawer_cabinet.py --out out  # layout.json + scene.glb
 .venv/bin/python -m lang.preview examples/drawer_cabinet.py       # live preview at http://127.0.0.1:8765
 ```

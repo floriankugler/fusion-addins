@@ -125,7 +125,16 @@ proposed]
 - **Faces and edges are attributes, not only strings.** `side.front` is a face,
   `side.front.inner` an edge, so autocomplete shows the six directions and a
   typo fails at parse time. Strings stay allowed where names are computed.
-  Direction names and modifier names do not collide.
+  Direction names and modifier names do not collide. The six directions plus
+  `inner` and `outer` are real properties on boxes, scopes, boards and faces,
+  not dynamic attributes, so editors and the type checker see them; project
+  aliases such as `fs` go through `face()`, `edge()` and `side()`.
+  [decided while implementing]
+- **Strict typing.** The package is checked with pyright in strict mode and
+  ships a `py.typed` marker, so build files get completion and errors in the
+  editor. Positions, sides, faces, anchor and depth specs and the layout file
+  are all typed; the layout file's shape lives in `layout_types.py` and is the
+  contract the emitter is checked against. [decided while implementing]
 - **Two layouts on the page, one object.** A chain in parentheses for a few
   calls; a `with board(...) as side:` block when a part has many operations, so
   the receiver is not repeated. Both build the same part.

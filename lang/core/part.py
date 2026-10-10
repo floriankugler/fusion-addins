@@ -6,34 +6,40 @@ order-free modifiers (`on`, `between`, `center`, `inset`, `grain`, `show`,
 `chamfer`). Every modifier returns the board. Placement is resolved lazily
 the first time a face, the box or the layout is asked for; from then on the
 placement modifiers are frozen.
+
+Faces and edges are properties named by world direction (`side.front`,
+`side.front.inner`), so editors can complete them; project aliases go
+through `face()` and `edge()`.
 """
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Self, Union, overload
 
 from . import directions
-from .directions import AXES, Direction
-from .errors import LangError
-from .material import Material
-from .ops import Chamfer, Cut, EdgeOp, Hole, Pocket
-from .refs import Pos, Side, ToFace, as_pos, through, _is_number
-from .shapes import Shape, parse_anchor, rect
 from . import scope as scopes
+from .box import Box
+from .directions import AXES, Axis, Direction
+from .errors import LangError
+from .layout_types import (ChamferLayout, CutLayout, EdgeOpLayout, HoleLayout, OpLayout,
+                           PartLayout, PocketLayout, Rings)
+from .material import Material
+from .ops import Chamfer, Cut, EdgeOp, Hole, Op, Pocket
+from .refs import Affine, AtSpec, DepthSpec, HasPosition, Pos, PosLike, Side, Through, ToFace, as_pos
+from .shapes import Anchor, Shape, parse_anchor, rect
 
-
-def _axis_of(value) -> str:
-    return as_pos(value).axis
+Point2 = tuple[float, float]
+Limit = Union[Pos, Affine, HasPosition, "Board"]
 
 
 class Face:
     """One of the six faces of a board, named by world direction."""
 
-    def __init__(self, part: "Board", direction: Direction):
+    def __init__(self, part: Board, direction: Direction):
         self.part = part
         self.direction = direction
 
     @property
-    def axis(self) -> str:
+    def axis(self) -> Axis:
         return self.direction.axis
 
     @property
@@ -62,30 +68,71 @@ class Face:
     def name(self) -> str:
         return self.direction.name
 
-    # Edge of this face with another: `side.front.inner`
-    def __getattr__(self, name: str):
-        f = directions.frame
-        if f.is_direction(name) or name in ("inner", "outer"):
-            other = self.part.face(name)
-            return Edge(self.part, self, other)
-        raise AttributeError(name)
+    # -- edges: this face with another ---------------------------------------------
 
-    # Arithmetic as a position
-    def __add__(self, other):
+    def edge(self, other: str | Direction | Face) -> Edge:
+        other_face = other if isinstance(other, Face) else self.part.face(other)
+        return Edge(self.part, self, other_face)
+
+    @property
+    def front(self) -> Edge:
+        return self.edge("front")
+
+    @property
+    def back(self) -> Edge:
+        return self.edge("back")
+
+    @property
+    def left(self) -> Edge:
+        return self.edge("left")
+
+    @property
+    def right(self) -> Edge:
+        return self.edge("right")
+
+    @property
+    def top(self) -> Edge:
+        return self.edge("top")
+
+    @property
+    def bottom(self) -> Edge:
+        return self.edge("bottom")
+
+    @property
+    def inner(self) -> Edge:
+        return self.edge("inner")
+
+    @property
+    def outer(self) -> Edge:
+        return self.edge("outer")
+
+    # -- arithmetic as a position ------------------------------------------------------
+
+    @overload
+    def __add__(self, other: float) -> Pos: ...
+    @overload
+    def __add__(self, other: Pos | Affine | HasPosition) -> Pos | Affine: ...
+
+    def __add__(self, other: float | Pos | Affine | HasPosition) -> Pos | Affine:
         return self.position + other
 
-    def __radd__(self, other):
-        return other + self.position
+    def __radd__(self, other: float) -> Pos:
+        return self.position + other
 
-    def __sub__(self, other):
+    @overload
+    def __sub__(self, other: float) -> Pos: ...
+    @overload
+    def __sub__(self, other: Pos | HasPosition) -> float: ...
+
+    def __sub__(self, other: float | Pos | HasPosition) -> Pos | float:
         return self.position - other
 
-    def __mul__(self, other):
+    def __mul__(self, other: float) -> Affine:
         return self.position * other
 
     __rmul__ = __mul__
 
-    def __truediv__(self, other):
+    def __truediv__(self, other: float) -> Affine:
         return self.position / other
 
     def __repr__(self) -> str:
@@ -93,7 +140,7 @@ class Face:
 
 
 class Edge:
-    def __init__(self, part: "Board", a: Face, b: Face):
+    def __init__(self, part: Board, a: Face, b: Face):
         if a.axis == b.axis:
             raise LangError(f"{a.name}.{b.name} is not an edge: both faces lie on {a.axis}.", part.path)
         self.part, self.a, self.b = part, a, b
@@ -114,26 +161,26 @@ class Board:
         self.material = material
         self._shape = shape
         self.scope = scopes.current()
-        self.scope._register(self)
+        self.scope.register(self)
         # placement, set once each
         self._on: Side | None = None
-        self._limits: list[Any] = []
+        self._limits: list[Limit] = []
         self._center: Pos | None = None
         self._inset: float = 0.0
-        self._grain: str | None = None
+        self._grain: Axis | None = None
         self._show: str | None = None
         self.manual_part: bool = False
         self._set: set[str] = set()
         # resolved
-        self._box = None
-        self._t_axis: str | None = None
-        self._u_axis: str | None = None
-        self._v_axis: str | None = None
+        self._box: Box | None = None
+        self._t_axis: Axis | None = None
+        self._u_axis: Axis | None = None
+        self._v_axis: Axis | None = None
         self._outline: Shape | None = None
-        self.ops: list = []
-        self._named_ops: dict[str, Any] = {}
+        self.ops: list[Op] = []
+        self._named_ops: dict[str, Op] = {}
 
-    # -- identity ----------------------------------------------------------
+    # -- identity ----------------------------------------------------------------------
 
     @property
     def path(self) -> str:
@@ -147,7 +194,7 @@ class Board:
     def __repr__(self) -> str:
         return f"Board({self.path})"
 
-    # -- placement modifiers (order-free, settable once) --------------------
+    # -- placement modifiers (order-free, settable once) --------------------------------
 
     def _placement(self, key: str) -> None:
         if self._box is not None:
@@ -156,15 +203,15 @@ class Board:
             raise LangError(f"{key}() given twice.", self.path)
         self._set.add(key)
 
-    def on(self, ref, side: str | Direction | None = None) -> "Board":
+    def on(self, ref: Side | Face | PosLike, side: str | Direction | None = None) -> Self:
         """Which plane the board's outer big face lies in, and where the
-        thickness goes. A box side knows its inward direction; a bare
-        position needs `side=`, the direction the thickness extends to."""
+        thickness goes. A box side knows its inward direction; a part's face
+        puts the thickness away from that part; a bare position needs
+        `side=`, the direction the thickness extends to."""
         self._placement("on")
         if isinstance(ref, Side) and side is None:
             self._on = ref
         elif isinstance(ref, Face) and side is None:
-            # Sitting on another part's face: thickness goes away from that part.
             self._on = Side(ref.axis, ref.value, inward=ref.direction)
         else:
             if side is None:
@@ -176,7 +223,7 @@ class Board:
             self._on = Side(pos.axis, pos.value, inward=d)
         return self
 
-    def between(self, *limits) -> "Board":
+    def between(self, *limits: Limit) -> Self:
         """Limits on the in-plane axes: positions, box sides, faces or
         parts. A part means its face nearest to this board. Missing limits
         default to the enclosing scope's box."""
@@ -184,61 +231,65 @@ class Board:
         self._limits = list(limits)
         return self
 
-    def center(self, pos) -> "Board":
+    def center(self, pos: PosLike) -> Self:
         """The board's thickness is centred on this position; the position's
         axis becomes the thickness axis."""
         self._placement("center")
         self._center = as_pos(pos, "center()")
         return self
 
-    def inset(self, n: float) -> "Board":
+    def inset(self, n: float) -> Self:
         """Shrinks the outline by `n` on every in-plane side of its box."""
         self._placement("inset")
         self._inset = float(n)
         return self
 
-    def grain(self, axis_or_direction: str) -> "Board":
+    def grain(self, axis_or_direction: str) -> Self:
         self._placement("grain")
-        a = axis_or_direction
-        self._grain = a if a in AXES else directions.frame.direction(a).axis
+        self._grain = directions.frame.axis_of(axis_or_direction)
         return self
 
-    def show(self, face: str) -> "Board":
+    def show(self, face: str) -> Self:
         """The visible big face: `outer`, `inner`, or a direction."""
         self._placement("show")
         self._show = face
         return self
 
-    def manual(self) -> "Board":
+    def manual(self) -> Self:
         self._placement("manual")
         self.manual_part = True
         return self
 
-    # -- resolution --------------------------------------------------------
+    # -- resolution ------------------------------------------------------------------------
 
-    def box(self):
+    def box(self) -> Box:
         if self._box is None:
             self._resolve()
+        assert self._box is not None
         return self._box
 
     @property
-    def t_axis(self) -> str:
+    def t_axis(self) -> Axis:
         self.box()
+        assert self._t_axis is not None
         return self._t_axis
 
     @property
-    def u_axis(self) -> str:
+    def u_axis(self) -> Axis:
         self.box()
+        assert self._u_axis is not None
         return self._u_axis
 
     @property
-    def v_axis(self) -> str:
+    def v_axis(self) -> Axis:
         self.box()
+        assert self._v_axis is not None
         return self._v_axis
 
     @property
     def outline(self) -> Shape:
         self.box()
+        assert self._outline is not None
         return self._outline
 
     @outline.setter
@@ -246,7 +297,6 @@ class Board:
         self._outline = shape
 
     def _resolve(self) -> None:
-        from .box import Box
         t = self.material.t
         if self._on is not None and self._center is not None:
             raise LangError("on() and center() both given; one decides the thickness axis.", self.path)
@@ -261,13 +311,14 @@ class Board:
             t_lo, t_hi = self._center.value - t / 2, self._center.value + t / 2
         else:
             raise LangError("no placement: give on() or center().", self.path)
-        self._t_axis = t_axis
-        self._u_axis, self._v_axis = [a for a in AXES if a != t_axis]
+        u_axis, v_axis = _in_plane(t_axis)
+        self._t_axis, self._u_axis, self._v_axis = t_axis, u_axis, v_axis
 
-        lo = {t_axis: t_lo}
-        hi = {t_axis: t_hi}
+        lo: dict[Axis, float] = {t_axis: t_lo}
+        hi: dict[Axis, float] = {t_axis: t_hi}
         scope_box = self.scope.box
-        for axis in (self._u_axis, self._v_axis):
+        axis: Axis
+        for axis in (u_axis, v_axis):
             values = self._limit_values(axis, scope_box)
             if len(values) == 2:
                 a, b = sorted(values)
@@ -277,42 +328,42 @@ class Board:
                 v = values[0]
                 centre = (scope_box.lo[axis] + scope_box.hi[axis]) / 2
                 a, b = (v, scope_box.hi[axis]) if v < centre else (scope_box.lo[axis], v)
+            elif self._shape is not None:
+                # An explicit shape carries its own extent; it sits at the box
+                # minimum, or at the origin without a box.
+                base = scope_box.lo[axis] if scope_box is not None else 0.0
+                size = self._shape.width if axis == u_axis else self._shape.height
+                a, b = base, base + size
+            elif scope_box is None:
+                raise LangError(f"no limits on {axis} and no enclosing box.", self.path)
             else:
-                if self._shape is not None:
-                    # An explicit shape carries its own extent; it sits at the
-                    # box minimum, or at the origin without a box.
-                    base = scope_box.lo[axis] if scope_box is not None else 0.0
-                    size = self._shape.width if axis == self._u_axis else self._shape.height
-                    a, b = base, base + size
-                elif scope_box is None:
-                    raise LangError(f"no limits on {axis} and no enclosing box.", self.path)
-                else:
-                    a, b = scope_box.lo[axis], scope_box.hi[axis]
+                a, b = scope_box.lo[axis], scope_box.hi[axis]
             a += self._inset
             b -= self._inset
             if b <= a:
                 raise LangError(f"extent on {axis} is not positive ({a:g} to {b:g}).", self.path)
             lo[axis], hi[axis] = a, b
         self._box = Box(lo, hi)
-        ua, va = self._u_axis, self._v_axis
         if self._shape is not None:
-            self._outline = self._shape.moved(lo[ua] - self._shape.bounds[0], lo[va] - self._shape.bounds[1])
+            sb = self._shape.bounds
+            self._outline = self._shape.moved(lo[u_axis] - sb[0], lo[v_axis] - sb[1])
         else:
-            self._outline = rect(hi[ua] - lo[ua], hi[va] - lo[va]).moved(lo[ua], lo[va])
+            self._outline = rect(hi[u_axis] - lo[u_axis], hi[v_axis] - lo[v_axis]).moved(lo[u_axis], lo[v_axis])
         if self._grain is None and self.material.grain:
             self._grain = self.scope.default_grain
         if self._grain is not None and self._grain == t_axis:
             raise LangError(f"grain {self._grain} is the thickness axis.", self.path)
 
-    def _limit_values(self, axis: str, scope_box) -> list[float]:
-        values = []
+    def _limit_values(self, axis: Axis, scope_box: Box | None) -> list[float]:
+        values: list[float] = []
         for limit in self._limits:
             if isinstance(limit, Board):
                 lb = limit.box()
                 if limit.t_axis != axis:
                     continue
                 # the face of `limit` nearest to this board's side of the box
-                centre = (scope_box.lo[axis] + scope_box.hi[axis]) / 2 if scope_box else (lb.lo[axis] + lb.hi[axis]) / 2
+                centre = ((scope_box.lo[axis] + scope_box.hi[axis]) / 2 if scope_box
+                          else (lb.lo[axis] + lb.hi[axis]) / 2)
                 values.append(lb.hi[axis] if lb.hi[axis] <= centre else lb.lo[axis])
                 continue
             pos = as_pos(limit, f"between() limit {limit!r}")
@@ -322,15 +373,14 @@ class Board:
             raise LangError(f"more than two limits on {axis}.", self.path)
         return values
 
-    # -- faces -------------------------------------------------------------
+    # -- faces ---------------------------------------------------------------------------------
 
-    def face(self, name: str | Direction) -> Face:
+    def face(self, name: str | Direction | Face) -> Face:
         if isinstance(name, Face):
             return name
-        if name in ("inner", "outer"):
+        if isinstance(name, str) and name in ("inner", "outer"):
             return self._inner_outer(name)
-        d = directions.frame.direction(name)
-        return Face(self, d)
+        return Face(self, directions.frame.direction(name))
 
     def _inner_outer(self, which: str) -> Face:
         """The big face toward (inner) or away from (outer) the enclosing
@@ -344,8 +394,39 @@ class Board:
         if b.lo[t] < centre < b.hi[t]:
             raise LangError(f"{which} is ambiguous: the board straddles the centre on {t}.", self.path)
         toward_centre = directions.frame.direction_of(t, 1 if centre > b.hi[t] else -1)
-        d = toward_centre if which == "inner" else -toward_centre
-        return Face(self, d)
+        return Face(self, toward_centre if which == "inner" else -toward_centre)
+
+    @property
+    def front(self) -> Face:
+        return self.face("front")
+
+    @property
+    def back(self) -> Face:
+        return self.face("back")
+
+    @property
+    def left(self) -> Face:
+        return self.face("left")
+
+    @property
+    def right(self) -> Face:
+        return self.face("right")
+
+    @property
+    def top(self) -> Face:
+        return self.face("top")
+
+    @property
+    def bottom(self) -> Face:
+        return self.face("bottom")
+
+    @property
+    def inner(self) -> Face:
+        return self.face("inner")
+
+    @property
+    def outer(self) -> Face:
+        return self.face("outer")
 
     @property
     def show_face(self) -> Face:
@@ -356,30 +437,30 @@ class Board:
         except LangError:
             return Face(self, directions.frame.direction_of(self.t_axis, 1))
 
-    def __getattr__(self, name: str):
-        if name.startswith("_"):
-            raise AttributeError(name)
-        f = directions.frame
-        if f.is_direction(name) or name in ("inner", "outer"):
-            return self.face(name)
-        named = self.__dict__.get("_named_ops", {})
+    def big_faces(self) -> tuple[Face, Face]:
+        return (Face(self, directions.frame.direction_of(self.t_axis, 1)),
+                Face(self, directions.frame.direction_of(self.t_axis, -1)))
+
+    def op(self, name: str) -> Op:
+        """A named operation, e.g. the cut called "toekick"."""
+        try:
+            return self._named_ops[name]
+        except KeyError:
+            raise LangError(f"no operation named {name!r}.", self.path) from None
+
+    def __getattr__(self, name: str) -> Any:
+        """Named operations are reachable as attributes (`left.toekick`)."""
+        named: dict[str, Op] = self.__dict__.get("_named_ops", {})
         if name in named:
             return named[name]
         raise AttributeError(name)
 
-    def big_faces(self) -> tuple[Face, Face]:
-        self.box()
-        return (Face(self, directions.frame.direction_of(self.t_axis, 1)),
-                Face(self, directions.frame.direction_of(self.t_axis, -1)))
+    # -- 2D frames ------------------------------------------------------------------------------
 
-    # -- 2D frames ---------------------------------------------------------
-
-    def _face_frame(self, face: Face):
-        """For a big face: anchors in the outline's (u, v) frame. Returns
-        (u_names, v_names, frame_kind). For a narrow face: s along the face,
-        t across the thickness."""
+    def _face_frame(self, face: Face) -> tuple[dict[str, float], dict[str, float], tuple[Axis, Axis]]:
+        """Anchor names for a face: for a big face the outline's (u, v) axes,
+        for a narrow face (s along the face, t across the thickness)."""
         f = directions.frame
-        b = self.box()
         if face.is_big:
             u_names = {f.direction_of(self.u_axis, -1).name: 0.0, f.direction_of(self.u_axis, 1).name: 1.0}
             v_names = {f.direction_of(self.v_axis, -1).name: 0.0, f.direction_of(self.v_axis, 1).name: 1.0}
@@ -389,43 +470,30 @@ class Board:
         t_names = {f.direction_of(self.t_axis, -1).name: 0.0, f.direction_of(self.t_axis, 1).name: 1.0}
         return s_names, t_names, (s_axis, self.t_axis)
 
-    def _resolve_at(self, face: Face, at, shape: Shape | None):
+    def _resolve_at(self, face: Face, at: AtSpec) -> tuple[Point2, Anchor]:
         """Resolves an `at=` spec on a face to a point in that face's frame
-        (world coordinates on its two axes) and the shape's matching anchor
-        fractions. Returns (point, anchor)."""
+        (world coordinates on its two axes) and the shape's matching anchor."""
         u_names, v_names, (ua, va) = self._face_frame(face)
         b = self.box()
-        lo = {ua: b.lo[ua], va: b.lo[va]}
-        hi = {ua: b.hi[ua], va: b.hi[va]}
         if isinstance(at, str):
             name, extras = at, ()
-        elif isinstance(at, (tuple, list)) and at and isinstance(at[0], str):
-            name, extras = at[0], tuple(at[1:])
         else:
-            raise LangError(f"at= must be an anchor name or (anchor, offsets...), got {at!r}.", self.path)
+            name, extras = at[0], at[1:]
         anchor = parse_anchor(name, u_names, v_names)
-        point = [lo[ua] + anchor.fu * (hi[ua] - lo[ua]), lo[va] + anchor.fv * (hi[va] - lo[va])]
-        # Offsets: in the order of the axes the anchor names (first named
-        # axis first); numbers move inward from the named edge or away from
-        # the centre; positions replace the coordinate.
-        order = []
-        for part in name.split("."):
-            order.append(ua if part in u_names else va)
+        point = [b.lo[ua] + anchor.fu * (b.hi[ua] - b.lo[ua]),
+                 b.lo[va] + anchor.fv * (b.hi[va] - b.lo[va])]
+        # Offsets apply in the order of the axes the anchor names, then the
+        # rest; numbers move inward from the named edge or away from the
+        # centre, positions replace the coordinate.
+        order: list[Axis] = [ua if part in u_names else va for part in name.split(".") if name != "center"]
         for axis in (ua, va):
             if axis not in order:
                 order.append(axis)
-        if len(extras) > 2:
-            raise LangError(f"at= takes at most two offsets, got {len(extras)}.", self.path)
         for axis, extra in zip(order, extras):
             idx = 0 if axis == ua else 1
             frac = anchor.fu if axis == ua else anchor.fv
-            if _is_number(extra):
-                if frac == 0.0:
-                    point[idx] += extra
-                elif frac == 1.0:
-                    point[idx] -= extra
-                else:
-                    point[idx] += extra
+            if isinstance(extra, (int, float)):
+                point[idx] += -extra if frac == 1.0 else extra
             else:
                 pos = as_pos(extra, "at= offset")
                 if pos.axis != axis:
@@ -433,14 +501,15 @@ class Board:
                 point[idx] = pos.value
         return (point[0], point[1]), anchor
 
-    def _place_shape(self, face: Face, shape: Shape, at) -> Shape:
-        point, anchor = self._resolve_at(face, at, shape)
+    def _place_shape(self, face: Face, shape: Shape, at: AtSpec) -> Shape:
+        point, anchor = self._resolve_at(face, at)
         su, sv = shape.anchor_point(anchor)
         return shape.moved(point[0] - su, point[1] - sv)
 
-    def _depth(self, face: Face, depth) -> tuple[float, str, bool]:
+    def _depth(self, face: Face, depth: DepthSpec) -> tuple[float, str, bool]:
+        """Depth in mm from `face`, its spec as text, and whether it goes through."""
         t = self.thickness
-        if depth is through:
+        if isinstance(depth, Through):
             return t, "through", True
         if isinstance(depth, ToFace):
             target = self.face(depth.face)
@@ -450,34 +519,34 @@ class Board:
                 raise LangError(f"depth to({depth.face!r}) names the face itself.", self.path)
             extent = self.box().extent(face.axis)
             return extent + depth.offset, f"to({depth.face}, {depth.offset:g})", abs(depth.offset) < 1e-9
-        if _is_number(depth):
-            if depth <= 0:
-                raise LangError(f"depth must be positive, got {depth}.", self.path)
-            return float(depth), f"{depth:g}", False
-        raise LangError(f"depth must be a number, to(face, offset) or through; got {depth!r}.", self.path)
+        if depth <= 0:
+            raise LangError(f"depth must be positive, got {depth}.", self.path)
+        return float(depth), f"{depth:g}", False
 
-    # -- operations (ordered) -------------------------------------------------
+    # -- operations (ordered) -----------------------------------------------------------------
 
-    def _record(self, op, name: str | None):
+    def _record(self, op: Op, name: str | None) -> None:
         self.ops.append(op)
         if name:
             if name in self._named_ops:
                 raise LangError(f"operation name {name!r} used twice.", self.path)
             self._named_ops[name] = op
 
-    def cut(self, shape: Shape, at="center", name: str | None = None, chamfer: float = 0.0) -> "Board":
+    def _face_for(self, face: str | Face) -> Face:
+        return self.show_face if face == "show" else self.face(face)
+
+    def cut(self, shape: Shape, at: AtSpec = "center", name: str | None = None, chamfer: float = 0.0) -> Self:
         """A through cut, positioned on the show face; it changes the outline."""
-        face = self.show_face
-        placed = self._place_shape(face, shape, at)
+        placed = self._place_shape(self.show_face, shape, at)
         self.outline = self.outline.difference(placed)
         if self.outline.is_empty():
             raise LangError("the cut removes the whole board.", self.path)
         self._record(Cut(placed, name, chamfer), name)
         return self
 
-    def pocket(self, shape: Shape, face="show", at="center", depth=None,
-               name: str | None = None, chamfer: float = 0.0) -> "Board":
-        f = self.show_face if face == "show" else self.face(face)
+    def pocket(self, shape: Shape, face: str | Face = "show", at: AtSpec = "center",
+               depth: DepthSpec | None = None, name: str | None = None, chamfer: float = 0.0) -> Self:
+        f = self._face_for(face)
         if depth is None:
             raise LangError("pocket() needs a depth.", self.path)
         d, spec, _ = self._depth(f, depth)
@@ -485,21 +554,21 @@ class Board:
             placed = self._place_shape(f, shape, at)
             self._record(Pocket(placed, f.name, d, spec, name, chamfer), name)
         else:
-            point, anchor = self._resolve_at(f, at, shape)
+            point, anchor = self._resolve_at(f, at)
             su, sv = shape.anchor_point(anchor)
             self._record(EdgeOp(f.name, Pocket(shape.moved(-su, -sv), f.name, d, spec, name, chamfer),
                                 point[0], point[1]), name)
         return self
 
-    def hole(self, d: float, face="show", at="center", depth=None,
-             name: str | None = None, chamfer: float = 0.0) -> "Board":
-        f = self.show_face if face == "show" else self.face(face)
+    def hole(self, d: float, face: str | Face = "show", at: AtSpec = "center",
+             depth: DepthSpec | None = None, name: str | None = None, chamfer: float = 0.0) -> Self:
+        f = self._face_for(face)
         if depth is None:
             raise LangError("hole() needs a depth.", self.path)
         if d <= 0:
             raise LangError(f"hole diameter must be positive, got {d}.", self.path)
         dep, spec, thru = self._depth(f, depth)
-        point, _ = self._resolve_at(f, at, None)
+        point, _ = self._resolve_at(f, at)
         if f.is_big:
             self._record(Hole(point[0], point[1], float(d), f.name, dep, spec, name, chamfer, thru), name)
         else:
@@ -507,42 +576,41 @@ class Board:
                                 point[0], point[1]), name)
         return self
 
-    def chamfer(self, what, size: float, face="show") -> "Board":
-        f = self.show_face if face == "show" else self.face(face)
+    def chamfer(self, what: str | Edge, size: float, face: str | Face = "show") -> Self:
+        """A chamfer along an edge (`side.front.inner` or `"front.inner"`),
+        along `"outline"`, or along a named pocket or hole."""
+        f = self._face_for(face)
         if isinstance(what, Edge):
             what = what.name
-        elif isinstance(what, Face):
-            raise LangError("chamfer(): name an edge (two faces), the outline, or an operation.", self.path)
         if what != "outline" and what not in self._named_ops:
             parts = what.split(".")
             if len(parts) != 2:
                 raise LangError(f"chamfer(): {what!r} is neither an edge, 'outline' nor an operation name.", self.path)
-            self.face(parts[0]), self.face(parts[1])
+            self.face(parts[0]).edge(parts[1])
         self._record(Chamfer(what, float(size), f.name), None)
         return self
 
-    # -- block form --------------------------------------------------------
+    # -- block form -------------------------------------------------------------------------------
 
-    def __enter__(self) -> "Board":
+    def __enter__(self) -> Self:
         return self
 
-    def __exit__(self, *exc) -> None:
+    def __exit__(self, *exc: object) -> None:
         return None
 
-    # -- layout --------------------------------------------------------------
+    # -- layout ---------------------------------------------------------------------------------------
 
-    def to_layout(self) -> dict:
+    def to_layout(self) -> PartLayout:
         b = self.box()
-        origin = {a: b.lo[a] for a in AXES}
         return {
             "path": self.path,
             "kind": "board",
             "material": self.material.label,
             "thickness": self.thickness,
             "axes": {"t": self.t_axis, "u": self.u_axis, "v": self.v_axis},
-            "box": b.as_dict(),
-            "origin": [origin[a] for a in AXES],
-            "outline": [[list(p) for p in ring] for ring in self.outline.rings()],
+            "box": b.as_dict(),  # type: ignore[typeddict-item]
+            "origin": [b.lo[a] for a in AXES],
+            "outline": _rings(self.outline),
             "grain": self._grain,
             "show": self.show_face.name,
             "manual": self.manual_part,
@@ -550,23 +618,36 @@ class Board:
         }
 
 
-def _op_to_layout(op) -> dict:
+def _in_plane(t_axis: Axis) -> tuple[Axis, Axis]:
+    others: list[Axis] = [a for a in AXES if a != t_axis]
+    return others[0], others[1]
+
+
+def _rings(shape: Shape) -> Rings:
+    return [[[u, v] for u, v in ring] for ring in shape.rings()]
+
+
+def _op_to_layout(op: Op) -> OpLayout:
     if isinstance(op, Cut):
-        return {"kind": "cut", "name": op.name, "chamfer": op.chamfer,
-                "shape": [[list(p) for p in r] for r in op.shape.rings()]}
+        cut: CutLayout = {"kind": "cut", "name": op.name, "chamfer": op.chamfer, "shape": _rings(op.shape)}
+        return cut
     if isinstance(op, Pocket):
-        return {"kind": "pocket", "name": op.name, "face": op.face, "depth": op.depth,
-                "depth_spec": op.depth_spec, "chamfer": op.chamfer,
-                "shape": [[list(p) for p in r] for r in op.shape.rings()]}
+        pocket: PocketLayout = {"kind": "pocket", "name": op.name, "face": op.face, "depth": op.depth,
+                                "depth_spec": op.depth_spec, "chamfer": op.chamfer, "shape": _rings(op.shape)}
+        return pocket
     if isinstance(op, Hole):
-        return {"kind": "hole", "name": op.name, "face": op.face, "u": op.u, "v": op.v, "d": op.d,
-                "depth": op.depth, "depth_spec": op.depth_spec, "through": op.through, "chamfer": op.chamfer}
+        hole: HoleLayout = {"kind": "hole", "name": op.name, "face": op.face, "u": op.u, "v": op.v, "d": op.d,
+                            "depth": op.depth, "depth_spec": op.depth_spec, "through": op.through,
+                            "chamfer": op.chamfer}
+        return hole
     if isinstance(op, Chamfer):
-        return {"kind": "chamfer", "what": op.what, "size": op.size, "face": op.face}
-    if isinstance(op, EdgeOp):
-        inner = _op_to_layout(op.op)
-        return {"kind": "edge", "face": op.face, "s": op.s, "t": op.t, "op": inner}
-    raise TypeError(op)
+        chamfer: ChamferLayout = {"kind": "chamfer", "what": op.what, "size": op.size, "face": op.face}
+        return chamfer
+    inner = _op_to_layout(op.op)
+    assert inner["kind"] in ("hole", "pocket")
+    edge: EdgeOpLayout = {"kind": "edge", "face": op.face, "s": op.s, "t": op.t,
+                          "op": inner}  # type: ignore[typeddict-item]
+    return edge
 
 
 def board(name: str, material: Material, shape: Shape | None = None) -> Board:

@@ -16,6 +16,7 @@ import subprocess
 import sys
 import threading
 from pathlib import Path
+from typing import Any
 
 from watchfiles import watch
 
@@ -23,7 +24,7 @@ VIEWER_DIR = Path(__file__).parent / "viewer"
 
 
 class _Handler(http.server.SimpleHTTPRequestHandler):
-    def __init__(self, *args, out_dir: Path, **kwargs):
+    def __init__(self, *args: Any, out_dir: Path, **kwargs: Any):
         self.out_dir = out_dir
         super().__init__(*args, directory=str(VIEWER_DIR), **kwargs)
 
@@ -33,11 +34,11 @@ class _Handler(http.server.SimpleHTTPRequestHandler):
             return str(self.out_dir / path[len("/out/"):])
         return super().translate_path(path)
 
-    def end_headers(self):
+    def end_headers(self) -> None:
         self.send_header("Cache-Control", "no-store")
         super().end_headers()
 
-    def log_message(self, *args):
+    def log_message(self, format: str, *args: Any) -> None:
         pass
 
 
@@ -46,14 +47,13 @@ def rebuild(build_file: Path, out_dir: Path) -> None:
         [sys.executable, "-m", "lang.build", str(build_file), "--out", str(out_dir)],
         capture_output=True, text=True, cwd=str(Path(__file__).resolve().parents[2]),
     )
-    log = out_dir / "build.log"
     out_dir.mkdir(parents=True, exist_ok=True)
-    log.write_text(result.stdout + result.stderr)
+    (out_dir / "build.log").write_text(result.stdout + result.stderr)
     status = "ok" if result.returncode == 0 else "FAILED"
     print(f"build {status}: {(result.stdout + result.stderr).strip()}")
 
 
-def main(argv=None) -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("build_file")
     parser.add_argument("--out", default="out")
