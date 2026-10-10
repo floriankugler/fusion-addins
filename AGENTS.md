@@ -62,7 +62,7 @@
 ## Coding Style & Naming Conventions
 
 - Language: Python 3, 4-space indentation, no tabs.
-- Naming: `snake_case` for functions/variables, lowercase filenames, add-in folder names match manifest names (e.g., `dog_bones`).
+- Naming: `snake_case` for functions/variables, lowercase filenames, add-in folder names match manifest names (e.g., `box_joint`).
 - Keep add-in entrypoints in `main.py` and use shared helpers from `lib/`.
 
 ## Fusion Modeling Rules

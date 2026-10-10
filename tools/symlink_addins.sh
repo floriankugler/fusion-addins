@@ -31,6 +31,18 @@ FUSION_ADDINS="$HOME/Library/Application Support/Autodesk/Autodesk Fusion 360/AP
 echo "Linking all add-ins from $ADDINS_SRC into Fusion 360 AddIns folder..."
 mkdir -p "$FUSION_ADDINS"
 
+# Prune links into this repo whose add-in no longer exists.
+for LINK_PATH in "$FUSION_ADDINS"/*; do
+    if [ -L "$LINK_PATH" ] && [ ! -e "$LINK_PATH" ]; then
+        case "$(readlink "$LINK_PATH")" in
+            "$REPO_ROOT"/*)
+                rm "$LINK_PATH"
+                echo "Removed dangling link $(basename "$LINK_PATH")"
+                ;;
+        esac
+    fi
+done
+
 for ADDIN_DIR in "$ADDINS_SRC"/*/; do
     ADDIN_NAME=$(basename "$ADDIN_DIR")
     LINK_PATH="$FUSION_ADDINS/$ADDIN_NAME"
