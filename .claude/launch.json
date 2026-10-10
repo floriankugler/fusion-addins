@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "preview",
+      "runtimeExecutable": ".venv/bin/python",
+      "runtimeArgs": ["-m", "lang.preview", "examples/drawer_cabinet.py", "--out", "out", "--port", "8765"],
+      "port": 8765
+    }
+  ]
+}

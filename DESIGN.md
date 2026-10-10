@@ -129,6 +129,17 @@ proposed]
 - **Two layouts on the page, one object.** A chain in parentheses for a few
   calls; a `with board(...) as side:` block when a part has many operations, so
   the receiver is not repeated. Both build the same part.
+- **Direction names on a scope are its box sides.** `cab.left` is the side of
+  the module's box, also after a part named `left` exists, because carcass
+  parts are routinely named after directions and `board("left").on(cab.left)`
+  must read naturally. Parts with such names are reached as `cab["left"]`;
+  other names resolve to parts, child scopes and exports. An export cannot
+  take a part's name. [decided while implementing phase 1]
+- **`at=` offsets.** A number moves inward from the edge the anchor names on
+  that axis; on an axis the anchor does not name, a number moves from the
+  face's centre, and a position replaces the coordinate. Narrow-face
+  operations are therefore centred in the thickness by `at="left"` alone.
+  [decided while implementing phase 1]
 - What this is not: free functions for everything (no autocomplete entry point),
   operators such as `left @ cab.left` (cryptic), or dataclass specs (that is
   what the layout JSON is for, and the language should not look like it).

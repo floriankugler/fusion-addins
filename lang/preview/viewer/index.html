@@ -1,0 +1,558 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Layout preview</title>
+<style>
+  :root { --bg: #f4f2ee; --panel: #ffffff; --text: #222; --muted: #777; --accent: #c0502c; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font: 13px/1.4 -apple-system, system-ui, sans-serif; }
+  #view { position: absolute; inset: 0 300px 0 0; }
+  #side { position: absolute; top: 0; right: 0; bottom: 0; width: 300px; background: var(--panel);
+    border-left: 1px solid #ddd; overflow: auto; padding: 12px 14px; box-sizing: border-box; }
+  h1 { font-size: 14px; margin: 0 0 8px; }
+  h2 { font-size: 12px; margin: 14px 0 6px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  #status { color: var(--muted); margin-bottom: 10px; white-space: pre-wrap; }
+  #status.error { color: var(--accent); }
+  #selected { font-family: ui-monospace, Menlo, monospace; font-size: 12px; margin: 8px 0 12px;
+    padding: 8px; background: #f7f5f0; border-radius: 4px; min-height: 2.6em; white-space: pre-wrap; }
+  ul { list-style: none; padding: 0; margin: 0; }
+  li { padding: 2px 0; cursor: pointer; font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+  li.hidden { color: #bbb; text-decoration: line-through; }
+  li.selected { color: var(--accent); }
+  li .mat { color: var(--muted); font-family: -apple-system, system-ui, sans-serif; }
+  .problems { color: var(--accent); margin-top: 10px; }
+  kbd { background: #eee; border-radius: 3px; padding: 0 4px; font-family: ui-monospace, Menlo, monospace; }
+  .row { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
+  .row label { min-width: 48px; color: var(--muted); }
+  select, button { font: inherit; }
+  input[type=range] { flex: 1; }
+  .keys { color: var(--muted); font-size: 12px; }
+  .keys div { display: flex; justify-content: space-between; padding: 1px 0; }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<div id="view"></div>
+<div id="side">
+  <h1>Layout preview</h1>
+  <div id="status">loading…</div>
+  <div id="selected">click a part for its path</div>
+
+  <h2>SpaceMouse</h2>
+  <div id="smStatus" class="keys">connecting…</div>
+
+  <h2>Display</h2>
+  <div class="row"><label>mode</label>
+    <select id="mode">
+      <option value="shaded">shaded with edges</option>
+      <option value="hidden">shaded, hidden edges shown</option>
+      <option value="ghost">ghosted</option>
+    </select>
+  </div>
+
+  <h2>Section</h2>
+  <div class="row"><label><input type="checkbox" id="secOn"> on</label>
+    <select id="secAxis"><option value="x">x</option><option value="y">y</option><option value="z">z</option></select>
+    <label><input type="checkbox" id="secFlip"> flip</label>
+  </div>
+  <div class="row"><input type="range" id="secPos" min="0" max="1000" value="500"><span id="secValue" style="min-width:5em;text-align:right"></span></div>
+
+  <h2>Parts</h2>
+  <ul id="parts"></ul>
+  <div class="problems" id="problems"></div>
+
+  <h2>Keys</h2>
+  <div class="keys">
+    <div><span>fit view</span><kbd>f</kbd></div>
+    <div><span>hide / show selected</span><kbd>h</kbd></div>
+    <div><span>isolate selected / show all</span><kbd>i</kbd></div>
+    <div><span>show all</span><kbd>a</kbd></div>
+    <div><span>display mode</span><kbd>e</kbd></div>
+    <div><span>section on / off</span><kbd>s</kbd></div>
+    <div><span>section axis</span><kbd>x</kbd> <kbd>y</kbd> <kbd>z</kbd></div>
+    <div><span>move section (shift: coarse)</span><kbd>[</kbd> <kbd>]</kbd></div>
+    <div><span>flip section</span><kbd>\</kbd></div>
+    <div><span>deselect</span><kbd>esc</kbd></div>
+  </div>
+</div>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
+import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
+import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
+import { attachSpaceMouse } from './spacemouse.js';
+
+const $ = (id) => document.getElementById(id);
+const view = $('view');
+const renderer = new THREE.WebGLRenderer({ antialias: true, stencil: true });
+renderer.setPixelRatio(window.devicePixelRatio);
+renderer.localClippingEnabled = true;   // materials carry the section plane, so caps can sit on it
+view.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xf4f2ee);
+// z is up in the layout; three.js defaults to y up, so we set the camera's up.
+const camera = new THREE.PerspectiveCamera(40, 1, 1, 100000);
+camera.up.set(0, 0, 1);
+camera.position.set(-1500, -1800, 1200);
+const controls = new OrbitControls(camera, renderer.domElement);
+scene.add(new THREE.HemisphereLight(0xffffff, 0x888877, 1.1));
+const sun = new THREE.DirectionalLight(0xffffff, 1.4);
+sun.position.set(-1000, -2000, 3000);
+scene.add(sun);
+const grid = new THREE.GridHelper(4000, 40, 0xcccccc, 0xe4e2dd);
+grid.rotation.x = Math.PI / 2;
+scene.add(grid);
+scene.add(new THREE.AxesHelper(300));
+
+let root = null;
+const caps = new THREE.Group();          // one striped cap per part, drawn where the section cuts it
+scene.add(caps);
+let layout = null;
+let version = null;
+let bounds = null;              // Box3 of the whole model, for the section slider
+const hidden = new Set();
+let selectedPath = null;
+let mode = 'shaded';
+
+// Edge materials: one that respects depth, one drawn through everything.
+const edgeFront = new THREE.LineBasicMaterial({ color: 0x3a3a3a, transparent: true, opacity: 0.35 });
+const edgeThrough = new THREE.LineBasicMaterial({ color: 0x3a3a3a, transparent: true, opacity: 0.16, depthTest: false });
+// Fat lines for the section borders: width in screen pixels, so they stay bold at any zoom.
+const outlineMaterial = new LineMaterial({ color: 0x000000, linewidth: 2.5, worldUnits: false });
+
+function resize() {
+  const w = view.clientWidth, h = view.clientHeight;
+  renderer.setSize(w, h);
+  outlineMaterial.resolution.set(w * window.devicePixelRatio, h * window.devicePixelRatio);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+}
+window.addEventListener('resize', resize);
+resize();
+
+function fit() {
+  if (!root) return;
+  const box = new THREE.Box3().setFromObject(root);
+  if (box.isEmpty()) return;
+  const size = box.getSize(new THREE.Vector3()), center = box.getCenter(new THREE.Vector3());
+  const radius = size.length() / 2;
+  const dist = radius / Math.sin(THREE.MathUtils.degToRad(camera.fov / 2));
+  const dir = new THREE.Vector3(-1, -1.2, 0.8).normalize();
+  camera.up.set(0, 0, 1);
+  camera.position.copy(center).addScaledVector(dir, dist * 1.1);
+  controls.target.copy(center);
+  controls.update();
+}
+
+// A warm palette keyed by material label, stable across reloads.
+const palette = [0xd9b98a, 0xc9a26e, 0xe3cfa6, 0xb48a5a, 0xcfb48f, 0xa9794b];
+const colorCache = {};
+function colorFor(label) {
+  if (!(label in colorCache)) colorCache[label] = palette[Object.keys(colorCache).length % palette.length];
+  return colorCache[label];
+}
+
+function meshes(fn) { root?.traverse((o) => { if (o.isMesh && o.userData.path) fn(o); }); }
+
+function capMaterial(color) {
+  const m = new THREE.ShaderMaterial({
+    uniforms: { color: { value: new THREE.Color(color) } },
+    vertexShader: `varying vec3 vWorld;
+      void main() { vWorld = (modelMatrix * vec4(position, 1.0)).xyz; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+    fragmentShader: `uniform vec3 color; varying vec3 vWorld;
+      void main() { float s = mod(dot(vWorld, vec3(1.0)) / 5.0, 2.0); float k = s < 1.0 ? 1.0 : 0.68;
+        gl_FragColor = vec4(color * k, 1.0); }`,
+    side: THREE.DoubleSide,
+  });
+  m.stencilWrite = true;
+  m.stencilRef = 0;
+  m.stencilFunc = THREE.NotEqualStencilFunc;
+  m.stencilFail = THREE.ReplaceStencilOp;
+  m.stencilZFail = THREE.ReplaceStencilOp;
+  m.stencilZPass = THREE.ReplaceStencilOp;
+  return m;
+}
+
+// Stencil pass: back faces of the clipped mesh increment, front faces decrement,
+// so the stencil is non-zero exactly where the plane passes through solid material.
+function stencilGroup(geometry, order) {
+  const group = new THREE.Group();
+  const base = new THREE.MeshBasicMaterial({ depthWrite: false, depthTest: false, colorWrite: false,
+    stencilWrite: true, stencilFunc: THREE.AlwaysStencilFunc });
+  const back = base.clone();
+  back.side = THREE.BackSide;
+  back.stencilFail = back.stencilZFail = back.stencilZPass = THREE.IncrementWrapStencilOp;
+  const front = base.clone();
+  front.side = THREE.FrontSide;
+  front.stencilFail = front.stencilZFail = front.stencilZPass = THREE.DecrementWrapStencilOp;
+  for (const mat of [back, front]) {
+    const m = new THREE.Mesh(geometry, mat);
+    m.renderOrder = order;
+    m.userData.role = 'stencil';
+    group.add(m);
+  }
+  return group;
+}
+
+const loader = new GLTFLoader();
+async function load(first) {
+  const status = $('status');
+  try {
+    const res = await fetch('out/layout.json', { cache: 'no-store' });
+    layout = await res.json();
+  } catch (e) { status.textContent = 'no layout yet'; status.className = 'error'; return; }
+  try {
+    const log = await (await fetch('out/build.log', { cache: 'no-store' })).text();
+    status.textContent = log.trim() || 'ok';
+    status.className = log.includes('error:') ? 'error' : '';
+  } catch (e) {}
+  loader.load('out/scene.glb?v=' + Date.now(), (gltf) => {
+    if (root) scene.remove(root);
+    root = gltf.scene;
+    // GLTFLoader strips dots and slashes from node names; map them back to paths.
+    const sanitized = (p) => p.replace(/\s/g, '_').replace(/[\[\]\.:\/]/g, '');
+    const pathOf = {}, materialOf = {};
+    for (const mod of layout.modules) for (const part of mod.parts) {
+      pathOf[sanitized(part.path)] = part.path; materialOf[part.path] = part.material;
+    }
+    meshes((obj) => {
+      obj.userData.path = pathOf[obj.name] || obj.name;
+      obj.geometry.deleteAttribute('normal');
+      obj.geometry = obj.geometry.toNonIndexed();
+      obj.geometry.computeVertexNormals();
+      obj.material = new THREE.MeshStandardMaterial({
+        color: colorFor(materialOf[obj.userData.path] || ''), roughness: 0.85, metalness: 0.0,
+        flatShading: true, side: THREE.DoubleSide });
+      obj.userData.baseColor = obj.material.color.clone();
+      const edges = new THREE.EdgesGeometry(obj.geometry, 20);
+      const front = new THREE.LineSegments(edges, edgeFront);
+      const through = new THREE.LineSegments(edges, edgeThrough);
+      front.userData.role = 'front'; through.userData.role = 'through';
+      through.renderOrder = 1;
+      obj.add(front, through);
+    });
+    // section caps: stencil pass as children of the mesh (same transform), cap plane in world space
+    caps.clear();
+    let order = 10;
+    meshes((obj) => {
+      const stencil = stencilGroup(obj.geometry, order);
+      obj.add(stencil);
+      const cap = new THREE.Mesh(new THREE.PlaneGeometry(20000, 20000), capMaterial(obj.userData.baseColor));
+      cap.renderOrder = order + 1;
+      cap.onAfterRender = () => renderer.clearStencil();
+      cap.userData.owner = obj;
+      obj.userData.stencil = stencil;
+      caps.add(cap);
+      // black border of the cut face, computed from the plane/triangle intersections
+      const outline = new LineSegments2(new LineSegmentsGeometry(), outlineMaterial);
+      outline.renderOrder = order + 1;
+      outline.userData.owner = obj;
+      outline.userData.isOutline = true;
+      obj.userData.outline = outline;
+      caps.add(outline);
+      order += 2;
+    });
+    scene.add(root);
+    bounds = new THREE.Box3().setFromObject(root);
+    if (first) fit();
+    applyAll();
+  }, undefined, (err) => { status.textContent = 'scene failed to load: ' + err; status.className = 'error'; });
+}
+
+// -- visibility, selection and display modes ------------------------------
+
+function applyAll() { applyVisibility(); applyMode(); applySection(); renderList(); showSelected(); }
+
+function applyVisibility() {
+  meshes((o) => { o.visible = !hidden.has(o.userData.path); });
+  applyCaps();
+}
+
+function applyCaps() {
+  const show = section.on && mode !== 'ghost';
+  for (const cap of caps.children) {
+    const owner = cap.userData.owner;
+    cap.visible = show && owner.visible;
+    owner.userData.stencil.visible = show;
+    if (!show || !owner.visible) continue;
+    if (cap.userData.isOutline) {
+      updateOutline(cap, owner);
+    } else {
+      plane.coplanarPoint(cap.position);
+      cap.lookAt(cap.position.clone().add(plane.normal));
+    }
+  }
+}
+
+// Segments where the section plane crosses the mesh's triangles, in world
+// space, nudged a little toward the removed side so they draw over the cap.
+const _v = [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()];
+function updateOutline(outline, mesh) {
+  mesh.updateMatrixWorld(true);
+  const pos = mesh.geometry.attributes.position;
+  const points = [];
+  const d = [0, 0, 0];
+  for (let i = 0; i < pos.count; i += 3) {
+    for (let k = 0; k < 3; k++) {
+      _v[k].fromBufferAttribute(pos, i + k).applyMatrix4(mesh.matrixWorld);
+      d[k] = plane.distanceToPoint(_v[k]);
+    }
+    const crossings = [];
+    for (let k = 0; k < 3; k++) {
+      const a = _v[k], b = _v[(k + 1) % 3], da = d[k], db = d[(k + 1) % 3];
+      if ((da < 0) !== (db < 0)) {
+        const t = da / (da - db);
+        crossings.push(new THREE.Vector3().lerpVectors(a, b, t));
+      }
+    }
+    if (crossings.length === 2) {
+      for (const c of crossings) {
+        c.addScaledVector(plane.normal, -0.4);
+        points.push(c.x, c.y, c.z);
+      }
+    }
+  }
+  outline.geometry.dispose();
+  outline.geometry = new LineSegmentsGeometry();
+  if (points.length) outline.geometry.setPositions(points);
+  outline.visible = points.length > 0;
+}
+
+function applyMode() {
+  const ghost = mode === 'ghost';
+  meshes((o) => {
+    o.material.transparent = ghost;
+    o.material.opacity = ghost ? 0.22 : 1.0;
+    o.material.depthWrite = !ghost;
+    o.material.needsUpdate = true;
+    for (const child of o.children) {
+      if (child.userData.role === 'through') child.visible = mode !== 'shaded';
+    }
+  });
+  $('mode').value = mode;
+  applyCaps();
+}
+
+function setMode(next) { mode = next; applyMode(); }
+
+function toggle(path) {
+  if (hidden.has(path)) hidden.delete(path); else hidden.add(path);
+  applyVisibility(); renderList(); showSelected();
+}
+
+function showAll() { hidden.clear(); applyVisibility(); renderList(); showSelected(); }
+
+function isolate(path) {
+  const others = (layout?.modules ?? []).flatMap((m) => m.parts).map((p) => p.path).filter((p) => p !== path);
+  const alreadyIsolated = others.every((p) => hidden.has(p)) && !hidden.has(path);
+  if (alreadyIsolated) { showAll(); return; }
+  hidden.clear();
+  for (const p of others) hidden.add(p);
+  applyVisibility(); renderList(); showSelected();
+}
+
+function select(path) {
+  selectedPath = path;
+  meshes((o) => {
+    const on = o.userData.path === path;
+    o.material.emissive = new THREE.Color(on ? 0xc0502c : 0x000000);
+    o.material.emissiveIntensity = on ? 0.25 : 0;
+  });
+  showSelected();
+  renderList();
+  if (path) navigator.clipboard?.writeText(path).catch(() => {});
+}
+
+function showSelected() {
+  const sel = $('selected');
+  if (!selectedPath || !layout) { sel.textContent = 'click a part for its path'; return; }
+  const part = layout.modules.flatMap((m) => m.parts).find((p) => p.path === selectedPath);
+  if (!part) { sel.textContent = selectedPath + ' (gone after rebuild)'; return; }
+  const b = part.box;
+  sel.textContent = selectedPath + '\n' + part.material + ', ' +
+    `${(b.max[0]-b.min[0]).toFixed(0)} x ${(b.max[1]-b.min[1]).toFixed(0)} x ${(b.max[2]-b.min[2]).toFixed(0)} mm\n` +
+    part.ops.length + ' ops' + (part.grain ? ', grain ' + part.grain : '') +
+    (hidden.has(selectedPath) ? ', hidden' : '');
+}
+
+function renderList() {
+  const list = $('parts');
+  list.innerHTML = '';
+  if (!layout) return;
+  for (const mod of layout.modules) {
+    for (const part of mod.parts) {
+      const li = document.createElement('li');
+      li.textContent = part.path + ' ';
+      const mat = document.createElement('span');
+      mat.className = 'mat';
+      mat.textContent = part.material;
+      li.appendChild(mat);
+      if (hidden.has(part.path)) li.classList.add('hidden');
+      if (part.path === selectedPath) li.classList.add('selected');
+      li.onclick = (e) => { if (e.altKey) select(part.path); else toggle(part.path); };
+      list.appendChild(li);
+    }
+  }
+  const problems = $('problems');
+  problems.textContent = layout.problems.length ? 'checks: ' + layout.problems.join('; ') : '';
+}
+
+// -- section plane ------------------------------------------------------------
+
+const section = { on: false, axis: 'z', pos: 0.5, flip: false };
+const plane = new THREE.Plane(new THREE.Vector3(0, 0, -1), 0);
+
+function setClipping(material, planes) {
+  const had = (material.clippingPlanes || []).length;
+  material.clippingPlanes = planes;
+  if (had !== planes.length) material.needsUpdate = true;
+}
+
+function applySection() {
+  const planes = section.on && bounds ? [plane] : [];
+  // Local clipping on every material except the caps, which lie on the plane.
+  setClipping(edgeFront, planes);
+  setClipping(edgeThrough, planes);
+  meshes((o) => {
+    setClipping(o.material, planes);
+    for (const m of o.userData.stencil?.children ?? []) setClipping(m.material, planes);
+  });
+  $('secOn').checked = section.on;
+  $('secAxis').value = section.axis;
+  $('secFlip').checked = section.flip;
+  $('secPos').value = Math.round(section.pos * 1000);
+  if (!bounds) return;
+  const i = { x: 0, y: 1, z: 2 }[section.axis];
+  const lo = bounds.min.getComponent(i), hi = bounds.max.getComponent(i);
+  const at = lo + section.pos * (hi - lo);
+  // Keep the side the normal points to; flip swaps the kept side.
+  const n = new THREE.Vector3(); n.setComponent(i, section.flip ? 1 : -1);
+  plane.normal.copy(n);
+  plane.constant = section.flip ? -at : at;
+  $('secValue').textContent = section.on ? `${section.axis} = ${at.toFixed(0)}` : '';
+  applyCaps();
+}
+
+$('secOn').onchange = (e) => { section.on = e.target.checked; applySection(); };
+$('secAxis').onchange = (e) => { section.axis = e.target.value; applySection(); };
+$('secFlip').onchange = (e) => { section.flip = e.target.checked; applySection(); };
+$('secPos').oninput = (e) => { section.pos = e.target.value / 1000; applySection(); };
+$('mode').onchange = (e) => setMode(e.target.value);
+
+// -- picking ---------------------------------------------------------------------
+
+const raycaster = new THREE.Raycaster();
+const pointer = new THREE.Vector2();
+let downAt = null;
+renderer.domElement.addEventListener('pointerdown', (e) => { downAt = [e.clientX, e.clientY]; });
+renderer.domElement.addEventListener('pointerup', (e) => {
+  if (!downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 4) return;
+  const rect = renderer.domElement.getBoundingClientRect();
+  pointer.set(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
+  raycaster.setFromCamera(pointer, camera);
+  const visible = [];
+  meshes((o) => { if (o.visible) visible.push(o); });
+  const hits = raycaster.intersectObjects(visible, false);
+  // With a section active, ignore hits on the clipped-away side.
+  const hit = hits.find((h) => !section.on || plane.distanceToPoint(h.point) >= -1e-6);
+  select(hit ? hit.object.userData.path : null);
+});
+
+// -- keys -------------------------------------------------------------------------
+
+const modes = ['shaded', 'hidden', 'ghost'];
+window.addEventListener('keydown', (e) => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+  const step = e.shiftKey ? 0.1 : 0.01;
+  switch (e.key) {
+    case 'f': fit(); break;
+    case 'h': if (selectedPath) toggle(selectedPath); showSelected(); break;
+    case 'i': if (selectedPath) isolate(selectedPath); break;
+    case 'a': showAll(); break;
+    case 'e': setMode(modes[(modes.indexOf(mode) + 1) % modes.length]); break;
+    case 's': section.on = !section.on; applySection(); break;
+    case 'x': case 'y': case 'z': section.axis = e.key; section.on = true; applySection(); break;
+    case '[': section.pos = Math.max(0, section.pos - step); section.on = true; applySection(); break;
+    case ']': section.pos = Math.min(1, section.pos + step); section.on = true; applySection(); break;
+    case '\\': section.flip = !section.flip; applySection(); break;
+    case 'Escape': select(null); break;
+    default: return;
+  }
+  e.preventDefault();
+});
+
+// -- reload loop ---------------------------------------------------------------
+
+async function poll() {
+  try {
+    const v = await (await fetch('out/version.txt', { cache: 'no-store' })).text();
+    if (v !== version) { const first = version === null; version = v; await load(first); }
+  } catch (e) {}
+  setTimeout(poll, 700);
+}
+poll();
+
+// The orbit controls apply mouse drags inside their own handlers (damping is
+// off), so they need no per-frame update. Updating them every frame would
+// re-level the camera with a look-at and undo any pose the SpaceMouse driver
+// wrote, which showed as the view jumping when a motion ended.
+function animate() {
+  requestAnimationFrame(animate);
+  renderer.render(scene, camera);
+}
+animate();
+
+// After the driver moved the camera, let the orbit controls adopt that pose:
+// the target sits ahead of the camera and `up` is the camera's own up, so the
+// controls' look-at reproduces the pose exactly, roll included. Fitting the
+// view (`f`) restores world up.
+function adoptCameraPose() {
+  const dist = Math.max(1, camera.position.distanceTo(controls.target));
+  const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+  controls.target.copy(camera.position).addScaledVector(forward, dist);
+  camera.up.copy(new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion));
+  controls.update();
+}
+
+// -- 3Dconnexion SpaceMouse through the 3DxWare navigation server ------------------
+const smLog = [];
+const pivotMarker = new THREE.Mesh(new THREE.SphereGeometry(6, 16, 12),
+  new THREE.MeshBasicMaterial({ color: 0xc0502c, depthTest: false, transparent: true, opacity: 0.8 }));
+pivotMarker.visible = false;
+pivotMarker.renderOrder = 100;
+scene.add(pivotMarker);
+window.spaceMouse = attachSpaceMouse(THREE, camera, controls, renderer.domElement, () => bounds, {
+  name: 'Layout preview',
+  onStatus: (text, ok) => { $('smStatus').textContent = text; $('smStatus').style.color = ok ? '' : '#a66'; },
+  onLog: (kind, msg) => { smLog.push([kind, msg]); if (smLog.length > 200) smLog.shift(); },
+  motion: (moving) => {
+    controls.enabled = !moving;
+    if (!moving) adoptCameraPose();
+  },
+  pivot: (position, visible) => {
+    if (position) pivotMarker.position.fromArray(position);
+    pivotMarker.visible = visible && !!position;
+  },
+  // The driver's hit test, used for automatic pivots: a ray against the visible parts.
+  pick: (origin, direction) => {
+    const visible = [];
+    meshes((o) => { if (o.visible) visible.push(o); });
+    const ray = new THREE.Raycaster(new THREE.Vector3().fromArray(origin), new THREE.Vector3().fromArray(direction).normalize());
+    const hit = ray.intersectObjects(visible, false)
+      .find((h) => !section.on || plane.distanceToPoint(h.point) >= -1e-6);
+    return hit ? hit.point.toArray() : null;
+  },
+});
+window.spaceMouseLog = smLog;
+</script>
+</body>
+</html>

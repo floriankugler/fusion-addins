@@ -115,6 +115,21 @@ To work on the addins, make sure you have VS Code installed, right-click on the 
 
 ![](img/doc3.png)
 
+## Modeling Language (prototype)
+
+`lang/` is a Python-embedded language for flat furniture that compiles into Fusion documents; the design is in `DESIGN.md`. Phase 1 contains the core (`lang/core`) and a browser preview (`lang/preview`), nothing in Fusion yet. It runs outside Fusion's Python:
+
+```bash
+python3 -m venv .venv && .venv/bin/pip install shapely trimesh manifold3d scipy watchfiles pytest numpy
+.venv/bin/python -m pytest tests                                  # unit tests
+.venv/bin/python -m lang.build examples/drawer_cabinet.py --out out  # layout.json + scene.glb
+.venv/bin/python -m lang.preview examples/drawer_cabinet.py       # live preview at http://127.0.0.1:8765
+```
+
+The preview rebuilds on every save of the build file or the `lang` package and reloads the scene with the camera kept. Click a part for its path; click a name in the list to hide it; `f` fits the view. The page lists its other keys: hide, isolate, display modes and a section plane with capped cut faces.
+
+A 3Dconnexion SpaceMouse works in the preview when 3DxWare is installed: the page talks to the driver's navigation server (`3DxNLServer`, on `127.51.68.120:8181`) with its own small client in `lang/preview/viewer/spacemouse.js`, so no 3Dconnexion script is bundled. The driver reads the camera and model extents from the page and writes the camera back, exactly as it does for Fusion, and the page's settings profile in 3DxWare is named "Layout preview". The device drives the page while the pointer is over the view.
+
 ## Build System
 
 Release artifacts are produced by `tools/vendor.py`.
