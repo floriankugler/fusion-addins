@@ -586,7 +586,8 @@ class Board:
             parts = what.split(".")
             if len(parts) != 2:
                 raise LangError(f"chamfer(): {what!r} is neither an edge, 'outline' nor an operation name.", self.path)
-            self.face(parts[0]).edge(parts[1])
+            # Stored with inner/outer and aliases resolved to directions.
+            what = self.face(parts[0]).edge(parts[1]).name
         self._record(Chamfer(what, float(size), f.name), None)
         return self
 

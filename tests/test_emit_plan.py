@@ -1,0 +1,134 @@
+from pathlib import Path
+
+import pytest
+
+from lang import *
+from lang.build import run_build
+from lang.core.layout import build_layout
+from lang.core.scope import registry
+from lang.emit.plan import (ChamferStep, CircleContour, EdgeContour, FaceRef, HoleStep, OutlineContour,
+                            PocketStep, ShapeContour, plan_layout)
+
+
+@pytest.fixture(autouse=True)
+def fresh_registry():
+    registry.reset()
+    yield
+    registry.reset()
+
+
+ply15 = material("birch", t=15)
+CAB = Box.from_size(width=600, depth=500, height=720)
+
+
+def _plan_of(part: Board):
+    plan = plan_layout(build_layout())
+    return next(p for p in plan.parts if p.path == part.path)
+
+
+def test_body_is_outline_on_lower_face_extruded_along_thickness():
+    with module("cab", CAB) as cab:
+        left = board("left", ply15).on(cab.left)
+    p = _plan_of(left)
+    assert p.component == ("cab",)
+    assert p.body.thickness == 15
+    assert p.body.direction == (0.0, 1.0, 0.0)
+    ring = p.body.rings[0]
+    assert all(pt[1] == 585.0 for pt in ring)
+    assert {(pt[0], pt[2]) for pt in ring} == {(0.0, 0.0), (500.0, 0.0), (500.0, 720.0), (0.0, 720.0)}
+
+
+def test_holes_batch_by_face_diameter_and_depth():
+    with module("cab", CAB) as cab:
+        left = board("left", ply15).on(cab.left)
+        left.hole(d=5, depth=10, face="inner", at=("front", 37, Pos("z", 120)))
+        left.hole(d=5, depth=10, face="inner", at=("front", 37, Pos("z", 152)))
+        left.hole(d=5, depth=12, face="inner", at=("front", 37, Pos("z", 184)))
+    steps = _plan_of(left).steps
+    assert len(steps) == 2
+    first, second = steps
+    assert isinstance(first, HoleStep) and isinstance(second, HoleStep)
+    assert first.face == FaceRef("y", -1, 585.0)
+    assert first.face.into == (0.0, 1.0, 0.0)
+    assert first.points == [(37.0, 585.0, 120.0), (37.0, 585.0, 152.0)]
+    assert first.depth == 10 and second.depth == 12
+
+
+def test_through_depth_is_none_and_pocket_chamfer_follows_pocket():
+    with module("cab", CAB) as cab:
+        bottom = board("bottom", ply15).on(cab.bottom)
+        bottom.pocket(rect(100, 20), face="top", at="center", depth=through, chamfer=1)
+        bottom.hole(d=6, face="top", at="center", depth=to("bottom"))
+    steps = _plan_of(bottom).steps
+    pocket, chamfer, hole = steps
+    assert isinstance(pocket, PocketStep) and pocket.depth is None
+    assert pocket.face == FaceRef("z", 1, 15.0)
+    assert all(pt[2] == 15.0 for pt in pocket.shapes[0][0])
+    assert isinstance(chamfer, ChamferStep) and isinstance(chamfer.contour, ShapeContour)
+    assert chamfer.contour.rings == pocket.shapes[0]
+    assert isinstance(hole, HoleStep) and hole.depth is None
+
+
+def test_cut_chamfer_and_named_contours():
+    with module("cab", CAB) as cab:
+        left = (board("left", ply15).on(cab.left)
+                .cut(rect(60, 100), at="bottom.front", name="toekick", chamfer=1)
+                .chamfer("outline", 1)
+                .chamfer("front.inner", 0.5)
+                .hole(d=5, depth=10, face="inner", at="center", name="pin")
+                .chamfer("pin", 0.5))
+    steps = _plan_of(left).steps
+    cut_chamfer, outline, edge, _hole, pin = steps
+    show = FaceRef("y", 1, 600.0)
+    assert isinstance(cut_chamfer, ChamferStep) and isinstance(cut_chamfer.contour, ShapeContour)
+    assert cut_chamfer.contour.face == show
+    assert all(pt[1] == 600.0 for pt in cut_chamfer.contour.rings[0])
+    assert isinstance(outline, ChamferStep) and outline.contour == OutlineContour(show)
+    assert isinstance(edge, ChamferStep)
+    assert edge.contour == EdgeContour(FaceRef("x", -1, 0.0), FaceRef("y", -1, 585.0))
+    assert isinstance(pin, ChamferStep)
+    assert pin.contour == CircleContour(FaceRef("y", -1, 585.0), (250.0, 585.0, 360.0), 2.5)
+
+
+def test_narrow_face_operations_map_to_the_face_plane():
+    with module("cab", CAB) as cab:
+        left = board("left", ply15).on(cab.left)
+        left.hole(d=8, depth=30, face="front", at=("bottom", 50))
+        left.pocket(rect(20, 6), face="top", at="center", depth=10)
+    hole, pocket = _plan_of(left).steps
+    assert isinstance(hole, HoleStep)
+    assert hole.face == FaceRef("x", -1, 0.0)
+    assert hole.points == [(0.0, 592.5, 50.0)]
+    assert hole.depth == 30  # deeper than the thickness, but not through the 500 mm board
+    assert isinstance(pocket, PocketStep)
+    assert pocket.face == FaceRef("z", 1, 720.0)
+    xs = {pt[0] for pt in pocket.shapes[0][0]}
+    ys = {pt[1] for pt in pocket.shapes[0][0]}
+    assert xs == {240.0, 260.0} and ys == {589.5, 595.5}
+    assert all(pt[2] == 720.0 for pt in pocket.shapes[0][0])
+
+
+def test_unknown_chamfer_target_is_a_problem_not_a_crash():
+    # The language refuses such a chamfer; a hand-edited layout can still carry one.
+    with module("cab", CAB) as cab:
+        board("left", ply15).on(cab.left)
+    layout = build_layout()
+    layout["modules"][0]["parts"][0]["ops"].append(
+        {"kind": "chamfer", "what": "nothing", "size": 1.0, "face": "left"})
+    plan = plan_layout(layout)
+    assert plan.problems and "nothing" in plan.problems[0]
+    assert plan.parts[0].steps == []
+
+
+def test_example_plans_completely(tmp_path: Path):
+    example = Path(__file__).resolve().parent.parent / "examples" / "drawer_cabinet.py"
+    layout = run_build(example, tmp_path, scene=False)
+    plan = plan_layout(layout)
+    assert len(plan.parts) == 23
+    assert plan.problems == []
+    sides = [p for p in plan.parts if p.path in ("drawercab.left", "drawercab.right")]
+    for side in sides:
+        assert len(side.steps) == 1 and isinstance(side.steps[0], HoleStep)
+        assert len(side.steps[0].points) == 16
+    assert [p.component for p in plan.parts if p.path.endswith("floor")] == [
+        ("drawercab", "drawer1"), ("drawercab", "drawer2"), ("drawercab", "drawer3")]

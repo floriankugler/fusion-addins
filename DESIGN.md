@@ -875,6 +875,18 @@ batch holes and cuts. A parametric document stays available as a debug mode.
 Where Multi Arrange and Auto Setup run, which need a timeline today, is still
 open (question 2).
 
+What the emitter (2026-10-10) does with this: every outline and pocket shape
+is a temporary B-rep face, so no sketch is drawn at all; pockets are batched
+per face and depth into one cut; holes are one hole feature each, positioned
+by a point on the face (`setPositionByPoint`), since batching barely matters
+in direct mode and a sketch per face would auto-project the face; chamfers
+are equal-distance chamfers on edges found by position along a contour.
+Found on the way: a through hole "to" the opposite face needs the
+`directionHint` argument or Fusion reports no target body; a 128-segment
+polyline circle chamfers fine; an edge can only be chamfered once, so a
+build must not let an outline chamfer and an edge or cut chamfer share an
+edge.
+
 ## Open questions
 
 1. ~~Compile speed~~: measured above; a 60-board module in about 4 s direct.
@@ -925,14 +937,26 @@ open (question 2).
 
 The smallest path through all layers [proposed, revised 2026-10-10]:
 
+Status 2026-10-10: steps 1 to 3 are implemented on branch `language`
+(`lang/core`, `lang/preview`, `lang/emit`, `addins-src/compiler`, `tests/`,
+`examples/`), with pyright strict and 26 tests. The viewer has hide/isolate,
+display modes, a capped section and SpaceMouse support. The emitter is a
+Fusion-free plan step (`lang/emit/plan.py`: world geometry, batching, chamfer
+contours) plus the adsk interpreter (`lang/emit/fusion.py`); it draws the
+drawer cabinet (23 parts, 61 features) in 0.4 s and `examples/operations.py`,
+which uses every operation kind, in 1.9 s, into a direct document with one
+component per scope and bodies named by path. The `compiler` add-in's Compile
+Layout button picks a layout file and runs it. Step 4 is next.
+
 1. `core`: the position algebra, box, board with `on`, `between` and `center`,
    scopes and paths, and layout JSON output with world transforms. With unit
-   tests.
+   tests. [done]
 2. `preview`: mesher and browser viewer for that JSON, with the watcher. This
    validates the layout format before the emitter exists and gives the loop.
+   [done]
 3. `emit`: the interpreter for that JSON in a fresh direct document, bodies
    named by path, with the measured levers (batching, deferred sketches, B-rep
-   outlines).
+   outlines). [done; see "Measured: compile speed" for what it does differently]
 4. Snapshot: one plane and one contour read from a master document into JSON,
    used as limits.
 

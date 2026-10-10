@@ -10,5 +10,11 @@ reportUnknownVariableType = false
 reportUnknownArgumentType = false
 reportMissingModuleSource = false
 
+# lang/emit imports Fusion's API; its stubs ship with Fusion (same path as
+# in .vscode/settings.json).
+[[tool.pyright.executionEnvironments]]
+root = "lang/emit"
+extraPaths = ["/Users/florian/Library/Application Support/Autodesk/Autodesk Fusion 360/API/Python/defs"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]

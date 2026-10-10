@@ -212,3 +212,19 @@ def test_layout_json_roundtrip(tmp_path: Path) -> None:
     assert left["axes"] == {"t": "y", "u": "x", "v": "z"}
     assert left["ops"][0]["kind"] == "cut"
     assert layout["problems"] == []
+
+
+def test_interference_ignores_overlap_inside_a_pocket():
+    with module("box", Box.from_size(width=400, depth=300, height=100)) as m:
+        side = board("side", ply15).on(m.left)
+        floor = board("floor", ply9).on(m.bottom + 10).between(side.inner.into(5), m.right)
+        side.pocket(rect(300, 9.5), face="inner", at=("bottom.front", floor.bottom, 0),
+                    depth=5, name="groove")
+    assert no_interference(m) == []
+    # a floor reaching deeper than the groove hits material
+    with module("box2", Box.from_size(width=400, depth=300, height=100)) as m2:
+        side = board("side", ply15).on(m2.left)
+        floor = board("floor", ply9).on(m2.bottom + 10).between(side.inner.into(6), m2.right)
+        side.pocket(rect(300, 9.5), face="inner", at=("bottom.front", floor.bottom, 0),
+                    depth=5, name="groove")
+    assert no_interference(m2) == ["box2.side overlaps box2.floor"]

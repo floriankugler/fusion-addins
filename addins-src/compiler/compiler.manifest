@@ -1,0 +1,13 @@
+{
+  "autodeskProduct": "Fusion360",
+  "type": "addin",
+  "id": "com.floriankugler.compiler",
+  "author": "",
+  "description": {
+    "": "The modeling language's Fusion side: compiles a layout file into a direct-modeling document."
+  },
+  "version": "",
+  "runOnStartup": false,
+  "supportedOS": "windows|mac",
+  "editEnabled": true
+}

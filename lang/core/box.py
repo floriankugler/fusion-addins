@@ -149,6 +149,11 @@ class Box:
         return all(self.lo[a] < other.hi[a] - tolerance and other.lo[a] < self.hi[a] - tolerance
                    for a in AXES)
 
+    def intersection(self, other: Box) -> Box:
+        """The common region; only meaningful when the boxes overlap."""
+        return Box({a: max(self.lo[a], other.lo[a]) for a in AXES},
+                   {a: min(self.hi[a], other.hi[a]) for a in AXES})
+
     def as_dict(self) -> dict[str, list[float]]:
         return {"min": [self.lo[a] for a in AXES], "max": [self.hi[a] for a in AXES]}
 

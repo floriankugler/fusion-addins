@@ -8,6 +8,8 @@
   - `lib/edge_sketch.py` holds the fully constrained sketch and cut helpers along a selected edge that `connectors_native` and `lib/domino.py` build with.
   - `lib/drawer_slides.py` holds the cabinet hole patterns of the drawer slides (Blum Movento, Grass Dynapro) and the odd/even hole choice used by `drawer_slides`. It is plain Python without Fusion imports; `python3 -m lib.drawer_slides` runs its self-checks.
   - `lib/hole_features.py` creates native Hole features from sketch points (flat-bottomed fixed depth or through to the opposite face).
+- `lang/` is the modeling language (see `DESIGN.md`; branch `language`). `lang/core` and `lang/preview` never import Fusion and need the repo `.venv` (shapely, trimesh). `lang/emit` is the Fusion emitter: `plan.py` is Fusion-free and unit tested, `fusion.py` is the only module that imports `adsk`. Fusion's Python has no shapely, so inside Fusion load `lang.emit` without its parent package as its `__init__.py` docstring shows (register the sub-package in `sys.modules`, then `importlib.import_module`). `examples/` holds build files, `tests/` the pytest suite. Commands: `.venv/bin/python -m pytest tests`, `.venv/bin/pyright`, `.venv/bin/python -m lang.build <build file> --out out`, `.venv/bin/python -m lang.preview <build file>`.
+  - `addins-src/compiler/` is the language's Fusion side (Compile Layout: pick a `layout.json`, draw it into a new direct document). It is not vendored; it loads `lang/emit` from the repo.
 - `_build/` holds versioned, self-contained add-in builds produced for distribution.
 - `tools/` includes helper scripts for symlinking and vendoring builds.
 - `img/` contains documentation screenshots referenced in `README.md`.

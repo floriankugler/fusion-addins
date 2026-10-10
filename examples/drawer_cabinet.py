@@ -55,13 +55,15 @@ def drawer(name: str, bay: Box, slide: StandInSlide) -> Scope:
         r = board("right", ply12).on(box.right).between(box.front, box.back, box.bottom, box.top)
         f = board("front", ply12).on(box.front).between(l, r, box.bottom, box.top)
         k = board("back", ply12).on(box.back).between(l, r, box.bottom, box.top)
-        (board("floor", ply9)
-         .on(box.bottom + slide.recess)
-         .between(l, r, f, k))
-        # groove for the floor, as a pocket on the inner face of each side
+        # the floor reaches 5 mm into the sides' grooves
+        floor = (board("floor", ply9)
+                 .on(box.bottom + slide.recess)
+                 .between(l.inner.into(5), r.inner.into(5), f, k))
+        # groove for the floor, as a pocket on the inner face of each side:
+        # 12 mm behind the front, resting on the floor's bottom face
         for side in (l, r):
             side.pocket(rect(box.extent("x") - 2 * 12, 9.5), face="inner",
-                        at=("bottom", 12, slide.recess - 1), depth=5, name="floor_groove")
+                        at=("bottom.front", floor.bottom, 12), depth=5, name="floor_groove")
     return d
 
 

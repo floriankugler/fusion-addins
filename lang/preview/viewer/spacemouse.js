@@ -238,14 +238,19 @@ export function attachSpaceMouse(THREE, camera, controls, canvas, world, opts = 
   };
 
   const mouse = new SpaceMouse(props, { name: opts.name, onStatus: opts.onStatus, onLog: opts.onLog });
-  // Focus gating: the driver only drives the page that has focus.
+  // Focus gating: the driver only drives the client that has focus. The
+  // page claims it while the pointer is anywhere over it (side pane
+  // included) or the window is focused, and releases it when the pointer
+  // leaves the page or the window loses focus, so another application
+  // under the pointer can take over.
   canvas.setAttribute('tabindex', '0');
   const focus = () => mouse.setFocus(true);
   const blur = () => mouse.setFocus(false);
-  canvas.addEventListener('pointerenter', focus);
-  canvas.addEventListener('pointerdown', focus);
-  canvas.addEventListener('pointerleave', blur);
-  window.addEventListener('focus', () => { if (canvas.matches(':hover')) focus(); });
+  const page = document.documentElement;
+  page.addEventListener('pointerenter', focus);
+  page.addEventListener('pointerdown', focus);
+  page.addEventListener('pointerleave', blur);
+  window.addEventListener('focus', focus);
   window.addEventListener('blur', blur);
   mouse.connect();
   return mouse;

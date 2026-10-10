@@ -6,6 +6,12 @@
       "runtimeExecutable": ".venv/bin/python",
       "runtimeArgs": ["-m", "lang.preview", "examples/drawer_cabinet.py", "--out", "out", "--port", "8765"],
       "port": 8765
+    },
+    {
+      "name": "preview-alt",
+      "runtimeExecutable": ".venv/bin/python",
+      "runtimeArgs": ["-m", "lang.preview", "examples/drawer_cabinet.py", "--out", "out", "--port", "8766"],
+      "port": 8766
     }
   ]
 }
