@@ -17,7 +17,8 @@ corner (see `Anchor`).
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Literal, Self, Union, overload
+from collections.abc import Sequence
+from typing import Any, Literal, Protocol, Self, Union, overload
 
 from . import directions
 from . import scope as scopes
@@ -454,6 +455,14 @@ class Operation:
         return Pos(face.axis, lo if face.sign > 0 else hi)
 
 
+class Joint(Protocol):
+    """A joint type that can join a board to others (see `lang.joints`).
+    `into` is the boards named in `join(..., into=)`, or None for every
+    board the joint finds."""
+
+    def join(self, part: Board, /, into: list[Board] | None) -> None: ...
+
+
 class Board:
     def __init__(self, name: str, material: Material, shape: Shape | None = None):
         if not name or "." in name:
@@ -687,7 +696,7 @@ class Board:
         reference = sum(values) / len(values) if values else box_centre
         values += contours.values(axis, reference)
         edges = contours.edges_on(axis)
-        stretch = contours.stretch(axis, reference)
+        stretch = contours.stretch(axis, values, box_centre)
         if len(values) + len(edges) > 2:
             raise LangError(f"more than two limits on {axis}.", self.path)
         if len(edges) > 1:
@@ -825,6 +834,9 @@ class Board:
     def big_faces(self) -> tuple[Face, Face]:
         return (Face(self, self.scope.frame.direction_of(self.t_axis, 1)),
                 Face(self, self.scope.frame.direction_of(self.t_axis, -1)))
+
+    def has_operation(self, name: str) -> bool:
+        return name in self._named_ops
 
     def op(self, name: str) -> Operation:
         """A named operation, e.g. the cut called "toekick"."""
@@ -1034,6 +1046,27 @@ class Board:
             face = self.show_face.world_name if isinstance(what, Cut) else what.face
             self._record(Chamfer(name, float(size), face), None)
         return self
+
+    # -- relations ---------------------------------------------------------------------------------
+
+    def join(self, joint: Joint, into: Board | Sequence[Board] | None = None) -> Self:
+        """Joins this board with a joint type, `long.join(half_lap(toward=
+        floor.top))`: with every board its placement meets in its module,
+        or only with those given as `into=`. The joint decides what that
+        means; it adds operations to both boards."""
+        partners = None if into is None else ([into] if isinstance(into, Board) else list(into))
+        joint.join(self, partners)
+        return self
+
+    def module_parts(self) -> list[Board]:
+        """Every part of the module this board belongs to (the parts outside
+        any module for a loose board): what a joint looks for partners in."""
+        scope = self.scope
+        if not isinstance(scope, scopes.Scope):
+            return list(scopes.registry.root_parts)
+        while scope.parent is not None:
+            scope = scope.parent
+        return scope.all_parts()
 
     # -- block form -------------------------------------------------------------------------------
 

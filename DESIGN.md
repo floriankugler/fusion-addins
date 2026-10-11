@@ -365,9 +365,15 @@ proposed]
     room), and the edge follows the contour; a chord at 45 degrees, or the
     other limit within the contour's reach, is an error.
   - In a perpendicular plane, a closed contour gives a stretch on the axis
-    the two planes share (several stretches: the one around the part's
-    other limits, else an error); an open contour gives a position there,
-    and must cross each face once.
+    the two planes share; an open contour gives a position there, and must
+    cross each face once. Where the contour leaves several stretches (a
+    batten along the wall, cut in two by a wheel arch), the part's limits
+    on that axis pick one: a single limit the stretch it lies in, two
+    limits the one between them, and two limits spanning several stretches
+    are an error naming them, since a part is one piece. So the two pieces
+    of an interrupted batten are two parts, each given one end:
+    `between(..., floor_outline, floor_front)` and `... floor_back)`.
+    [decided 2026-10-11]
   - `contour.gap(n)` keeps n of clearance, measured in the contour's plane
     with round joins, so it is exact at corners; `contour.into(n)` reaches
     past it. Stretches from closed contours cut every other range down
@@ -515,6 +521,24 @@ proposed]
   name, **Contact**: the shared plane, the rectangle, the two parts, which one
   meets edge-on. Joint layouts take a contact plus settings and return operations
   for both parts. [proposed]
+- Besides contacts there are **crossings** (`lang/core/crossing.py`): two
+  boards in perpendicular planes whose material passes through each other,
+  like battens across and along a floor. They share one axis, the line
+  their planes meet along; each board's material at the other's thickness,
+  projected onto that axis, gives the height they share. `no_interference`
+  uses this too, so lapped boards are not reported. [implemented
+  2026-10-11]
+- The first joint is the **half lap** (`lang/joints/laps.py`) [decided and
+  implemented 2026-10-11]: `long.join(half_lap(toward=floor.top))` laps the
+  board with every board it crosses in its module (`into=` narrows that).
+  Its own notches open toward `toward`, the other boards' the opposite way;
+  the split lies in the middle of the height both share at each crossing
+  (`at=` a position instead), and `clearance=` widens each notch per side
+  (default 0). Each notch is a through cut named `lap_<other board>`, so
+  the emitter needs nothing new. `Board.join(joint, into=)` hands the
+  board to the joint object (the `Joint` protocol in `part.py`), as
+  `Scope.mount` does with hardware, so core knows no joint types. The join
+  happens when it is called: the boards it crosses must exist by then.
 - Joinery rules are a list of predicate plus joint, first match wins, and an
   explicit call always beats a rule. Predicates see the contact: materials,
   roles (end panel, mid panel), visibility. [proposed]
@@ -918,14 +942,26 @@ profile for the whole length, so no `.at(x)`):
 ```python
 van = master("van_snapshot.json")
 floor_level = van.plane("Bodenniveau")
+floor_front, floor_back = van.plane("Boden vorne"), van.plane("Boden hinten")
 floor_outline = van.contour("Bodenumriss")
 floor_profile = van.contour("Bodenprofil")
 
 with module("floor", van.box("Boden")) as f:
     top = floor_level - ply12.t
-    battens = [board(f"batten{i}", ply15).center(x).between(top, floor_profile.gap(2), floor_outline)
-               for i, x in enumerate(spread(van.plane("Boden vorne"), van.plane("Boden hinten"),
-                                            pitch=van.param("Lattenabstand")))]
+    above_floor = floor_profile.gap(2)
+    inside = floor_outline.gap(3)
+    battens = [board(f"batten{i}", ply15).center(x).between(top, above_floor, inside)
+               for i, x in enumerate(spread(floor_front, floor_back, pitch=van.param("Lattenabstand")))]
+    edge = 3 + ply15.t / 2
+    for i, y in enumerate(spread(f.left.into(edge), f.right.into(edge), count=6)):
+        if i in (0, 5):     # cut in two by the wheel arches: one board from each end
+            pieces = [board(f"long{i}_front", ply15).center(y).between(top, above_floor, inside, floor_front),
+                      board(f"long{i}_back", ply15).center(y).between(top, above_floor, inside, floor_back)]
+        else:
+            pieces = [board(f"long{i}", ply15).center(y).between(top, above_floor, inside,
+                                                               floor_front, floor_back)]
+        for long in pieces:
+            long.join(half_lap(toward=f.top))
     middle = battens[len(battens) // 2]
     joint = (middle.front + middle.back) / 2
     board("panel_front", ply12).on(f.top).between(floor_outline, f.front, joint)
@@ -936,11 +972,14 @@ kitchen = drawer_cabinet("kitchen", kitchen_box, 3, slide, front=kitchen_box.rig
 kitchen.check(inside_box, inside(floor_outline))
 ```
 
-The battens beside the wheel arches come out shorter, the one centred on an
-arch's rear end ends at its tighter face, every lower edge dips 2 mm above
-the floor's valleys and rises into the walls, and the rear panel carries
-the arch notches with their rounded corners. Compiled in Fusion: 34 parts,
-111 features in 0.9 s, every floor part's volume equal to the layout's.
+The battens across beside the wheel arches come out shorter, the one centred
+on an arch's rear end ends at its tighter face, every lower edge dips 2 mm
+above the floor's valleys and rises into the walls, and the rear panel
+carries the arch notches with their rounded corners. The six battens along
+stand on the floor 2 mm above its highest point under them, the outer two
+in two pieces, and all 48 crossings are half lapped. Compiled in Fusion: 42
+parts, 119 features in 1.0 s, every floor part's volume equal to the
+layout's.
 
 ## Project structure
 
@@ -1200,7 +1239,8 @@ driven from a script).
       at both faces; checks for parts inside the module box and the gap to a
       contour. The floor battens are the test case.
 
-Then: one contact and one holes-only joint; the assembly experiment from
+Then: one contact and one holes-only joint (the half lap, a crossing joint
+made of cuts, is done); the assembly experiment from
 question 2. (Operations are done.)
 
 Before any of it, cheap and useful: write two real modules from the van in the

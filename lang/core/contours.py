@@ -282,12 +282,14 @@ class ContourLimits:
                             "an open contour must cross each face once.", self.path)
         return values[0]
 
-    def stretch(self, axis: Axis, reference: float | None) -> tuple[float, float] | None:
+    def stretch(self, axis: Axis, values: Sequence[float], centre: float | None) -> tuple[float, float] | None:
         """The stretch on `axis` that closed contours leave: the bounds of
         those in the board's plane, and the sections of those in
         perpendicular planes at both faces (tighter wins). Where a section
-        falls into several stretches, the one around `reference` is
-        taken."""
+        falls into several stretches, the board's limits on the axis pick
+        one: a single limit the stretch it lies in, two limits the one
+        stretch between them (more is an error: the contour would cut the
+        board in two), no limit the one around the room's `centre`."""
         lo, hi = float("-inf"), float("inf")
         found = False
         for name, area in self.areas:
@@ -307,12 +309,7 @@ class ContourLimits:
                 raise LangError(f"the board lies outside contour {name!r} (sectioned at {self.t}="
                                 f"{self.t_lo:g} and {self.t_hi:g}).", self.path)
             if len(pieces) > 1:
-                chosen = [p for p in pieces if reference is not None and p[0] <= reference <= p[1]]
-                if len(chosen) != 1:
-                    stretches = ", ".join(f"{a:g} to {b:g}" for a, b in pieces)
-                    raise LangError(f"contour {name!r} leaves several stretches on {axis} ({stretches}); "
-                                    "give a limit inside the one meant.", self.path)
-                pieces = chosen
+                pieces = self._pick(name, axis, pieces, values, centre)
             lo, hi = max(lo, pieces[0][0]), min(hi, pieces[0][1])
             found = True
         if not found:
@@ -320,6 +317,24 @@ class ContourLimits:
         if hi <= lo:
             raise LangError(f"the contours leave no room on {axis}.", self.path)
         return lo, hi
+
+    def _pick(self, name: str, axis: Axis, pieces: list[tuple[float, float]], values: Sequence[float],
+              centre: float | None) -> list[tuple[float, float]]:
+        stretches = ", ".join(f"{a:.1f} to {b:.1f}" for a, b in pieces)
+        if len(values) >= 2:
+            a, b = sorted(values[:2])
+            chosen = [p for p in pieces if min(p[1], b) - max(p[0], a) > 1e-9]
+            if len(chosen) > 1:
+                raise LangError(f"contour {name!r} cuts the board into {len(chosen)} pieces on {axis} "
+                                f"({stretches}); give one end to take one piece.", self.path)
+        else:
+            point = values[0] if values else centre
+            chosen = [p for p in pieces if point is not None and p[0] - 1e-9 <= point <= p[1] + 1e-9]
+        if len(chosen) != 1:
+            where = "the board's limit" if values else "the middle of the board's room"
+            raise LangError(f"contour {name!r} leaves several stretches on {axis} ({stretches}) and "
+                            f"{where} lies in none of them; give a limit inside the one meant.", self.path)
+        return chosen
 
     def _section(self, area: BaseGeometry, t: float) -> list[tuple[float, float]]:
         lo, hi = area.bounds[1] - 1.0, area.bounds[3] + 1.0

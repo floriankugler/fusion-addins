@@ -8,6 +8,7 @@ from shapely.geometry import box as shapely_box
 from . import directions
 from .box import Box
 from .contours import Contour, footprint
+from .crossing import crossing
 from .directions import AXES, Axis
 from .errors import LangError
 from .ops import Pocket
@@ -21,8 +22,10 @@ if TYPE_CHECKING:
 def no_interference(scope: Scope) -> list[str]:
     """Pairs of parts in the scope (and below) whose material overlaps. A
     part's material is its outline through its thickness minus its pockets,
-    so a floor sitting in a groove does not count. Pockets in narrow faces
-    are not taken into account yet."""
+    so a floor sitting in a groove does not count. Perpendicular parts must
+    also pass through each other (`crossing`), so two lapped battens, each
+    filling half of the box they share, do not count either. Pockets in
+    narrow faces are not taken into account yet."""
     parts = scope.all_parts()
     problems: list[str] = []
     for i, a in enumerate(parts):
@@ -30,8 +33,11 @@ def no_interference(scope: Scope) -> list[str]:
             if not a.box().overlaps(b.box()):
                 continue
             region = a.box().intersection(b.box())
-            if _has_material(a, region) and _has_material(b, region):
-                problems.append(f"{a.path} overlaps {b.path}")
+            if not (_has_material(a, region) and _has_material(b, region)):
+                continue
+            if a.t_axis != b.t_axis and crossing(a, b) is None:
+                continue
+            problems.append(f"{a.path} overlaps {b.path}")
     return problems
 
 

@@ -28,18 +28,37 @@ floor_profile = van.contour("Bodenprofil")    # cross-section of the vehicle flo
 
 
 def floor(name: str, box: Box) -> Scope:
-    """Battens across the vehicle under two floor panels. A batten's top is
-    the panels' underside, its lower edge follows the floor profile 2 mm
-    above it, and its ends stop at the floor outline, so the battens
-    between the wheel arches are shorter. The panels take the outline as
-    it is and meet over the middle batten."""
+    """A grid of battens under two floor panels. The battens' tops are the
+    panels' underside and they keep 2 mm off the vehicle floor: the ones
+    across follow its profile, the ones along stand on it. All of them stop
+    3 mm short of the floor outline, so the ones across between the wheel
+    arches are shorter and the outer ones along are cut in two by the
+    arches. Where they cross they are half lapped. The panels take the
+    outline as it is and meet over the middle batten across."""
     with module(name, box) as f:
         top = floor_level - ply12.t
+        above_floor = floor_profile.gap(2)
+        inside = floor_outline.gap(3)
         pitch = van.param("Lattenabstand")
         battens = [
-            board(f"batten{i}", ply15).center(x).between(top, floor_profile.gap(2), floor_outline)
+            board(f"batten{i}", ply15).center(x).between(top, above_floor, inside)
             for i, x in enumerate(spread(floor_front, floor_back, pitch=pitch))
         ]
+        # Six along, evenly spaced, the outer two with their outer faces where
+        # the battens across end. The wheel arches cut the outer two in two,
+        # so each is two boards: one from each end, as far as the outline
+        # lets it.
+        edge = 3 + ply15.t / 2
+        for i, y in enumerate(spread(f.left.into(edge), f.right.into(edge), count=6)):
+            if i in (0, 5):
+                pieces = [board(f"long{i}_front", ply15).center(y).between(top, above_floor, inside, floor_front),
+                          board(f"long{i}_back", ply15).center(y).between(top, above_floor, inside, floor_back)]
+            else:
+                pieces = [board(f"long{i}", ply15).center(y).between(top, above_floor, inside,
+                                                                   floor_front, floor_back)]
+            for long in pieces:
+                # notched from the top where it crosses a batten, which is notched from below
+                long.join(half_lap(toward=f.top))
         middle = battens[len(battens) // 2]
         joint = (middle.front + middle.back) / 2
         board("panel_front", ply12).on(f.top).between(floor_outline, f.front, joint)

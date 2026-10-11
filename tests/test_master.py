@@ -171,6 +171,21 @@ def test_contour_errors(van: Master):
                                                         Pos("x", 2600), Pos("y", -800), Pos("y", -700)).box()
 
 
+def test_an_end_picks_one_piece_of_a_cut_up_board(van: Master):
+    """A batten along the wall is cut in two by the wheel arch: with both
+    ends it is an error that names the pieces, one end takes its piece."""
+    outline = van.contour("Bodenumriss")
+    front, back = van.plane("Boden vorne"), van.plane("Boden hinten")
+    with module("floor", van.box("Boden")):
+        whole = board("whole", ply15).center(Pos("y", -880)).between(outline, front, back, Pos("z", 0), Pos("z", 28))
+        with pytest.raises(LangError, match=r"cuts the board into 2 pieces on x \(0.0 to 1965.3, 2934.7 to 3400.0\)"):
+            whole.box()
+        first = board("first", ply15).center(Pos("y", -880)).between(outline, front, Pos("z", 0), Pos("z", 28))
+        last = board("last", ply15).center(Pos("y", -880)).between(outline, back, Pos("z", 0), Pos("z", 28))
+    assert (first.box().lo["x"], first.box().hi["x"]) == pytest.approx((20, 1965.3), abs=0.05)
+    assert (last.box().lo["x"], last.box().hi["x"]) == pytest.approx((2934.7, 3380), abs=0.05)
+
+
 # -- checks ------------------------------------------------------------------------
 
 def test_inside_box_and_inside_contour(van: Master):
@@ -199,5 +214,10 @@ def test_the_van_example_builds_without_problems(tmp_path: Path):
     # the battens beside the wheel arches are shorter (batten7 straddles the rear end)
     short = sorted(path for path, b in battens.items() if b["max"][1] < 700)
     assert short == ["floor.batten5", "floor.batten6", "floor.batten7"]
+    # six along, the outer two in two pieces each, lapped at all 48 crossings
+    longs = [p for p in floor["parts"] if ".long" in p["path"]]
+    assert len(longs) == 8
+    laps = sum(1 for p in longs for op in p["ops"] if (op.get("name") or "").startswith("lap_"))
+    assert laps == 48
     assert layout["problems"] == []
     assert layout.get("snapshots", [])[0]["hash"] == master(FIXTURE).hash
