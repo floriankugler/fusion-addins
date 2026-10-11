@@ -14,13 +14,14 @@ What it holds (world mm; front is -x, the driver's side -y, top +z):
   hinten (where the battens start and end), Wand FS (the driver's-side
   wall) and Dach geneigt (tilted, so not a position);
 - sketches Bodenumriss (floor outline with both wheel arches, closed),
-  Bodenprofil (cross-section of the ribbed vehicle floor, open), Bettkante
-  (one line in a moved component), Fenster (two rectangles: not one chain)
-  and __Hilfsskizze plus the sketches behind the bodies (all left out of
-  the snapshot by their names);
-- placeholder boxes Boden, Kueche, Bett (a moved component with a plane of
-  its own, Bett oben), Radkasten FS (filleted, so not a cuboid) and the
-  component Sitzbank with the two bodies Sitz and Lehne.
+  Bodenprofil (cross-section of the ribbed vehicle floor, open), Fenster
+  (two rectangles: not one chain) and __Hilfsskizze plus the sketches
+  behind the bodies (all left out of the snapshot by their names);
+- placeholder boxes Boden, Moebel.Kueche (a component inside the empty
+  component Moebel), Bett (a moved component with the plane Bett.oben and
+  the one-line sketch Bett.Kante of its own), Radkasten FS (filleted, so
+  not a cuboid) and the component Sitzbank with the two bodies Sitz and
+  Lehne (Sitzbank.Sitz, Sitzbank.Lehne).
 """
 import math
 
@@ -118,8 +119,8 @@ def _floor_profile(sketch):
     arcs.addByThreePoints(sk(w - 30, 0), sk(w - 12, 3.5), sk(w, 15))
 
 
-def _component(root, name, transform=None):
-    occurrence = root.occurrences.addNewComponent(transform or adsk.core.Matrix3D.create())
+def _component(parent, name, transform=None):
+    occurrence = parent.occurrences.addNewComponent(transform or adsk.core.Matrix3D.create())
     occurrence.component.name = name
     return occurrence.component
 
@@ -196,7 +197,8 @@ def build(app=None):
 
     # Placeholder boxes, one component each.
     _block(_component(root, "Boden"), "Boden", (0, -HALF_WIDTH), (LENGTH, HALF_WIDTH), "Bodenaufbau")
-    _block(_component(root, "Kueche"), "Kueche", (300, -HALF_WIDTH), (900, -390), "Kuechenhoehe",
+    furniture = _component(root, "Moebel")
+    _block(_component(furniture, "Kueche"), "Kueche", (300, -HALF_WIDTH), (900, -390), "Kuechenhoehe",
            start="Bodenaufbau")
 
     move = adsk.core.Matrix3D.create()
@@ -205,9 +207,9 @@ def build(app=None):
     _block(bed, "Bett", (0, 0), (1100, 2 * HALF_WIDTH), "100 mm")
     bed_top = bed.constructionPlanes.createInput()
     bed_top.setByOffset(bed.xYConstructionPlane, _v("100 mm"))
-    bed.constructionPlanes.add(bed_top).name = "Bett oben"
+    bed.constructionPlanes.add(bed_top).name = "oben"
     edge = bed.sketches.add(bed.xYConstructionPlane)
-    edge.name = "Bettkante"
+    edge.name = "Kante"
     edge.sketchCurves.sketchLines.addByTwoPoints(_p(0, 0), _p(1100, 0))
 
     arch = _component(root, "Radkasten FS")

@@ -10,14 +10,17 @@ in world millimetres (proxies carry each occurrence's placement):
 - every sketch, as one contour: its curves that are not construction
   geometry, sampled at 0.1 mm and chained (`snapshot_format.chain`);
 - every solid body, as its axis-aligned bounding box, flagged when the
-  body is not an axis-aligned cuboid. A component with exactly one body
-  names the box; otherwise each body names its own;
+  body is not an axis-aligned cuboid;
 - every user parameter, lengths in mm and angles in degrees.
 
-Names starting with a double underscore are left out, also a component's
-(with everything in it), and so are linked components, which belong to
-other documents. Duplicate names and sketches that are not one chain are
-listed as problems; the build reports them when such a name is used.
+Items in the root keep their names; items inside components are named by
+the dotted path of component names (`Bett.oben`), and a component's only
+body by the component's path (`Moebel.Kueche`), otherwise each body by its
+own name after the path (`Sitzbank.Sitz`). Names starting with a double
+underscore are left out, also a component's (with everything in it), and
+so are linked components, which belong to other documents. Duplicate names
+and sketches that are not one chain are listed as problems; the build
+reports them when such a name is used.
 """
 from __future__ import annotations
 
@@ -79,14 +82,16 @@ def _vec(v: adsk.core.Vector3D) -> Point3:
 @dataclass
 class _Context:
     """A component as it sits in the root: the occurrence it is reached
-    through (None for the root) and a path for messages."""
+    through (None for the root), the dotted path of component names that
+    names its items ("" for the root), and where it is, for messages."""
     component: adsk.fusion.Component
     occurrence: adsk.fusion.Occurrence | None
+    path: str
     where: str
 
 
 def _contexts(root: adsk.fusion.Component, collector: Collector, summary: Summary) -> list[_Context]:
-    contexts = [_Context(root, None, "root")]
+    contexts = [_Context(root, None, "", "root")]
     for occurrence in root.allOccurrences:
         # Skip linked components and anything below a skipped one.
         chain: list[adsk.fusion.Occurrence] = []
@@ -106,7 +111,8 @@ def _contexts(root: adsk.fusion.Component, collector: Collector, summary: Summar
             if skipped[0] and not any(skipped[1:]):
                 collector.skipped += 1
             continue
-        contexts.append(_Context(occurrence.component, occurrence, occurrence.fullPathName))
+        path = ".".join(o.component.name for o in reversed(chain))
+        contexts.append(_Context(occurrence.component, occurrence, path, occurrence.fullPathName))
     return contexts
 
 
@@ -117,7 +123,7 @@ def _planes(ctx: _Context, collector: Collector) -> None:
         if ctx.occurrence is not None:
             plane = plane.createForAssemblyContext(ctx.occurrence)
         geometry = plane.geometry
-        collector.plane(plane.name, ctx.where, _mm(geometry.origin), _vec(geometry.normal))
+        collector.plane(ctx.path, plane.name, ctx.where, _mm(geometry.origin), _vec(geometry.normal))
 
 
 def _strokes(curve: adsk.fusion.SketchCurve) -> list[Point3]:
@@ -149,7 +155,7 @@ def _sketches(ctx: _Context, collector: Collector) -> None:
                 continue
             polylines.append(_strokes(curve))
         origin, normal = _sketch_plane(sketch)
-        collector.contour(sketch.name, ctx.where, polylines, origin, normal)
+        collector.contour(ctx.path, sketch.name, ctx.where, polylines, origin, normal)
 
 
 def _sketch_plane(sketch: adsk.fusion.Sketch) -> tuple[Point3, Point3]:
@@ -170,14 +176,16 @@ def _bodies(ctx: _Context, collector: Collector) -> None:
     measure = adsk.core.Application.get().measureManager
     x_axis = adsk.core.Vector3D.create(1, 0, 0)
     y_axis = adsk.core.Vector3D.create(0, 1, 0)
+    # A component's only body is named by the component's path.
+    only = count == 1 and ctx.occurrence is not None
+    path = ctx.path.rpartition(".")[0] if only else ctx.path
     for i in range(count):
         body = bodies.item(i)
-        # A component with one body names the box after itself.
-        name = ctx.component.name if count == 1 and ctx.occurrence is not None else body.name
+        name = ctx.component.name if only else body.name
         if ctx.occurrence is not None:
             body = body.createForAssemblyContext(ctx.occurrence)
         if not body.isSolid:
-            collector.problem("boxes", name, ctx.where, "a surface body, not a solid")
+            collector.problem("boxes", path, name, ctx.where, "a surface body, not a solid")
             continue
         box = measure.getOrientedBoundingBox(body, x_axis, y_axis)
         c = box.centerPoint
@@ -186,7 +194,7 @@ def _bodies(ctx: _Context, collector: Collector) -> None:
         hi = (c.x + size[0] / 2, c.y + size[1] / 2, c.z + size[2] / 2)
         # An axis-aligned cuboid, and only that, fills its axis-aligned box.
         cuboid = math.isclose(body.volume, size[0] * size[1] * size[2], rel_tol=1e-6)
-        collector.box(name, ctx.where, [v * CM for v in lo], [v * CM for v in hi], cuboid)
+        collector.box(path, name, ctx.where, [v * CM for v in lo], [v * CM for v in hi], cuboid)
 
 
 def _parameters(design: adsk.fusion.Design, collector: Collector) -> None:

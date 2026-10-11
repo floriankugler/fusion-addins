@@ -43,7 +43,7 @@ def test_planes_are_positions(van: Master):
     assert van.plane("Wand FS").position == Pos("y", -890)
     assert (van.plane("Boden vorne") + van.plane("Boden hinten")) / 2 == Pos("x", 1700)
     # a plane in a moved component, in world coordinates
-    assert van.plane("Bett oben").position == Pos("z", 1000)
+    assert van.plane("Bett.oben").position == Pos("z", 1000)
 
 
 def test_a_tilted_plane_is_an_error_when_used(van: Master):
@@ -53,7 +53,7 @@ def test_a_tilted_plane_is_an_error_when_used(van: Master):
 
 
 def test_boxes_and_parameters(van: Master):
-    k = van.box("Kueche")
+    k = van.box("Moebel.Kueche")
     assert (k.lo["x"], k.lo["y"], k.lo["z"]) == (300, -890, 40)
     assert (k.width, k.depth, k.height) == (500, 600, 720)
     assert van.param("Lattenabstand") == 400
@@ -90,7 +90,7 @@ def test_layout_records_the_snapshot(van: Master):
     layout = build_layout()
     [snapshot] = layout.get("snapshots", [])
     assert snapshot["hash"] == van.hash and snapshot["file"] == "van_snapshot.json"
-    assert set(snapshot["boxes"]) >= {"Kueche", "Bett"} and "Bodenumriss" in snapshot["contours"]
+    assert set(snapshot["boxes"]) >= {"Moebel.Kueche", "Bett"} and "Bodenumriss" in snapshot["contours"]
     # the filleted body is only a bounding box, which the layout says
     assert any("Radkasten FS" in p and "cuboid" in p for p in layout["problems"])
 
@@ -142,7 +142,7 @@ def test_a_panel_takes_the_outline_in_its_own_plane(van: Master):
 
 
 def test_an_open_contour_in_the_board_plane_is_an_edge(van: Master):
-    edge = van.contour("Bettkante")                    # a line along x at y = -890, z = 900
+    edge = van.contour("Bett.Kante")                   # a line along x at y = -890, z = 900
     shelf = board("shelf", ply15).on(Pos("z", 1000), toward=frame.direction("bottom")).between(
         edge.gap(10), Pos("y", -500), Pos("x", 2400), Pos("x", 3000))
     box = shelf.box()
@@ -150,7 +150,7 @@ def test_an_open_contour_in_the_board_plane_is_an_edge(van: Master):
 
 
 def test_an_open_contour_in_a_perpendicular_plane_gives_a_position(van: Master):
-    edge = van.contour("Bettkante")
+    edge = van.contour("Bett.Kante")
     side = board("side", ply15).center(Pos("x", 3000)).between(edge.gap(5), Pos("y", 0), Pos("z", 0), Pos("z", 500))
     assert (side.box().lo["y"], side.box().hi["y"]) == pytest.approx((-885, 0))
     with pytest.raises(LangError, match="does not reach"):
@@ -175,7 +175,7 @@ def test_contour_errors(van: Master):
 
 def test_inside_box_and_inside_contour(van: Master):
     outline = van.contour("Bodenumriss")
-    with module("cab", van.box("Kueche")) as cab:
+    with module("cab", van.box("Moebel.Kueche")) as cab:
         board("left", ply15).on(cab.left)
         board("top", ply15).on(cab.top).between(Pos("y", -890), Pos("y", -300))   # 90 mm too deep
         check(inside_box, inside(outline))

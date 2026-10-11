@@ -2,9 +2,9 @@
   "version": 1,
   "units": "mm",
   "source": "van master (tools/van_master.py)",
-  "hash": "95c73f29c22d4c87f3664399a9aa19de644b759fd9ffa6ea503958e9fb29f2fc",
+  "hash": "22eb7b3593113ae2ec9ff1c158805cfb3dce01ea4d55453b418767d17c7d6182",
   "planes": {
-    "Bett oben": {
+    "Bett.oben": {
       "origin": [2300.0, -890.0, 1000.0],
       "normal": [0.0, 0.0, 1.0]
     },
@@ -30,7 +30,7 @@
     }
   },
   "contours": {
-    "Bettkante": {
+    "Bett.Kante": {
       "points": [
         [2300.0, -890.0, 900.0],
         [3400.0, -890.0, 900.0]
@@ -225,14 +225,9 @@
       "max": [3400.0, 890.0, 40.0],
       "cuboid": true
     },
-    "Kueche": {
+    "Moebel.Kueche": {
       "min": [300.0, -890.0, 40.0],
       "max": [900.0, -390.0, 760.0],
-      "cuboid": true
-    },
-    "Lehne": {
-      "min": [1000.0, 790.0, 440.0],
-      "max": [1600.0, 890.0, 900.0],
       "cuboid": true
     },
     "Radkasten FS": {
@@ -240,7 +235,12 @@
       "max": [2900.0, -675.0, 250.0],
       "cuboid": false
     },
-    "Sitz": {
+    "Sitzbank.Lehne": {
+      "min": [1000.0, 790.0, 440.0],
+      "max": [1600.0, 890.0, 900.0],
+      "cuboid": true
+    },
+    "Sitzbank.Sitz": {
       "min": [1000.0, 390.0, 40.0],
       "max": [1600.0, 890.0, 440.0],
       "cuboid": true

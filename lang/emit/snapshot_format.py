@@ -1,7 +1,13 @@
 """The Fusion-free half of the snapshot writer: what `snapshot.py` reads
-from the master goes through a `Collector`, which skips double-underscore
-names, chains each sketch's sampled curves into one contour, reports
-duplicate names, and builds the snapshot with its hash. Unit tested.
+from the master goes through a `Collector`, which names items by their
+component path, skips double-underscore names, chains each sketch's sampled
+curves into one contour, reports duplicate names, and builds the snapshot
+with its hash. Unit tested.
+
+Names: an item in the root component keeps its own name; an item inside
+components is named by the path of component names from the root, dotted,
+then its own name (`Bett.oben`, `Moebel.Sitzbank.Sitz`). A body that is a
+component's only body takes the component's path (`Moebel.Kueche`).
 
 The snapshot's shape is `lang.core.snapshot_types`.
 """
@@ -124,50 +130,60 @@ class _Entry:
     problem: str | None = None
 
 
+def path_name(path: str, name: str) -> str:
+    """An item's name in the snapshot: its component path, dotted, then its
+    own name; just its own name in the root (`path` empty)."""
+    return f"{path}.{name}" if path else name
+
+
 class Collector:
-    """Gathers what the master holds, by kind and name. `where` says where
-    an item was found (a component path), for messages about duplicates."""
+    """Gathers what the master holds, by kind and name. `path` is the
+    dotted path of the component an item is in ("" for the root); `where`
+    says where it was found, for messages about duplicates. An item whose
+    own name starts with a double underscore is left out."""
 
     def __init__(self) -> None:
         self._entries: dict[str, dict[str, list[_Entry]]] = {kind: {} for kind in KINDS}
         self.skipped = 0
 
-    def _add(self, kind: str, name: str, entry: _Entry) -> None:
+    def _add(self, kind: str, path: str, name: str, entry: _Entry) -> None:
         if name.startswith(SKIP_PREFIX):
             self.skipped += 1
             return
-        self._entries[kind].setdefault(name, []).append(entry)
+        self._entries[kind].setdefault(path_name(path, name), []).append(entry)
 
-    def plane(self, name: str, where: str, origin: Sequence[float], normal: Sequence[float]) -> None:
+    def plane(self, path: str, name: str, where: str, origin: Sequence[float], normal: Sequence[float]) -> None:
         data: PlaneDict = {"origin": _point(origin), "normal": _unit(normal)}
-        self._add("planes", name, _Entry(where, data))
+        self._add("planes", path, name, _Entry(where, data))
 
-    def contour(self, name: str, where: str, polylines: Sequence[Sequence[Point3]],
+    def contour(self, path: str, name: str, where: str, polylines: Sequence[Sequence[Point3]],
                 plane_origin: Sequence[float], plane_normal: Sequence[float]) -> None:
         """A sketch: its non-construction curves, each sampled to a
         polyline, and the sketch plane."""
         try:
             points, closed = chain(polylines)
         except ChainError as error:
-            self._add("contours", name, _Entry(where, problem=str(error)))
+            self._add("contours", path, name, _Entry(where, problem=str(error)))
             return
         data: ContourDict = {
             "points": [_point(p) for p in points], "closed": closed,
             "plane": {"origin": _point(plane_origin), "normal": _unit(plane_normal)},
         }
-        self._add("contours", name, _Entry(where, data))
+        self._add("contours", path, name, _Entry(where, data))
 
-    def box(self, name: str, where: str, lo: Sequence[float], hi: Sequence[float], cuboid: bool) -> None:
+    def box(self, path: str, name: str, where: str, lo: Sequence[float], hi: Sequence[float],
+            cuboid: bool) -> None:
         data: BoxDict = {"min": _point(lo), "max": _point(hi), "cuboid": cuboid}
-        self._add("boxes", name, _Entry(where, data))
+        self._add("boxes", path, name, _Entry(where, data))
 
     def parameter(self, name: str, value: float, unit: str, expression: str) -> None:
+        """A user parameter; these belong to the whole design, so no path."""
         data: ParameterDict = {"value": _r(value), "unit": unit, "expression": expression}
-        self._add("parameters", name, _Entry("user parameters", data))
+        self._add("parameters", "", name, _Entry("user parameters", data))
 
-    def problem(self, kind: str, name: str, where: str, message: str) -> None:
+    def problem(self, kind: str, path: str, name: str, where: str, message: str) -> None:
         """An item that cannot be taken, e.g. a surface body."""
-        self._add(kind, name, _Entry(where, problem=message))
+        self._add(kind, path, name, _Entry(where, problem=message))
 
     def build(self, source: str) -> SnapshotDict:
         tables: dict[str, dict[str, Any]] = {kind: {} for kind in KINDS}

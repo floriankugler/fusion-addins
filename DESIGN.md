@@ -356,7 +356,8 @@ proposed]
   a contour in a perpendicular plane is sectioned at both big faces of the part
   and the tighter result wins, so the part fits over its whole thickness. Both
   are polyline math on the snapshot (`lang/core/contours.py`). [implemented
-  2026-10-11; the rules below were chosen while implementing]
+  2026-10-11; the rules below were chosen while implementing and confirmed
+  by Florian the same day]
   - In the part's plane, a closed contour is intersected with the outline
     and its bounds stand in for missing limits. An open contour is an edge:
     it limits the axis across its chord (first to last point), the part
@@ -448,14 +449,22 @@ proposed]
   button runs `lang/emit/snapshot.py` on the active document and saves
   `snapshot.json` (shape in `lang/core/snapshot_types.py`; the Fusion-free
   half, `lang/emit/snapshot_format.py`, chains curves, collects names and
-  hashes, and is unit tested). Rules chosen while implementing [proposed]:
+  hashes, and is unit tested). Rules chosen while implementing, confirmed
+  by Florian 2026-10-11 (naming changed to paths then):
   - items in components are taken in world coordinates, through the
     occurrence they are reached by;
-  - a component with exactly one body names its box (Florian names the
-    components of placeholder bodies); otherwise each body names its own;
+  - items in the root keep their names; items inside components are named
+    by the dotted path of component names from the root, then their own
+    name (`Bett.oben`, `Moebel.Sitzbank.Sitz`); a component's only body
+    takes the component's path (`Moebel.Kueche`), since Florian names the
+    components of placeholder bodies and leaves the bodies as Body1; user
+    parameters belong to the whole design and have no path;
   - a component whose name starts with `__` is left out with everything in
     it; linked components are left out, since they belong to other
     documents;
+  - sketches drawn only to make a body count as contours like any other,
+    so they are named `__...` to leave them out (no guessing from hidden
+    or consumed sketches);
   - a sketch's construction curves do not count; the rest must form one
     chain without branches;
   - surface bodies, duplicate names (per kind: a plane and a sketch may
@@ -922,7 +931,7 @@ with module("floor", van.box("Boden")) as f:
     board("panel_front", ply12).on(f.top).between(floor_outline, f.front, joint)
     board("panel_back", ply12).on(f.top).between(floor_outline, joint, f.back)
 
-kitchen_box = van.box("Kueche")
+kitchen_box = van.box("Moebel.Kueche")
 kitchen = drawer_cabinet("kitchen", kitchen_box, 3, slide, front=kitchen_box.right)
 kitchen.check(inside_box, inside(floor_outline))
 ```
