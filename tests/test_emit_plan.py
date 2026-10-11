@@ -129,6 +129,6 @@ def test_example_plans_completely(tmp_path: Path):
     sides = [p for p in plan.parts if p.path in ("drawercab.left", "drawercab.right")]
     for side in sides:
         assert len(side.steps) == 1 and isinstance(side.steps[0], HoleStep)
-        assert len(side.steps[0].points) == 16
+        assert len(side.steps[0].points) == 13   # the column starts above the raised bottom
     assert [p.component for p in plan.parts if p.path.endswith("floor")] == [
         ("drawercab", "drawer1"), ("drawercab", "drawer2"), ("drawercab", "drawer3")]

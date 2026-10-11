@@ -354,6 +354,105 @@ class Outline:
     face: Face
 
 
+class Operation:
+    """A named operation of a board, reached as `side.toekick` or
+    `side.op("toekick")`. Its edges are positions named by direction, so
+    `side.toekick.top` is the upper edge of the notch and
+    `side.groove.floor` the bottom of the pocket; it is also what
+    `chamfer()` takes to chamfer the operation's contour."""
+
+    def __init__(self, part: Board, name: str, op: Op):
+        self.part = part
+        self.name = name
+        self.op = op
+
+    def __repr__(self) -> str:
+        return f"Operation({self.part.path}.{self.name})"
+
+    def _extents(self) -> dict[Axis, tuple[float, float]]:
+        """The region the operation occupies, per world axis."""
+        part = self.part
+        b = part.box()
+        op = self.op
+        extents: dict[Axis, tuple[float, float]] = {}
+        if isinstance(op, Chamfer):
+            raise LangError(f"{self!r}: a chamfer has no edges to refer to.", part.path)
+        if isinstance(op, EdgeOp):
+            face = directions.frame.direction(op.face)
+            s_axis, t_axis = part.face_axes(Face(part, face))
+            inner = op.op
+            if isinstance(inner, Hole):
+                r = inner.d / 2
+                extents[s_axis] = (op.s - r, op.s + r)
+                extents[t_axis] = (op.t - r, op.t + r)
+            else:
+                u0, v0, u1, v1 = inner.shape.bounds
+                extents[s_axis] = (u0 + op.s, u1 + op.s)
+                extents[t_axis] = (v0 + op.t, v1 + op.t)
+            value = b.hi[face.axis] if face.sign > 0 else b.lo[face.axis]
+            extents[face.axis] = tuple(sorted((value, value - face.sign * inner.depth)))  # type: ignore[assignment]
+            return extents
+        u, v = part.u_axis, part.v_axis
+        if isinstance(op, Hole):
+            r = op.d / 2
+            extents[u] = (op.u - r, op.u + r)
+            extents[v] = (op.v - r, op.v + r)
+        else:
+            u0, v0, u1, v1 = op.shape.bounds
+            extents[u] = (u0, u1)
+            extents[v] = (v0, v1)
+        if not isinstance(op, Cut):
+            face = directions.frame.direction(op.face)
+            value = b.hi[face.axis] if face.sign > 0 else b.lo[face.axis]
+            extents[face.axis] = tuple(sorted((value, value - face.sign * op.depth)))  # type: ignore[assignment]
+        return extents
+
+    def side(self, name: str | Direction) -> Pos:
+        """The operation's edge in the given direction, as a position."""
+        d = self.part.scope.frame.direction(name)
+        extents = self._extents()
+        if d.axis not in extents:
+            raise LangError(f"{self!r}: a through cut has no {d.name} edge in the thickness.", self.part.path)
+        lo, hi = extents[d.axis]
+        return Pos(d.axis, hi if d.sign > 0 else lo)
+
+    @property
+    def front(self) -> Pos:
+        return self.side("front")
+
+    @property
+    def back(self) -> Pos:
+        return self.side("back")
+
+    @property
+    def left(self) -> Pos:
+        return self.side("left")
+
+    @property
+    def right(self) -> Pos:
+        return self.side("right")
+
+    @property
+    def top(self) -> Pos:
+        return self.side("top")
+
+    @property
+    def bottom(self) -> Pos:
+        return self.side("bottom")
+
+    @property
+    def floor(self) -> Pos:
+        """The bottom of a pocket or hole: its end away from the face it
+        is cut from."""
+        op = self.op
+        inner = op.op if isinstance(op, EdgeOp) else op
+        if isinstance(inner, (Cut, Chamfer)):
+            raise LangError(f"{self!r}: only a pocket or hole has a floor.", self.part.path)
+        face = directions.frame.direction(op.face if isinstance(op, EdgeOp) else inner.face)
+        lo, hi = self._extents()[face.axis]
+        return Pos(face.axis, lo if face.sign > 0 else hi)
+
+
 class Board:
     def __init__(self, name: str, material: Material, shape: Shape | None = None):
         if not name or "." in name:
@@ -676,10 +775,10 @@ class Board:
         return (Face(self, self.scope.frame.direction_of(self.t_axis, 1)),
                 Face(self, self.scope.frame.direction_of(self.t_axis, -1)))
 
-    def op(self, name: str) -> Op:
+    def op(self, name: str) -> Operation:
         """A named operation, e.g. the cut called "toekick"."""
         try:
-            return self._named_ops[name]
+            return Operation(self, name, self._named_ops[name])
         except KeyError:
             raise LangError(f"no operation named {name!r}.", self.path) from None
 
@@ -687,7 +786,7 @@ class Board:
         """Named operations are reachable as attributes (`left.toekick`)."""
         named: dict[str, Op] = self.__dict__.get("_named_ops", {})
         if name in named:
-            return named[name]
+            return Operation(self, name, named[name])
         raise AttributeError(name)
 
     # -- 2D frames ------------------------------------------------------------------------------
@@ -863,10 +962,12 @@ class Board:
                                 point[0], point[1]), name)
         return self
 
-    def chamfer(self, what: Edge | Outline | Op, size: float) -> Self:
+    def chamfer(self, what: Edge | Outline | Operation | Op, size: float) -> Self:
         """A chamfer along an edge (`side.front.inner`), along a face's
         outline (`side.outer.outline`), or along a named operation of this
         board (`side.toekick`)."""
+        if isinstance(what, Operation):
+            what = what.op
         if isinstance(what, Edge):
             if what.part is not self:
                 raise LangError(f"chamfer(): {what!r} is not an edge of this board.", self.path)

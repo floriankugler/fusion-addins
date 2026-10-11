@@ -110,7 +110,11 @@ proposed]
 - **Every modifier returns the part itself, and the part is mutable.** A later
   `side.hole(...)` on its own line is the same as the chained form, which is
   what the incremental workflow needs. Operations get a `name=` and are
-  reachable as attributes, so `left.toekick.top` names the face a cut made.
+  reachable as attributes, so `left.toekick.top` names the face a cut made:
+  a named operation's edges are positions by direction, a pocket or hole
+  also has a `floor`, and `board("bottom").on(left.toekick.top,
+  toward=cab.top)` puts the bottom on the toe kick without repeating its
+  height. [implemented 2026-10-11]
 - **Operations keep a few keywords.** Face, position and depth interact and
   belong in one call: `pocket(shape, face=, at=, depth=)`. Splitting them into
   separate modifiers would double the length and lose the grouping.
@@ -333,6 +337,12 @@ proposed]
   extent is an argument it is one of those three names, checked by the type
   checker: `bay.split("height", 3)`, `.grain("depth")`. Axis letters do not
   appear in build files. [decided 2026-10-10]
+- `split("height", 3)` makes equal bays; `split("height", [230])` cuts a
+  230 mm bay off and returns it with the remaining space, which is split
+  again: `first, rest = space.split("height", [230]); rest.split("height",
+  2)`. Several sizes work the same, the remainder last. No "fill the rest"
+  marker: the steps say it. Bays run from bottom to top, left to right,
+  front to back in the box's own frame. [decided 2026-10-11]
 - Strings in the API are either names checked as literals by the type
   checker (`width`/`depth`/`height`, `"inner"`/`"outer"` in `show()` and
   `to()` for the chained form) or lookups for computed names

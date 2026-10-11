@@ -60,10 +60,29 @@ def test_box_sides_and_extents():
     assert b.height == 720 and b.width == 600 and b.depth == 500
     bays = b.split("height", 3)
     assert [bay.bottom.value for bay in bays] == [0, 240, 480]
+    first, rest = b.split("height", [230])
+    assert (first.bottom.value, first.top.value) == (0, 230) and (rest.bottom.value, rest.top.value) == (230, 720)
+    assert [(bay.bottom.value, bay.top.value) for bay in rest.split("height", 2)] == [(230, 475), (475, 720)]
+    one, two, remainder = b.split("height", [230, 200])
+    assert one.height == 230
+    assert (two.bottom.value, two.top.value) == (230, 430) and remainder.bottom.value == 430
+    gapped = b.split("width", [100], gap=20)
+    assert [(bay.left.value, bay.right.value) for bay in gapped] == [(0, 100), (120, 600)]
+    assert len(b.split("height", [360, 360])) == 2    # an exact fit has no remainder
+    with pytest.raises(LangError):
+        b.split("height", [500, 300])          # more than the box has
     moved = b.with_sides(front=Pos("x", 100), top=b.bottom + 50)
     assert moved.front.value == 100 and moved.top.value == 50
     with pytest.raises(TypeError):
         b.shrunk(lefft=5)  # type: ignore[call-arg]  -- a misspelt side is a type error
+
+
+def test_split_runs_from_the_frames_own_side():
+    box = Box.from_size(width=500, depth=600, height=720)
+    with module("cab", box, front=box.right) as cab:
+        first, rest = cab.interior.split("width", [100])
+        assert first.left.value == cab.left.value and first.width == 100
+        assert rest.right.value == cab.right.value
 
 
 # -- placement ----------------------------------------------------------------
@@ -163,9 +182,33 @@ def test_cut_changes_outline_and_names_the_op():
     left.cut(rect(depth=60, height=100), at=left.outer.bottom.front, name="toekick")
     assert left.outline.area == pytest.approx(area_before - 60 * 100)
     toekick = left.op("toekick")
-    assert isinstance(toekick, Cut)
-    assert toekick.shape.bounds == pytest.approx((0, 0, 60, 100))
-    assert left.toekick is toekick
+    assert isinstance(toekick.op, Cut)
+    assert toekick.op.shape.bounds == pytest.approx((0, 0, 60, 100))
+    assert left.toekick.op is toekick.op
+
+
+def test_named_operations_expose_their_edges():
+    cab = carcass()
+    left = cab["left"]
+    left.cut(rect(depth=60, height=100), at=left.outer.bottom.front, name="toekick")
+    assert left.toekick.top == Pos("z", 100) and left.toekick.bottom == Pos("z", 0)
+    assert left.toekick.front == Pos("x", 0) and left.toekick.back == Pos("x", 60)
+    with pytest.raises(LangError):
+        left.toekick.left                     # a through cut has no extent in the thickness
+    with pytest.raises(LangError):
+        left.toekick.floor
+    left.pocket(rect(depth=300, height=9.5), at=left.inner.bottom(20).front(12), depth=5, name="groove")
+    assert left.groove.floor == Pos("y", 15 - 5) and left.groove.right == Pos("y", 15)
+    assert left.groove.left == left.groove.floor
+    assert left.groove.bottom == Pos("z", 20) and left.groove.top == Pos("z", 29.5)
+    left.hole(d=8, depth=30, at=left.front.bottom(50), name="dowel")   # into the front narrow face
+    assert left.dowel.floor == Pos("x", 30) and left.dowel.top == Pos("z", 54)
+    # a board placed on a cut's edge, and bays above it
+    with cab:
+        bottom = board("bottom2", ply15).on(left.toekick.top, toward=cab.top).between(cab["left"], cab["right"])
+    assert bottom.box().lo["z"] == 100 and bottom.box().hi["z"] == 115
+    bays = cab.interior.with_sides(bottom=bottom.top).split("height", 2)
+    assert bays[0].bottom.value == 115
 
 
 def test_hole_anchor_offsets_and_positions():

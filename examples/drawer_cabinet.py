@@ -21,26 +21,36 @@ class StandInSlide:
                 .with_sides(top=inner.bottom + height))
 
 
-def drawer_cabinet(name: str, box: Box, n: int, slide: StandInSlide, front: Side | None = None) -> Scope:
+def drawer_cabinet(name: str, box: Box, n: int, slide: StandInSlide, front: Side | None = None,
+                   bottom_drawer: float | None = None) -> Scope:
     """A drawer cabinet in its own frame: front is where the drawers open,
-    wherever the cabinet stands. `front=` places it (see `module`)."""
+    wherever the cabinet stands. `front=` places it (see `module`). With
+    `bottom_drawer=` the lowest bay gets that height and the others share
+    the rest; otherwise all bays are equal."""
     with module(name, box, front=front) as cab:
         left = board("left", ply15).on(cab.left)
         right = board("right", ply15).on(cab.right)
-        bottom = board("bottom", ply15).on(cab.bottom).between(left, right)
-        top = board("top", ply15).on(cab.top).between(left, right)
-        board("back", ply9).on(cab.back).between(left, right, bottom, top)
-
-        # toe kick notch in both sides, named so its faces can be referenced
+        # toe kick notch in both sides, named so its edges can be referred to
         for side in (left, right):
             side.cut(rect(depth=60, height=100), at=side.outer.bottom.front, name="toekick")
+        # the bottom sits on the toe kick, not on the floor
+        bottom = board("bottom", ply15).on(left.toekick.top, toward=cab.top).between(left, right)
+        top = board("top", ply15).on(cab.top).between(left, right)
+        board("back", ply9).on(cab.back).between(left, right, bottom, top)
 
         # shelf-pin holes on the inner faces, lined up on both sides
         for side in (left, right):
             for z in spread(bottom.top + 100, top.bottom - 100, pitch=32):
                 side.hole(d=5, depth=10, at=side.inner.front(37).bottom(z))
 
-        for i, bay in enumerate(cab.interior.split("height", n), 1):
+        # drawer bays fill the space above the bottom
+        space = cab.interior.with_sides(bottom=bottom.top)
+        if bottom_drawer is None:
+            bays = space.split("height", n)
+        else:
+            first, rest = space.split("height", [bottom_drawer])
+            bays = [first] + rest.split("height", n - 1)
+        for i, bay in enumerate(bays, 1):
             drawer(f"drawer{i}", bay, slide)
 
         cab.export("worktop", top.top)   # for whatever stands on the cabinet
@@ -74,4 +84,4 @@ def drawer(name: str, bay: Box, slide: StandInSlide) -> Scope:
 # 500 wide (across the vehicle) and 600 deep (along it); inside the module the
 # cabinet is 600 wide and 500 deep.
 box = Box.from_size(width=500, depth=600, height=720)
-cabinet = drawer_cabinet("drawercab", box, 3, StandInSlide(), front=box.right)
+cabinet = drawer_cabinet("drawercab", box, 3, StandInSlide(), front=box.right, bottom_drawer=230)

@@ -5,12 +5,16 @@ come from the box's frame, by default the frame of the scope the box was
 made in, so a module's box names its sides the module's way."""
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from . import directions
 from .directions import AXES, Axis, Direction, ExtentName, Frame
 from .errors import LangError
 from .refs import Pos, PosLike, Side, as_pos
 
 _SIDE_NAMES = ("front", "back", "left", "right", "top", "bottom")
+#: Where a split starts: it runs from this side toward the opposite one.
+_SPLIT_FROM: dict[ExtentName, str] = {"height": "bottom", "width": "left", "depth": "front"}
 
 
 class Box:
@@ -119,23 +123,46 @@ class Box:
 
     # -- derived boxes ------------------------------------------------------------
 
-    def split(self, name: ExtentName, n: int, gap: float = 0.0) -> list[Box]:
-        """`n` equal boxes along one extent (`split("height", 3)` stacks
-        three bays), with `gap` between them."""
+    def split(self, name: ExtentName, parts: int | Sequence[float], gap: float = 0.0) -> list[Box]:
+        """Boxes along one extent, with `gap` between them. `split("height",
+        3)` is three equal bays. `split("height", [230])` cuts a 230 mm bay
+        off and returns it with the remaining space, so `first, rest =
+        space.split("height", [230])` and then `rest.split("height", 2)`;
+        with several sizes the remainder is the last box, left out when the
+        sizes fill the box exactly. The bays run from bottom to top, left to
+        right or front to back of this box's frame."""
         axis = self.frame.axis_of_extent(name)
-        if n < 1:
-            raise LangError("split: n must be at least 1.")
-        total = self.extent(name) - gap * (n - 1)
-        if total <= 0:
-            raise LangError(f"split: {n} bays with gap {gap} do not fit in {self.extent(name)}.")
-        size = total / n
+        extent = self.extent(name)
+        if isinstance(parts, int):
+            if parts < 1:
+                raise LangError("split: at least one bay is needed.")
+            total = extent - gap * (parts - 1)
+            if total <= 0:
+                raise LangError(f"split: {parts} bays with gap {gap:g} do not fit in {extent:g}.")
+            resolved = [total / parts] * parts
+        else:
+            resolved = [float(s) for s in parts]
+            if not resolved:
+                raise LangError("split: at least one size is needed.")
+            if any(s <= 0 for s in resolved):
+                raise LangError("split: every bay needs a positive size.")
+            rest = extent - sum(resolved) - gap * len(resolved)
+            if rest > 1e-6:
+                resolved.append(rest)
+            elif rest < -1e-6:
+                raise LangError(f"split: the sizes add up to {sum(resolved):g}, the box has {extent:g}.")
+        start = self.frame.direction(_SPLIT_FROM[name])
+        position = self.lo[axis] if start.sign < 0 else self.hi[axis]
+        step = 1 if start.sign < 0 else -1
         boxes: list[Box] = []
-        for i in range(n):
-            lo = dict(self.lo)
-            hi = dict(self.hi)
-            lo[axis] = self.lo[axis] + i * (size + gap)
-            hi[axis] = lo[axis] + size
+        for size in resolved:
+            lo, hi = dict(self.lo), dict(self.hi)
+            if step > 0:
+                lo[axis], hi[axis] = position, position + size
+            else:
+                lo[axis], hi[axis] = position - size, position
             boxes.append(Box(lo, hi, self.frame))
+            position += step * (size + gap)
         return boxes
 
     def shrunk(self, *, front: float = 0.0, back: float = 0.0, left: float = 0.0, right: float = 0.0,
