@@ -1193,7 +1193,9 @@ The smallest path through all layers [proposed, revised 2026-10-10]:
 Status 2026-10-10: steps 1 to 3 are implemented on branch `language`
 (`lang/core`, `lang/preview`, `lang/emit`, `addins-src/compiler`, `tests/`,
 `examples/`), with pyright strict and 26 tests. The viewer has hide/isolate,
-display modes, a capped section and SpaceMouse support. The emitter is a
+display modes, a capped section and SpaceMouse support; since 2026-10-11 also
+the master's ghosts, a floor-grid toggle and a collapsible part tree by path
+(hardware bodies included; clicking a group hides or shows all of it). The emitter is a
 Fusion-free plan step (`lang/emit/plan.py`: world geometry, batching, chamfer
 contours) plus the adsk interpreter (`lang/emit/fusion.py`); it draws the
 drawer cabinet (23 parts, 61 features) in 0.4 s and `examples/operations.py`,

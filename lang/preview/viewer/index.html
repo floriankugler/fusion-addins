@@ -18,10 +18,16 @@
   #selected { font-family: ui-monospace, Menlo, monospace; font-size: 12px; margin: 8px 0 12px;
     padding: 8px; background: #f7f5f0; border-radius: 4px; min-height: 2.6em; white-space: pre-wrap; }
   ul { list-style: none; padding: 0; margin: 0; }
-  li { padding: 2px 0; cursor: pointer; font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
-  li.hidden { color: #bbb; text-decoration: line-through; }
-  li.selected { color: var(--accent); }
-  li .mat { color: var(--muted); font-family: -apple-system, system-ui, sans-serif; }
+  #parts ul { padding-left: 14px; }
+  .node { display: flex; align-items: baseline; gap: 4px; padding: 2px 0; cursor: pointer;
+    font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+  .node .caret { flex: none; width: 12px; text-align: center; color: var(--muted); user-select: none; }
+  .node.group .name { font-weight: 600; }
+  .node.hidden .name { color: #bbb; text-decoration: line-through; }
+  .node.partial .name { color: #999; }
+  .node.selected .name { color: var(--accent); }
+  .node .mat, .node .count { color: var(--muted); font-family: -apple-system, system-ui, sans-serif; }
+  .hint { color: var(--muted); font-size: 11px; margin: -2px 0 6px; }
   .problems { color: var(--accent); margin-top: 10px; }
   kbd { background: #eee; border-radius: 3px; padding: 0 4px; font-family: ui-monospace, Menlo, monospace; }
   .row { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
@@ -60,6 +66,7 @@
       <option value="ghost">ghosted</option>
     </select>
   </div>
+  <div class="row"><label><input type="checkbox" id="gridOn" checked> floor grid</label></div>
 
   <h2>Master</h2>
   <div id="masterInfo" class="keys">no snapshot</div>
@@ -77,6 +84,7 @@
   <div class="row"><input type="range" id="secPos" min="0" max="1000" value="500"><span id="secValue" style="min-width:5em;text-align:right"></span></div>
 
   <h2>Parts</h2>
+  <div class="hint">click: hide / show &middot; alt-click: select &middot; &#9656;: open / close (alt: all below)</div>
   <ul id="parts"></ul>
   <div class="problems" id="problems"></div>
 
@@ -87,6 +95,7 @@
     <div><span>isolate selected / show all</span><kbd>i</kbd></div>
     <div><span>show all</span><kbd>a</kbd></div>
     <div><span>display mode</span><kbd>e</kbd></div>
+    <div><span>floor grid on / off</span><kbd>g</kbd></div>
     <div><span>master boxes and contours</span><kbd>m</kbd></div>
     <div><span>section on / off</span><kbd>s</kbd></div>
     <div><span>section axis</span><kbd>x</kbd> <kbd>y</kbd> <kbd>z</kbd></div>
@@ -131,6 +140,23 @@ scene.add(sun);
 const grid = new THREE.GridHelper(4000, 40, 0xcccccc, 0xe4e2dd);
 grid.rotation.x = Math.PI / 2;
 scene.add(grid);
+
+// Per-viewer conveniences kept across reloads; the page works without them.
+function stored(key, fallback) {
+  try { const v = localStorage.getItem('preview.' + key); return v === null ? fallback : JSON.parse(v); }
+  catch (e) { return fallback; }
+}
+function store(key, value) {
+  try { localStorage.setItem('preview.' + key, JSON.stringify(value)); } catch (e) {}
+}
+
+function setGrid(on) {
+  grid.visible = on;
+  $('gridOn').checked = on;
+  store('grid', on);
+}
+setGrid(stored('grid', true));
+$('gridOn').onchange = (e) => setGrid(e.target.checked);
 scene.add(new THREE.AxesHelper(300));
 
 let root = null;
@@ -260,6 +286,7 @@ async function load(first) {
     for (const mod of layout.modules) for (const part of mod.parts) {
       pathOf[sanitized(part.path)] = part.path; materialOf[part.path] = part.material;
     }
+    for (const { path } of hardwareBodies()) pathOf[sanitized(path)] = path;
     meshes((obj) => {
       obj.userData.path = pathOf[obj.name] || obj.name;
       obj.geometry.deleteAttribute('normal');
@@ -453,7 +480,7 @@ function toggle(path) {
 function showAll() { hidden.clear(); applyVisibility(); renderList(); showSelected(); }
 
 function isolate(path) {
-  const others = (layout?.modules ?? []).flatMap((m) => m.parts).map((p) => p.path).filter((p) => p !== path);
+  const others = listItems().map((item) => item.path).filter((p) => p !== path);
   const alreadyIsolated = others.every((p) => hidden.has(p)) && !hidden.has(path);
   if (alreadyIsolated) { showAll(); return; }
   hidden.clear();
@@ -463,6 +490,7 @@ function isolate(path) {
 
 function select(path) {
   selectedPath = path;
+  if (path) revealInList(path);
   meshes((o) => {
     const on = o.userData.path === path;
     o.material.emissive = new THREE.Color(on ? 0xc0502c : 0x000000);
@@ -470,6 +498,7 @@ function select(path) {
   });
   showSelected();
   renderList();
+  $('parts').querySelector('.node.leaf.selected')?.scrollIntoView({ block: 'nearest' });
   if (path) navigator.clipboard?.writeText(path).catch(() => {});
 }
 
@@ -477,7 +506,12 @@ function showSelected() {
   const sel = $('selected');
   if (!selectedPath || !layout) { sel.textContent = 'click a part for its path'; return; }
   const part = layout.modules.flatMap((m) => m.parts).find((p) => p.path === selectedPath);
-  if (!part) { sel.textContent = selectedPath + ' (gone after rebuild)'; return; }
+  if (!part) {
+    const bought = hardwareBodies().some((h) => h.path === selectedPath);
+    sel.textContent = selectedPath + (bought ? '\nhardware' : ' (gone after rebuild)') +
+      (bought && hidden.has(selectedPath) ? ', hidden' : '');
+    return;
+  }
   const b = part.box;
   sel.textContent = selectedPath + '\n' + part.material + ', ' +
     `${(b.max[0]-b.min[0]).toFixed(0)} x ${(b.max[1]-b.min[1]).toFixed(0)} x ${(b.max[2]-b.min[2]).toFixed(0)} mm\n` +
@@ -485,24 +519,124 @@ function showSelected() {
     (hidden.has(selectedPath) ? ', hidden' : '');
 }
 
+// -- the parts list: a tree by path (module, scope, part) -----------------------
+
+// Every body of a bought part, by path, as the scene names it.
+function hardwareBodies() {
+  return (layout?.modules ?? []).flatMap((m) => (m.hardware ?? []).flatMap((item) =>
+    item.bodies.map((body) => ({ path: `${item.path}.${body.name}`, label: 'hardware' }))));
+}
+
+function listItems() {
+  const parts = (layout?.modules ?? []).flatMap((m) => m.parts.map((p) => ({ path: p.path, label: p.material })));
+  return [...parts, ...hardwareBodies()];
+}
+
+function buildTree(items) {
+  const root = { name: '', path: '', depth: 0, groups: new Map(), leaves: [] };
+  for (const item of items) {
+    const segments = item.path.split('.');
+    let node = root;
+    for (let i = 0; i < segments.length - 1; i++) {
+      if (!node.groups.has(segments[i])) {
+        node.groups.set(segments[i], { name: segments[i], path: segments.slice(0, i + 1).join('.'),
+          depth: i + 1, groups: new Map(), leaves: [] });
+      }
+      node = node.groups.get(segments[i]);
+    }
+    node.leaves.push({ ...item, name: segments[segments.length - 1] });
+  }
+  return root;
+}
+
+function pathsUnder(node) {
+  return [...node.leaves.map((l) => l.path), ...[...node.groups.values()].flatMap(pathsUnder)];
+}
+
+// Open or closed per group path; groups below the modules start closed.
+const openGroups = stored('open', {});
+function isOpen(group) { return openGroups[group.path] ?? group.depth < 2; }
+function setOpen(group, open, below) {
+  openGroups[group.path] = open;
+  if (below) for (const g of group.groups.values()) setOpen(g, open, true);
+}
+
+function revealInList(path) {
+  const segments = path.split('.');
+  for (let i = 1; i < segments.length; i++) openGroups[segments.slice(0, i).join('.')] = true;
+  store('open', openGroups);
+}
+
+function toggleGroup(paths) {
+  const show = paths.every((p) => hidden.has(p));
+  for (const p of paths) { if (show) hidden.delete(p); else hidden.add(p); }
+  applyVisibility(); renderList(); showSelected();
+}
+
+function row(kind, name, caret) {
+  const div = document.createElement('div');
+  div.className = 'node ' + kind;
+  const c = document.createElement('span');
+  c.className = 'caret';
+  c.textContent = caret;
+  const n = document.createElement('span');
+  n.className = 'name';
+  n.textContent = name;
+  div.append(c, n);
+  return div;
+}
+
+function note(text, cls) {
+  const span = document.createElement('span');
+  span.className = cls;
+  span.textContent = text;
+  return span;
+}
+
+function renderNode(node, ul) {
+  for (const leaf of node.leaves) {
+    const li = document.createElement('li');
+    const div = row('leaf', leaf.name, '');
+    div.append(note(leaf.label, 'mat'));
+    if (hidden.has(leaf.path)) div.classList.add('hidden');
+    if (leaf.path === selectedPath) div.classList.add('selected');
+    div.title = leaf.path;
+    div.onclick = (e) => { if (e.altKey) select(leaf.path); else toggle(leaf.path); };
+    li.append(div);
+    ul.append(li);
+  }
+  for (const group of node.groups.values()) {
+    const li = document.createElement('li');
+    const paths = pathsUnder(group);
+    const shown = paths.filter((p) => !hidden.has(p)).length;
+    const open = isOpen(group);
+    const div = row('group', group.name, open ? '\u25be' : '\u25b8');
+    div.append(note(String(paths.length), 'count'));
+    if (shown === 0) div.classList.add('hidden'); else if (shown < paths.length) div.classList.add('partial');
+    if (selectedPath && selectedPath.startsWith(group.path + '.') && !open) div.classList.add('selected');
+    div.title = group.path;
+    div.querySelector('.caret').onclick = (e) => {
+      e.stopPropagation();
+      setOpen(group, !open, e.altKey);
+      store('open', openGroups);
+      renderList();
+    };
+    div.onclick = () => toggleGroup(paths);
+    li.append(div);
+    if (open) {
+      const sub = document.createElement('ul');
+      renderNode(group, sub);
+      li.append(sub);
+    }
+    ul.append(li);
+  }
+}
+
 function renderList() {
   const list = $('parts');
   list.innerHTML = '';
   if (!layout) return;
-  for (const mod of layout.modules) {
-    for (const part of mod.parts) {
-      const li = document.createElement('li');
-      li.textContent = part.path + ' ';
-      const mat = document.createElement('span');
-      mat.className = 'mat';
-      mat.textContent = part.material;
-      li.appendChild(mat);
-      if (hidden.has(part.path)) li.classList.add('hidden');
-      if (part.path === selectedPath) li.classList.add('selected');
-      li.onclick = (e) => { if (e.altKey) select(part.path); else toggle(part.path); };
-      list.appendChild(li);
-    }
-  }
+  renderNode(buildTree(listItems()), list);
   const problems = $('problems');
   problems.textContent = layout.problems.length ? 'checks: ' + layout.problems.join('; ') : '';
 }
@@ -581,6 +715,7 @@ window.addEventListener('keydown', (e) => {
     case 'i': if (selectedPath) isolate(selectedPath); break;
     case 'a': showAll(); break;
     case 'e': setMode(modes[(modes.indexOf(mode) + 1) % modes.length]); break;
+    case 'g': setGrid(!grid.visible); break;
     case 'm': {
       const on = !(masterShow.boxes || masterShow.contours);
       masterShow.boxes = masterShow.contours = on;
