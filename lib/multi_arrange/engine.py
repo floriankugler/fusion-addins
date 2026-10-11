@@ -34,6 +34,7 @@ from ..envelope import builder as envelope_builder
 
 
 BRIDGE_WIDTH = 0.2       # cm; thin enough that no real part can span it
+PROXY_SQUASH = 0.05      # proxy thickness factor, so the selected face is the largest (see build_proxy)
 PROXY_PREFIX = 'ma_proxy'
 RESULT_COMPONENT_NAME = 'Multi-Arrange'
 TIMELINE_GROUP_NAME = 'Multi-Arrange'
@@ -338,6 +339,19 @@ def build_proxy(parts: list[model.Part], frame: adsk.core.Matrix3D) -> Proxy:
                 'a single connected proxy body.'
             )
 
+    # The solver lays every part on its largest face and offers no working
+    # way to name the face instead (adding a component by its face fails
+    # with InternalValidationError, retested 2026-10-11). A part narrower
+    # than it is thick, such as a batten on edge, would land on its side.
+    # Squashing the proxy along the frame's z (the selected face's normal,
+    # z >= 0 from the frame's origin) makes that face and its opposite the
+    # largest ones, while the outline in the sheet plane stays exact. The
+    # proxy is only solved with: placements map the real parts through the
+    # frame, so its thickness does not matter.
+    squash = adsk.core.Matrix3D.create()
+    squash.setCell(2, 2, PROXY_SQUASH)
+    temp_manager.transform(merged, squash)
+
     rotations = [part.settings.rotation for part in parts]
     return Proxy(merged_body=merged, frame=frame, parts=parts,
                  rotation_type=rotation_type_for(rotations),
@@ -509,6 +523,10 @@ def solve_in_scratch(proxies: list[Proxy], envelope_spec: EnvelopeSpec,
     try:
         design = adsk.fusion.Design.cast(
             document.products.itemByProductType('DesignProductType'))
+        # Arrange is a timeline feature. A new document takes the design
+        # type from Fusion's preferences, which may be direct modeling.
+        if design.designType != adsk.fusion.DesignTypes.ParametricDesignType:
+            design.designType = adsk.fusion.DesignTypes.ParametricDesignType
         root = design.rootComponent
 
         sketch = envelope_builder.build_envelope_sketch_on(
