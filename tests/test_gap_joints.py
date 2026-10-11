@@ -1,9 +1,13 @@
 """Screws, and connectors in the gaps between tenons (`gaps=`, `tenons=`)."""
+import math
+
 import pytest
 
 from lang import *
 from lang.core.ops import Hole
+from lang.core.layout import build_layout
 from lang.core.scope import registry
+from lang.preview.mesh import mesh_part
 
 ply15 = material("birch", t=15)
 ply18 = material("birch", t=18)
@@ -108,3 +112,17 @@ def test_gap_and_tenon_screw_errors():
                           ("give one of count=, at= or gaps=", lambda: cabineo(count=2, gaps=t))):
         with pytest.raises(LangError, match=message):
             make()
+
+
+@pytest.mark.parametrize("outer", ["left", "right"])
+def test_the_preview_shows_countersinks(outer: str):
+    u, left, right, shelf = _unit()
+    with u:
+        shelf.join(left if outer == "left" else right, using=screws(count=1, countersink=True))
+    layout = build_layout()
+    part = next(p for p in layout["modules"][0]["parts"] if p["path"] == f"unit.{outer}")
+    volume = mesh_part(part, layout["frame"]).volume
+    r, c = 2.0, 2.2                               # a 4 mm screw, its countersink 8.4 wide
+    hole = math.pi * r * r * 15                   # through the 15 mm side, 24-sided in the mesh
+    sink = math.pi * c / 3 * ((r + c) ** 2 + (r + c) * r + r * r) - math.pi * r * r * c
+    assert 300 * 800 * 15 - volume == pytest.approx(hole + sink, rel=0.01)

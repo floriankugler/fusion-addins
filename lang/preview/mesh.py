@@ -1,8 +1,9 @@
 """Meshes a layout into a glTF scene for the browser viewer.
 
 Each board is its outline extruded by its thickness, with pockets, holes
-and V-grooves subtracted through mesh booleans (manifold). Chamfers are not
-shown, and operations on narrow faces are not meshed yet.
+(countersinks included) and V-grooves subtracted through mesh booleans
+(manifold). Other chamfers are not shown, and operations on narrow faces
+are not meshed yet.
 """
 from __future__ import annotations
 
@@ -15,7 +16,7 @@ import trimesh
 from shapely.geometry import Polygon
 from trimesh.creation import extrude_polygon
 
-from ..core.layout_types import BoxDict, HardwareLayout, Layout, PartLayout, Rings, VGrooveLayout
+from ..core.layout_types import BoxDict, HardwareLayout, HoleLayout, Layout, PartLayout, Rings, VGrooveLayout
 
 AXES = ("x", "y", "z")
 
@@ -71,6 +72,29 @@ def _vgroove_tool(op: VGrooveLayout, frame: dict[str, str], t_axis: str, t: floa
     return trimesh.convex.convex_hull(np.array(points))
 
 
+def _countersink_tool(op: HoleLayout, frame: dict[str, str], t_axis: str, t: float) -> Any:
+    """A hole's chamfer, a 90 degree countersink: a cone from the hole's
+    radius plus the chamfer at the face down to the hole's radius, reaching
+    a little above the face and on into the hole so the boolean cuts
+    cleanly. Built in the part's (u, v, t) frame; a narrow face yields an
+    empty tool."""
+    code = frame[op["face"]]
+    if code[1] != t_axis:
+        return trimesh.Trimesh()
+    r, c = op["d"] / 2, op["chamfer"]
+    above, into = 0.01, c + 0.05
+    # (radius, depth into the part), revolved about the hole's axis
+    profile = np.array([[0.0, -above], [r + c + above, -above], [r + c - into, into], [0.0, into]])
+    tool = trimesh.creation.revolve(profile, sections=32)
+    if code[0] == "+":
+        # into the part is down from the upper face: turn the cone over
+        tool.apply_transform(trimesh.transformations.rotation_matrix(math.pi, [1, 0, 0]))
+        tool.apply_translation([op["u"], op["v"], t])
+    else:
+        tool.apply_translation([op["u"], op["v"], 0.0])
+    return tool
+
+
 def mesh_part(part: PartLayout, frame: dict[str, str]) -> Any:
     t = part["thickness"]
     outline = _polygon(part["outline"])
@@ -89,6 +113,8 @@ def mesh_part(part: PartLayout, frame: dict[str, str]) -> Any:
             tool = trimesh.creation.cylinder(radius=op["d"] / 2, height=depth + 0.01, sections=24)
             tool.apply_translation([op["u"], op["v"], (depth + 0.01) / 2])
             tools.append(_from_face(tool, op["face"], frame, t_axis, t, depth))
+            if op["chamfer"] > 0:
+                tools.append(_countersink_tool(op, frame, t_axis, t))
         elif op["kind"] == "vgroove":
             tools.append(_vgroove_tool(op, frame, t_axis, t))
     tools = [tool for tool in tools if len(tool.faces)]

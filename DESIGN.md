@@ -899,7 +899,8 @@ below is proposed]
   grow with the module.
 - Shown: boards as extruded polygons in van coordinates; through cuts exact, since
   they are in the outline; holes and pockets exact through mesh booleans
-  (manifold); chamfers as lines or omitted; hardware as catalog envelope boxes,
+  (manifold); countersinks (hole chamfers) as cones, other chamfers
+  omitted [implemented]; hardware as catalog envelope boxes,
   later the real meshes exported once from Fusion; the vehicle and master
   geometry from the snapshot mesh; grain as a subtle stripe per board; colors by
   material; check overlays (interference pairs, parts flagged not flat, sheet
@@ -922,6 +923,13 @@ below is proposed]
   without Fusion, validates the layout format before the emitter exists, and
   Claude can see it through the built-in browser after each edit.
 - Click-to-path in the viewer is the Copy Path helper outside Fusion.
+- Camera and visibility from code [implemented 2026-10-11]: the page
+  exposes `window.preview` (`look`, `view`, `camera`, `fit`, `isolate`,
+  `show`, `hide`, `select`, `section`, `parts`, `ops`, `loaded`), so a
+  tool driving the browser frames a part, a scope or a named operation
+  from a named direction in one call instead of steering the mouse
+  (AGENTS.md has the details). The camera is kept in the URL hash, so a
+  link or a reload shows the same view.
 - SpaceMouse: the viewer talks to 3DxWare's navigation server
   (`lang/preview/viewer/spacemouse.js`), which works in Chrome and in the
   Claude app's browser pane, not in Safari. The page connects in Safari too,
@@ -1417,11 +1425,31 @@ groove, screws to the face).
       at both faces; checks for parts inside the module box and the gap to a
       contour. The floor battens are the test case.
 
-Then: box joints; arcs from the snapshot's contours (open question
-16).
-(Operations, the half lap and the connectors are done; the assembly
-experiment from question 2 was dropped as a priority on 2026-10-11, since
-assembling module documents is easy by hand.)
+Still to do (listed by Florian 2026-10-11, roughly in his order of weight):
+
+- **Cutouts**, an important one: what the cutouts_native add-in (Face
+  Cutout) does, as an operation in the language: a full inset cutout of a
+  face, or a pattern of Cross, Triangles or Rhombuses that leaves material
+  bands, inner loops kept with tabs to the rim, rounded corners, and a 45
+  degree chamfer on the rim of the selected face only.
+- **Hardware** beyond the slides, as `Mountable` objects like
+  `DrawerSlide`, each with its add-in as the reference: concealed hinges
+  (concealed_hinge_native), hatch hinges (hatch_hinge), ball catches
+  (ball_catch), door latches (door_latch_native), and whatever else the
+  van needs.
+- **Complete the slides**: Blum (Movento) drawer-box machining, runner
+  models for other nominal lengths and for Movento, the other Dynapro
+  load classes.
+- **Joints**: box joints (box_joint), the drawer floor's groove as a join,
+  screws through a drawer face into the box front (two boards face to
+  face, which contacts do not cover yet), dog bones on any inside corner
+  (dog_bones_native).
+- Arcs from the snapshot's contours (open question 16); the preview's
+  other chamfers.
+
+(Operations, the half lap, the connectors and the tenons are done; the
+assembly experiment from question 2 was dropped as a priority on
+2026-10-11, since assembling module documents is easy by hand.)
 
 Before any of it, cheap and useful: write two real modules from the van in the
 proposed syntax on paper, a bank and the rear storage, since those resolved
