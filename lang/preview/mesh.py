@@ -1,11 +1,12 @@
 """Meshes a layout into a glTF scene for the browser viewer.
 
-Each board is its outline extruded by its thickness, with pockets and holes
-subtracted through mesh booleans (manifold). Chamfers are not shown, and
-operations on narrow faces are not meshed yet.
+Each board is its outline extruded by its thickness, with pockets, holes
+and V-grooves subtracted through mesh booleans (manifold). Chamfers are not
+shown, and operations on narrow faces are not meshed yet.
 """
 from __future__ import annotations
 
+import math
 from pathlib import Path
 from typing import Any
 
@@ -14,7 +15,7 @@ import trimesh
 from shapely.geometry import Polygon
 from trimesh.creation import extrude_polygon
 
-from ..core.layout_types import BoxDict, HardwareLayout, Layout, PartLayout, Rings
+from ..core.layout_types import BoxDict, HardwareLayout, Layout, PartLayout, Rings, VGrooveLayout
 
 AXES = ("x", "y", "z")
 
@@ -48,6 +49,28 @@ def _from_face(tool: Any, face: str, frame: dict[str, str], t_axis: str, t: floa
     return tool
 
 
+def _vgroove_tool(op: VGrooveLayout, frame: dict[str, str], t_axis: str, t: float) -> Any:
+    """The groove as a prism in the part's (u, v, t) frame, its opening a
+    little above the face so the boolean cuts cleanly. A narrow face
+    yields an empty tool."""
+    code = frame[op["face"]]
+    if code[1] != t_axis:
+        return trimesh.Trimesh()
+    out = 1.0 if code[0] == "+" else -1.0
+    face = t if out > 0 else 0.0
+    (u0, v0), (u1, v1) = op["start"], op["end"]
+    length = math.hypot(u1 - u0, v1 - v0)
+    wu, wv = -(v1 - v0) / length, (u1 - u0) / length       # across the groove, in the face
+    above = 0.01
+    half = op["depth"] + above                              # 90 degrees: as wide on each side as deep
+    points: list[tuple[float, float, float]] = []
+    for u, v in ((u0, v0), (u1, v1)):
+        points += [(u + wu * half, v + wv * half, face + out * above),
+                   (u - wu * half, v - wv * half, face + out * above),
+                   (u, v, face - out * op["depth"])]
+    return trimesh.convex.convex_hull(np.array(points))
+
+
 def mesh_part(part: PartLayout, frame: dict[str, str]) -> Any:
     t = part["thickness"]
     outline = _polygon(part["outline"])
@@ -66,6 +89,8 @@ def mesh_part(part: PartLayout, frame: dict[str, str]) -> Any:
             tool = trimesh.creation.cylinder(radius=op["d"] / 2, height=depth + 0.01, sections=24)
             tool.apply_translation([op["u"], op["v"], (depth + 0.01) / 2])
             tools.append(_from_face(tool, op["face"], frame, t_axis, t, depth))
+        elif op["kind"] == "vgroove":
+            tools.append(_vgroove_tool(op, frame, t_axis, t))
     tools = [tool for tool in tools if len(tool.faces)]
     if tools:
         try:

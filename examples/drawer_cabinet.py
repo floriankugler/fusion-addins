@@ -1,8 +1,10 @@
 """The drawer cabinet from DESIGN.md: boards and their placement, cuts,
-pockets and holes, and drawer slides as the first hardware. The slide
-dictates the drawer box and pre-drills the carcass sides; joints are not
-modelled yet. Built on its own, it stands in a box of its own; van.py
-imports `drawer_cabinet` and places it in the master's kitchen box."""
+pockets and holes, drawer slides as the first hardware, and connectors in
+the carcass. The slide dictates the drawer box and pre-drills the carcass
+sides; the bottom and top are joined to the sides with Cabineos, the back
+to all four with Dominos. The drawer boxes are not joined yet. Built on
+its own, it stands in a box of its own; van.py imports `drawer_cabinet`
+and places it in the master's kitchen box."""
 from lang import *
 from lang.hardware.slides import DrawerSlide
 from lib.drawer_slides import DYNAPRO_40
@@ -28,7 +30,15 @@ def drawer_cabinet(name: str, box: Box, n: int, slide: DrawerSlide, front: Side 
         # the bottom sits on the toe kick, not on the floor
         bottom = board("bottom", ply15).on(left.toekick.top, toward=cab.top).between(left, right)
         top = board("top", ply15).on(cab.top).between(left, right)
-        board("back", ply9).on(cab.back).between(left, right, bottom, top)
+        back = board("back", ply9).on(cab.back).between(left, right, bottom, top)
+
+        # Cabineos into the sides, from the faces that are not the show
+        # faces (here the inner ones); Dominos all round the back, slotted
+        # into the inner faces too, so each carcass board is machined from
+        # one side. The back carries the Dominos' marks on its show face.
+        bottom.join(left, right, using=cabineo(count=3))
+        top.join(left, right, using=cabineo(count=3))
+        back.join(left, right, bottom, top, using=domino("4x20", count=2))
 
         # shelf-pin holes on the inner faces, lined up on both sides
         for side in (left, right):

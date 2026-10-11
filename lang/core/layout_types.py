@@ -67,6 +67,17 @@ class ChamferLayout(TypedDict):
     face: str
 
 
+class VGrooveLayout(TypedDict):
+    """A 90 degree V-groove along the line from `start` to `end` (u, v) in a
+    big face, `depth` deep, its ends cut square."""
+    kind: Literal["vgroove"]
+    name: str | None
+    face: str
+    start: list[float]
+    end: list[float]
+    depth: float
+
+
 class EdgeOpLayout(TypedDict):
     kind: Literal["edge"]
     face: str
@@ -75,7 +86,7 @@ class EdgeOpLayout(TypedDict):
     op: HoleLayout | PocketLayout
 
 
-OpLayout = CutLayout | PocketLayout | HoleLayout | ChamferLayout | EdgeOpLayout
+OpLayout = CutLayout | PocketLayout | HoleLayout | ChamferLayout | VGrooveLayout | EdgeOpLayout
 
 
 class PartLayout(TypedDict):

@@ -10,6 +10,8 @@ face, extruded along the thickness axis) and an ordered list of steps:
 - `PocketStep`: shapes cut from one face to one depth, batched while
   consecutive pockets share face and depth;
 - `HoleStep`: holes of one diameter and depth from one face, batched alike;
+- `VGrooveStep`: one straight 90 degree V-groove, from its start to its end
+  along the face, `depth` deep (twice as wide at the face), ends square;
 - `ChamferStep`: a size and a contour that names the edges: a face's outer
   loop, the line where two faces meet, a shape's contour on a face, or a
   circle on a face.
@@ -82,6 +84,14 @@ class HoleStep:
 
 
 @dataclass
+class VGrooveStep:
+    face: FaceRef
+    start: Point3
+    end: Point3
+    depth: float
+
+
+@dataclass
 class OutlineContour:
     face: FaceRef
 
@@ -114,7 +124,7 @@ class ChamferStep:
     contour: Contour
 
 
-Step = PocketStep | HoleStep | ChamferStep
+Step = PocketStep | HoleStep | VGrooveStep | ChamferStep
 
 
 @dataclass
@@ -266,6 +276,10 @@ def _plan_op(p: _Part, plan: PartPlan, op: OpLayout, show: FaceRef,
         _add_pocket(p, steps, p.face(op["face"]), op, (0.0, 0.0))
     elif op["kind"] == "hole":
         _add_hole(p, steps, p.face(op["face"]), op, (op["u"], op["v"]))
+    elif op["kind"] == "vgroove":
+        face = p.face(op["face"])
+        steps.append(VGrooveStep(face, p.point(face, op["start"][0], op["start"][1]),
+                                 p.point(face, op["end"][0], op["end"][1]), op["depth"]))
     elif op["kind"] == "edge":
         face = p.face(op["face"])
         inner = op["op"]

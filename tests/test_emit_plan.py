@@ -7,7 +7,7 @@ from lang.build import run_build
 from lang.core.layout import build_layout
 from lang.core.scope import registry
 from lang.emit.plan import (ChamferStep, CircleContour, EdgeContour, FaceRef, HoleStep, OutlineContour,
-                            PocketStep, ShapeContour, plan_layout)
+                            PocketStep, ShapeContour, VGrooveStep, plan_layout)
 
 
 @pytest.fixture(autouse=True)
@@ -120,6 +120,17 @@ def test_unknown_chamfer_target_is_a_problem_not_a_crash():
     assert plan.parts[0].steps == []
 
 
+def test_a_vgroove_runs_between_world_points_on_its_face():
+    with module("cab", CAB) as cab:
+        left = board("left", ply15).on(cab.left)
+        bottom = board("bottom", ply15).on(cab.bottom).between(left, cab.right)
+        bottom.join(left, using=domino("4x20", count=1))
+    (step,) = _plan_of(bottom).steps
+    assert isinstance(step, VGrooveStep)
+    assert step.face == FaceRef("z", -1, 0.0)                 # the bottom's show face, its underside
+    assert (step.start, step.end, step.depth) == ((250.0, 14.0, 0.0), (250.0, 19.0, 0.0), 0.3)
+
+
 def test_example_plans_completely(tmp_path: Path):
     example = Path(__file__).resolve().parent.parent / "examples" / "drawer_cabinet.py"
     layout = run_build(example, tmp_path, scene=False)
@@ -128,7 +139,10 @@ def test_example_plans_completely(tmp_path: Path):
     assert plan.problems == []
     sides = [p for p in plan.parts if p.path in ("drawercab.left", "drawercab.right")]
     for side in sides:
-        pins, predrill = side.steps
+        screws, slots, pins, predrill = side.steps
+        assert isinstance(screws, HoleStep) and isinstance(slots, PocketStep)
+        assert len(screws.points) == 6 and (screws.d, screws.depth) == (5.0, 8.0)   # Cabineos, bottom and top
+        assert len(slots.shapes) == 2 and slots.depth == 10.5                      # Dominos for the back
         assert isinstance(pins, HoleStep) and isinstance(predrill, HoleStep)
         assert len(pins.points) == 13            # the column starts above the raised bottom
         assert len(predrill.points) == 12 and predrill.d == 2.0   # 3 drawers x 4 slide holes

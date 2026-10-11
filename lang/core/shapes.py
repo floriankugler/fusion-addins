@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from typing import cast
 
 from shapely import affinity
-from shapely.geometry import MultiPolygon, Point, Polygon
+from shapely.geometry import LineString, MultiPolygon, Point, Polygon
 from shapely.geometry import box as shapely_box
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
@@ -231,8 +231,16 @@ def rect(*, width: float | None = None, depth: float | None = None, height: floa
     return box_shape(0.0, 0.0, by_axis[u], by_axis[v], (u, v))
 
 
+def slot_shape(start: tuple[float, float], end: tuple[float, float], width: float,
+               segments: int = 8) -> Shape:
+    """A raw slot: the line from `start` to `end` widened to `width`, with
+    round ends of `segments` sides per quarter circle; for joints and
+    hardware, which compute their own positions."""
+    return Shape(LineString([start, end]).buffer(width / 2, quad_segs=segments))
+
+
 def circle(diameter: float, center: tuple[float, float] = (0.0, 0.0), resolution: int = 32) -> Shape:
-    return Shape(Point(*center).buffer(diameter / 2.0, resolution=resolution))
+    return Shape(Point(*center).buffer(diameter / 2.0, quad_segs=resolution))
 
 
 def polygon(points: list[tuple[float, float]]) -> Shape:

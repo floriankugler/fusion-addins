@@ -1,8 +1,8 @@
 # Modeling language: design brief
 
-Status: design only, nothing is implemented. Written 2026-10-09 from a design
-conversation between Florian and Claude, as the starting point for implementation
-work in this repo. Revised 2026-10-10 after a design review and the compile-speed
+Status: partly implemented on branch `language`, see "First slice". Written
+2026-10-09 from a design conversation between Florian and Claude, as the
+starting point for implementation work in this repo. Revised 2026-10-10 after a design review and the compile-speed
 benchmark. All function, package and reference names are placeholders.
 
 Each point is marked:
@@ -119,10 +119,11 @@ proposed]
 - **Operations keep a few keywords.** Face, position and depth interact and
   belong in one call: `pocket(shape, face=, at=, depth=)`. Splitting them into
   separate modifiers would double the length and lose the grouping.
-- **Relations are methods on the moving or edge-on part.** `bottom.join(...)`,
+- **Relations are methods on a part.** `bottom.join(left, right, using=...)`,
   `drawer.mount(...)`, `face.latch(...)`, `cab.port(...)`, `cab.export(...)`.
-  Methods give autocomplete an entry point that free functions lack, and the
-  receiver rule removes the asymmetry of binary relations.
+  Methods give autocomplete an entry point that free functions lack. A
+  relation names every part it involves; nothing is related to whatever
+  happens to touch (see `join` under Joints). [decided 2026-10-11]
 - **Placement resolves lazily with early errors.** `board("left", ply15)` has no
   position until `.on()`. Using `left.inner` before that errors with the part
   path and the missing fact. Since emission is deferred anyway, this costs
@@ -179,7 +180,7 @@ proposed]
   parametric document as a debug mode, because its timeline is a readable log of
   how each part was built. [measured, decision proposed]
 - The emitter is one generic interpreter with a small instruction set: part,
-  cut, pocket, hole, chamfer, name. Every joint and hardware pattern in this repo
+  cut, pocket, hole, chamfer, V-groove, name. Every joint and hardware pattern in this repo
   reduces to those operations on faces of flat parts, which is also what Auto
   Setup recognises. The emitter batches: one sketch per board face, one hole
   feature per diameter and depth, one cut per depth with many profiles, one
@@ -285,9 +286,12 @@ proposed]
   `.miter(end, angle)`; holes and pockets work as on a board.
 - **Operations on a board** [proposed]: `cut` (through, changes the outline),
   `pocket` and `hole` (2D shape plus depth plus face). This list per board is the
-  layout. Operations on the narrow faces (Domino, Cabineo, screws into an edge)
-  are allowed; the one-side check counts them as secondary operations, not as a
-  flip.
+  layout. Operations on a narrow face can be written (`side.front.right(50)`
+  as an anchor) and are emitted, but no joint or connector uses them: the
+  3-axis machine cannot reach a narrow face, so every connector is machined
+  from the big faces of both boards. [decided 2026-10-11 by Florian,
+  replacing the earlier "Domino, Cabineo, screws into an edge" on narrow
+  faces]
 - **Cutting with a part or a box** [decided 2026-10-10]: `side.cut(floor)`
   removes the region the floor occupies inside the side, its outline through
   its thickness; a pocket from the face the region enters through, or a
@@ -533,10 +537,15 @@ proposed]
   extracted from each add-in over time, as `lib/drawer_slides.py` already is.
   Headless add-in calls are at most a stopgap for the first joint. [proposed]
 - A joint is a relation between two parts along the rectangle where they touch.
-  The layout layer finds those rectangles from the parts' boxes. The concept has a
-  name, **Contact**: the shared plane, the rectangle, the two parts, which one
-  meets edge-on. Joint layouts take a contact plus settings and return operations
-  for both parts. [proposed]
+  The concept has a name, **Contact** (`lang/core/contact.py`): a board that
+  meets another edge-on, one of its narrow faces on the other's big face.
+  It holds both parts, the two faces, the axis along the line where they
+  meet and the rectangle: along that axis where the edge-on board's end has
+  material and the other board's outline covers it, across it the edge-on
+  board's thickness. Exact for outlines (a toe kick notch in the side
+  shortens the bottom's contact); pockets do not count; an end interrupted
+  by a notch gives one contact per piece. Joint layouts take a contact plus
+  settings and return operations for both parts. [implemented 2026-10-11]
 - Besides contacts there are **crossings** (`lang/core/crossing.py`): two
   boards in perpendicular planes whose material passes through each other,
   like battens across and along a floor. They share one axis, the line
@@ -545,28 +554,93 @@ proposed]
   uses this too, so lapped boards are not reported. [implemented
   2026-10-11]
 - The first joint is the **half lap** (`lang/joints/laps.py`) [decided and
-  implemented 2026-10-11]: `long.join(half_lap(toward=floor.top))` laps the
-  board with every board it crosses in its module (`into=` narrows that).
-  Its own notches open toward `toward`, the other boards' the opposite way;
+  implemented 2026-10-11]: `long.join(battens, using=half_lap(toward=
+  floor.top))` laps the board with each board named, all of which it must
+  cross. Its own notches open toward `toward`, the other boards' the
+  opposite way;
   the split lies in the middle of the height both share at each crossing
   (`at=` a position instead), and `clearance=` widens each notch per side
   (default 0). Each notch is a through cut named `lap_<other board>`, so
-  the emitter needs nothing new. `Board.join(joint, into=)` hands the
-  board to the joint object (the `Joint` protocol in `part.py`), as
-  `Scope.mount` does with hardware, so core knows no joint types. The join
-  happens when it is called: the boards it crosses must exist by then.
-- Joinery rules are a list of predicate plus joint, first match wins, and an
-  explicit call always beats a rule. Predicates see the contact: materials,
-  roles (end panel, mid panel), visibility. [proposed]
-- One vocabulary for explicit calls and rules [proposed]: joint types are
-  objects with their settings, `tenons(count=3)`, `box_joint()`, `domino(size=8,
-  count=4)`, `cabineo(count=2)`, `clamex(count=2)`, `screws(count=4)`,
-  `groove(depth=5)`. An explicit call is `part.join(joint)` on the edge-on
-  part, which joins at every contact its placement created; `into=(a, b)`
-  narrows it. A rule is the same joint object behind a predicate. Connectors
-  are joint types, not an option of tenons, which is what the first draft's
-  `connector=` implied. Hardware follows the same receiver rule:
-  `drawer.mount(slide, sides=(left, right))`, `face.latch(right, model)`.
+  the emitter needs nothing new. `Board.join(*partners, using=joint)`
+  hands the board and the boards named to the joint object (the `Joint`
+  protocol in `part.py`), as `Scope.mount` does with hardware, so core
+  knows no joint types. The join happens when it is called: the boards it
+  joins must exist by then.
+- Joinery rules are dropped [decided 2026-10-11 by Florian]: which
+  connector goes where is hard to formalize, so joints are stated one call
+  per board. The earlier proposal (a predicate list, first match wins, as in
+  Polyboard's manufacturing methods) is not pursued.
+- Joint types are objects with their settings, `tenons(count=3)`,
+  `box_joint()`, `domino("5x30", count=4)`, `cabineo(count=2)`,
+  `clamex(count=2)`, `screws(count=4)`, `groove(depth=5)`. Connectors are
+  joint types, not an option of tenons, which is what the first draft's
+  `connector=` implied. [decided]
+- **A join names its partners** [decided 2026-10-11 by Florian]:
+  `bottom.join(left, right, using=cabineo(count=3))`, partners one by one
+  or in lists (`long.join(battens, using=half_lap(...))`), the joint as the
+  required keyword `using=`, so the type checker catches a missing joint.
+  Nothing is joined that is not named: an earlier version joined every
+  board the receiver touched, which Florian rejected in favour of stating
+  each connection. Every board named must meet the receiver the way the
+  joint needs (a contact for a connector, a crossing for a half lap), else
+  the join fails naming it, and a failed join changes no board. A board
+  named twice, or the receiver itself, is an error. A connector join may be
+  written from either board, since the contact says which one meets the
+  other edge-on: `left.join(bottom, top, using=...)` equals the two joins
+  from the bottom and the top. A half lap stays relative to its receiver
+  (`toward=` is where the receiver's notches open). Where a board crosses
+  only some of a list, the build picks them, e.g. the van floor's
+  interrupted battens join `[b for b in battens if b.box().overlaps(
+  piece.box())]`, the battens on their side of the wheel arch.
+- **Connectors** (`lang/joints/connectors.py`) [implemented 2026-10-11]:
+  `bottom.join(left, right, using=cabineo(count=3))`,
+  `back.join(left, right, bottom, top, using=domino("4x20", count=2))`,
+  `top.join(right, using=clamex("P-14", at=[...]))`. Along each contact the connectors sit at `count=` stations, the outer ones `end=`
+  from the contact's ends (37 for Dominos, the machine's stop latches; 60
+  for the others, the add-in's default), or at the positions `at=`. Every
+  operation is on a big face:
+  - `domino(size, ...)`: a slot in the face-on board, centred on the
+    edge-on board's thickness or `fence=` from its reference face (the show
+    face unless `face=`), half the Domino's length plus 0.5 deep or
+    `remaining=` short of the far face; `loose=` lengthens all slots but the
+    first (front, left or bottom) per contact. The edge-on board's mortise
+    is cut with the Domino machine, which is lined up by a mark: a 90 degree
+    V-groove in the edge-on board's reference face, 0.3 deep, running 4 in
+    from its end (it starts 1 mm outside the board so it runs out cleanly),
+    one per Domino by default; `marks="middle"` leaves out the first and
+    last, which the machine's end stops locate, `marks=None` all of them.
+    The marks are the layout's `vgroove` operation (`Board.add_vgroove`): a
+    straight V-groove from a start to an end point on a big face, a depth,
+    ends cut square; the emitter cuts its triangular cross-section along
+    the line, the preview subtracts the prism. Auto Setup recognises such a
+    groove (two 45 degree flanks, a sharp bottom edge) and traces it with
+    the V-bit.
+  - `clamex("P-10" | "P-14", ...)`: the access slot or hole in the edge-on
+    board, half its thickness deep, two guide holes 101 apart in the other.
+  - `cabineo("8" | "12" | "8 M6", ...)`: three overlapping 15 mm holes,
+    10.5 deep, in the edge-on board, open toward its end, and the screw hole
+    in the other, 5 mm from the access face across the edge-on board's
+    thickness; `insert=` for the 8 M6, `surface="flush"` or `"anti-break"`,
+    `through=`.
+  The access holes go on the edge-on board's big face that is not its show
+  face, unless `face=` names one (`face=cab.bottom`, `"inner"`). With the
+  default show face (outer) that is the inner face of a carcass bottom or
+  top, which is also where the back's Domino slots are, so each board is
+  machined from one side; Cabineos from the bottom's underside would mean a
+  flip. The dimensions come from `lib/connector_data.py`, plain data shared
+  with the connectors_native add-in (and through `lib/domino.py` with
+  tenons_native). Operations are named `cabineo_left_1a` (kind, other
+  board, station, letter). Round access pockets are hole features, so they
+  come out exact; slots are polygons (open question 16).
+  Verified in Fusion 2026-10-11 against connectors_native on the same board
+  pair (Cabineo 8 x 3, Domino 4x20 x 3 with marks, Clamex P-10 x 2): the
+  boolean difference between the add-in's bodies and the compiled ones is
+  zero for Cabineo and for the Domino marks; for the Domino and Clamex
+  slots the compiled ones leave 2.5 and 2.7 mm³ more, exactly what their
+  polygonal round ends account for (32 sides per circle), and they cost
+  faces: the side with three Domino slots has 111 faces against the
+  add-in's 21. The drawer cabinet compiles with 160 features in 1.0 s,
+  volumes exact against the layout.
 - Hardware carries its own rules. A drawer slide determines the drawer box width,
   length, position and floor recess, so those numbers never appear in cabinet
   code. [decided; first hardware implemented 2026-10-11]
@@ -613,9 +687,6 @@ proposed]
   one package. Sources: Grass "Dynapro Planungshinweise" 113378 12/2021
   (the definitive sheet: installation dimensions, fastening positions and
   assembly steps), Blum TD-132/1 DE/06.22 p.5.
-- Joinery as rules instead of one call per joint, as in Polyboard's manufacturing
-  methods: state once which joint applies where, write only the exceptions.
-  [proposed; mechanism above]
 - Not covered by an add-in today, as far as seen: a groove for drawer floors
   (done with `side.cut(floor.box().grown(...))`), and the drawer-box
   dimensions per slide model (box width, length, recess, the coupling and
@@ -701,14 +772,14 @@ proposed]
   its face moves. In the language a hole is a relation to a named face, a joint
   a relation to a contact, a slide pattern follows the bay, so details survive
   shape changes and there is no cost to adding them early or late.
-- Details have homes. Joints and hardware go into the rules file and into
-  relation lines after the boards. One-offs go inline next to the board they
+- Details have homes. Joints and hardware go into relation lines after the
+  boards. One-offs go inline next to the board they
   concern. A rough module is the boards and their placement; a finished module
-  is the same file plus rules and a few mount and exception lines.
+  is the same file plus join and mount lines.
 - Details that drive the rough shape are chosen early as families with
   defaults: the slide family decides drawer box width and floor recess, the
-  connector family and front gap decide the carcass. They live in the rules file
-  and are refined to exact models later, in one place.
+  connector family and front gap decide the carcass. They are stated once in
+  the build and refined to exact models later, in one place.
 - A **detail level** is a compile and preview switch: `rough` shows outlines
   and placement only; `full` shows joints, holes, chamfers and hardware. The
   layout step skips the operations below the requested level. A level is a
@@ -874,13 +945,11 @@ def drawer_cabinet(name, box, n, slide, front=None):
         right  = board("right", ply15).on(cab.right)
         bottom = board("bottom", ply15).on(cab.bottom).between(left, right)
         top    = board("top", ply15).on(cab.top).between(left, right)
-        back   = (board("back", ply9)
-                  .on(cab.back)
-                  .between(left, right, bottom, top)
-                  .join(cabineo(count=4)))
+        back   = board("back", ply9).on(cab.back).between(left, right, bottom, top)
 
-        bottom.join(tenons(count=3))          # at every contact it has: left and right
-        top.join(tenons(count=3))
+        back.join(left, right, bottom, top, using=domino("4x20", count=2))
+        bottom.join(left, right, using=tenons(count=3))
+        top.join(left, right, using=tenons(count=3))
 
         for i, bay in enumerate(cab.interior.split("height", n), 1):
             d = drawer(f"drawer{i}", bay, slide)
@@ -899,20 +968,20 @@ def drawer(name, bay, slide):
 
         l = board("left", ply12).on(box.left)
         r = board("right", ply12).on(box.right)
-        f = board("front", ply12).on(box.front).between(l, r).join(box_joint())
-        k = board("back", ply12).on(box.back).between(l, r).join(box_joint())
-        (board("floor", ply9)
-         .on(box.bottom + slide.recess)
-         .between(l, r, f, k)
-         .join(groove(depth=5)))
-        d.face.join(screws(count=4), into=f)
+        f = board("front", ply12).on(box.front).between(l, r)
+        k = board("back", ply12).on(box.back).between(l, r)
+        floor = board("floor", ply9).on(box.bottom + slide.recess).between(l, r, f, k)
+        f.join(l, r, using=box_joint())
+        k.join(l, r, using=box_joint())
+        floor.join(l, r, f, k, using=groove(depth=5))
+        d.face.join(f, using=screws(count=4))
     return d
 ```
 
-With a rules file saying carcass joints are tenons, drawer boxes are box
-jointed and floors are grooved, every `join` above disappears and only
-exceptions remain. Things to notice: no board has a dimension, no line names an
-edge, and the slide decides the drawer box.
+(Joinery rules, which would have made every `join` above disappear, were
+dropped on 2026-10-11; joins name their partners.) Things to notice: no
+board has a dimension, no line names an edge, and the slide decides the
+drawer box.
 
 ### Master index and floor battens
 
@@ -977,15 +1046,16 @@ with module("floor", van.box("Boden")) as f:
     battens = [board(f"batten{i}", ply15).center(x).between(top, above_floor, inside)
                for i, x in enumerate(spread(floor_front, floor_back, pitch=van.param("Lattenabstand")))]
     edge = 3 + ply15.t / 2
+    lap = half_lap(toward=f.top)
     for i, y in enumerate(spread(f.left.into(edge), f.right.into(edge), count=6)):
         if i in (0, 5):     # cut in two by the wheel arches: one board from each end
             pieces = [board(f"long{i}_front", ply15).center(y).between(top, above_floor, inside, floor_front),
                       board(f"long{i}_back", ply15).center(y).between(top, above_floor, inside, floor_back)]
+            for piece in pieces:     # the battens on its side of the arch
+                piece.join([b for b in battens if b.box().overlaps(piece.box())], using=lap)
         else:
-            pieces = [board(f"long{i}", ply15).center(y).between(top, above_floor, inside,
-                                                               floor_front, floor_back)]
-        for long in pieces:
-            long.join(half_lap(toward=f.top))
+            long = board(f"long{i}", ply15).center(y).between(top, above_floor, inside, floor_front, floor_back)
+            long.join(battens, using=lap)
     middle = battens[len(battens) // 2]
     joint = (middle.front + middle.back) / 2
     board("panel_front", ply12).on(f.top).between(floor_outline, f.front, joint)
@@ -1024,7 +1094,7 @@ fusion-addins/
     emit/         layout JSON -> Fusion features; the only place that imports adsk
     preview/      mesher, browser viewer, watcher; SVG per part
     export/       cut list
-  catalog/        Florian's cabinet functions and joinery rules
+  catalog/        Florian's cabinet functions
   tests/          unit tests for core and layout, runnable outside Fusion
   tools/perf/     compile-speed benchmark
   DESIGN.md       this file
@@ -1035,7 +1105,6 @@ builds/<van>/
   build.py        which modules to compile
   master.py       index of names in the master document
   materials.py
-  rules.py        joinery rules for this build
   modules/
     floor.py
     kitchen.py
@@ -1175,8 +1244,8 @@ edge.
 5. ~~Where code runs~~: snapshot and emit in Fusion, layout anywhere (see
    Terms and pipeline). Whether the Compile button shells out to a system
    Python for the layout step or the user runs it from a terminal is a detail.
-6. ~~Joinery rules~~: predicate list, first match wins, explicit call wins (see
-   Joints). Predicate vocabulary still to be written.
+6. ~~Joinery rules~~: dropped 2026-10-11; joints are stated per board (see
+   Joints).
 7. ~~Connections between modules~~: module exports in Python (see Master
    document).
 8. ~~Contour limits~~: drawn sketches as polylines in the snapshot, projected
@@ -1204,7 +1273,11 @@ edge.
     choice.
 16. Whether the snapshot should carry arcs exactly instead of polylines.
     Sampled at 0.1 mm for now, which is up to 0.2 mm off along an axis where
-    an arc runs steeply (seen at the sample's wheel-arch corners).
+    an arc runs steeply (seen at the sample's wheel-arch corners). The same
+    holds for layout shapes: a Domino or Clamex slot's round ends are
+    polygons of 32 sides per circle (0.01 mm inside the arc), so Fusion gets
+    a ring of small flat faces where the add-in has a cylinder. Carrying arcs
+    in layout shapes would make them exact; whether CAM minds is untested.
 17. Runs: fittings and connectors on tubes; whether a duct needs a lid part of
     its own for the cut list; how a run crossing a board at an angle is cut.
 18. Detail levels: two or three, and whether chamfers belong to `full` or to a
@@ -1236,6 +1309,15 @@ Fusion with exact volumes. Not done: `replace`/`.at(x)` for profile
 exceptions, the vehicle mesh. The Snapshot Master button was clicked by
 Florian on 2026-10-11 and wrote its file.
 
+Status 2026-10-11, later: contacts and the connectors Domino, Clamex and
+Cabineo (see "Joints and hardware"), with their dimensions moved into
+`lib/connector_data.py`, which connectors_native and `lib/domino.py` now
+read too; the drawer cabinet's carcass is joined with them. Joins name
+their partners (`join(*partners, using=)`), and the Domino marks are the
+new `vgroove` operation through layout, emitter and preview. 97 tests.
+Verified in Fusion against connectors_native. Not done: the drawer boxes'
+joints (box joints, groove, screws).
+
 1. `core`: the position algebra, box, board with `on`, `between` and `center`,
    scopes and paths, and layout JSON output with world transforms. With unit
    tests. [done]
@@ -1264,9 +1346,11 @@ Florian on 2026-10-11 and wrote its file.
       at both faces; checks for parts inside the module box and the gap to a
       contour. The floor battens are the test case.
 
-Then: one contact and one holes-only joint (the half lap, a crossing joint
-made of cuts, is done); the assembly experiment from
-question 2. (Operations are done.)
+Then: box joints and tenons, which change outlines; arcs in layout shapes
+(open question 16).
+(Operations, the half lap and the connectors are done; the assembly
+experiment from question 2 was dropped as a priority on 2026-10-11, since
+assembling module documents is easy by hand.)
 
 Before any of it, cheap and useful: write two real modules from the van in the
 proposed syntax on paper, a bank and the rear storage, since those resolved
@@ -1278,7 +1362,8 @@ its features into the escape-hatch rungs.
 
 - `AGENTS.md`: dev cycle (reloading add-ins through MCP), modeling rules, testing
   through MCP.
-- `lib/drawer_slides.py`: the model for a Fusion-free layout layer.
+- `lib/drawer_slides.py`: the model for a Fusion-free layout layer;
+  `lib/connector_data.py` the second, for Domino, Clamex and Cabineo.
 - `lib/domino.py`, `lib/edge_sketch.py`, `lib/hole_features.py`: sketch and cut
   helpers the native add-ins build with.
 - `lib/group_edit.py`: stored settings per result.

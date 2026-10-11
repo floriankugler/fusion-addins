@@ -48,17 +48,20 @@ def floor(name: str, box: Box) -> Scope:
         # the battens across end. The wheel arches cut the outer two in two,
         # so each is two boards: one from each end, as far as the outline
         # lets it.
+        # Each is notched from the top where it crosses a batten, which is
+        # notched from below.
         edge = 3 + ply15.t / 2
+        lap = half_lap(toward=f.top)
         for i, y in enumerate(spread(f.left.into(edge), f.right.into(edge), count=6)):
             if i in (0, 5):
                 pieces = [board(f"long{i}_front", ply15).center(y).between(top, above_floor, inside, floor_front),
                           board(f"long{i}_back", ply15).center(y).between(top, above_floor, inside, floor_back)]
+                for piece in pieces:
+                    # the battens on its side of the wheel arch
+                    piece.join([b for b in battens if b.box().overlaps(piece.box())], using=lap)
             else:
-                pieces = [board(f"long{i}", ply15).center(y).between(top, above_floor, inside,
-                                                                   floor_front, floor_back)]
-            for long in pieces:
-                # notched from the top where it crosses a batten, which is notched from below
-                long.join(half_lap(toward=f.top))
+                long = board(f"long{i}", ply15).center(y).between(top, above_floor, inside, floor_front, floor_back)
+                long.join(battens, using=lap)
         middle = battens[len(battens) // 2]
         joint = (middle.front + middle.back) / 2
         board("panel_front", ply12).on(f.top).between(floor_outline, f.front, joint)

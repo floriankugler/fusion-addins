@@ -27,9 +27,9 @@ from .contours import Contour, ContourLimit, ContourLimits, as_contour_limit
 from .directions import AXES, Axis, Direction, ExtentName
 from .errors import LangError
 from .layout_types import (ChamferLayout, CutLayout, EdgeOpLayout, HoleLayout, OpLayout,
-                           PartLayout, PocketLayout, Rings)
+                           PartLayout, PocketLayout, Rings, VGrooveLayout)
 from .material import Material
-from .ops import Chamfer, Cut, EdgeOp, Hole, Op, Pocket
+from .ops import Chamfer, Cut, EdgeOp, Hole, Op, Pocket, VGroove
 from .refs import Affine, DepthSpec, HasPosition, Number, Pos, PosLike, Side, Through, ToFace, as_pos
 from .shapes import Anchor as ShapeAnchor
 from .shapes import Shape, box_shape
@@ -399,6 +399,10 @@ class Operation:
             r = op.d / 2
             extents[u] = (op.u - r, op.u + r)
             extents[v] = (op.v - r, op.v + r)
+        elif isinstance(op, VGroove):
+            w = op.depth                    # half the width at the face
+            extents[u] = (min(op.u0, op.u1) - w, max(op.u0, op.u1) + w)
+            extents[v] = (min(op.v0, op.v1) - w, max(op.v0, op.v1) + w)
         else:
             u0, v0, u1, v1 = op.shape.bounds
             extents[u] = (u0, u1)
@@ -456,11 +460,11 @@ class Operation:
 
 
 class Joint(Protocol):
-    """A joint type that can join a board to others (see `lang.joints`).
-    `into` is the boards named in `join(..., into=)`, or None for every
-    board the joint finds."""
+    """A joint type that can join a board to others (see `lang.joints`):
+    `partners` are the boards named in `join(...)`, each of which it must
+    join or report as an error."""
 
-    def join(self, part: Board, /, into: list[Board] | None) -> None: ...
+    def join(self, part: Board, /, partners: list[Board]) -> None: ...
 
 
 class Board:
@@ -844,7 +848,7 @@ class Board:
         not count."""
         counts: dict[str, int] = {}
         for op in self.ops:
-            if isinstance(op, (Pocket, Hole, Chamfer)):
+            if isinstance(op, (Pocket, Hole, Chamfer, VGroove)):
                 face = op.face
             elif isinstance(op, Cut) and op.chamfer:
                 face = self.show_face.world_name
@@ -883,9 +887,11 @@ class Board:
         s_axis = self.v_axis if face.axis == self.u_axis else self.u_axis
         return (s_axis, self.t_axis)
 
-    def _anchor(self, at: Anchor | None) -> Anchor:
+    def _anchor(self, at: Anchor | Edge | None) -> Anchor:
         if at is None:
             return self.show_face.center
+        if isinstance(at, Edge):
+            at = at.anchor              # the middle of the edge
         if at.part is not self:
             raise LangError(f"at= names a point on {at.part.path}, not on this board.", self.path)
         return at
@@ -926,7 +932,7 @@ class Board:
                 raise LangError(f"operation name {name!r} used twice.", self.path)
             self._named_ops[name] = op
 
-    def cut(self, shape: Shape | Board | Box, at: Anchor | None = None, name: str | None = None,
+    def cut(self, shape: Shape | Board | Box, at: Anchor | Edge | None = None, name: str | None = None,
             chamfer: float = 0.0) -> Self:
         """With a shape: a through cut at an anchor on a big face (the
         centre of the show face by default); it changes the outline. With
@@ -1003,7 +1009,7 @@ class Board:
         self._record(Pocket(shape, face.name, depth, f"cut({label})", name, chamfer), name)
         return self
 
-    def pocket(self, shape: Shape, at: Anchor | None = None, depth: DepthSpec | None = None,
+    def pocket(self, shape: Shape, at: Anchor | Edge | None = None, depth: DepthSpec | None = None,
                name: str | None = None, chamfer: float = 0.0) -> Self:
         """A pocket of `shape` from the face the anchor names (the centre of
         the show face by default), `depth` deep."""
@@ -1025,7 +1031,7 @@ class Board:
                                 point[0], point[1]), name)
         return self
 
-    def hole(self, d: float, at: Anchor | None = None, depth: DepthSpec | None = None,
+    def hole(self, d: float, at: Anchor | Edge | None = None, depth: DepthSpec | None = None,
              name: str | None = None, chamfer: float = 0.0) -> Self:
         """A hole of diameter `d` at the anchor's point, into the face the
         anchor names (the centre of the show face by default)."""
@@ -1067,26 +1073,76 @@ class Board:
             self._record(Chamfer(name, float(size), face), None)
         return self
 
-    # -- relations ---------------------------------------------------------------------------------
+    # -- operations at computed positions (joints and hardware) ------------------------------------
 
-    def join(self, joint: Joint, into: Board | Sequence[Board] | None = None) -> Self:
-        """Joins this board with a joint type, `long.join(half_lap(toward=
-        floor.top))`: with every board its placement meets in its module,
-        or only with those given as `into=`. The joint decides what that
-        means; it adds operations to both boards."""
-        partners = None if into is None else ([into] if isinstance(into, Board) else list(into))
-        joint.join(self, partners)
+    def _big_face_of_mine(self, face: Face, what: str) -> None:
+        if face.part is not self:
+            raise LangError(f"{what}: {face!r} is not a face of this board.", self.path)
+        if not face.is_big:
+            raise LangError(f"{what}: {face!r} is a narrow face; this takes a big face.", self.path)
+
+    def add_pocket(self, face: Face, shape: Shape, depth: DepthSpec, name: str | None = None) -> Self:
+        """A pocket from a big face with `shape` already placed in the face's
+        frame (world coordinates on the outline's two axes, see `face_axes`).
+        For joints and hardware, which compute positions themselves; build
+        files use `pocket()`."""
+        self._big_face_of_mine(face, "add_pocket()")
+        d, spec, _ = self._depth(face, depth)
+        self._record(Pocket(shape, face.world_name, d, spec, name), name)
         return self
 
-    def module_parts(self) -> list[Board]:
-        """Every part of the module this board belongs to (the parts outside
-        any module for a loose board): what a joint looks for partners in."""
-        scope = self.scope
-        if not isinstance(scope, scopes.Scope):
-            return list(scopes.registry.root_parts)
-        while scope.parent is not None:
-            scope = scope.parent
-        return scope.all_parts()
+    def add_hole(self, face: Face, point: Point2, d: float, depth: DepthSpec, name: str | None = None) -> Self:
+        """A hole into a big face at `point` in the face's frame; see
+        `add_pocket`."""
+        self._big_face_of_mine(face, "add_hole()")
+        if d <= 0:
+            raise LangError(f"hole diameter must be positive, got {d}.", self.path)
+        dep, spec, thru = self._depth(face, depth)
+        self._record(Hole(point[0], point[1], float(d), face.world_name, dep, spec, name, 0.0, thru), name)
+        return self
+
+    def add_vgroove(self, face: Face, start: Point2, end: Point2, depth: float, name: str | None = None) -> Self:
+        """A 90 degree V-groove into a big face along the line from `start`
+        to `end` in the face's frame, `depth` deep; see `add_pocket`."""
+        self._big_face_of_mine(face, "add_vgroove()")
+        if depth <= 0 or depth >= self.thickness:
+            raise LangError(f"a V-groove must be between 0 and the board's thickness deep, got {depth:g}.",
+                            self.path)
+        if abs(start[0] - end[0]) + abs(start[1] - end[1]) < 1e-9:
+            raise LangError("a V-groove needs two different ends.", self.path)
+        self._record(VGroove(start[0], start[1], end[0], end[1], face.world_name, float(depth), name), name)
+        return self
+
+    def unique_op_name(self, base: str) -> str:
+        """`base`, or `base_2`, `base_3`... when this board already has an
+        operation of that name."""
+        name, n = base, 2
+        while name in self._named_ops:
+            name, n = f"{base}_{n}", n + 1
+        return name
+
+    # -- relations ---------------------------------------------------------------------------------
+
+    def join(self, *partners: Board | Sequence[Board], using: Joint) -> Self:
+        """Joins this board to the boards named, with a joint type:
+        `bottom.join(left, right, using=cabineo(count=3))`,
+        `long.join(battens, using=half_lap(toward=floor.top))`. Boards come
+        one by one or in lists. Every board named must meet this one the
+        way the joint needs (a contact for a connector, a crossing for a
+        half lap); nothing is joined that is not named. The joint adds
+        operations to both boards."""
+        named: list[Board] = []
+        for p in partners:
+            named.extend([p] if isinstance(p, Board) else p)
+        if not named:
+            raise LangError("join(): name the boards to join, e.g. join(left, right, using=...).", self.path)
+        for i, p in enumerate(named):
+            if p is self:
+                raise LangError("join(): a board cannot be joined to itself.", self.path)
+            if any(q is p for q in named[:i]):
+                raise LangError(f"join(): {p.path} is named twice.", self.path)
+        using.join(self, named)
+        return self
 
     # -- block form -------------------------------------------------------------------------------
 
@@ -1152,6 +1208,10 @@ def _op_to_layout(op: Op) -> OpLayout:
     if isinstance(op, Chamfer):
         chamfer: ChamferLayout = {"kind": "chamfer", "what": op.what, "size": op.size, "face": op.face}
         return chamfer
+    if isinstance(op, VGroove):
+        groove: VGrooveLayout = {"kind": "vgroove", "name": op.name, "face": op.face, "start": [op.u0, op.v0],
+                                 "end": [op.u1, op.v1], "depth": op.depth}
+        return groove
     inner = _op_to_layout(op.op)
     assert inner["kind"] in ("hole", "pocket")
     edge: EdgeOpLayout = {"kind": "edge", "face": op.face, "s": op.s, "t": op.t,

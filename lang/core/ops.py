@@ -56,6 +56,22 @@ class Chamfer:
 
 
 @dataclass
+class VGroove:
+    """A straight 90 degree V-groove in a big face, as a V-bit cuts it: from
+    (u0, v0) to (u1, v1), `depth` deep and twice as wide at the face. Its
+    ends are cut square; a groove meant to run out of the board starts
+    outside it."""
+    u0: float
+    v0: float
+    u1: float
+    v1: float
+    face: str
+    depth: float
+    name: str | None = None
+    kind: Literal["vgroove"] = "vgroove"
+
+
+@dataclass
 class EdgeOp:
     """An operation on a narrow face, positioned in that face's own (s, t)
     frame: s along the face, t across the thickness."""
@@ -66,4 +82,4 @@ class EdgeOp:
     kind: Literal["edge"] = "edge"
 
 
-Op = Cut | Pocket | Hole | Chamfer | EdgeOp
+Op = Cut | Pocket | Hole | Chamfer | VGroove | EdgeOp

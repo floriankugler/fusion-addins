@@ -36,7 +36,7 @@ import adsk.fusion
 
 from .plan import (AXES, Axis, ChamferStep, CircleContour, Contour, EdgeContour, FaceRef, HardwarePlan,
                    HoleStep, OutlineContour, PartPlan, Plan, PocketStep, Point3, Rings3, ShapeContour,
-                   Step, Vec, plan_layout)
+                   Step, Vec, VGrooveStep, plan_layout)
 
 if TYPE_CHECKING:
     from ..core.layout_types import Layout
@@ -98,6 +98,10 @@ def _dot(a: Vec, b: Vec) -> float:
     return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 
 
+def _cross(a: Vec, b: Vec) -> Vec:
+    return (a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0])
+
+
 def _collection(items: list[adsk.core.Base]) -> adsk.core.ObjectCollection:
     coll = adsk.core.ObjectCollection.create()
     for item in items:
@@ -140,6 +144,8 @@ def _describe(step: Step) -> str:
         return f"pocket x{len(step.shapes)} on {step.face} depth {step.depth}"
     if isinstance(step, HoleStep):
         return f"hole d{step.d} x{len(step.points)} on {step.face} depth {step.depth} at {step.points[0]}"
+    if isinstance(step, VGrooveStep):
+        return f"v-groove on {step.face} depth {step.depth} from {step.start} to {step.end}"
     return f"chamfer {step.size} along {step.contour}"
 
 
@@ -259,6 +265,8 @@ class Emitter:
                 self._pockets(comp, body, step, part.path)
             elif isinstance(step, HoleStep):
                 self._holes(comp, body, step, part.path)
+            elif isinstance(step, VGrooveStep):
+                self._vgroove(comp, body, step)
             else:
                 self._chamfer(comp, body, step, part.path)
         if part.facts is not None:
@@ -469,6 +477,32 @@ class Emitter:
             inp.participantBodies = [body]
             holes.add(inp)
             self.report.features += 1
+
+    def _vgroove(self, comp: adsk.fusion.Component, body: adsk.fusion.BRepBody, step: VGrooveStep) -> None:
+        """The groove's cross-section at its start, a triangle with its
+        opening on the face, cut along the groove to its end."""
+        line: Vec = (step.end[0] - step.start[0], step.end[1] - step.start[1], step.end[2] - step.start[2])
+        length = math.sqrt(_dot(line, line))
+        along: Vec = (line[0] / length, line[1] / length, line[2] / length)
+        into = step.face.into
+        across = _cross(along, into)          # a unit vector in the face, across the groove
+        half = step.depth                     # a 90 degree V is twice as wide as it is deep
+        s = step.start
+        ring: list[Point3] = [
+            (s[0] + across[0] * half, s[1] + across[1] * half, s[2] + across[2] * half),
+            (s[0] - across[0] * half, s[1] - across[1] * half, s[2] - across[2] * half),
+            (s[0] + into[0] * step.depth, s[1] + into[1] * step.depth, s[2] + into[2] * step.depth),
+        ]
+        added = self._add_faces(comp, [[ring]], along)
+        profile = added[0].faces.item(0)
+        extrudes = comp.features.extrudeFeatures
+        inp = extrudes.createInput(profile, _CUT)
+        extent = adsk.fusion.DistanceExtentDefinition.create(adsk.core.ValueInput.createByReal(length * MM))
+        inp.setOneSideExtent(extent, self._direction_toward(profile, along))
+        inp.participantBodies = [body]
+        extrudes.add(inp)
+        self._drop_faces(comp, added)
+        self.report.features += 1
 
     def _chamfer(self, comp: adsk.fusion.Component, body: adsk.fusion.BRepBody, step: ChamferStep,
                  path: str) -> None:

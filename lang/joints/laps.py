@@ -1,9 +1,9 @@
 """Half laps: two boards that cross each other (`lang.core.crossing`), each
 notched to half the height they share, so they slot together flush.
 
-`long.join(half_lap(toward=floor.top))` laps the board with every board
-it crosses in its module (`into=` narrows that): its own notches open
-toward the given side, the other boards' notches the opposite way. The
+`long.join(battens, using=half_lap(toward=floor.top))` laps the board with
+each board named, all of which it must cross: its own notches open toward
+the given side, the other boards' notches the opposite way. The
 split lies in the middle of the height both boards have at the crossing,
 or at `at=`, a position. `clearance=` widens every notch by that much on
 each side. Each notch is a through cut named `lap_<other board>`.
@@ -29,37 +29,37 @@ class HalfLap:
     at: float | None = None
     clearance: float = 0.0
 
-    def join(self, part: Board, /, into: list[Board] | None) -> None:
-        partners = into if into is not None else [p for p in part.module_parts() if p is not part]
-        laps = 0
+    def join(self, part: Board, /, partners: list[Board]) -> None:
+        # Every crossing is checked before any board is cut.
+        laps: list[tuple[Board, Crossing, float]] = []
         for other in partners:
-            found = crossing(part, other)
-            if found is None:
-                if into is not None:
-                    raise LangError(f"half_lap: {other.path} does not cross this board.", part.path)
-                continue
-            self._lap(part, other, found)
-            laps += 1
-        if laps == 0:
-            raise LangError("half_lap: this board crosses no other board.", part.path)
+            c = crossing(part, other)
+            if c is None:
+                raise LangError(f"half_lap: {other.path} does not cross this board.", part.path)
+            laps.append((other, c, self._split(part, other, c)))
+        for other, c, split in laps:
+            self._lap(part, other, c, split)
 
-    def _lap(self, part: Board, other: Board, c: Crossing) -> None:
-        d = self.toward
-        if d.axis != c.axis:
-            raise LangError(f"half_lap: toward={d.name} does not run along the line where it meets "
+    def _split(self, part: Board, other: Board, c: Crossing) -> float:
+        if self.toward.axis != c.axis:
+            raise LangError(f"half_lap: toward={self.toward.name} does not run along the line where it meets "
                             f"{other.path} ({c.axis}).", part.path)
         split = self.at if self.at is not None else (c.lo + c.hi) / 2
         if not c.lo < split < c.hi:
             raise LangError(f"half_lap: the split at {c.axis}={split:g} lies outside the height it shares "
                             f"with {other.path} ({c.lo:g} to {c.hi:g}).", part.path)
+        return split
+
+    def _lap(self, part: Board, other: Board, c: Crossing, split: float) -> None:
+        d = self.toward
         pb, ob = part.box(), other.box()
         low = min(pb.lo[c.axis], ob.lo[c.axis]) - _PAST
         high = max(pb.hi[c.axis], ob.hi[c.axis]) + _PAST
         # This board's notch opens toward `toward`, the other's the other way.
         mine = (split, high) if d.sign > 0 else (low, split)
         theirs = (low, split) if d.sign > 0 else (split, high)
-        part.cut(self._notch(part, other, c.axis, mine), name=_name(part, other))
-        other.cut(self._notch(other, part, c.axis, theirs), name=_name(other, part))
+        part.cut(self._notch(part, other, c.axis, mine), name=part.unique_op_name(f"lap_{other.name}"))
+        other.cut(self._notch(other, part, c.axis, theirs), name=other.unique_op_name(f"lap_{part.name}"))
 
     def _notch(self, part: Board, other: Board, axis: Axis, span: tuple[float, float]) -> Box:
         """The region cut from `part`: through its thickness, as wide as
@@ -71,16 +71,8 @@ class HalfLap:
         return Box({a: lo[a] for a in AXES}, {a: hi[a] for a in AXES})
 
 
-def _name(part: Board, other: Board) -> str:
-    base = f"lap_{other.name}"
-    name, n = base, 2
-    while part.has_operation(name):
-        name, n = f"{base}_{n}", n + 1
-    return name
-
-
 def half_lap(toward: Side | Direction, at: PosLike | None = None, clearance: float = 0.0) -> HalfLap:
-    """A half lap with every crossing board. `toward` is the side this
+    """A half lap with each board named in `join()`. `toward` is the side this
     board's notches open to (`floor.top`: notched from the top, the other
     boards from below); `at` a position for the split instead of the middle
     of the shared height; `clearance` widens each notch per side."""
