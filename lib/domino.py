@@ -4,9 +4,10 @@ connectors_native offers Dominos as a connector type, tenons_native as a
 tenon type. Both cut the slots into the face of the board the selected
 edge's board butts against, and can engrave V-grooves next to the selected
 edge that mark where the Domino machine cuts the matching mortises into the
-selected board. Everything Domino about that lives here: the published
-Domino sizes and machine stops, the dialog inputs (DominoInputs) and the
-sketches and cuts (DominoBuilder).
+selected board. Everything Domino about that lives here: the dialog inputs
+(DominoInputs) and the sketches and cuts (DominoBuilder). The published
+Domino sizes and the machine's stops are plain data in lib/connector_data.py,
+re-exported here.
 """
 from dataclasses import dataclass
 from enum import Enum, unique
@@ -15,7 +16,12 @@ from typing import Callable
 import adsk.core
 import adsk.fusion
 
-from . import edge_sketch, inputs, utils
+from . import connector_data, edge_sketch, inputs, utils
+# The Domino's dimensions and the machine's stops are plain data, shared
+# with the modeling language; re-exported under their old names.
+from .connector_data import FENCE_STOPS, FenceStop
+from .connector_data import DOMINO_SIZES as SIZES
+from .connector_data import DominoSize as Size
 
 
 @unique
@@ -26,8 +32,8 @@ class EndStop(Enum):
     20 mm with the additional stop ZA-DF 500/700 fitted. CUSTOM uses an End
     Offset input of the add-in instead."""
 
-    STOP_LATCH = 37
-    ADDITIONAL_STOP = 20
+    STOP_LATCH = round(connector_data.DOMINO_STOP_LATCH)
+    ADDITIONAL_STOP = round(connector_data.DOMINO_ADDITIONAL_STOP)
     CUSTOM = 0
 
 
@@ -44,8 +50,8 @@ class LooseSlots(Enum):
     13, 19 or 23 mm plus the cutter diameter."""
 
     NONE = 0
-    PLUS_6 = 6
-    PLUS_10 = 10
+    PLUS_6 = round(connector_data.DOMINO_LOOSE_STEPS[0])
+    PLUS_10 = round(connector_data.DOMINO_LOOSE_STEPS[1])
     CUSTOM = 1
 
 
@@ -56,66 +62,8 @@ class Marks(Enum):
     SKIP_FIRST_AND_LAST = 2
 
 
-@dataclass(frozen=True)
-class FenceStop:
-    """A height stop of the Domino machine's fence. Stops are labelled with
-    the board thickness they center the mortise on, so the mortise ends up
-    half that far from the face the fence rests on."""
-
-    value: int
-    thickness: float
-    label: str
-
-    @property
-    def name(self) -> str:
-        return f"{self.thickness:g} mm ({self.label})"
-
-
 FENCE_CENTERED = 0
 FENCE_CUSTOM = 1
-FENCE_STOPS = [
-    FenceStop(1000 + thickness, thickness, "Festool")
-    for thickness in (16, 20, 22, 25, 28, 36, 40)
-] + [
-    # Aftermarket (e.g. 3D-printed) stop gauges add further thicknesses.
-    FenceStop(2000 + thickness, thickness, "Alternative")
-    for thickness in (10, 12, 13, 16, 18)
-]
-
-
-@dataclass(frozen=True)
-class Size:
-    """Festool DOMINO tenon dimensions in mm, as published in Festool's
-    technical data ("thickness x length x width")."""
-
-    value: int
-    thickness: float
-    width: float
-    length: float
-
-    @property
-    def name(self) -> str:
-        return f"{self.thickness:g} x {self.length:g}"
-
-
-SIZES = [
-    Size(420, 4, 16.6, 20),
-    Size(530, 5, 18.8, 30),
-    Size(640, 6, 19.8, 40),
-    Size(836, 8, 21.9, 36),
-    Size(840, 8, 21.9, 40),
-    Size(850, 8, 21.9, 50),
-    Size(880, 8, 21.9, 80),
-    Size(8100, 8, 21.9, 100),
-    Size(1050, 10, 23.9, 50),
-    Size(1080, 10, 23.9, 80),
-    Size(10100, 10, 23.9, 100),
-    Size(12100, 12, 25.9, 100),
-    Size(12140, 12, 25.9, 140),
-    Size(1475, 14, 27.9, 75),
-    Size(14100, 14, 27.9, 100),
-    Size(14140, 14, 27.9, 140),
-]
 
 
 class DominoInputs:
@@ -326,7 +274,7 @@ class DominoInputs:
         self.domino_depth_offset = inputs.FloatInput(
             id="dominoDepthOffset",
             name="Depth Offset",
-            default_value=0.05,
+            default_value=connector_data.DOMINO_DEPTH_OFFSET / 10,
             tool_tip="Added to half the Domino's length to get the slot depth.",
             units=units,
             update_visibility=lambda: is_domino() and is_half_length(),
@@ -367,7 +315,7 @@ class DominoInputs:
         self.domino_mark_depth = inputs.FloatInput(
             id="dominoMarkDepth",
             name="Mark Depth",
-            default_value=0.03,
+            default_value=connector_data.DOMINO_MARK_DEPTH / 10,
             tool_tip=(
                 "Depth of the V-grooves. Cut with a 90 degree cutter, a "
                 "groove is twice as wide as it is deep."
@@ -380,7 +328,7 @@ class DominoInputs:
         self.domino_mark_length = inputs.FloatInput(
             id="dominoMarkLength",
             name="Mark Length",
-            default_value=0.4,
+            default_value=connector_data.DOMINO_MARK_LENGTH / 10,
             tool_tip="Length of the V-grooves, measured from the edge.",
             units=units,
             update_visibility=has_marks,

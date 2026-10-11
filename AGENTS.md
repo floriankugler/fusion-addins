@@ -5,6 +5,7 @@
 - `addins-src/` contains the editable Fusion 360 add-ins. Each add-in has a `main.py`, `<addin>.py`, a `<addin>.manifest`, and `Resources/` icons.
 - `lib/` is the shared Python library used by add-ins (utility modules, Fusion helpers).
   - `lib/domino.py` holds all Festool Domino code (sizes, machine stops, dialog inputs, validation, sketches and cuts), shared by `connectors_native` (Domino connector type) and `tenons_native` (Domino tenon type). Change Domino behavior there, not in the add-ins.
+  - `lib/connector_data.py` holds the connector dimensions in mm (Domino sizes and machine stops, Clamex P and Cabineo geometry, the spacing along an edge). It is plain Python without Fusion imports, read by `connectors_native`, `lib/domino.py` and the modeling language's connectors (`lang/joints/connectors.py`), so a dimension is changed there once; `python3 -m lib.connector_data` runs its self-checks.
   - `lib/edge_sketch.py` holds the fully constrained sketch and cut helpers along a selected edge that `connectors_native` and `lib/domino.py` build with.
   - `lib/drawer_slides.py` holds the cabinet hole patterns of the drawer slides (Blum Movento, Grass Dynapro) and the odd/even hole choice used by `drawer_slides`. It is plain Python without Fusion imports; `python3 -m lib.drawer_slides` runs its self-checks.
   - `lib/hole_features.py` creates native Hole features from sketch points (flat-bottomed fixed depth or through to the opposite face).

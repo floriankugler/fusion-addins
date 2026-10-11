@@ -6,11 +6,23 @@ from typing import cast
 import adsk.core
 import adsk.fusion
 
-from lib import addin, domino, edge_sketch, inputs, ui_placement, utils
+from lib import addin, connector_data, domino, edge_sketch, inputs, ui_placement, utils
 from lib.fusionbootstrap.runtime import RuntimeInfo
 
 
 _addin: addin.Addin | None = None
+
+# The connectors' dimensions live in lib/connector_data.py, in mm; the
+# sketches here work in cm and write the values as expressions.
+_THREADED_INSERT = connector_data.CABINEO_GUIDE_HOLES["8 M6 threaded insert"]
+
+
+def _cm(mm: float) -> float:
+    return mm / 10
+
+
+def _expression(mm: float) -> str:
+    return f"{mm:g} mm"
 
 
 @unique
@@ -337,7 +349,7 @@ class ConnectorsNativeInputs(domino.DominoInputs, inputs.Inputs):
         self.offset = inputs.FloatInput(
             id="offset",
             name="End Offset",
-            default_value=6,
+            default_value=_cm(connector_data.DEFAULT_END_OFFSET),
             tool_tip=(
                 "Distance from each end of the selected edge to the first and "
                 "last connector. A single connector is always centered."
@@ -366,7 +378,7 @@ class ConnectorsNativeInputs(domino.DominoInputs, inputs.Inputs):
         self.clamex_guide_hole_diameter = inputs.FloatInput(
             id="clamexGuideHoleDiameter",
             name="Guide Hole Diameter",
-            default_value=0.77,
+            default_value=_cm(connector_data.CLAMEX_GUIDE_DIAMETER),
             tool_tip="Diameter of the paired Clamex holes in the adjacent board.",
             units=units,
             update_visibility=is_clamex,
@@ -404,7 +416,7 @@ class ConnectorsNativeInputs(domino.DominoInputs, inputs.Inputs):
         self.cabineo_anti_break_depth = inputs.FloatInput(
             id="cabineoAntiBreakDepth",
             name="Anti-Break Depth",
-            default_value=0.08,
+            default_value=_cm(connector_data.CABINEO_ANTI_BREAK_DEPTH),
             tool_tip="Depth of the shallow Cabineo anti-break relief.",
             units=units,
             update_visibility=lambda: (
@@ -417,7 +429,7 @@ class ConnectorsNativeInputs(domino.DominoInputs, inputs.Inputs):
         self.cabineo_anti_break_distance = inputs.FloatInput(
             id="cabineoAntiBreakDistance",
             name="Anti-Break Distance",
-            default_value=0.06,
+            default_value=_cm(connector_data.CABINEO_ANTI_BREAK_DISTANCE),
             tool_tip="Additional radius of the Cabineo anti-break relief.",
             units=units,
             update_visibility=lambda: (
@@ -448,7 +460,7 @@ class ConnectorsNativeInputs(domino.DominoInputs, inputs.Inputs):
         self.threaded_insert_core_diameter = inputs.FloatInput(
             id="threadedInsertCoreDiameter",
             name="Core Diameter",
-            default_value=0.79,
+            default_value=_cm(_THREADED_INSERT.diameter),
             tool_tip="Core diameter of the threaded insert hole.",
             units=units,
             update_visibility=is_threaded_insert,
@@ -457,7 +469,7 @@ class ConnectorsNativeInputs(domino.DominoInputs, inputs.Inputs):
         self.threaded_insert_core_depth = inputs.FloatInput(
             id="threadedInsertCoreDepth",
             name="Core Depth",
-            default_value=1.27 + 0.08,
+            default_value=_cm(_THREADED_INSERT.depth),
             tool_tip="Core depth of the threaded insert hole.",
             units=units,
             update_visibility=is_threaded_insert,
@@ -466,7 +478,7 @@ class ConnectorsNativeInputs(domino.DominoInputs, inputs.Inputs):
         self.threaded_insert_collar_diameter = inputs.FloatInput(
             id="threadedInsertCollarDiameter",
             name="Collar Diameter",
-            default_value=1.27,
+            default_value=_cm(_THREADED_INSERT.collar_diameter or 0),
             tool_tip="Diameter of the threaded insert collar relief.",
             units=units,
             update_visibility=is_threaded_insert,
@@ -475,7 +487,7 @@ class ConnectorsNativeInputs(domino.DominoInputs, inputs.Inputs):
         self.threaded_insert_collar_depth = inputs.FloatInput(
             id="threadedInsertCollarDepth",
             name="Collar Depth",
-            default_value=0.08,
+            default_value=_cm(_THREADED_INSERT.collar_depth or 0),
             tool_tip="Depth of the threaded insert collar relief.",
             units=units,
             update_visibility=is_threaded_insert,
@@ -742,9 +754,9 @@ class ConnectorsNative(addin.Addin):
                     else access_thickness / 2
                 )
                 if connector_type.is_clamex
-                else 1.1
+                else _cm(connector_data.CABINEO_FLUSH_ACCESS_DEPTH)
                 if surface == CabineoSurface.FLUSH
-                else 1.05
+                else _cm(connector_data.CABINEO_ACCESS_DEPTH)
             )
             last_feature = self._sketcher.create_cut_extrude(
                 component=component,
@@ -765,7 +777,7 @@ class ConnectorsNative(addin.Addin):
 
         if relief_context:
             relief_depth: float | str = (
-                0.08
+                _cm(connector_data.CABINEO_FLUSH_RELIEF_DEPTH)
                 if surface == CabineoSurface.FLUSH
                 else self.inputs.cabineo_anti_break_depth.expression
             )
@@ -1313,19 +1325,20 @@ class ConnectorsNative(addin.Addin):
             positions,
         )
         if connector_type == ConnectorType.CLAMEX_P14:
+            model = connector_data.CLAMEX_P14
             centers = self._add_normal_points(
                 context,
                 position_points,
                 inward,
-                [0.75],
-                ["0.75 cm"],
+                [_cm(center) for center in model.access_centers],
+                [_expression(center) for center in model.access_centers],
                 "HoleInset",
             )
             circles = self._add_equal_circles(
                 context.sketch,
                 centers,
-                0.6 / 2,
-                "0.6 cm",
+                _cm(model.access_width) / 2,
+                _expression(model.access_width),
                 "accessHoleDiameter",
             )
             return _AccessLayout(
@@ -1336,19 +1349,20 @@ class ConnectorsNative(addin.Addin):
             )
 
         if connector_type == ConnectorType.CLAMEX_P10:
+            model = connector_data.CLAMEX_P10
             centers = self._add_normal_points(
                 context,
                 position_points,
                 inward,
-                [0.5, 0.75],
-                ["0.5 cm", "0.75 cm"],
+                [_cm(center) for center in model.access_centers],
+                [_expression(center) for center in model.access_centers],
                 "SlotCenter",
             )
             alignment_points: list[adsk.fusion.SketchPoint] = []
             first_width_parameter: adsk.fusion.ModelParameter | None = None
             for index in range(0, len(centers), 2):
                 width_expression = (
-                    "0.6 cm"
+                    _expression(model.access_width)
                     if first_width_parameter is None
                     else first_width_parameter.name
                 )
@@ -1384,19 +1398,21 @@ class ConnectorsNative(addin.Addin):
                 alignment_points=alignment_points,
             )
 
+        access_centers = connector_data.CABINEO_ACCESS_CENTERS
+        access_diameter = connector_data.CABINEO_ACCESS_DIAMETER
         centers = self._add_normal_points(
             context,
             position_points,
             inward,
-            [0.36, 1.48, 2.6],
-            ["0.36 cm", "1.48 cm", "2.6 cm"],
+            [_cm(center) for center in access_centers],
+            [_expression(center) for center in access_centers],
             "HoleInset",
         )
         circles = self._add_equal_circles(
             context.sketch,
             centers,
-            1.5 / 2,
-            "1.5 cm",
+            _cm(access_diameter) / 2,
+            _expression(access_diameter),
             "accessHoleDiameter",
         )
         return _AccessLayout(
@@ -1414,21 +1430,24 @@ class ConnectorsNative(addin.Addin):
         inward: adsk.core.Vector3D,
         surface: CabineoSurface,
     ) -> None:
+        access_centers = connector_data.CABINEO_ACCESS_CENTERS
+        access_diameter = connector_data.CABINEO_ACCESS_DIAMETER
         if surface == CabineoSurface.ANTI_BREAK:
             centers = self._add_normal_points(
                 context,
                 position_points,
                 inward,
-                [0.36, 1.48, 2.6],
-                ["0.36 cm", "1.48 cm", "2.6 cm"],
+                [_cm(center) for center in access_centers],
+                [_expression(center) for center in access_centers],
                 "HoleInset",
             )
             self._add_equal_circles(
                 context.sketch,
                 centers,
-                1.5 / 2 + self.inputs.cabineo_anti_break_distance.value,
+                _cm(access_diameter) / 2
+                + self.inputs.cabineo_anti_break_distance.value,
                 (
-                    "1.5 cm + 2 * "
+                    f"{_expression(access_diameter)} + 2 * "
                     f"({self.inputs.cabineo_anti_break_distance.expression})"
                 ),
                 "accessReliefDiameter",
@@ -1439,8 +1458,8 @@ class ConnectorsNative(addin.Addin):
             context,
             position_points,
             inward,
-            [2.6],
-            ["2.6 cm"],
+            [_cm(access_centers[-1])],
+            [_expression(access_centers[-1])],
             "SlotCenter",
         )
         first_width_parameter: adsk.fusion.ModelParameter | None = None
@@ -1448,7 +1467,7 @@ class ConnectorsNative(addin.Addin):
             zip(position_points, top_centers)
         ):
             width_expression = (
-                "1.67 cm"
+                _expression(connector_data.CABINEO_FLUSH_RELIEF_WIDTH)
                 if first_width_parameter is None
                 else first_width_parameter.name
             )
@@ -1504,12 +1523,12 @@ class ConnectorsNative(addin.Addin):
                 first_model = edge_sketch.translated(
                     center_model,
                     edge_direction,
-                    -10.1 / 2,
+                    -_cm(connector_data.CLAMEX_GUIDE_SPACING) / 2,
                 )
                 second_model = edge_sketch.translated(
                     center_model,
                     edge_direction,
-                    10.1 / 2,
+                    _cm(connector_data.CLAMEX_GUIDE_SPACING) / 2,
                 )
                 centerline = lines.addByTwoPoints(
                     context.sketch.modelToSketchSpace(first_model),
@@ -1527,7 +1546,7 @@ class ConnectorsNative(addin.Addin):
                         context.sketch,
                         centerline.startSketchPoint,
                         centerline.endSketchPoint,
-                        "10.1 cm",
+                        _expression(connector_data.CLAMEX_GUIDE_SPACING),
                         "guidePairSpacing",
                     )
                     reference_centerline = centerline
@@ -1635,12 +1654,17 @@ class ConnectorsNative(addin.Addin):
             alignment_points,
             "access-hole midpoints",
         )
+        offset = (
+            connector_data.CABINEO_FLUSH_GUIDE_OFFSET
+            if surface == CabineoSurface.FLUSH
+            else connector_data.CABINEO_GUIDE_OFFSET
+        )
         return self._sketcher.edge_offset_points(
             context,
             projected_points,
             inward,
-            0.58 if surface == CabineoSurface.FLUSH else 0.5,
-            "0.58 cm" if surface == CabineoSurface.FLUSH else "0.5 cm",
+            _cm(offset),
+            _expression(offset),
             "oppositeEdgeOffset",
         )
 
@@ -1658,53 +1682,46 @@ class ConnectorsNative(addin.Addin):
                 depth=(
                     guide_thickness
                     if self.inputs.through_guide_holes.value
-                    else 0.8
+                    else _cm(connector_data.CLAMEX_GUIDE_DEPTH)
                 ),
             )
 
-        if connector_type == ConnectorType.CABINEO_8:
-            diameter = 0.5
-            diameter_expression = "0.5 cm"
-            depth: float | str = 0.8
-            collar_diameter = None
-            collar_diameter_expression = None
-            collar_depth = None
-        elif connector_type == ConnectorType.CABINEO_12:
-            diameter = 0.5
-            diameter_expression = "0.5 cm"
-            depth = 1.2
+        insert = CabineoInsert(self.inputs.cabineo_insert_type.value)
+        key = (
+            "8"
+            if connector_type == ConnectorType.CABINEO_8
+            else "12"
+            if connector_type == ConnectorType.CABINEO_12
+            else "8 M6 x 12.3"
+            if insert == CabineoInsert.M6X123
+            else "8 M6 x 15.3"
+            if insert == CabineoInsert.M6X153
+            else None
+        )
+        depth: float | str
+        if key is not None:
+            hole = connector_data.CABINEO_GUIDE_HOLES[key]
+            diameter = _cm(hole.diameter)
+            diameter_expression = _expression(hole.diameter)
+            depth = _cm(hole.depth)
             collar_diameter = None
             collar_diameter_expression = None
             collar_depth = None
         else:
-            insert = CabineoInsert(self.inputs.cabineo_insert_type.value)
-            if insert == CabineoInsert.M6X123:
-                diameter = 0.8
-                diameter_expression = "0.8 cm"
-                depth = 1.35
-                collar_diameter = None
-                collar_diameter_expression = None
-                collar_depth = None
-            elif insert == CabineoInsert.M6X153:
-                diameter = 0.8
-                diameter_expression = "0.8 cm"
-                depth = 1.65
-                collar_diameter = None
-                collar_diameter_expression = None
-                collar_depth = None
-            else:
-                diameter = self.inputs.threaded_insert_core_diameter.value
-                diameter_expression = (
-                    self.inputs.threaded_insert_core_diameter.expression
-                )
-                depth = self.inputs.threaded_insert_core_depth.expression
-                collar_diameter = (
-                    self.inputs.threaded_insert_collar_diameter.value
-                )
-                collar_diameter_expression = (
-                    self.inputs.threaded_insert_collar_diameter.expression
-                )
-                collar_depth = self.inputs.threaded_insert_collar_depth.expression
+            # The threaded insert's hole comes from the dialog, whose
+            # defaults are connector_data's.
+            diameter = self.inputs.threaded_insert_core_diameter.value
+            diameter_expression = (
+                self.inputs.threaded_insert_core_diameter.expression
+            )
+            depth = self.inputs.threaded_insert_core_depth.expression
+            collar_diameter = (
+                self.inputs.threaded_insert_collar_diameter.value
+            )
+            collar_diameter_expression = (
+                self.inputs.threaded_insert_collar_diameter.expression
+            )
+            collar_depth = self.inputs.threaded_insert_collar_depth.expression
 
         if self.inputs.through_guide_holes.value:
             depth = guide_thickness

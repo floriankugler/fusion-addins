@@ -13,7 +13,7 @@ from typing import Callable, cast
 import adsk.core
 import adsk.fusion
 
-from . import utils
+from . import connector_data, utils
 
 
 @dataclass(frozen=True)
@@ -74,11 +74,7 @@ def evenly_spaced_positions(
     its ends and the rest evenly spaced between them. A single point is
     centered on the edge."""
     direction = utils.brep.normal_along_edge(edge)
-    if count == 1:
-        distances = [edge.length / 2]
-    else:
-        spacing = (edge.length - 2 * end_offset) / (count - 1)
-        distances = [end_offset + index * spacing for index in range(count)]
+    distances = connector_data.stations(edge.length, count, end_offset)
     return [
         translated(edge.startVertex.geometry, direction, distance)
         for distance in distances
