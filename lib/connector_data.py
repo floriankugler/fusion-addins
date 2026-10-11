@@ -159,6 +159,8 @@ CLAMEX_GUIDE_SPACING = 101.0
 CLAMEX_GUIDE_DIAMETER = 7.7
 CLAMEX_GUIDE_DEPTH = 8.0
 # The access hole or slot is half the edge-on board's thickness deep.
+#: The narrowest gap between tenons (or beside them) a Clamex fits in, mm.
+CLAMEX_MIN_GAP = 120.0
 
 
 # -- Cabineo -------------------------------------------------------------------------
@@ -182,6 +184,8 @@ CABINEO_ANTI_BREAK_DEPTH = 0.8
 #: the edge-on board's thickness, mm; with a flush relief.
 CABINEO_GUIDE_OFFSET = 5.0
 CABINEO_FLUSH_GUIDE_OFFSET = 5.8
+#: The narrowest gap between tenons (or beside them) a Cabineo fits in, mm.
+CABINEO_MIN_GAP = 40.0
 
 
 @dataclass(frozen=True)
@@ -203,6 +207,23 @@ CABINEO_GUIDE_HOLES = {
     "8 M6 x 15.3": GuideHole(8.0, 16.5),
     "8 M6 threaded insert": GuideHole(7.9, 13.5, 12.7, 0.8),
 }
+
+
+# -- Screws ---------------------------------------------------------------------------
+
+#: The tenon add-in's defaults: screw diameter, and the distance of the
+#: two-sided screws from a tenon's edge, mm.
+SCREW_DIAMETER = 4.0
+SCREW_OFFSET = 12.0
+#: A countersunk head (SPAX Universal) is about twice as wide as the thread
+#: (3.5 -> 7.0, 4.0 -> 8.0, 4.5 -> 8.8, 5.0 -> 9.7 mm); a 90 degree
+#: countersink twice the diameter plus this wide lets it sit just below the
+#: surface, mm.
+SCREW_COUNTERSINK_MARGIN = 0.4
+
+
+def countersink_diameter(screw: float) -> float:
+    return 2 * screw + SCREW_COUNTERSINK_MARGIN
 
 
 def _self_check() -> None:

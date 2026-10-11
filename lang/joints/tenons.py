@@ -23,13 +23,16 @@ from the contact's ends (a single one centred), `even=True` for tenons as
 wide as the gaps between them, or tenons centred at the positions `at=`.
 
 As the tenons_native add-in makes them, defaults included. Its screws and
-connectors in the gaps between the tenons are joins of their own.
+connectors in the gaps between the tenons are joins of their own, which
+take their stations from what this joint made (`cabineo(gaps=t)`,
+`screws(gaps=t)`, `screws(tenons=t)`), so the tenon joint keeps a record
+per contact.
 """
 from __future__ import annotations
 
 import math
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import ClassVar, Literal
 
 from shapely.geometry import Point
@@ -39,7 +42,7 @@ from ..core.errors import LangError
 from ..core.part import Board
 from ..core.refs import DepthSpec, Pos, PosLike, to
 from ..core.shapes import Shape, box_shape, circle
-from .common import EPS, ContactGeometry, Point2, join_contacts, make_spacing, opposite_face
+from .common import EPS, ContactGeometry, Point2, TenonPlacement, join_contacts, make_spacing, opposite_face, touching
 
 DogBones = Literal["corner", "hidden"]
 
@@ -64,6 +67,8 @@ class Tenons:
     tool: float
     relief: float
     dogbones: DogBones
+    #: What the joint made, per contact, for the joints that sit in its gaps.
+    made: list[TenonPlacement] = field(default_factory=list[TenonPlacement], compare=False, repr=False)
     label: ClassVar[str] = "tenons"
 
     @property
@@ -73,6 +78,17 @@ class Tenons:
 
     def join(self, part: Board, /, partners: list[Board]) -> None:
         join_contacts(self, part, partners)
+
+    def contacts_with(self, part: Board, other: Board) -> list[Contact]:
+        return touching(part, other)
+
+    def placements(self, part: Board, other: Board) -> list[TenonPlacement]:
+        """What these tenons made between the two boards."""
+        found = [p for p in self.made if {id(p.contact.edge_on), id(p.contact.face_on)} == {id(part), id(other)}]
+        if not found:
+            raise LangError(f"gaps=: {part.path} and {other.path} are not joined with these tenons; join them "
+                            "with the tenons first.", part.path)
+        return found
 
     def width_on(self, c: Contact) -> float:
         """The tenons' width on a contact: as given, or with `even` as wide
@@ -153,6 +169,7 @@ class Tenons:
                 f.add_cut(mortise, name=name)
             else:
                 f.add_pocket(c.face, mortise, mortise_depth, name=name)
+        self.made.append(TenonPlacement(c, tuple(stations), w, length))
 
     def _root_relief(self, g: ContactGeometry, along: float, side: float) -> Shape:
         """The relief at a tenon's root, the corner where its side at

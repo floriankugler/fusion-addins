@@ -1107,14 +1107,15 @@ class Board:
         self.outline = self.outline.union(shape)
         return self
 
-    def add_hole(self, face: Face, point: Point2, d: float, depth: DepthSpec, name: str | None = None) -> Self:
+    def add_hole(self, face: Face, point: Point2, d: float, depth: DepthSpec, name: str | None = None,
+                 chamfer: float = 0.0) -> Self:
         """A hole into a big face at `point` in the face's frame; see
-        `add_pocket`."""
+        `add_pocket`. A chamfer on its edge is a 90 degree countersink."""
         self._big_face_of_mine(face, "add_hole()")
         if d <= 0:
             raise LangError(f"hole diameter must be positive, got {d}.", self.path)
         dep, spec, thru = self._depth(face, depth)
-        self._record(Hole(point[0], point[1], float(d), face.world_name, dep, spec, name, 0.0, thru), name)
+        self._record(Hole(point[0], point[1], float(d), face.world_name, dep, spec, name, float(chamfer), thru), name)
         return self
 
     def add_vgroove(self, face: Face, start: Point2, end: Point2, depth: float, name: str | None = None) -> Self:

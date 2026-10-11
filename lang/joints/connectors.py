@@ -46,7 +46,8 @@ from ..core.part import Board, Face
 from ..core.refs import DepthSpec, PosLike, through, to
 from ..core.shapes import circle, slot_shape
 from .common import (EPS, ContactGeometry, FaceChoice, Spacing, big_face, hidden_face, join_contacts,
-                     make_spacing, opposite_face, start_index)
+                     check_gaps, make_spacing, opposite_face, start_index)
+from .tenons import Tenons
 
 DominoSize = Literal["4x20", "5x30", "6x40", "8x36", "8x40", "8x50", "8x80", "8x100", "10x50", "10x80",
                      "10x100", "12x100", "12x140", "14x75", "14x100", "14x140"]
@@ -94,6 +95,9 @@ class Domino:
 
     def join(self, part: Board, /, partners: list[Board]) -> None:
         join_contacts(self, part, partners)
+
+    def contacts_with(self, part: Board, other: Board) -> list[Contact]:
+        return self.spacing.contacts_with(part, other)
 
     def stations(self, c: Contact) -> list[float]:
         return self.spacing.stations(self.label, c)
@@ -213,11 +217,15 @@ class Clamex:
     def join(self, part: Board, /, partners: list[Board]) -> None:
         join_contacts(self, part, partners)
 
+    def contacts_with(self, part: Board, other: Board) -> list[Contact]:
+        return self.spacing.contacts_with(part, other)
+
     def stations(self, c: Contact) -> list[float]:
         return self.spacing.stations(self.label, c)
 
     def check(self, c: Contact, stations: list[float]) -> None:
         f = c.face_on
+        check_gaps(self.label, self.spacing, c, data.CLAMEX_MIN_GAP)
         if not self.through and data.CLAMEX_GUIDE_DEPTH >= f.thickness - EPS:
             raise LangError(f"clamex: the {data.CLAMEX_GUIDE_DEPTH:g} mm guide holes go through {f.path}; "
                             "give through=True.", c.edge_on.path)
@@ -241,17 +249,19 @@ class Clamex:
 
 
 def clamex(model: ClamexModel = "P-10", *, count: int | None = None, at: Sequence[PosLike] | None = None,
-           end: float = data.DEFAULT_END_OFFSET, face: FaceChoice = None,
+           gaps: Tenons | None = None, end: float = data.DEFAULT_END_OFFSET, face: FaceChoice = None,
            guide_d: float = data.CLAMEX_GUIDE_DIAMETER, through: bool = False) -> Clamex:
     """Lamello Clamex P (`"P-10"` or `"P-14"`): per station an access slot
     (P-10) or hole (P-14) in this board's access face, half its thickness
     deep, and two guide holes in the other board's face, 101 apart and
     centred on this board's thickness, `guide_d` wide and 8 deep or
     `through`. `end` is the distance of the outer connectors from the
-    contact's ends."""
+    contact's ends; with `gaps=` tenons joined before, one sits in the
+    middle of each gap between and beside them, which must be 120 long."""
     if guide_d <= 0:
         raise LangError("clamex: guide_d must be positive.")
-    return Clamex(data.CLAMEX_MODELS[model], make_spacing("clamex", count, end, at), face, float(guide_d), through)
+    return Clamex(data.CLAMEX_MODELS[model], make_spacing("clamex", count, end, at, gaps), face, float(guide_d),
+                  through)
 
 
 # -- Cabineo ---------------------------------------------------------------------------------------------
@@ -275,11 +285,15 @@ class Cabineo:
     def join(self, part: Board, /, partners: list[Board]) -> None:
         join_contacts(self, part, partners)
 
+    def contacts_with(self, part: Board, other: Board) -> list[Contact]:
+        return self.spacing.contacts_with(part, other)
+
     def stations(self, c: Contact) -> list[float]:
         return self.spacing.stations(self.label, c)
 
     def check(self, c: Contact, stations: list[float]) -> None:
         e, f = c.edge_on, c.face_on
+        check_gaps(self.label, self.spacing, c, data.CABINEO_MIN_GAP)
         if self.access_depth >= e.thickness - EPS:
             raise LangError(f"cabineo: the {self.access_depth:g} mm deep pocket goes through this board "
                             f"({e.thickness:g} thick).", e.path)
@@ -321,7 +335,8 @@ class Cabineo:
 
 
 def cabineo(model: CabineoModel = "8", *, count: int | None = None, at: Sequence[PosLike] | None = None,
-            end: float = data.DEFAULT_END_OFFSET, face: FaceChoice = None, insert: CabineoInsert | None = None,
+            gaps: Tenons | None = None, end: float = data.DEFAULT_END_OFFSET, face: FaceChoice = None,
+            insert: CabineoInsert | None = None,
             surface: CabineoSurface | None = None,
             anti_break: tuple[float, float] = (data.CABINEO_ANTI_BREAK_DEPTH, data.CABINEO_ANTI_BREAK_DISTANCE),
             through: bool = False) -> Cabineo:
@@ -335,7 +350,9 @@ def cabineo(model: CabineoModel = "8", *, count: int | None = None, at: Sequence
     default). `surface="flush"` sinks the connector 0.5 deeper under a
     0.8 deep relief; `"anti-break"` adds a relief `anti_break` = (depth,
     widening). `through` drills the screw hole through the other board.
-    `end` is the distance of the outer connectors from the contact's ends."""
+    `end` is the distance of the outer connectors from the contact's ends;
+    with `gaps=` tenons joined before, one sits in the middle of each gap
+    between and beside them, which must be 40 long."""
     if model == "8 M6":
         key = _INSERT_KEYS[insert or "threaded insert"]
     elif insert is not None:
@@ -345,5 +362,5 @@ def cabineo(model: CabineoModel = "8", *, count: int | None = None, at: Sequence
     depth, widening = anti_break
     if depth <= 0 or widening < 0:
         raise LangError("cabineo: anti_break needs a positive depth and a widening of at least 0.")
-    return Cabineo(model, data.CABINEO_GUIDE_HOLES[key], make_spacing("cabineo", count, end, at), face, surface,
-                   (float(depth), float(widening)), through)
+    return Cabineo(model, data.CABINEO_GUIDE_HOLES[key], make_spacing("cabineo", count, end, at, gaps), face,
+                   surface, (float(depth), float(widening)), through)

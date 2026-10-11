@@ -657,14 +657,35 @@ proposed]
   through cuts and pockets, so the tenon joint needs no new operation; a
   through cut that would split a board in pieces is now an error.
   Florian's choices 2026-10-11: corner dog bones by default; screws and
-  Clamex/Cabineo in the gaps between tenons will be joins of their own
-  that take their stations from the tenons (`cabineo(gaps=t)`,
-  `screws(..., gaps=t)`), not options of the tenon joint; the add-in's
-  screw through the tenon itself is left out. Verified in Fusion against
-  tenons_native on the same board pair (corner and hidden dog bones,
-  blind, even, mortises breaking out of the board's edge): zero boolean
-  difference both ways, identical face counts. `examples/shelf.py` shows
-  all of it.
+  Clamex/Cabineo in the gaps between tenons are joins of their own that
+  take their stations from the tenons, not options of the tenon joint.
+  Verified in Fusion against tenons_native on the same board pair (corner
+  and hidden dog bones, blind, even, mortises breaking out of the board's
+  edge): zero boolean difference both ways, identical face counts.
+  `examples/shelf.py` shows all of it.
+- **In the gaps between tenons, and screws** [implemented 2026-10-11]: a
+  tenon joint records what it made per contact (centres, width, length),
+  and a joint given `gaps=t` joins along those contacts, as they were
+  before the tenons changed the outline, one per gap between and beside
+  the tenons: `cabineo(gaps=t)` (gaps of at least 40), `clamex(gaps=t)`
+  (120), `screws(gaps=t)`. `screws` is a joint of its own (`lang/joints/
+  screws.py`): `count=`/`at=` on a plain butt joint, or `gaps=t`, through
+  the board that is met from its outer face into the other's end, centred
+  on its thickness, `countersink=True` for a 90 degree countersink twice
+  the screw plus 0.4 wide (a chamfer on the hole's edge); `offset=12`
+  puts two beside each tenon instead. `screws(tenons=t)` drills through
+  the tenons themselves, halfway along each, one in the middle or two
+  `offset` in from its edges, square to the tenon board's faces: only
+  where the tenon's face lies open because its mortise runs out of the
+  other board's edge, as with a top flush with the sides (Florian: the
+  screw is driven through the open tenon into the other board), else an
+  error; drilled from that open face. Verified in Fusion against
+  tenons_native: gap screws centred with countersink and two-sided,
+  Clamex P-10 and Cabineo 8 in the gaps, tenon screws centred and
+  two-sided: zero difference both ways, identical face counts. The two
+  add-ins cut the Cabineo pocket 10.5 and 11 deep; Florian: 10.5 is right,
+  so tenons_native now reads all its Lamello and screw dimensions from
+  `lib/connector_data.py` too.
 - Hardware carries its own rules. A drawer slide determines the drawer box width,
   length, position and floor recess, so those numbers never appear in cabinet
   code. [decided; first hardware implemented 2026-10-11]
@@ -1362,10 +1383,11 @@ read too; the drawer cabinet's carcass is joined with them. Joins name
 their partners (`join(*partners, using=)`), and the Domino marks are the
 new `vgroove` operation through layout, emitter and preview. The emitter
 draws the arcs the layout's polygons stand for (see "Arcs" under Backend).
-116 tests. Verified in Fusion against connectors_native, now to zero
-difference. Integral tenons as the tenons_native add-in makes them,
-verified against it too. Not done: screws and connectors in the gaps
-between tenons, the drawer boxes' joints (box joints, groove, screws).
+122 tests. Verified in Fusion against connectors_native, now to zero
+difference. Integral tenons as the tenons_native add-in makes them, with
+screws and connectors in their gaps and screws through open tenons,
+verified against it too. Not done: the drawer boxes' joints (box joints,
+groove, screws to the face).
 
 1. `core`: the position algebra, box, board with `on`, `between` and `center`,
    scopes and paths, and layout JSON output with world transforms. With unit
@@ -1395,8 +1417,8 @@ between tenons, the drawer boxes' joints (box joints, groove, screws).
       at both faces; checks for parts inside the module box and the gap to a
       contour. The floor battens are the test case.
 
-Then: screws and connectors in the gaps between tenons (`gaps=`); box
-joints; arcs from the snapshot's contours (open question 16).
+Then: box joints; arcs from the snapshot's contours (open question
+16).
 (Operations, the half lap and the connectors are done; the assembly
 experiment from question 2 was dropped as a priority on 2026-10-11, since
 assembling module documents is easy by hand.)

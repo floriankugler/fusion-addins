@@ -5,6 +5,10 @@ a contact, stations along it, and the choice of a big face.
 `join_contacts` drives a `ContactJoint`: it finds every contact, asks the
 joint for its stations along each, lets it check them all and only then
 machine them, so a failed join changes no board.
+
+A tenon joint records what it made along each contact (`TenonPlacement`),
+so that connectors and screws joined afterwards can sit in the gaps
+between the tenons (`gaps=`) along the contact as it was before.
 """
 from __future__ import annotations
 
@@ -27,19 +31,73 @@ EPS = 1e-6
 Point2 = tuple[float, float]
 
 
+# -- tenons joined before ----------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class TenonPlacement:
+    """What a tenon joint made along one contact: the tenons' centres, their
+    width, and how far they reach into the other board."""
+    contact: Contact
+    centres: tuple[float, ...]
+    width: float
+    length: float
+
+    def tenons(self) -> list[tuple[float, float]]:
+        """Each tenon's extent along the contact."""
+        return [(s - self.width / 2, s + self.width / 2) for s in self.centres]
+
+    def gaps(self) -> list[tuple[float, float]]:
+        """The stretches of the contact between the tenons and beside the
+        outer ones, left to right; where a tenon is flush with an end there
+        is no gap."""
+        ends = [self.contact.lo] + [x for t in self.tenons() for x in t] + [self.contact.hi]
+        pairs = [(ends[k], ends[k + 1]) for k in range(0, len(ends), 2)]
+        return [(a, b) for a, b in pairs if b - a > EPS]
+
+
+class TenonSource(Protocol):
+    """A tenon joint, as other joints see it."""
+
+    def placements(self, part: Board, other: Board) -> list[TenonPlacement]:
+        """What it made between the two boards; an error when they were not
+        joined with it."""
+        ...
+
+
+def placement_of(source: TenonSource, c: Contact) -> TenonPlacement:
+    """The placement a contact came from."""
+    return next(p for p in source.placements(c.edge_on, c.face_on) if p.contact is c)
+
+
 # -- where along a contact -----------------------------------------------------------------------
+
+def touching(part: Board, other: Board) -> list[Contact]:
+    """The contacts of two boards, whichever meets the other edge-on."""
+    return contacts(part, other) or contacts(other, part)
+
 
 @dataclass(frozen=True)
 class Spacing:
     """`count` connectors with the outer ones `end` from the contact's ends,
-    or one at each position of `at`."""
+    one at each position of `at`, or one in each gap between the tenons
+    of `gaps`."""
     count: int | None
     end: float
     at: tuple[Pos, ...] | None
+    gaps: TenonSource | None = None
+
+    def contacts_with(self, part: Board, other: Board) -> list[Contact]:
+        """The contacts to join along: where the boards touch, or where the
+        tenons of `gaps` were made."""
+        if self.gaps is not None:
+            return [p.contact for p in self.gaps.placements(part, other)]
+        return touching(part, other)
 
     def stations(self, label: str, c: Contact) -> list[float]:
         """The positions along the contact, ascending."""
         path, other = c.edge_on.path, c.face_on.path
+        if self.gaps is not None:
+            return [(a + b) / 2 for a, b in placement_of(self.gaps, c).gaps()]
         if self.at is not None:
             values: list[float] = []
             for pos in self.at:
@@ -61,9 +119,21 @@ class Spacing:
         return [c.lo + s for s in data.stations(c.length, self.count, self.end)]
 
 
-def make_spacing(label: str, count: int | None, end: float, at: Sequence[PosLike] | None) -> Spacing:
-    if (count is None) == (at is None):
-        raise LangError(f"{label}: give count= or at=.")
+def check_gaps(label: str, spacing: Spacing, c: Contact, minimum: float) -> None:
+    """With `gaps=`, every gap must be at least `minimum` long."""
+    if spacing.gaps is None:
+        return
+    for lo, hi in placement_of(spacing.gaps, c).gaps():
+        if hi - lo < minimum - EPS:
+            raise LangError(f"{label}: the {hi - lo:g} mm gap from {c.axis}={lo:g} to {hi:g} is narrower than the "
+                            f"{minimum:g} mm a {label} needs.", c.edge_on.path)
+
+
+def make_spacing(label: str, count: int | None, end: float, at: Sequence[PosLike] | None,
+                 gaps: TenonSource | None = None) -> Spacing:
+    if [count is not None, at is not None, gaps is not None].count(True) != 1:
+        raise LangError(f"{label}: give one of count=, at= or gaps=." if gaps is not None
+                        else f"{label}: give count= or at=.")
     if count is not None and count < 1:
         raise LangError(f"{label}: count must be at least 1.")
     if end < 0:
@@ -71,7 +141,7 @@ def make_spacing(label: str, count: int | None, end: float, at: Sequence[PosLike
     positions = tuple(as_pos(p, f"{label}(at=)") for p in at) if at is not None else None
     if positions == ():
         raise LangError(f"{label}: at= is empty.")
-    return Spacing(count, float(end), positions)
+    return Spacing(count, float(end), positions, gaps)
 
 
 # -- geometry of one contact ---------------------------------------------------------------------
@@ -140,8 +210,13 @@ def hidden_face(part: Board) -> Face:
 # -- joining ---------------------------------------------------------------------------------------
 
 class ContactJoint(Protocol):
-    """A joint made per contact: where along it, a check, the machining."""
+    """A joint made per contact: which contacts, where along them, a check,
+    the machining."""
     label: ClassVar[str]
+
+    def contacts_with(self, part: Board, other: Board) -> list[Contact]:
+        """The contacts to join along; empty when the boards do not touch."""
+        ...
 
     def stations(self, c: Contact) -> list[float]:
         """The positions along the contact, ascending."""
@@ -158,7 +233,7 @@ def join_contacts(joint: ContactJoint, part: Board, partners: list[Board]) -> No
     label = joint.label
     found: list[Contact] = []
     for other in partners:
-        here = contacts(part, other) or contacts(other, part)
+        here = joint.contacts_with(part, other)
         if not here:
             raise LangError(f"{label}: {other.path} does not touch this board with an end or edge on a face.",
                             part.path)
