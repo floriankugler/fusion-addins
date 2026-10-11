@@ -2,9 +2,9 @@ import pytest
 
 from lang import *
 from lang.core.layout import build_layout
-from lang.core.ops import Hole
+from lang.core.ops import Cut, Hole
 from lang.core.scope import registry
-from lang.hardware.slides import INNER_FACE_OFFSET, SIDE_LIFT, DrawerSlide
+from lang.hardware.slides import BOTTOM_HEIGHT, INNER_FACE_OFFSET, DrawerSlide
 from lib.drawer_slides import DYNAPRO_40, MOVENTO_760H
 
 
@@ -17,6 +17,7 @@ def fresh_registry():
 
 ply15 = material("birch", t=15)
 ply12 = material("birch", t=12)
+ply9 = material("birch", t=9)
 
 
 def test_slide_dictates_the_drawer_box():
@@ -33,7 +34,45 @@ def test_slide_dictates_the_drawer_box():
     assert box.right.value == right.inner.value + (INNER_FACE_OFFSET - 12) * right.inner.direction.sign
     assert box.width == 570 - 2 * 9
     assert box.front.value == face.back.value and box.depth == 440
-    assert box.bottom.value == bay.bottom.value + SIDE_LIFT and box.height == 150
+    # the sides hang below the bottom panel, whose underside is 28 above the slide's bottom
+    assert slide.side_lift == BOTTOM_HEIGHT - 11.5 == 16.5
+    assert box.bottom.value == bay.bottom.value + 16.5 and box.height == 150
+
+
+def test_slide_machines_the_drawer_box():
+    slide = DrawerSlide(DYNAPRO_40, nl=450)
+    with module("cab", Box.from_size(width=600, depth=500, height=300)) as cab:
+        board("left", ply15).on(cab.left)
+        board("right", ply15).on(cab.right)
+        bay = cab.interior
+        with scope("drawer1", bay):
+            face = board("face", ply15).on(bay.front)
+            box = slide.drawer_box(bay, front=face.back, side_thickness=12, height=150)
+            l = board("left", ply12).on(box.left).between(box.front, box.back, box.bottom, box.top)
+            r = board("right", ply12).on(box.right).between(box.front, box.back, box.bottom, box.top)
+            f = board("front", ply12).on(box.front).between(l, r, box.bottom, box.top)
+            k = board("back", ply12).on(box.back).between(l, r, box.bottom, box.top)
+            floor = board("floor", ply9).on(box.bottom + slide.recess).between(l.into(5), r.into(5), f, k)
+            slide.machine_box(sides=(l, r), front=f, back=k, floor=floor)
+    # the sides' inner faces (left is -y here), the floor's underside above the box bottom
+    li, ri = l.inner.value, r.inner.value
+    assert (li, ri) == (36, 564)
+    z0, z1 = box.bottom.value, floor.bottom.value
+    assert z1 == z0 + 11.5
+    # cut-outs at both ends, from the lower edge to the floor's underside: 69 wide
+    # in the front for the couplings, 35 in the back for the hooks (u = y, v = z)
+    for board_, what, width in ((f, "coupling", 69), (k, "hook", 35)):
+        cuts = {op.name: op.shape.bounds for op in board_.ops if isinstance(op, Cut)}
+        assert cuts == {f"{what}_left": (li, z0, li + width, z1), f"{what}_right": (ri - width, z0, ri, z1)}
+    # three hook pre-drill holes per side in the back board's rear face, 2 x 8 by default
+    holes = [op for op in k.ops if isinstance(op, Hole)]
+    assert all(h.face == "back" and h.d == 2 and h.depth == 8 for h in holes)
+    assert {(h.u, h.v) for h in holes} == {
+        (li + 42, z1 + 15), (li + 42, z1 + 47), (li + 10, z1 + 47),
+        (ri - 42, z1 + 15), (ri - 42, z1 + 47), (ri - 10, z1 + 47)}
+    assert DrawerSlide(DYNAPRO_40, nl=450, hook_predrill=(3, 10)).hook_predrill == (3, 10)
+    with pytest.raises(LangError):   # no Blum data yet
+        DrawerSlide(MOVENTO_760H, nl=500).machine_box(sides=(l, r), front=f, back=k, floor=floor)
 
 
 def test_slide_refuses_what_it_cannot_take():

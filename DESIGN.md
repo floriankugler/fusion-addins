@@ -450,9 +450,20 @@ proposed]
   `lib/drawer_slides.py`. `slide.drawer_box(bay, front=face.back,
   side_thickness=, height=)` is the drawer box: the sides' inner faces 21 mm
   from the carcass sides (inner width LW - 42 in both catalogs, sides up to
-  16 mm), NL - 10 long, standing 10 mm above the bay bottom (Grass draws it,
-  Blum assumed), with `slide.recess` for the bottom panel (Grass 10-13,
-  Blum 12-15, default the middle); it refuses a bay shallower than NL + 3.
+  16 mm), NL - 10 long, with the bottom panel's underside 28 mm above the
+  bay bottom (10 below the screw row; Grass, Blum assumed) and the sides
+  hanging below it by `slide.recess` (Grass 10-13, Blum 12-15, default the
+  middle), so the sides' lower edge is `slide.side_lift` above the bay
+  bottom; it refuses a bay shallower than NL + 3.
+  `slide.machine_box(sides=(l, r), front=f, back=k, floor=floor)` machines
+  the drawer box (Grass; no Blum data yet): a cut-out at each end of the
+  front board for the couplings, 69 mm wide from the side's inner face,
+  and one at each end of the back board for the rear hooks, 35 mm wide,
+  both from the board's lower edge up to the floor's underside; and three
+  pre-drill holes per hook into the back board's rear face
+  (`hook_predrill`, default 2 x 8): 42 mm from the side's inner face at
+  15 and 47 above the floor's underside, and 10 mm from the inner face at
+  47. Cut-outs are named `coupling_left`, `hook_right` and so on.
   `drawer.mount(slide, sides=(left, right), front=face.back)` pre-drills the
   carcass sides: a row 38 mm above the bay bottom at the hole positions the
   add-in uses, measured from the runner's front. Hardware mounts through
@@ -472,17 +483,20 @@ proposed]
   runner front 4 mm behind the carcass edge, and the screw row sits at
   z = 35.9, which the placement aligns with the pre-drilled holes.
   Verified: all 24 pre-drill holes of the example coincide with the
-  runners' screw holes. Not yet: the drawer-box machining (coupling and
-  rear hook cut-outs) and models for other lengths and for Movento; one
-  slide variant is the prototype for now. The model files are committed
-  with the code so that the build is one package. Sources: Blum TD-132/1
-  DE/06.22 p.5, Grass Dynapro catalog p.13.
+  runners' screw holes. Not yet: Blum's drawer-box machining and models
+  for other lengths and for Movento; one slide variant is the prototype
+  for now. The model files are committed with the code so that the build is
+  one package. Sources: Grass "Dynapro Planungshinweise" 113378 12/2021
+  (the definitive sheet: installation dimensions, fastening positions and
+  assembly steps), Blum TD-132/1 DE/06.22 p.5.
 - Joinery as rules instead of one call per joint, as in Polyboard's manufacturing
   methods: state once which joint applies where, write only the exceptions.
   [proposed; mechanism above]
-- Not covered by an add-in today, as far as seen: a groove for drawer floors, and
-  the drawer-box dimensions per slide model (box width, length, recess, rear hook
-  notches). That is data to collect before the drawer example can compile. [open]
+- Not covered by an add-in today, as far as seen: a groove for drawer floors
+  (done with `side.cut(floor.box().grown(...))`), and the drawer-box
+  dimensions per slide model (box width, length, recess, the coupling and
+  hook cut-outs and the hook pre-drilling are in `lang/hardware/slides.py`
+  for Grass; Blum is still to be collected). [open]
 
 ### Runs: tubes, ducts and keep-outs
 

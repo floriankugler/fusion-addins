@@ -82,6 +82,7 @@ def drawer(name: str, bay: Box, panel: Box, slide: DrawerSlide) -> Scope:
         room = floor.box().grown(top=0.5, left=0.5, right=0.5)
         for side in (l, r):
             side.cut(room, name="floor_groove")
+        slide.machine_box(sides=(l, r), front=f, back=k, floor=floor)   # cut-outs and hook holes
     return d
 
 

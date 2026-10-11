@@ -2,19 +2,24 @@
 
 A slide dictates the drawer box: its sides' inner faces sit 21 mm from the
 carcass sides (inner width LW - 42, both catalogs), its length is the
-nominal length less 10 (SKL = NL - 10), its sides stand on the runner above
-the bay's bottom, and the bottom panel is recessed above the sides' lower
-edge. The carcass needs NL + 3 of depth behind the runner's front.
-`drawer_box()` returns that box; `recess` the bottom panel's height.
+nominal length less 10 (SKL = NL - 10), its bottom panel's underside lies
+28 mm above the slide's bottom (the bay's bottom), and its sides hang below
+the panel by the recess. The carcass needs NL + 3 of depth behind the
+runner's front. `drawer_box()` returns that box; `recess` the bottom
+panel's height above the sides' lower edge. `machine_box()` cuts the
+front and back boards out for the couplings and rear hooks and pre-drills
+the back board for the hooks.
 
 Mounted on a drawer scope, a slide pre-drills the carcass sides: a row 38
 mm above the bay's bottom, at the hole positions of `lib.drawer_slides`
 measured from the runner's front (the drawer face's back for inset
-fronts, the carcass front edge for overlay fronts).
+fronts, the carcass front edge for overlay fronts). The runner's own front
+is 4 mm behind that.
 
-Sources: Blum TD-132/1 DE/06.22 p.5 and Grass "Dynapro Fuehrungs-System"
-p.13 (read 2026-10-11); hole patterns from `lib.drawer_slides`. The
-drawer-box machining (coupling and hook cut-outs) is not modelled yet.
+Sources: Grass "Dynapro Planungshinweise" 113378 12/2021 (installation
+dimensions and assembly steps; read 2026-10-11), Blum TD-132/1 DE/06.22
+p.5; hole patterns from `lib.drawer_slides`; drawer-box machining as
+Florian read it from the Grass sheet (2026-10-11).
 """
 from __future__ import annotations
 
@@ -38,14 +43,36 @@ INNER_FACE_OFFSET = 21.0
 MAX_SIDE_THICKNESS = 16.0
 #: Drawer box length below the nominal length (SKL = NL - 10), mm.
 BOX_SHORTER_THAN_NL = 10.0
-#: The drawer sides' lower edge above the line the runner rests on, mm.
-#: Grass draws 10; Blum's figure gives no number, 10 is assumed.
-SIDE_LIFT = 10.0
+#: The bottom panel's underside above the slide's bottom (the bay's
+#: bottom), mm: 10 below the screw row at 38 (Grass; Blum assumed).
+BOTTOM_HEIGHT = 28.0
 #: Allowed height of the bottom panel's underside above the sides' lower
 #: edge, per model family, mm.
 BOTTOM_RECESS: dict[str, tuple[float, float]] = {
     "Blum": (12.0, 15.0),
     "Grass": (10.0, 13.0),
+}
+
+
+@dataclass(frozen=True)
+class BoxMachining:
+    """What the drawer box needs cut and drilled for a slide family, mm.
+    The cut-outs run from the board's lower edge up to the bottom panel's
+    underside; widths are measured from the drawer sides' inner faces.
+    Hook holes are drilled into the back board's rear face, given as
+    (from the side's inner face, above the bottom panel's underside)."""
+    #: Width of the cut-out at each end of the front board, for the couplings.
+    front_cutout: float
+    #: Width of the cut-out at each end of the back board, for the rear hooks.
+    back_cutout: float
+    #: Pre-drill positions for each rear hook.
+    hook_holes: tuple[tuple[float, float], ...]
+
+
+#: Per model family (Grass per Florian's reading of the Dynapro sheet).
+BOX_MACHINING: dict[str, BoxMachining] = {
+    "Grass": BoxMachining(front_cutout=69.0, back_cutout=35.0,
+                          hook_holes=((42.0, 15.0), (42.0, 15.0 + 32.0), (10.0, 15.0 + 32.0))),
 }
 
 
@@ -92,7 +119,8 @@ class DrawerSlide:
     `predrill` as (diameter, depth) in mm."""
 
     def __init__(self, model: data.SlideModel, nl: int, holes: int = 4, odd: bool = True,
-                 predrill: tuple[float, float] = (2.0, 4.0), bottom_recess: float | None = None):
+                 predrill: tuple[float, float] = (2.0, 4.0), bottom_recess: float | None = None,
+                 hook_predrill: tuple[float, float] = (2.0, 8.0)):
         if nl not in model.nominal_lengths:
             raise LangError(f"{model.name} is not made in NL {nl}; lengths: {model.nominal_lengths}.")
         self.model = model
@@ -100,6 +128,8 @@ class DrawerSlide:
         self.holes = holes
         self.odd = odd
         self.predrill = predrill
+        #: (diameter, depth) of the rear hooks' pre-drill holes in the back board.
+        self.hook_predrill = hook_predrill
         lo, hi = BOTTOM_RECESS[_family(model)]
         if bottom_recess is None:
             bottom_recess = (lo + hi) / 2
@@ -121,10 +151,18 @@ class DrawerSlide:
         """Carcass depth behind the runner's front (MET = NL + 3)."""
         return self.nl + data.DEPTH_ALLOWANCE
 
+    @property
+    def side_lift(self) -> float:
+        """The drawer sides' lower edge above the bay's bottom: the bottom
+        panel's underside at 28 less the recess the sides hang below it."""
+        return BOTTOM_HEIGHT - self.recess
+
     def drawer_box(self, bay: Box, front: PosLike, side_thickness: float, height: float) -> Box:
         """The drawer box's outer envelope in `bay`: the runner's front at
         `front`, the sides' inner faces 21 mm from the carcass sides, the
-        box NL - 10 long and `height` high, standing on the runner."""
+        box NL - 10 long and `height` high, its sides' lower edge
+        `side_lift` above the bay's bottom so that the bottom panel's
+        underside lies 28 above it."""
         if side_thickness > MAX_SIDE_THICKNESS:
             raise LangError(f"{self.name}: drawer sides may be at most {MAX_SIDE_THICKNESS:g} mm thick.")
         clearance = INNER_FACE_OFFSET - side_thickness
@@ -138,8 +176,43 @@ class DrawerSlide:
                             f"the bay has {available:g}.")
         box = bay.shrunk(left=clearance, right=clearance)
         box = box.with_sides(front=front_pos, back=Pos(back.axis, front_pos.value + back.sign * self.box_length))
-        bottom = bay.bottom.into(SIDE_LIFT)
-        return box.with_sides(bottom=bottom, top=bottom + height)
+        bottom = bay.bottom.into(self.side_lift)
+        return box.with_sides(bottom=bottom, top=bay.bottom.into(self.side_lift + height))
+
+    def machine_box(self, sides: tuple[Board, Board], front: Board, back: Board, floor: Board) -> None:
+        """`slide.machine_box(sides=(l, r), front=f, back=k, floor=floor)`:
+        the drawer box's cut-outs and holes. At each end of the front board
+        a cut-out for the coupling, 69 wide from the side's inner face, and
+        at each end of the back board one for the rear hook, 35 wide; both
+        from the board's lower edge up to the floor's underside. Into the
+        back board's rear face, three pre-drill holes per hook (`hook_predrill`
+        diameter and depth): 42 from the side's inner face at 15 and 47
+        above the floor's underside, and 10 from the inner face at 47."""
+        try:
+            data = BOX_MACHINING[_family(self.model)]
+        except KeyError:
+            raise LangError(f"{self.name}: no drawer-box machining data for {_family(self.model)}.") from None
+        frame = floor.box().frame
+        width_axis = frame.direction("left").axis
+        floor_bottom = floor.bottom.position
+        diameter, depth = self.hook_predrill
+        for side in sides:
+            inward = side.inner.direction            # from this side into the drawer
+            if inward.axis != width_axis:
+                raise LangError(f"{self.name}: {side.path} is not a side of the drawer box.", side.path)
+            inner = side.inner.value
+            which = (-inward).name                   # the side's own name in the frame: left or right
+            for board, width, what in ((front, data.front_cutout, "coupling"), (back, data.back_cutout, "hook")):
+                box = board.box()
+                if box.frame.direction("back").axis == width_axis:
+                    raise LangError(f"{self.name}: {board.path} is not the drawer's front or back.", board.path)
+                region = (box.with_side(-inward, inner)
+                             .with_side(inward, inner + inward.sign * width)
+                             .with_side(frame.direction("top"), floor_bottom.value))
+                board.cut(region, name=f"{what}_{which}")
+            for across, up in data.hook_holes:
+                at = Pos(width_axis, inner + inward.sign * across)
+                back.hole(d=diameter, depth=depth, at=back.outer.bottom(floor_bottom + up).left(at))
 
     def hole_positions(self) -> list[float]:
         """Pre-drill positions behind the runner's front, mm."""
