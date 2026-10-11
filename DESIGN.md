@@ -1217,9 +1217,8 @@ button and `lang/emit/snapshot.py`, `lang/master.py`, contour limits in
 ghosts in the viewer, and `examples/van.py` against the sample master from
 `tools/van_master.py` (fixture `examples/van_snapshot.json`), compiled in
 Fusion with exact volumes. Not done: `replace`/`.at(x)` for profile
-exceptions, the vehicle mesh. The Snapshot button was registered and its
-code path run through MCP, but not clicked (its save dialog cannot be
-driven from a script).
+exceptions, the vehicle mesh. The Snapshot Master button was clicked by
+Florian on 2026-10-11 and wrote its file.
 
 1. `core`: the position algebra, box, board with `on`, `between` and `center`,
    scopes and paths, and layout JSON output with world transforms. With unit
