@@ -23,8 +23,8 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
-    from ..core.layout_types import (ChamferLayout, HoleLayout, Layout, OpLayout, PartLayout,
-                                     PocketLayout, Rings)
+    from ..core.layout_types import (ChamferLayout, HardwareLayout, HoleLayout, Layout, OpLayout,
+                                     PartLayout, PocketLayout, Rings)
 
 Axis = Literal["x", "y", "z"]
 AXES: tuple[Axis, Axis, Axis] = ("x", "y", "z")
@@ -127,9 +127,29 @@ class PartPlan:
 
 
 @dataclass
+class HardwareBodyPlan:
+    name: str
+    offset: Point3  #: in the model's frame, mm
+
+
+@dataclass
+class HardwarePlan:
+    """A model file to import and place: the model's axes as world vectors
+    and its origin in world mm, plus per-body offsets in the model's frame."""
+    path: str
+    component: tuple[str, ...]
+    name: str
+    model: str
+    origin: Point3
+    axes: tuple[Vec, Vec, Vec]
+    bodies: list[HardwareBodyPlan]
+
+
+@dataclass
 class Plan:
     parts: list[PartPlan]
     problems: list[str]
+    hardware: list[HardwarePlan] = field(default_factory=list[HardwarePlan])
 
 
 def _unit(axis: Axis, sign: int) -> Vec:
@@ -301,8 +321,25 @@ def plan_layout(layout: Layout) -> Plan:
     frame = _Frame(layout["frame"])
     problems: list[str] = list(layout["problems"])
     parts: list[PartPlan] = []
+    hardware: list[HardwarePlan] = []
     for module in layout["modules"]:
         problems.extend(module["problems"])
         for part in module["parts"]:
             parts.append(plan_part(part, frame, problems))
-    return Plan(parts, problems)
+        for item in module.get("hardware", []):
+            hardware.append(plan_hardware(item))
+    return Plan(parts, problems, hardware)
+
+
+def _code_vector(code: str) -> Vec:
+    return _unit(_as_axis(code[1]), 1 if code[0] == "+" else -1)
+
+
+def plan_hardware(item: HardwareLayout) -> HardwarePlan:
+    segments = item["path"].split(".")
+    o = item["origin"]
+    return HardwarePlan(
+        item["path"], tuple(segments[:-1]), item["name"], item["model"], (o[0], o[1], o[2]),
+        (_code_vector(item["axes"]["x"]), _code_vector(item["axes"]["y"]), _code_vector(item["axes"]["z"])),
+        [HardwareBodyPlan(b["name"], (b["offset"][0], b["offset"][1], b["offset"][2])) for b in item["bodies"]],
+    )

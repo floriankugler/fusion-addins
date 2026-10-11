@@ -12,18 +12,25 @@ exports through attribute access.
 """
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any, Callable, Protocol
 
 from . import directions
 from .box import Box
 from .directions import Axis, Direction, ExtentName, Frame
 from .errors import LangError
+from .layout_types import HardwareBodyLayout, HardwareLayout
 from .refs import Pos, Side
 
 if TYPE_CHECKING:
     from .part import Board
 
 Check = Callable[["Scope"], list[str]]
+
+
+class Mountable(Protocol):
+    """Hardware that can be mounted in a scope (see `lang.hardware`)."""
+
+    def mount(self, scope: Scope, /, **options: Any) -> None: ...
 
 
 class Registry:
@@ -79,6 +86,7 @@ class Scope:
         self._box = box.in_frame(self.frame) if box is not None else None
         self.parts: dict[str, Board] = {}
         self.children: dict[str, Scope] = {}
+        self.hardware: list[HardwareLayout] = []
         self.exports: dict[str, Any] = {}
         self.checks: list[Check] = []
         self.problems: list[str] = []
@@ -223,6 +231,30 @@ class Scope:
             out.extend(child.all_parts())
         return out
 
+    def all_hardware(self) -> list[HardwareLayout]:
+        out = list(self.hardware)
+        for child in self.children.values():
+            out.extend(child.all_hardware())
+        return out
+
+    def place_hardware(self, name: str, model: str, origin: tuple[float, float, float],
+                       axes: dict[str, Direction], bodies: list[HardwareBodyLayout],
+                       mesh: str | None = None) -> HardwareLayout:
+        """Records a bought part placed from a model file: the model's x, y
+        and z axes along the given directions, its origin at `origin`
+        (world mm), with `mesh` as the preview's copy of the model.
+        Hardware objects call this from `mount`."""
+        if name in self.parts or name in self.children:
+            raise LangError(f"hardware name {name!r} collides with a part or scope name.", self.path)
+        item: HardwareLayout = {
+            "path": f"{self.path}.{name}", "kind": "hardware", "name": name, "model": model, "mesh": mesh,
+            "origin": [float(c) for c in origin],
+            "axes": {"x": axes["x"].code, "y": axes["y"].code, "z": axes["z"].code},
+            "bodies": bodies,
+        }
+        self.hardware.append(item)
+        return item
+
     # -- API -------------------------------------------------------------------------------------
 
     def export(self, name: str, value: object) -> Scope:
@@ -233,6 +265,13 @@ class Scope:
 
     def check(self, *checks: Check) -> Scope:
         self.checks.extend(checks)
+        return self
+
+    def mount(self, hardware: Mountable, **options: object) -> Scope:
+        """Mounts hardware in this scope: `drawer.mount(slide, sides=(left,
+        right), front=face.back)`. The hardware decides what that means;
+        the options are its own."""
+        hardware.mount(self, **options)
         return self
 
     def run_checks(self) -> list[str]:

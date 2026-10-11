@@ -24,6 +24,12 @@ class AxesDict(TypedDict):
     v: str
 
 
+class ModelAxesDict(TypedDict):
+    x: str
+    y: str
+    z: str
+
+
 class CutLayout(TypedDict):
     kind: Literal["cut"]
     name: str | None
@@ -92,10 +98,38 @@ class ExportValue(TypedDict):
     value: float
 
 
+class HardwareBodyLayout(TypedDict):
+    #: The body's name inside the model file.
+    name: str
+    #: Where the body goes, in the model's own frame (mm); non-zero when a
+    #: file holds a pair whose spacing the build decides.
+    offset: list[float]
+    #: The body's bounding box in the model's frame (mm), for the preview.
+    envelope: BoxDict
+
+
+class HardwareLayout(TypedDict):
+    """A bought part placed from a model file: the file's frame mapped to
+    world directions and a world origin."""
+    path: str
+    kind: Literal["hardware"]
+    name: str
+    #: Model file, relative to the repository root.
+    model: str
+    #: The same model as a mesh (glTF) for the preview, or None.
+    mesh: str | None
+    #: World origin of the model's origin, mm.
+    origin: list[float]
+    #: World direction code (`+y`, `-x`, ...) of each model axis.
+    axes: ModelAxesDict
+    bodies: list[HardwareBodyLayout]
+
+
 class ModuleLayout(TypedDict):
     path: str
     box: BoxDict | None
     parts: list[PartLayout]
+    hardware: list[HardwareLayout]
     exports: dict[str, ExportValue | float | str]
     problems: list[str]
 

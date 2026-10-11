@@ -445,7 +445,38 @@ proposed]
   `drawer.mount(slide, sides=(left, right))`, `face.latch(right, model)`.
 - Hardware carries its own rules. A drawer slide determines the drawer box width,
   length, position and floor recess, so those numbers never appear in cabinet
-  code. The slide data today appears to cover only the carcass hole patterns. [proposed]
+  code. [decided; first hardware implemented 2026-10-11]
+  `lang/hardware/slides.py`: `DrawerSlide(model, nl)` with the models of
+  `lib/drawer_slides.py`. `slide.drawer_box(bay, front=face.back,
+  side_thickness=, height=)` is the drawer box: the sides' inner faces 21 mm
+  from the carcass sides (inner width LW - 42 in both catalogs, sides up to
+  16 mm), NL - 10 long, standing 10 mm above the bay bottom (Grass draws it,
+  Blum assumed), with `slide.recess` for the bottom panel (Grass 10-13,
+  Blum 12-15, default the middle); it refuses a bay shallower than NL + 3.
+  `drawer.mount(slide, sides=(left, right), front=face.back)` pre-drills the
+  carcass sides: a row 38 mm above the bay bottom at the hole positions the
+  add-in uses, measured from the runner's front. Hardware mounts through
+  `Scope.mount(hardware, **options)`, which hands the scope to the hardware
+  object, so core knows nothing about slides.
+  The runner pair's 3D model is placed too: the layout has a `hardware`
+  list per module (a model file relative to the repository, the model's
+  axes as world directions, a world origin, and per-body offsets in the
+  model's frame plus an envelope box), the emitter imports the STEP into
+  the scope's component and moves each body into place, and the preview
+  shows the same model from the CAD box's glTF export, whose pieces are
+  assigned to bodies by their envelopes because the file names nothing;
+  without a mesh file the envelope boxes stand in. Häfele's CAD box delivers the file (`teccad.hafele.com`,
+  `ccHandler.aspx?CadBox=2&CssClass=topco&Mandant=HDE&ArtikelNr=...`,
+  format STEP, article 433.19.608 for Dynapro 40 kg NL 450) as a left and
+  right runner 400 mm apart; in it x = 0 is the mounting face, y = 0 the
+  runner front 4 mm behind the carcass edge, and the screw row sits at
+  z = 35.9, which the placement aligns with the pre-drilled holes.
+  Verified: all 24 pre-drill holes of the example coincide with the
+  runners' screw holes. Not yet: the drawer-box machining (coupling and
+  rear hook cut-outs) and models for other lengths and for Movento; one
+  slide variant is the prototype for now. The model files are committed
+  with the code so that the build is one package. Sources: Blum TD-132/1
+  DE/06.22 p.5, Grass Dynapro catalog p.13.
 - Joinery as rules instead of one call per joint, as in Polyboard's manufacturing
   methods: state once which joint applies where, write only the exceptions.
   [proposed; mechanism above]

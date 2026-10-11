@@ -23,6 +23,7 @@ from __future__ import annotations
 import gc
 import json
 import math
+import os
 import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Callable, cast
@@ -30,9 +31,9 @@ from typing import TYPE_CHECKING, Callable, cast
 import adsk.core
 import adsk.fusion
 
-from .plan import (AXES, Axis, ChamferStep, CircleContour, Contour, EdgeContour, FaceRef, HoleStep,
-                   OutlineContour, PartPlan, Plan, PocketStep, Point3, Rings3, ShapeContour, Step,
-                   Vec, plan_layout)
+from .plan import (AXES, Axis, ChamferStep, CircleContour, Contour, EdgeContour, FaceRef, HardwarePlan,
+                   HoleStep, OutlineContour, PartPlan, Plan, PocketStep, Point3, Rings3, ShapeContour,
+                   Step, Vec, plan_layout)
 
 if TYPE_CHECKING:
     from ..core.layout_types import Layout
@@ -75,6 +76,10 @@ def _pt(p: Point3) -> adsk.core.Point3D:
 
 def _cm(p: Point3) -> Point3:
     return (p[0] * MM, p[1] * MM, p[2] * MM)
+
+
+def _vec(v: Vec) -> adsk.core.Vector3D:
+    return adsk.core.Vector3D.create(v[0], v[1], v[2])
 
 
 def _coord(point: adsk.core.Point3D, axis: Axis) -> float:
@@ -132,9 +137,15 @@ def _describe(step: Step) -> str:
 
 # -- the emitter ---------------------------------------------------------------------------------
 
+#: Where model files named in the layout are found: the repository root.
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
 class Emitter:
-    def __init__(self, design: adsk.fusion.Design, log: Log | None = None):
+    def __init__(self, design: adsk.fusion.Design, log: Log | None = None, model_root: str = REPO_ROOT):
         self.design = design
+        self.app = adsk.core.Application.get()
+        self.model_root = model_root
         self.root = design.rootComponent
         self.tmp = adsk.fusion.TemporaryBRepManager.get()
         self.parametric = design.designType == _PARAMETRIC
@@ -151,9 +162,69 @@ class Emitter:
                 continue
             self.log(f"part {part.path}")
             self._emit_part(part)
+        for item in plan.hardware:
+            self.log(f"hardware {item.path}")
+            self._emit_hardware(item)
         self.report.seconds = time.perf_counter() - t0
         self.report.document = self.design.parentDocument.name
         return self.report
+
+    # -- hardware ------------------------------------------------------------------------------------
+
+    def _emit_hardware(self, item: HardwarePlan) -> None:
+        """Imports the model file into the scope's component and places it:
+        the occurrence takes the model-to-world transform, and a body with
+        an offset is moved within the model's frame."""
+        path = os.path.join(self.model_root, item.model)
+        if not os.path.isfile(path):
+            self._problem(f"{item.path}: model file not found: {path}")
+            return
+        comp = self._component(item.component)
+        before = comp.occurrences.count
+        options = self.app.importManager.createSTEPImportOptions(path)
+        self.app.importManager.importToTarget(options, comp)
+        # Nested occurrences have no entity tokens; the import appends.
+        added = [comp.occurrences.item(i) for i in range(before, comp.occurrences.count)]
+        if len(added) != 1:
+            self._problem(f"{item.path}: the import added {len(added)} components, expected one.")
+            return
+        occ = added[0]
+        occ.component.name = item.path   # unique, like the bodies' names
+        # Nested occurrences take no transform overrides, so each body is
+        # moved itself: a copy transformed from the model's frame (plus the
+        # body's offset in that frame) into the world replaces the original.
+        ax, ay, az = item.axes
+        for body_plan in item.bodies:
+            body = self._find_body(occ.component, body_plan.name)
+            if body is None:
+                self._problem(f"{item.path}: body {body_plan.name!r} not found in the model.")
+                continue
+            ox, oy, oz = body_plan.offset
+            origin = tuple(item.origin[i] + ax[i] * ox + ay[i] * oy + az[i] * oz for i in range(3))
+            transform = adsk.core.Matrix3D.create()
+            transform.setWithCoordinateSystem(
+                _pt((origin[0], origin[1], origin[2])), _vec(ax), _vec(ay), _vec(az))
+            moved = self.tmp.copy(body)
+            self.tmp.transform(moved, transform)
+            parent = body.parentComponent
+            name = body.name
+            body.deleteMe()
+            parent.bRepBodies.add(moved).name = name
+        self.report.features += 1
+
+    @staticmethod
+    def _find_body(comp: adsk.fusion.Component, name: str) -> adsk.fusion.BRepBody | None:
+        """The body of that name anywhere below `comp`, skipping empty
+        placeholder bodies (Häfele's files carry a zero-size "Body1")."""
+        for i in range(comp.bRepBodies.count):
+            body = comp.bRepBodies.item(i)
+            if body.name == name and body.volume > 1e-9:
+                return body
+        for i in range(comp.occurrences.count):
+            found = Emitter._find_body(comp.occurrences.item(i).component, name)
+            if found is not None:
+                return found
+        return None
 
     def _problem(self, text: str) -> None:
         self.report.problems.append(text)

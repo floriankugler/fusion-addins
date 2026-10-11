@@ -128,7 +128,16 @@ def test_example_plans_completely(tmp_path: Path):
     assert plan.problems == []
     sides = [p for p in plan.parts if p.path in ("drawercab.left", "drawercab.right")]
     for side in sides:
-        assert len(side.steps) == 1 and isinstance(side.steps[0], HoleStep)
-        assert len(side.steps[0].points) == 13   # the column starts above the raised bottom
+        pins, predrill = side.steps
+        assert isinstance(pins, HoleStep) and isinstance(predrill, HoleStep)
+        assert len(pins.points) == 13            # the column starts above the raised bottom
+        assert len(predrill.points) == 12 and predrill.d == 2.0   # 3 drawers x 4 slide holes
     assert [p.component for p in plan.parts if p.path.endswith("floor")] == [
         ("drawercab", "drawer1"), ("drawercab", "drawer2"), ("drawercab", "drawer3")]
+    # the runner pairs: one model per drawer, axes as world vectors, the right runner offset
+    assert [h.path for h in plan.hardware] == [f"drawercab.drawer{i}.runners" for i in (1, 2, 3)]
+    runners = plan.hardware[0]
+    assert runners.component == ("drawercab", "drawer1") and runners.model.endswith(".stp")
+    assert runners.axes == ((-1.0, 0.0, 0.0), (0.0, -1.0, 0.0), (0.0, 0.0, 1.0))
+    assert runners.origin == (585.0, 481.0, 117.1)
+    assert [b.offset for b in runners.bodies] == [(0.0, 0.0, 0.0), (170.0, 0.0, 0.0)]

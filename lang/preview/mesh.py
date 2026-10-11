@@ -14,7 +14,7 @@ import trimesh
 from shapely.geometry import Polygon
 from trimesh.creation import extrude_polygon
 
-from ..core.layout_types import Layout, PartLayout, Rings
+from ..core.layout_types import BoxDict, HardwareLayout, Layout, PartLayout, Rings
 
 AXES = ("x", "y", "z")
 
@@ -77,17 +77,93 @@ def mesh_part(part: PartLayout, frame: dict[str, str]) -> Any:
     return mesh
 
 
-def build_scene(layout: Layout) -> Any:
+def _axis_vector(code: str) -> Any:
+    v = np.zeros(3)
+    v["xyz".index(code[1])] = 1.0 if code[0] == "+" else -1.0
+    return v
+
+
+_mesh_cache: dict[str, list[Any]] = {}
+
+
+def _model_pieces(path: Path) -> list[Any]:
+    """The connected pieces of a glTF model file, in the model's frame
+    (the file's numbers are millimetres whatever its unit says). Häfele's
+    files put every body into one node with a generated name, so bodies
+    are told apart by where they lie, not by name."""
+    key = str(path)
+    if key not in _mesh_cache:
+        scene: Any = trimesh.load(str(path), force="scene")
+        pieces: list[Any] = []
+        graph = scene.graph
+        for node in graph.nodes_geometry:
+            transform, geometry_name = graph[node]
+            mesh = scene.geometry[geometry_name].copy()
+            mesh.apply_transform(transform)
+            if len(mesh.faces) < 4:
+                continue
+            pieces.extend(mesh.split(only_watertight=False, repair=False))
+        _mesh_cache[key] = pieces
+    return _mesh_cache[key]
+
+
+def _body_mesh(item: HardwareLayout, body: Any, root: Path) -> Any:
+    """A body's mesh: the model's pieces inside the body's envelope, or the
+    envelope box when there is no model file."""
+    if item["mesh"]:
+        path = root / item["mesh"]
+        if path.is_file():
+            pieces = [p for p in _model_pieces(path) if _inside_envelope(p, body["envelope"])]
+            if pieces:
+                return trimesh.util.concatenate(pieces)
+    lo = np.array(body["envelope"]["min"])
+    hi = np.array(body["envelope"]["max"])
+    box = trimesh.creation.box(extents=hi - lo)
+    box.apply_translation((lo + hi) / 2)
+    return box
+
+
+def _inside_envelope(mesh: Any, envelope: BoxDict, tolerance: float = 1.0) -> bool:
+    lo, hi = mesh.bounds
+    return bool(np.all(lo >= np.array(envelope["min"]) - tolerance)
+                and np.all(hi <= np.array(envelope["max"]) + tolerance))
+
+
+def mesh_hardware(item: HardwareLayout, root: Path) -> list[tuple[str, Any]]:
+    """Each body of a bought part in world coordinates: the model's mesh
+    when `mesh` names a file under `root`, else its envelope box."""
+    m = np.eye(4)
+    for col, key in enumerate(("x", "y", "z")):
+        m[:3, col] = _axis_vector(item["axes"][key])
+    m[:3, 3] = item["origin"]
+    out: list[tuple[str, Any]] = []
+    for body in item["bodies"]:
+        mesh = _body_mesh(item, body, root)
+        mesh.apply_translation(body["offset"])
+        mesh.apply_transform(m)
+        mesh.metadata["path"] = f"{item['path']}.{body['name']}"
+        out.append((mesh.metadata["path"], mesh))
+    return out
+
+
+#: Where model files named in the layout are found: the repository root.
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def build_scene(layout: Layout, root: Path = REPO_ROOT) -> Any:
     scene = trimesh.Scene()
     for module in layout["modules"]:
         for part in module["parts"]:
             mesh = mesh_part(part, layout["frame"])
             if mesh is not None and len(mesh.faces):
                 scene.add_geometry(mesh, node_name=part["path"], geom_name=part["path"])
+        for item in module.get("hardware", []):
+            for name, mesh in mesh_hardware(item, root):
+                scene.add_geometry(mesh, node_name=name, geom_name=name)
     return scene
 
 
-def write_scene(layout: Layout, path: str | Path) -> None:
-    scene = build_scene(layout)
+def write_scene(layout: Layout, path: str | Path, root: Path = REPO_ROOT) -> None:
+    scene = build_scene(layout, root)
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     scene.export(str(path))

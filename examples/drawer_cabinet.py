@@ -1,7 +1,10 @@
-"""The drawer cabinet from DESIGN.md, as far as phase 1 reaches: boards and
-their placement, cuts, pockets and holes. No joints and no hardware yet, so
-the slide is a stand-in with the numbers a real slide module will own."""
+"""The drawer cabinet from DESIGN.md: boards and their placement, cuts,
+pockets and holes, and drawer slides as the first hardware. The slide
+dictates the drawer box and pre-drills the carcass sides; joints are not
+modelled yet."""
 from lang import *
+from lang.hardware.slides import DrawerSlide
+from lib.drawer_slides import DYNAPRO_40
 
 ply15 = material("birch", t=15, sheet=(2500, 1250))
 ply12 = material("birch", t=12, sheet=(2500, 1250))
@@ -9,19 +12,7 @@ ply9 = material("birch", t=9, sheet=(2500, 1250))
 GAP = 3  # between fronts
 
 
-class StandInSlide:
-    """Until the drawer-slide module exists: a runner needing 13 mm per side
-    and lifting the drawer floor 10 mm."""
-    side_clearance = 13
-    recess = 10
-
-    def box_space(self, bay: Box, behind: Board, height: float) -> Box:
-        inner = bay.with_sides(front=behind.back)
-        return (inner.shrunk(left=self.side_clearance, right=self.side_clearance)
-                .with_sides(top=inner.bottom + height))
-
-
-def drawer_cabinet(name: str, box: Box, n: int, slide: StandInSlide, front: Side | None = None,
+def drawer_cabinet(name: str, box: Box, n: int, slide: DrawerSlide, front: Side | None = None,
                    bottom_drawer: float | None = None) -> Scope:
     """A drawer cabinet in its own frame: front is where the drawers open,
     wherever the cabinet stands. `front=` places it (see `module`). With
@@ -52,7 +43,8 @@ def drawer_cabinet(name: str, box: Box, n: int, slide: StandInSlide, front: Side
         bays = divide(opening, n, bottom_drawer)
         panels = divide(fronts, n, bottom_drawer)
         for i, (bay, panel) in enumerate(zip(bays, panels), 1):
-            drawer(f"drawer{i}", bay, panel, slide)
+            d = drawer(f"drawer{i}", bay, panel, slide)
+            d.mount(slide, sides=(left, right), front=d.face.back)   # pre-drills the carcass
 
         cab.export("worktop", top.top)   # for whatever stands on the cabinet
         check(no_interference, fits_sheet)
@@ -68,14 +60,14 @@ def divide(space: Box, n: int, first: float | None) -> list[Box]:
     return [lowest] + rest.split("height", n - 1)
 
 
-def drawer(name: str, bay: Box, panel: Box, slide: StandInSlide) -> Scope:
+def drawer(name: str, bay: Box, panel: Box, slide: DrawerSlide) -> Scope:
     """A drawer in its `bay`, the space it occupies in the carcass, with its
     face covering `panel`, its share of the cabinet front, less half a gap
-    on every side."""
+    on every side. The slide sizes the box behind the face."""
     with scope(name, bay) as d:
-        (board("face", ply15).on(bay.front)
-         .between(panel.left, panel.right, panel.bottom, panel.top).inset(GAP / 2))
-        box = slide.box_space(bay, behind=d.face, height=bay.height - 30)
+        face = (board("face", ply15).on(bay.front)
+                .between(panel.left, panel.right, panel.bottom, panel.top).inset(GAP / 2))
+        box = slide.drawer_box(bay, front=face.back, side_thickness=ply12.t, height=bay.height - 30)
 
         l = board("left", ply12).on(box.left).between(box.front, box.back, box.bottom, box.top)
         r = board("right", ply12).on(box.right).between(box.front, box.back, box.bottom, box.top)
@@ -98,4 +90,5 @@ def drawer(name: str, bay: Box, panel: Box, slide: StandInSlide) -> Scope:
 # 500 wide (across the vehicle) and 600 deep (along it); inside the module the
 # cabinet is 600 wide and 500 deep.
 box = Box.from_size(width=500, depth=600, height=720)
-cabinet = drawer_cabinet("drawercab", box, 3, StandInSlide(), front=box.right, bottom_drawer=230)
+slide = DrawerSlide(DYNAPRO_40, nl=450)
+cabinet = drawer_cabinet("drawercab", box, 3, slide, front=box.right, bottom_drawer=230)

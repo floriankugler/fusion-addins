@@ -27,12 +27,13 @@ def build_layout() -> Layout:
             "path": root.path,
             "box": box.as_dict() if box else None,  # type: ignore[typeddict-item]
             "parts": parts,
+            "hardware": root.all_hardware(),
             "exports": {k: _export_value(v) for k, v in root.exports.items()},
             "problems": list(root.problems),
         })
     loose = [part.to_layout() for part in registry.root_parts]
     if loose:
-        modules.append({"path": "", "box": None, "parts": loose, "exports": {}, "problems": []})
+        modules.append({"path": "", "box": None, "parts": loose, "hardware": [], "exports": {}, "problems": []})
     return {
         "version": LAYOUT_VERSION,
         "units": "mm",
