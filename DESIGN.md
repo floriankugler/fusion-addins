@@ -385,11 +385,22 @@ proposed]
 - One master per van build, holding planes, base boxes and shapes that the modules
   refer to. Optionally one reference document per module for extra hand-drawn
   geometry. Everything else is generated on top. [decided]
-- Two kinds of reference: planes, which give a position, and contours, which give a
-  shape to follow. [proposed]
+- Four kinds of reference [decided 2026-10-11]: planes, which give a
+  position; contours, which give a shape to follow; placeholder boxes, rough
+  bodies drawn in the master to divide up the room, which become module
+  boxes (`module("kitchen", van.box("Kueche"), front=...)`); and the
+  master's user parameters, which are plain numbers (`van.param("Bodenhoehe")`).
+  A box's front is stated in Python at placement, never read from the master.
 - Naming uses what is visibly named in Fusion: one construction plane per plane
-  reference, one sketch per contour (the sketch name is the reference name). No
-  hidden tags on single curves. [proposed]
+  reference, one sketch per contour (the sketch name is the reference name),
+  one component or body per box, one user parameter per number. No hidden
+  tags on single curves. The snapshot takes everything in the master; a name
+  starting with a double underscore (`__temporarySketch`) is left out.
+  Duplicate names are an error. [decided 2026-10-11]
+- The master's axes are the world axes. Which world axis is front, left or
+  up is a per-project choice made in the build file with `set_frame(Frame(...))`;
+  the planning documents use front = -x, left (driver's side) = -y, top = +z.
+  [decided 2026-10-11]
 - `master.py` is an index that binds those names and says where exceptions apply.
   Compile fails early on a missing name, a duplicate name, or a sketch with more
   than one chain of curves. [proposed]
@@ -404,10 +415,20 @@ proposed]
   reference; a module function returns its module object, and the importer reads
   `kitchen.top`. Modules import the build's master index as `van`
   (`from . import master as van`), which is the name the examples use.
-- The snapshot is the compile's only view of the master. It holds planes, contour
-  polylines sampled at a stated tolerance, and the vehicle mesh. Faceting on
-  curved contours is accepted for now; arcs can be carried exactly later. The
-  lock file records the snapshot's hash. [proposed]
+- The snapshot is the compile's only view of the master. It holds planes
+  (origin and normal), contours as polylines sampled at 0.1 mm with a closed
+  flag, boxes (min and max; a body that is not an axis-aligned cuboid is
+  exported as its bounding box and flagged), user parameters (value in mm and
+  expression), and later the vehicle mesh. Faceting on curved contours is
+  accepted for now; arcs can be carried exactly later. The file carries its
+  own hash and the source document's name; a layout records the hash of the
+  snapshot it used. [decided 2026-10-11, tolerance included]
+- Reading it [proposed]: `van = master("snapshot.json")` in the build file,
+  then `van.plane(name)` (a position when the plane is axis aligned, an error
+  when used otherwise), `van.box(name)`, `van.param(name)`, `van.contour(name)`.
+  The layout carries the boxes and contours through, so the preview can draw
+  placeholder boxes as translucent ghosts and contours as lines around the
+  compiled module. A check keeps a module's parts inside its box.
 
 ### Joints and hardware
 
@@ -1053,12 +1074,27 @@ Layout button picks a layout file and runs it. Step 4 is next.
 3. `emit`: the interpreter for that JSON in a fresh direct document, bodies
    named by path, with the measured levers (batching, deferred sketches, B-rep
    outlines). [done; see "Measured: compile speed" for what it does differently]
-4. Snapshot: one plane and one contour read from a master document into JSON,
-   used as limits.
+4. Snapshot [planned 2026-10-11, decisions in "Master document"], in this order:
+   1. The writer in Fusion: `lang/emit/snapshot.py` (loaded like the emitter,
+      without the parent package) and a Snapshot button in the compiler
+      add-in. With the master active it writes `snapshot.json`: planes,
+      sketches as single-chain contours, user parameters, cuboid bodies as
+      boxes; double-underscore names skipped, duplicates reported.
+   2. Reading: `lang/master.py` with `master(path)`; the layout records the
+      snapshot hash and carries boxes and contours; the preview draws ghost
+      boxes and contour lines; unit tests against a committed fixture.
+   3. A worked example: a sample master built by script through the Fusion
+      MCP (planes, a floor outline with wheel arches, a floor profile, user
+      parameters, placeholder boxes), its snapshot committed as the fixture,
+      and `examples/van.py` with the floor battens and the drawer cabinet
+      placed in a placeholder box.
+   4. Contour limits: `.between()` takes a contour, `.gap(n)` offsets it;
+      own-plane contours bound the outline, perpendicular ones are sectioned
+      at both faces; checks for parts inside the module box and the gap to a
+      contour. The floor battens are the test case.
 
-Then, in this order: operations (cut, pocket, hole, chamfer); one contact and one
-holes-only joint; contour limits with the floor battens as the test case; the
-assembly experiment from question 2.
+Then: one contact and one holes-only joint; the assembly experiment from
+question 2. (Operations are done.)
 
 Before any of it, cheap and useful: write two real modules from the van in the
 proposed syntax on paper, a bank and the rear storage, since those resolved
