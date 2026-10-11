@@ -6,8 +6,8 @@ from lang import *
 from lang.build import run_build
 from lang.core.layout import build_layout
 from lang.core.scope import registry
-from lang.emit.plan import (ChamferStep, CircleContour, EdgeContour, FaceRef, HoleStep, OutlineContour,
-                            PocketStep, ShapeContour, VGrooveStep, plan_layout)
+from lang.emit.plan import (Arc, ChamferStep, Circle, CircleContour, EdgeContour, FaceRef, HoleStep, Line,
+                            OutlineContour, PocketStep, ShapeContour, VGrooveStep, loop_points, plan_layout)
 
 
 @pytest.fixture(autouse=True)
@@ -33,7 +33,8 @@ def test_body_is_outline_on_lower_face_extruded_along_thickness():
     assert p.component == ("cab",)
     assert p.body.thickness == 15
     assert p.body.direction == (0.0, 1.0, 0.0)
-    ring = p.body.rings[0]
+    ring = loop_points(p.body.loops[0])
+    assert all(isinstance(c, Line) for c in p.body.loops[0])
     assert all(pt[1] == 0.0 for pt in ring)
     assert {(pt[0], pt[2]) for pt in ring} == {(0.0, 0.0), (500.0, 0.0), (500.0, 720.0), (0.0, 720.0)}
 
@@ -63,9 +64,9 @@ def test_through_depth_is_none_and_pocket_chamfer_follows_pocket():
     pocket, chamfer, hole = steps
     assert isinstance(pocket, PocketStep) and pocket.depth is None
     assert pocket.face == FaceRef("z", 1, 15.0)
-    assert all(pt[2] == 15.0 for pt in pocket.shapes[0][0])
+    assert all(pt[2] == 15.0 for pt in loop_points(pocket.shapes[0][0]))
     assert isinstance(chamfer, ChamferStep) and isinstance(chamfer.contour, ShapeContour)
-    assert chamfer.contour.rings == pocket.shapes[0]
+    assert chamfer.contour.loops == pocket.shapes[0]
     assert isinstance(hole, HoleStep) and hole.depth is None
 
 
@@ -82,7 +83,7 @@ def test_cut_chamfer_and_named_contours():
     show = FaceRef("y", -1, 0.0)
     assert isinstance(cut_chamfer, ChamferStep) and isinstance(cut_chamfer.contour, ShapeContour)
     assert cut_chamfer.contour.face == show
-    assert all(pt[1] == 0.0 for pt in cut_chamfer.contour.rings[0])
+    assert all(pt[1] == 0.0 for pt in loop_points(cut_chamfer.contour.loops[0]))
     assert isinstance(outline, ChamferStep) and outline.contour == OutlineContour(show)
     assert isinstance(edge, ChamferStep)
     assert edge.contour == EdgeContour(FaceRef("x", -1, 0.0), FaceRef("y", 1, 15.0))
@@ -102,10 +103,11 @@ def test_narrow_face_operations_map_to_the_face_plane():
     assert hole.depth == 30  # deeper than the thickness, but not through the 500 mm board
     assert isinstance(pocket, PocketStep)
     assert pocket.face == FaceRef("z", 1, 720.0)
-    xs = {pt[0] for pt in pocket.shapes[0][0]}
-    ys = {pt[1] for pt in pocket.shapes[0][0]}
+    corners = loop_points(pocket.shapes[0][0])
+    xs = {pt[0] for pt in corners}
+    ys = {pt[1] for pt in corners}
     assert xs == {240.0, 260.0} and ys == {4.5, 10.5}
-    assert all(pt[2] == 720.0 for pt in pocket.shapes[0][0])
+    assert all(pt[2] == 720.0 for pt in corners)
 
 
 def test_unknown_chamfer_target_is_a_problem_not_a_crash():
@@ -118,6 +120,26 @@ def test_unknown_chamfer_target_is_a_problem_not_a_crash():
     plan = plan_layout(layout)
     assert plan.problems and "nothing" in plan.problems[0]
     assert plan.parts[0].steps == []
+
+
+def test_round_shapes_come_out_as_arcs_and_circles():
+    with module("cab", CAB) as cab:
+        bottom = board("bottom", ply15).on(cab.bottom)
+        bottom.pocket(circle(20), at=bottom.top.center, depth=5, chamfer=1)
+        bottom.cut(rect(width=100, depth=60).rounded(10), at=bottom.top.front(50))
+    p = _plan_of(bottom)
+    pocket, chamfer = p.steps
+    assert isinstance(pocket, PocketStep) and isinstance(chamfer, ChamferStep)
+    ((circle_,),) = pocket.shapes[0]
+    assert isinstance(circle_, Circle) and circle_.radius == pytest.approx(10)
+    assert circle_.center == pytest.approx((250.0, 300.0, 15.0))
+    assert isinstance(chamfer.contour, ShapeContour) and chamfer.contour.loops == pocket.shapes[0]
+    # the window's rounded corners are arcs in the outline's hole, the board's corners lines
+    outer, window = p.body.loops
+    assert all(isinstance(c, Line) for c in outer)
+    arcs = [c for c in window if isinstance(c, Arc)]
+    assert len(window) == 8 and len(arcs) == 4 and all(a.radius == pytest.approx(10) for a in arcs)
+    assert sorted(a.center[:2] for a in arcs) == pytest.approx([(60, 260), (60, 340), (100, 260), (100, 340)])
 
 
 def test_a_vgroove_runs_between_world_points_on_its_face():

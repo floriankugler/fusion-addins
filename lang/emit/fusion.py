@@ -34,9 +34,9 @@ from typing import TYPE_CHECKING, Callable, cast
 import adsk.core
 import adsk.fusion
 
-from .plan import (AXES, Axis, ChamferStep, CircleContour, Contour, EdgeContour, FaceRef, HardwarePlan,
-                   HoleStep, OutlineContour, PartPlan, Plan, PocketStep, Point3, Rings3, ShapeContour,
-                   Step, Vec, VGrooveStep, plan_layout)
+from .plan import (AXES, Arc, Axis, ChamferStep, Circle, CircleContour, Contour, Curve, EdgeContour, FaceRef,
+                   HardwarePlan, HoleStep, Line, Loop, Loops, OutlineContour, PartPlan, Plan, PocketStep, Point3,
+                   ShapeContour, Step, Vec, VGrooveStep, loop_points, plan_layout)
 
 if TYPE_CHECKING:
     from ..core.layout_types import Layout
@@ -119,15 +119,49 @@ def _newell_normal(ring: list[Point3]) -> Vec:
     return (nx, ny, nz)
 
 
-def _oriented(ring: list[Point3], normal: Vec) -> list[Point3]:
-    """The ring without a repeated closing point, wound so that the face
-    made from it has `normal` (right-hand rule)."""
-    pts = list(ring)
-    if len(pts) > 1 and all(abs(pts[0][i] - pts[-1][i]) < 1e-9 for i in range(3)):
-        pts.pop()
-    if _dot(_newell_normal(pts), normal) < 0:
-        pts.reverse()
-    return pts
+def _reversed(curve: Curve) -> Curve:
+    if isinstance(curve, Line):
+        return Line(curve.b, curve.a)
+    if isinstance(curve, Arc):
+        return Arc(curve.b, curve.mid, curve.a, curve.center, curve.radius)
+    return curve
+
+
+def _oriented(loop: Loop, normal: Vec) -> Loop:
+    """The loop wound so that the face made from it has `normal`
+    (right-hand rule). A full circle is drawn about `normal` anyway."""
+    points = loop_points(loop)
+    if not points or _dot(_newell_normal(points), normal) >= 0:
+        return loop
+    return [_reversed(c) for c in reversed(loop)]
+
+
+def _polygon(points: list[Point3]) -> Loop:
+    return [Line(a, points[(i + 1) % len(points)]) for i, a in enumerate(points)]
+
+
+def _on_arc(p: Point3, arc: Arc, normal: Vec) -> bool:
+    """Whether `p` (cm), a point on the arc's circle, lies between its ends
+    (mm), going the way its middle point does."""
+    c = _cm(arc.center)
+    def angle(q: Point3) -> float:
+        u = (_cm(arc.a)[0] - c[0], _cm(arc.a)[1] - c[1], _cm(arc.a)[2] - c[2])
+        v = (q[0] - c[0], q[1] - c[1], q[2] - c[2])
+        return math.atan2(_dot(normal, _cross(u, v)), _dot(u, v)) % (2 * math.pi)
+    mid, end, at = angle(_cm(arc.mid)), angle(_cm(arc.b)), angle(p)
+    slack = 1e-6
+    if mid < end:                         # counter-clockwise about the normal
+        return at <= end + slack or at >= 2 * math.pi - slack
+    return at >= end - slack or at <= slack
+
+
+def _on_curve(p: Point3, curve: Curve, normal: Vec) -> bool:
+    """Whether `p` (cm), a point on the curve's plane, lies on the curve (mm)."""
+    if isinstance(curve, Line):
+        return _dist_to_segment(p, _cm(curve.a), _cm(curve.b)) < TOL
+    if abs(math.dist(p, _cm(curve.center)) - curve.radius * MM) >= TOL:
+        return False
+    return isinstance(curve, Circle) or _on_arc(p, curve, normal)
 
 
 def _dist_to_segment(p: Point3, a: Point3, b: Point3) -> float:
@@ -280,7 +314,7 @@ class Emitter:
 
     def _make_body(self, comp: adsk.fusion.Component, part: PartPlan) -> adsk.fusion.BRepBody:
         direction = part.body.direction
-        added = self._add_faces(comp, [part.body.rings], direction)
+        added = self._add_faces(comp, [part.body.loops], direction)
         profile = added[0].faces.item(0)
         extrudes = comp.features.extrudeFeatures
         inp = extrudes.createInput(profile, _NEW_BODY)
@@ -296,25 +330,28 @@ class Emitter:
 
     # -- temporary face bodies -----------------------------------------------------------------
 
-    def _face_body(self, rings: Rings3, normal: Vec) -> adsk.fusion.BRepBody:
+    def _face_body(self, loops: Loops, normal: Vec) -> adsk.fusion.BRepBody:
         wires: list[adsk.fusion.BRepBody] = []
-        for ring in rings:
-            pts = _oriented(ring, normal)
+        for loop in loops:
             curves: list[adsk.core.Curve3D] = []
-            for i, a in enumerate(pts):
-                b = pts[(i + 1) % len(pts)]
-                if math.dist(a, b) < 1e-6:
-                    continue
-                curves.append(adsk.core.Line3D.create(_pt(a), _pt(b)))
+            for c in _oriented(loop, normal):
+                if isinstance(c, Line):
+                    if math.dist(c.a, c.b) < 1e-6:
+                        continue
+                    curves.append(adsk.core.Line3D.create(_pt(c.a), _pt(c.b)))
+                elif isinstance(c, Arc):
+                    curves.append(adsk.core.Arc3D.createByThreePoints(_pt(c.a), _pt(c.mid), _pt(c.b)))
+                else:
+                    curves.append(adsk.core.Circle3D.createByCenter(_pt(c.center), _vec(normal), c.radius * MM))
             wire, _ = self.tmp.createWireFromCurves(curves)
             wires.append(wire)
         return self.tmp.createFaceFromPlanarWires(wires)
 
-    def _add_faces(self, comp: adsk.fusion.Component, shapes: list[Rings3],
+    def _add_faces(self, comp: adsk.fusion.Component, shapes: list[Loops],
                    normal: Vec) -> list[adsk.fusion.BRepBody]:
         """Adds one planar face body per shape to the component. A
         parametric design needs a base feature; a direct design does not."""
-        faces = [self._face_body(rings, normal) for rings in shapes]
+        faces = [self._face_body(loops, normal) for loops in shapes]
         if not self.parametric:
             return [comp.bRepBodies.add(fb) for fb in faces]
         base = comp.features.baseFeatures.add()
@@ -398,16 +435,14 @@ class Emitter:
             return [e for e in body.edges
                     if self._edge_on_plane(e, contour.a) and self._edge_on_plane(e, contour.b)]
         if isinstance(contour, ShapeContour):
-            segments: list[tuple[Point3, Point3]] = []
-            for ring in contour.rings:
-                pts = [_cm(p) for p in ring]
-                segments += [(pts[i], pts[(i + 1) % len(pts)]) for i in range(len(pts))]
+            curves = [c for loop in contour.loops for c in loop]
+            normal = contour.face.normal
             found: list[adsk.fusion.BRepEdge] = []
             for e in body.edges:
                 if not self._edge_on_plane(e, contour.face):
                     continue
                 mid = self._edge_midpoint(e)
-                if min(_dist_to_segment(mid, a, b) for a, b in segments) < TOL:
+                if any(_on_curve(mid, c, normal) for c in curves):
                     found.append(e)
             return found
         circle_contour: CircleContour = contour
@@ -493,7 +528,7 @@ class Emitter:
             (s[0] - across[0] * half, s[1] - across[1] * half, s[2] - across[2] * half),
             (s[0] + into[0] * step.depth, s[1] + into[1] * step.depth, s[2] + into[2] * step.depth),
         ]
-        added = self._add_faces(comp, [[ring]], along)
+        added = self._add_faces(comp, [[_polygon(ring)]], along)
         profile = added[0].faces.item(0)
         extrudes = comp.features.extrudeFeatures
         inp = extrudes.createInput(profile, _CUT)

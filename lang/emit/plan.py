@@ -4,7 +4,7 @@ Everything here is plain Python in world millimetres. The Fusion half
 (`fusion.py`) only converts units, draws, and finds faces and edges by the
 positions recorded here.
 
-Per part the plan holds the body (outline rings on the part's lower big
+Per part the plan holds the body (the outline on the part's lower big
 face, extruded along the thickness axis) and an ordered list of steps:
 
 - `PocketStep`: shapes cut from one face to one depth, batched while
@@ -18,11 +18,18 @@ face, extruded along the thickness axis) and an ordered list of steps:
 
 Through cuts are already part of the outline and produce no step, except a
 chamfer along their contour.
+
+Outlines and shapes are loops of lines, arcs and circles: the layout's
+polygons with the runs that lie on a circle recovered as arcs (`arcs.fit`),
+so a slot's round end becomes one cylindrical face in Fusion instead of a
+fan of flat ones.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal
+
+from .arcs import Arc2, Curve2, Line2, fit
 
 if TYPE_CHECKING:
     from ..core.layout_types import (ChamferLayout, HardwareLayout, HoleLayout, Layout, OpLayout,
@@ -32,8 +39,48 @@ Axis = Literal["x", "y", "z"]
 AXES: tuple[Axis, Axis, Axis] = ("x", "y", "z")
 Vec = tuple[float, float, float]
 Point3 = tuple[float, float, float]
-#: A polygon as rings of 3D points, exterior first, then holes.
-Rings3 = list[list[Point3]]
+
+
+@dataclass(frozen=True)
+class Line:
+    a: Point3
+    b: Point3
+
+
+@dataclass(frozen=True)
+class Arc:
+    """From `a` through `mid` to `b` about `center`."""
+    a: Point3
+    mid: Point3
+    b: Point3
+    center: Point3
+    radius: float
+
+
+@dataclass(frozen=True)
+class Circle:
+    """A full circle in the plane of the face it is drawn on."""
+    center: Point3
+    radius: float
+
+
+Curve = Line | Arc | Circle
+#: A closed loop of curves, each starting where the one before ends.
+Loop = list[Curve]
+#: A planar region: its outer loop first, then its holes.
+Loops = list[Loop]
+
+
+def loop_points(loop: Loop) -> list[Point3]:
+    """The loop's corners in order, with each arc's middle point: a polygon
+    that winds the same way. Empty for a full circle."""
+    points: list[Point3] = []
+    for curve in loop:
+        if isinstance(curve, Line):
+            points.append(curve.a)
+        elif isinstance(curve, Arc):
+            points += [curve.a, curve.mid]
+    return points
 
 
 @dataclass(frozen=True)
@@ -63,7 +110,7 @@ class FaceRef:
 class Body:
     """The part's outline on its lower big face, extruded along
     `direction` by `thickness`."""
-    rings: Rings3
+    loops: Loops
     direction: Vec
     thickness: float
 
@@ -71,7 +118,7 @@ class Body:
 @dataclass
 class PocketStep:
     face: FaceRef
-    shapes: list[Rings3]
+    shapes: list[Loops]
     depth: float | None  #: None means through
 
 
@@ -105,7 +152,7 @@ class EdgeContour:
 @dataclass
 class ShapeContour:
     face: FaceRef
-    rings: Rings3
+    loops: Loops
 
 
 @dataclass
@@ -234,8 +281,19 @@ class _Part:
         coords = {first: a, second: b, face.axis: face.value}
         return (coords["x"], coords["y"], coords["z"])
 
-    def rings(self, face: FaceRef, rings: Rings, offset: tuple[float, float] = (0.0, 0.0)) -> Rings3:
-        return [[self.point(face, p[0] + offset[0], p[1] + offset[1]) for p in ring] for ring in rings]
+    def loops(self, face: FaceRef, rings: Rings, offset: tuple[float, float] = (0.0, 0.0)) -> Loops:
+        """A layout shape (rings in the face's frame, moved by `offset`) as
+        loops on the face, with its arcs recovered."""
+        return [[self._curve(face, c) for c in fit([(p[0] + offset[0], p[1] + offset[1]) for p in ring])]
+                for ring in rings]
+
+    def _curve(self, face: FaceRef, c: Curve2) -> Curve:
+        if isinstance(c, Line2):
+            return Line(self.point(face, *c.a), self.point(face, *c.b))
+        if isinstance(c, Arc2):
+            return Arc(self.point(face, *c.a), self.point(face, *c.mid), self.point(face, *c.b),
+                       self.point(face, *c.center), c.radius)
+        return Circle(self.point(face, *c.center), c.radius)
 
     def depth(self, face: FaceRef, depth: float, through: bool = False) -> float | None:
         """A depth from `face`, or None when it reaches the opposite face:
@@ -248,7 +306,7 @@ def plan_part(part: PartLayout, frame: _Frame, problems: list[str]) -> PartPlan:
     p = _Part(part, frame)
     segments = part["path"].split(".")
     lower = FaceRef(p.t_axis, -1, p.lo[p.t_axis])
-    body = Body(p.rings(lower, part["outline"]), _unit(p.t_axis, 1), p.thickness)
+    body = Body(p.loops(lower, part["outline"]), _unit(p.t_axis, 1), p.thickness)
     plan = PartPlan(part["path"], tuple(segments[:-1]), body, manual=part["manual"])
     show = p.face(part["show"])
     # Layouts written before the machine face existed: the show face is up.
@@ -271,7 +329,7 @@ def _plan_op(p: _Part, plan: PartPlan, op: OpLayout, show: FaceRef,
     steps = plan.steps
     if op["kind"] == "cut":
         if op["chamfer"] > 0:
-            steps.append(ChamferStep(op["chamfer"], ShapeContour(show, p.rings(show, op["shape"]))))
+            steps.append(ChamferStep(op["chamfer"], ShapeContour(show, p.loops(show, op["shape"]))))
     elif op["kind"] == "pocket":
         _add_pocket(p, steps, p.face(op["face"]), op, (0.0, 0.0))
     elif op["kind"] == "hole":
@@ -297,15 +355,15 @@ def _plan_op(p: _Part, plan: PartPlan, op: OpLayout, show: FaceRef,
 
 def _add_pocket(p: _Part, steps: list[Step], face: FaceRef, op: PocketLayout,
                 offset: tuple[float, float]) -> None:
-    rings = p.rings(face, op["shape"], offset)
+    loops = p.loops(face, op["shape"], offset)
     depth = p.depth(face, op["depth"])
     last = steps[-1] if steps else None
     if isinstance(last, PocketStep) and last.face == face and last.depth == depth:
-        last.shapes.append(rings)
+        last.shapes.append(loops)
     else:
-        steps.append(PocketStep(face, [rings], depth))
+        steps.append(PocketStep(face, [loops], depth))
     if op["chamfer"] > 0:
-        steps.append(ChamferStep(op["chamfer"], ShapeContour(face, rings)))
+        steps.append(ChamferStep(op["chamfer"], ShapeContour(face, loops)))
 
 
 def _add_hole(p: _Part, steps: list[Step], face: FaceRef, op: HoleLayout,
@@ -330,10 +388,10 @@ def _chamfer_contour(p: _Part, op: ChamferLayout, show: FaceRef,
     if what in named:
         target = named[what]
         if target["kind"] == "cut":
-            return ShapeContour(face, p.rings(face, target["shape"]))
+            return ShapeContour(face, p.loops(face, target["shape"]))
         if target["kind"] == "pocket":
             f = p.face(target["face"])
-            return ShapeContour(f, p.rings(f, target["shape"]))
+            return ShapeContour(f, p.loops(f, target["shape"]))
         if target["kind"] == "hole":
             f = p.face(target["face"])
             return CircleContour(f, p.point(f, target["u"], target["v"]), target["d"] / 2)
@@ -341,7 +399,7 @@ def _chamfer_contour(p: _Part, op: ChamferLayout, show: FaceRef,
             f = p.face(target["face"])
             inner = target["op"]
             if inner["kind"] == "pocket":
-                return ShapeContour(f, p.rings(f, inner["shape"], (target["s"], target["t"])))
+                return ShapeContour(f, p.loops(f, inner["shape"], (target["s"], target["t"])))
             return CircleContour(f, p.point(f, target["s"], target["t"]), inner["d"] / 2)
         return None
     parts = what.split(".")

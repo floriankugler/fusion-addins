@@ -630,17 +630,14 @@ proposed]
   flip. The dimensions come from `lib/connector_data.py`, plain data shared
   with the connectors_native add-in (and through `lib/domino.py` with
   tenons_native). Operations are named `cabineo_left_1a` (kind, other
-  board, station, letter). Round access pockets are hole features, so they
-  come out exact; slots are polygons (open question 16).
+  board, station, letter). Round access pockets are hole features; the
+  slots' round ends come out as true arcs (see "Arcs" under Backend).
   Verified in Fusion 2026-10-11 against connectors_native on the same board
   pair (Cabineo 8 x 3, Domino 4x20 x 3 with marks, Clamex P-10 x 2): the
   boolean difference between the add-in's bodies and the compiled ones is
-  zero for Cabineo and for the Domino marks; for the Domino and Clamex
-  slots the compiled ones leave 2.5 and 2.7 mm³ more, exactly what their
-  polygonal round ends account for (32 sides per circle), and they cost
-  faces: the side with three Domino slots has 111 faces against the
-  add-in's 21. The drawer cabinet compiles with 160 features in 1.0 s,
-  volumes exact against the layout.
+  zero both ways for all three, and every body has as many faces as the
+  add-in's. The drawer cabinet compiles with 160 features in 0.8 s,
+  volumes exact.
 - Hardware carries its own rules. A drawer slide determines the drawer box width,
   length, position and floor recess, so those numbers never appear in cabinet
   code. [decided; first hardware implemented 2026-10-11]
@@ -1230,6 +1227,25 @@ polyline circle chamfers fine; an edge can only be chamfered once, so a
 build must not let an outline chamfer and an edge or cut chamfer share an
 edge.
 
+**Arcs** [implemented 2026-10-11]: layout shapes stay polygons, since all
+of the layout step's 2D work is shapely, but the emitter plan recovers the
+arcs they stand for (`lang/emit/arcs.py`). Circles, slot ends, `rounded()`
+corners and round-join offsets all put their vertices exactly on a circle,
+a few degrees apart, and booleans keep those vertices. A run of at least 4
+segments turning 0.5 to 11.5 degrees each about one centre, every vertex
+within 1e-7 mm of the circle, is drawn as a three-point arc (a whole ring
+as a circle); everything else stays lines. That leaves coarse polygons
+(an octagon) alone, and the master's contours too: sampled every 0.1 mm
+and rounded to 0.1 micrometre, they turn too little per step and are too
+noisy, so they stay polylines (open question 16). The plan's outlines,
+pockets and chamfer contours are loops of lines, arcs and circles; the
+emitter builds the temporary faces from `Line3D`, `Arc3D` and `Circle3D`
+and finds a chamfer's edges on them by their midpoints. The preview keeps
+meshing the polygons. Verified 2026-10-11: the drawer cabinet (23 parts),
+the van (42) and the operations example compile without problems, every
+cabinet and van body within 0.005 mm³ of its exact volume, a carcass side
+down from 140 faces to 80.
+
 ## Open questions
 
 1. ~~Compile speed~~: measured above; a 60-board module in about 4 s direct.
@@ -1273,11 +1289,10 @@ edge.
     choice.
 16. Whether the snapshot should carry arcs exactly instead of polylines.
     Sampled at 0.1 mm for now, which is up to 0.2 mm off along an axis where
-    an arc runs steeply (seen at the sample's wheel-arch corners). The same
-    holds for layout shapes: a Domino or Clamex slot's round ends are
-    polygons of 32 sides per circle (0.01 mm inside the arc), so Fusion gets
-    a ring of small flat faces where the add-in has a cylinder. Carrying arcs
-    in layout shapes would make them exact; whether CAM minds is untested.
+    an arc runs steeply (seen at the sample's wheel-arch corners), and such
+    a contour reaches Fusion as a polyline of many tiny faces, since the
+    emitter only recovers arcs from exact vertices. The layout's own arcs
+    are recovered (see "Arcs" under Backend).
 17. Runs: fittings and connectors on tubes; whether a duct needs a lid part of
     its own for the cut list; how a run crossing a board at an angle is cut.
 18. Detail levels: two or three, and whether chamfers belong to `full` or to a
@@ -1314,9 +1329,11 @@ Cabineo (see "Joints and hardware"), with their dimensions moved into
 `lib/connector_data.py`, which connectors_native and `lib/domino.py` now
 read too; the drawer cabinet's carcass is joined with them. Joins name
 their partners (`join(*partners, using=)`), and the Domino marks are the
-new `vgroove` operation through layout, emitter and preview. 97 tests.
-Verified in Fusion against connectors_native. Not done: the drawer boxes'
-joints (box joints, groove, screws).
+new `vgroove` operation through layout, emitter and preview. The emitter
+draws the arcs the layout's polygons stand for (see "Arcs" under Backend).
+105 tests. Verified in Fusion against connectors_native, now to zero
+difference. Not done: the drawer boxes' joints (box joints, groove,
+screws).
 
 1. `core`: the position algebra, box, board with `on`, `between` and `center`,
    scopes and paths, and layout JSON output with world transforms. With unit
@@ -1346,8 +1363,8 @@ joints (box joints, groove, screws).
       at both faces; checks for parts inside the module box and the gap to a
       contour. The floor battens are the test case.
 
-Then: box joints and tenons, which change outlines; arcs in layout shapes
-(open question 16).
+Then: box joints and tenons, which change outlines; arcs from the
+snapshot's contours (open question 16).
 (Operations, the half lap and the connectors are done; the assembly
 experiment from question 2 was dropped as a priority on 2026-10-11, since
 assembling module documents is easy by hand.)

@@ -3,8 +3,10 @@
 Two halves:
 
 - `plan` turns a layout into the geometry the emitter draws, in world
-  millimetres: outlines as 3D rings, operations batched per face and depth,
-  chamfers as contours to find edges along. Plain Python, unit tested.
+  millimetres: outlines as loops of lines, arcs and circles (`arcs`
+  recovers the arcs the layout's polygons stand for), operations batched
+  per face and depth, chamfers as contours to find edges along. Plain
+  Python, unit tested.
 - `fusion` draws a plan into a Fusion document with Fusion's own features.
 
 The master's snapshot is written here too: `snapshot` reads the active
