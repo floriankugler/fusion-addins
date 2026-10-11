@@ -12,19 +12,29 @@ exports through attribute access.
 """
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Protocol
 
 from . import directions
 from .box import Box
 from .directions import Axis, Direction, ExtentName, Frame
 from .errors import LangError
-from .layout_types import HardwareBodyLayout, HardwareLayout
+from .layout_types import HardwareBodyLayout, HardwareLayout, SnapshotLayout
 from .refs import Pos, Side
 
 if TYPE_CHECKING:
     from .part import Board
 
 Check = Callable[["Scope"], list[str]]
+
+
+class SnapshotSource(Protocol):
+    """A snapshot of the master in use (`lang.master.Master`)."""
+    path: Path
+    hash: str
+    notes: list[str]
+
+    def to_layout(self) -> SnapshotLayout: ...
 
 
 class Mountable(Protocol):
@@ -37,11 +47,19 @@ class Registry:
     def __init__(self) -> None:
         self.roots: list[Scope] = []
         self.root_parts: list[Board] = []
+        #: Snapshots of the master the build reads, recorded in the layout.
+        self.snapshots: list[SnapshotSource] = []
 
     def reset(self) -> None:
         self.roots.clear()
         self.root_parts.clear()
+        self.snapshots.clear()
         _stack.clear()
+
+    def use_snapshot(self, snapshot: SnapshotSource) -> None:
+        """Records a snapshot the build reads; one entry per file and hash."""
+        if not any(s is snapshot for s in self.snapshots):
+            self.snapshots.append(snapshot)
 
 
 registry = Registry()

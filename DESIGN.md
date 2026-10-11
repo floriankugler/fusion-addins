@@ -41,8 +41,9 @@ Not goals:
 - **Master document**: a hand-made Fusion document with named planes and sketches
   for the whole van. The compiler reads it and never writes to it.
 - **Snapshot**: the master document read once into a JSON file: every plane as
-  origin plus normal, every contour as a sampled polyline, and the vehicle body
-  as a mesh for the preview. [proposed]
+  origin plus normal, every contour as a sampled polyline, every body as a
+  box, every user parameter; later the vehicle body as a mesh for the
+  preview. [implemented 2026-10-11, without the mesh]
 - **Layout**: a pure-Python description of each part: its world placement, its
   outline, and a list of operations (2D shape, depth, face). Written to one
   JSON file per module. No Fusion involved.
@@ -354,7 +355,26 @@ proposed]
 - Contour limits: a contour in the part's own plane bounds the outline directly;
   a contour in a perpendicular plane is sectioned at both big faces of the part
   and the tighter result wins, so the part fits over its whole thickness. Both
-  are polyline math on the snapshot. [proposed]
+  are polyline math on the snapshot (`lang/core/contours.py`). [implemented
+  2026-10-11; the rules below were chosen while implementing]
+  - In the part's plane, a closed contour is intersected with the outline
+    and its bounds stand in for missing limits. An open contour is an edge:
+    it limits the axis across its chord (first to last point), the part
+    keeps the side its other limit on that axis is on (or the middle of its
+    room), and the edge follows the contour; a chord at 45 degrees, or the
+    other limit within the contour's reach, is an error.
+  - In a perpendicular plane, a closed contour gives a stretch on the axis
+    the two planes share (several stretches: the one around the part's
+    other limits, else an error); an open contour gives a position there,
+    and must cross each face once.
+  - `contour.gap(n)` keeps n of clearance, measured in the contour's plane
+    with round joins, so it is exact at corners; `contour.into(n)` reaches
+    past it. Stretches from closed contours cut every other range down
+    (tighter wins). A contour that splits the part in two, leaves nothing,
+    lies in a tilted plane or is not planar is an error.
+  - The part's box is the bounds of what the contours leave, so a batten
+    whose lower edge follows the floor profile has its `bottom` at the
+    profile's lowest point.
 - Anywhere a length or a position is expected, a reference can be given instead of
   a number. This replaces the extrude options Florian uses a lot in Fusion (start
   from offset or from object plus offset, extent to object plus offset).
@@ -403,7 +423,8 @@ proposed]
   [decided 2026-10-11]
 - `master.py` is an index that binds those names and says where exceptions apply.
   Compile fails early on a missing name, a duplicate name, or a sketch with more
-  than one chain of curves. [proposed]
+  than one chain of curves. [proposed; the errors are implemented, exceptions
+  such as `replace` below are not]
 - A module refers only to the master, to its own parts, and to what other modules
   export. The kitchen reads the floor's top from the floor module in Python, not
   from a hand-moved plane in the master; `build.py` orders the compiles. Fusion
@@ -423,12 +444,45 @@ proposed]
   accepted for now; arcs can be carried exactly later. The file carries its
   own hash and the source document's name; a layout records the hash of the
   snapshot it used. [decided 2026-10-11, tolerance included]
-- Reading it [proposed]: `van = master("snapshot.json")` in the build file,
-  then `van.plane(name)` (a position when the plane is axis aligned, an error
-  when used otherwise), `van.box(name)`, `van.param(name)`, `van.contour(name)`.
-  The layout carries the boxes and contours through, so the preview can draw
-  placeholder boxes as translucent ghosts and contours as lines around the
-  compiled module. A check keeps a module's parts inside its box.
+- Writing it [implemented 2026-10-11]: the compiler add-in's Snapshot Master
+  button runs `lang/emit/snapshot.py` on the active document and saves
+  `snapshot.json` (shape in `lang/core/snapshot_types.py`; the Fusion-free
+  half, `lang/emit/snapshot_format.py`, chains curves, collects names and
+  hashes, and is unit tested). Rules chosen while implementing [proposed]:
+  - items in components are taken in world coordinates, through the
+    occurrence they are reached by;
+  - a component with exactly one body names its box (Florian names the
+    components of placeholder bodies); otherwise each body names its own;
+  - a component whose name starts with `__` is left out with everything in
+    it; linked components are left out, since they belong to other
+    documents;
+  - a sketch's construction curves do not count; the rest must form one
+    chain without branches;
+  - surface bodies, duplicate names (per kind: a plane and a sketch may
+    share a name) and sketches that are not one chain are listed as
+    problems in the file instead of failing the snapshot, and using such a
+    name in a build is an error that repeats the problem;
+  - the hash covers the content, not the document's name, and the file is
+    deterministic (rounded to 0.1 micrometre, sorted, one point per line),
+    so an unchanged master gives an unchanged file.
+- Reading it [implemented 2026-10-11]: `van = master("snapshot.json")` in
+  the build file (a relative path starts at the calling file's directory),
+  then `van.plane(name)`, `van.box(name)`, `van.param(name)` (mm for
+  lengths, degrees for angles), `van.contour(name)` (`lang/master.py`). A
+  plane is a `Plane` that acts as a position (`on`, `between`, `spread`,
+  arithmetic) when it is axis aligned and is an error when a tilted one is
+  used as one. A box that is only a bounding box adds a note to the
+  layout's problems. A missing name is an error that suggests close
+  matches. The layout carries the snapshots it read (file, source, hash,
+  boxes, contours), and the preview draws the boxes as translucent ghosts
+  with their names and the contours as lines (`m` toggles them). Checks:
+  `inside_box` keeps a module's parts inside its box, `inside(contour,
+  gap=)` keeps them inside a closed contour seen along its normal (a part
+  in the contour's plane by its outline, any other by its box).
+- The sample master is built by `tools/van_master.py` in Fusion (rebuild it
+  rather than keep a saved document); its snapshot is
+  `examples/van_snapshot.json`, the test fixture, and `examples/van.py` is
+  the worked example below.
 
 ### Joints and hardware
 
@@ -842,11 +896,42 @@ batten ends at the tighter of its two faces, so that it fits inside the outline
 over its whole thickness. All of that is polyline math in the layout step: the
 floor profile is a polyline in the batten's plane, the floor outline is sectioned
 at both faces of the batten. The emitter receives a finished outline and extrudes
-it; nothing is projected or healed in Fusion. [proposed; the original draft had
-the emitter project the master sketch]
+it; nothing is projected or healed in Fusion. [implemented 2026-10-11 except
+`.at(x)` and `replace`; the original draft had the emitter project the master
+sketch]
 
 Nothing in `floor.py` is specific to one vehicle. The next van needs a new master
 and the same floor code.
+
+As implemented in `examples/van.py`, against the sample master (one floor
+profile for the whole length, so no `.at(x)`):
+
+```python
+van = master("van_snapshot.json")
+floor_level = van.plane("Bodenniveau")
+floor_outline = van.contour("Bodenumriss")
+floor_profile = van.contour("Bodenprofil")
+
+with module("floor", van.box("Boden")) as f:
+    top = floor_level - ply12.t
+    battens = [board(f"batten{i}", ply15).center(x).between(top, floor_profile.gap(2), floor_outline)
+               for i, x in enumerate(spread(van.plane("Boden vorne"), van.plane("Boden hinten"),
+                                            pitch=van.param("Lattenabstand")))]
+    middle = battens[len(battens) // 2]
+    joint = (middle.front + middle.back) / 2
+    board("panel_front", ply12).on(f.top).between(floor_outline, f.front, joint)
+    board("panel_back", ply12).on(f.top).between(floor_outline, joint, f.back)
+
+kitchen_box = van.box("Kueche")
+kitchen = drawer_cabinet("kitchen", kitchen_box, 3, slide, front=kitchen_box.right)
+kitchen.check(inside_box, inside(floor_outline))
+```
+
+The battens beside the wheel arches come out shorter, the one centred on an
+arch's rear end ends at its tighter face, every lower edge dips 2 mm above
+the floor's valleys and rises into the walls, and the rear panel carries
+the arch notches with their rounded corners. Compiled in Fusion: 34 parts,
+111 features in 0.9 s, every floor part's volume equal to the layout's.
 
 ## Project structure
 
@@ -1022,9 +1107,11 @@ edge.
    Joints). Predicate vocabulary still to be written.
 7. ~~Connections between modules~~: module exports in Python (see Master
    document).
-8. Contour limits: project one drawn master sketch into the part's plane, or
-   section the vehicle body at that plane? Current answer: a drawn profile with
-   exceptions looked up by position, as polylines in the snapshot.
+8. ~~Contour limits~~: drawn sketches as polylines in the snapshot, projected
+   or sectioned in the layout step (implemented 2026-10-11, see Placement and
+   references). Still open: exceptions looked up by position
+   (`floor_profile.at(x)` with `replace(..., between=...)`), and sectioning
+   the vehicle body once there is a mesh.
 9. ~~Naming for vehicle-fitted parts~~: those are hand-modeled and outside the
    language; only Copy Path cares.
 10. ~~Attributes surviving operations~~: irrelevant for compiler output, which
@@ -1043,8 +1130,9 @@ edge.
 15. Terminology: "module" collides with Python's term, and the files live in a
     `modules/` folder; "layout" collides with nesting. Livable, but a conscious
     choice.
-16. Whether the snapshot should carry arcs exactly instead of polylines, and at
-    what tolerance to sample.
+16. Whether the snapshot should carry arcs exactly instead of polylines.
+    Sampled at 0.1 mm for now, which is up to 0.2 mm off along an axis where
+    an arc runs steeply (seen at the sample's wheel-arch corners).
 17. Runs: fittings and connectors on tubes; whether a duct needs a lid part of
     its own for the cut list; how a run crossing a board at an angle is cut.
 18. Detail levels: two or three, and whether chamfers belong to `full` or to a
@@ -1063,7 +1151,17 @@ contours) plus the adsk interpreter (`lang/emit/fusion.py`); it draws the
 drawer cabinet (23 parts, 61 features) in 0.4 s and `examples/operations.py`,
 which uses every operation kind, in 1.9 s, into a direct document with one
 component per scope and bodies named by path. The `compiler` add-in's Compile
-Layout button picks a layout file and runs it. Step 4 is next.
+Layout button picks a layout file and runs it.
+
+Status 2026-10-11: step 4 is implemented too (71 tests): the Snapshot Master
+button and `lang/emit/snapshot.py`, `lang/master.py`, contour limits in
+`lang/core/contours.py`, the `inside_box` and `inside()` checks, master
+ghosts in the viewer, and `examples/van.py` against the sample master from
+`tools/van_master.py` (fixture `examples/van_snapshot.json`), compiled in
+Fusion with exact volumes. Not done: `replace`/`.at(x)` for profile
+exceptions, the vehicle mesh. The Snapshot button was registered and its
+code path run through MCP, but not clicked (its save dialog cannot be
+driven from a script).
 
 1. `core`: the position algebra, box, board with `on`, `between` and `center`,
    scopes and paths, and layout JSON output with world transforms. With unit
@@ -1074,7 +1172,7 @@ Layout button picks a layout file and runs it. Step 4 is next.
 3. `emit`: the interpreter for that JSON in a fresh direct document, bodies
    named by path, with the measured levers (batching, deferred sketches, B-rep
    outlines). [done; see "Measured: compile speed" for what it does differently]
-4. Snapshot [planned 2026-10-11, decisions in "Master document"], in this order:
+4. Snapshot [done 2026-10-11, decisions in "Master document"], in this order:
    1. The writer in Fusion: `lang/emit/snapshot.py` (loaded like the emitter,
       without the parent package) and a Snapshot button in the compiler
       add-in. With the master active it writes `snapshot.json`: planes,

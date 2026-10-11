@@ -6,7 +6,11 @@ Two halves:
   millimetres: outlines as 3D rings, operations batched per face and depth,
   chamfers as contours to find edges along. Plain Python, unit tested.
 - `fusion` draws a plan into a Fusion document with Fusion's own features.
-  The only module in the language that imports `adsk`.
+
+The master's snapshot is written here too: `snapshot` reads the active
+design (`snapshot.write_snapshot(path)`), `snapshot_format` is its
+Fusion-free half (chaining curves, names, hash), unit tested. `fusion` and
+`snapshot` are the only modules in the language that import `adsk`.
 
 Fusion's Python has no shapely, so `lang` itself cannot be imported there.
 Load this sub-package without its parent, from an MCP script or an add-in::

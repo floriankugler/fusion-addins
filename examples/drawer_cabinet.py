@@ -1,7 +1,8 @@
 """The drawer cabinet from DESIGN.md: boards and their placement, cuts,
 pockets and holes, and drawer slides as the first hardware. The slide
 dictates the drawer box and pre-drills the carcass sides; joints are not
-modelled yet."""
+modelled yet. Built on its own, it stands in a box of its own; van.py
+imports `drawer_cabinet` and places it in the master's kitchen box."""
 from lang import *
 from lang.hardware.slides import DrawerSlide
 from lib.drawer_slides import DYNAPRO_40
@@ -86,10 +87,11 @@ def drawer(name: str, bay: Box, panel: Box, slide: DrawerSlide) -> Scope:
     return d
 
 
-# The cabinet stands against the driver's wall (left, -y) and opens toward the
-# aisle. Its 600 mm front runs along the vehicle, so in world terms the box is
-# 500 wide (across the vehicle) and 600 deep (along it); inside the module the
-# cabinet is 600 wide and 500 deep.
-box = Box.from_size(width=500, depth=600, height=720)
-slide = DrawerSlide(DYNAPRO_40, nl=450)
-cabinet = drawer_cabinet("drawercab", box, 3, slide, front=box.right, bottom_drawer=230)
+if __name__ == "__build__":   # run as the build file, not imported
+    # The cabinet stands against the driver's wall (left, -y) and opens toward
+    # the aisle. Its 600 mm front runs along the vehicle, so in world terms the
+    # box is 500 wide (across the vehicle) and 600 deep (along it); inside the
+    # module the cabinet is 600 wide and 500 deep.
+    box = Box.from_size(width=500, depth=600, height=720)
+    slide = DrawerSlide(DYNAPRO_40, nl=450)
+    cabinet = drawer_cabinet("drawercab", box, 3, slide, front=box.right, bottom_drawer=230)

@@ -22,6 +22,7 @@ from typing import Any, Literal, Self, Union, overload
 from . import directions
 from . import scope as scopes
 from .box import Box
+from .contours import Contour, ContourLimit, ContourLimits, as_contour_limit
 from .directions import AXES, Axis, Direction, ExtentName
 from .errors import LangError
 from .layout_types import (ChamferLayout, CutLayout, EdgeOpLayout, HoleLayout, OpLayout,
@@ -33,7 +34,7 @@ from .shapes import Anchor as ShapeAnchor
 from .shapes import Shape, box_shape
 
 Point2 = tuple[float, float]
-Limit = Union[Pos, Affine, HasPosition, "Board", "PartLimit"]
+Limit = Union[Pos, Affine, HasPosition, "Board", "PartLimit", Contour, ContourLimit]
 
 
 class Face:
@@ -646,46 +647,96 @@ class Board:
         hi: dict[Axis, float] = {t_axis: t_hi}
         scope_box = self.scope.box
         shape = self._shape.in_plane(u_axis, v_axis, self.path) if self._shape is not None else None
+        contours = ContourLimits(
+            [as_contour_limit(c) for c in self._limits if isinstance(c, (Contour, ContourLimit))],
+            t_axis, t_lo, t_hi, u_axis, v_axis, self.path)
         axis: Axis
-        for axis in (u_axis, v_axis):
-            values = self._limit_values(axis, scope_box)
-            if len(values) == 2:
-                a, b = sorted(values)
-            elif len(values) == 1:
-                if scope_box is None:
-                    raise LangError(f"only one limit on {axis} and no enclosing box to supply the other.", self.path)
-                v = values[0]
-                centre = (scope_box.lo[axis] + scope_box.hi[axis]) / 2
-                a, b = (v, scope_box.hi[axis]) if v < centre else (scope_box.lo[axis], v)
-            elif shape is not None:
-                # An explicit shape carries its own extent; it sits at the box
-                # minimum, or at the origin without a box.
-                base = scope_box.lo[axis] if scope_box is not None else 0.0
-                size = shape.width if axis == u_axis else shape.height
-                a, b = base, base + size
-            elif scope_box is None:
-                raise LangError(f"no limits on {axis} and no enclosing box.", self.path)
-            else:
-                a, b = scope_box.lo[axis], scope_box.hi[axis]
+        # An axis an open contour limits goes last, after the one it runs along.
+        for axis in sorted((u_axis, v_axis), key=lambda a: bool(contours.edges_on(a))):
+            a, b = self._extent(axis, scope_box, shape, contours)
             a += self._inset
             b -= self._inset
             if b <= a:
                 raise LangError(f"extent on {axis} is not positive ({a:g} to {b:g}).", self.path)
             lo[axis], hi[axis] = a, b
-        self._box = Box(lo, hi)
         if shape is not None:
             sb = shape.bounds
             self._outline = shape.moved(lo[u_axis] - sb[0], lo[v_axis] - sb[1])
         else:
             self._outline = box_shape(lo[u_axis], lo[v_axis], hi[u_axis], hi[v_axis])
+        if contours.trims:
+            # The board's box is what the contours leave of the outline.
+            self._outline = contours.trim(self._outline)
+            ob = self._outline.bounds
+            lo[u_axis], lo[v_axis], hi[u_axis], hi[v_axis] = ob
+        self._box = Box(lo, hi)
         if self._grain is None and self.material.grain:
             self._grain = self.scope.default_grain
         if self._grain is not None and self._grain == t_axis:
             raise LangError(f"grain {self._grain} is the thickness axis.", self.path)
 
+    def _extent(self, axis: Axis, scope_box: Box | None, shape: Shape | None,
+                contours: ContourLimits) -> tuple[float, float]:
+        """The board's range on one in-plane axis, before the inset: from
+        two limits; from one limit and an open contour's far side, a
+        contour's stretch or the box side opposite; from a contour's
+        stretch alone; from an explicit shape; or the enclosing box. The
+        stretches closed contours leave then cut it down (tighter wins)."""
+        values = self._limit_values(axis, scope_box)
+        box_centre = (scope_box.lo[axis] + scope_box.hi[axis]) / 2 if scope_box is not None else None
+        reference = sum(values) / len(values) if values else box_centre
+        values += contours.values(axis, reference)
+        edges = contours.edges_on(axis)
+        stretch = contours.stretch(axis, reference)
+        if len(values) + len(edges) > 2:
+            raise LangError(f"more than two limits on {axis}.", self.path)
+        if len(edges) > 1:
+            raise LangError(f"two open contours limit {axis}; give one of them as a position.", self.path)
+        room = stretch if stretch is not None else (
+            (scope_box.lo[axis], scope_box.hi[axis]) if scope_box is not None else None)
+        if len(values) == 2:
+            a, b = sorted(values)
+        elif edges:
+            # The board keeps the side of its other limit, or of the middle
+            # of its room, up to the contour; the trim then follows it.
+            edge = edges[0]
+            if values:
+                near = values[0]
+                edge.choose_side(near)
+            elif room is not None:
+                edge.choose_side((room[0] + room[1]) / 2)
+                near = room[1] if edge.side > 0 else room[0]
+            else:
+                raise LangError(f"contour {edge.name!r} limits {axis}, but nothing gives the other end.",
+                                self.path)
+            a, b = sorted((near, edge.far()))
+        elif len(values) == 1:
+            v = values[0]
+            if room is None:
+                raise LangError(f"only one limit on {axis} and no enclosing box to supply the other.", self.path)
+            centre = (room[0] + room[1]) / 2
+            a, b = (v, room[1]) if v < centre else (room[0], v)
+        elif stretch is not None:
+            a, b = stretch
+        elif shape is not None:
+            # An explicit shape carries its own extent; it sits at the box
+            # minimum, or at the origin without a box.
+            base = scope_box.lo[axis] if scope_box is not None else 0.0
+            size = shape.width if axis == self._u_axis else shape.height
+            a, b = base, base + size
+        elif scope_box is None:
+            raise LangError(f"no limits on {axis} and no enclosing box.", self.path)
+        else:
+            a, b = scope_box.lo[axis], scope_box.hi[axis]
+        if stretch is not None:
+            a, b = max(a, stretch[0]), min(b, stretch[1])
+        return a, b
+
     def _limit_values(self, axis: Axis, scope_box: Box | None) -> list[float]:
         values: list[float] = []
         for limit in self._limits:
+            if isinstance(limit, (Contour, ContourLimit)):
+                continue
             if isinstance(limit, (Board, PartLimit)):
                 part, offset = (limit, 0.0) if isinstance(limit, Board) else (limit.part, limit.offset)
                 lb = part.box()

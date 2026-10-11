@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 
 from . import directions
-from .layout_types import LAYOUT_VERSION, ExportValue, Layout, ModuleLayout
+from .layout_types import LAYOUT_VERSION, ExportValue, Layout, ModuleLayout, SnapshotLayout
 from .refs import Pos, as_pos
 from .scope import registry
 
@@ -34,12 +34,18 @@ def build_layout() -> Layout:
     loose = [part.to_layout() for part in registry.root_parts]
     if loose:
         modules.append({"path": "", "box": None, "parts": loose, "hardware": [], "exports": {}, "problems": []})
+    # One entry per snapshot file and hash, however often it was read.
+    snapshots: dict[tuple[str, str], SnapshotLayout] = {}
+    for snapshot in registry.snapshots:
+        snapshots.setdefault((str(snapshot.path), snapshot.hash), snapshot.to_layout())
+        problems.extend(note for note in snapshot.notes if note not in problems)
     return {
         "version": LAYOUT_VERSION,
         "units": "mm",
         "frame": {d.name: f"{'+' if d.sign > 0 else '-'}{d.axis}" for d in f.directions()},
         "modules": modules,
         "problems": problems,
+        "snapshots": list(snapshots.values()),
     }
 
 

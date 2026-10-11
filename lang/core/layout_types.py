@@ -5,7 +5,7 @@ mesher, the Fusion emitter). Bump LAYOUT_VERSION on incompatible changes.
 """
 from __future__ import annotations
 
-from typing import Literal, TypedDict
+from typing import Literal, NotRequired, TypedDict
 
 LAYOUT_VERSION = 1
 
@@ -134,9 +134,34 @@ class ModuleLayout(TypedDict):
     problems: list[str]
 
 
+class SnapshotBoxLayout(TypedDict):
+    min: list[float]
+    max: list[float]
+    cuboid: bool
+
+
+class SnapshotContourLayout(TypedDict):
+    points: list[list[float]]
+    closed: bool
+
+
+class SnapshotLayout(TypedDict):
+    """A snapshot of the master the build read: its hash, and its boxes and
+    contours for the preview to draw around the modules."""
+    #: The snapshot file's name.
+    file: str
+    #: The master document's name.
+    source: str
+    hash: str
+    boxes: dict[str, SnapshotBoxLayout]
+    contours: dict[str, SnapshotContourLayout]
+
+
 class Layout(TypedDict):
     version: int
     units: Literal["mm"]
     frame: dict[str, str]
     modules: list[ModuleLayout]
     problems: list[str]
+    #: Snapshots of the master the build read (absent in older layouts).
+    snapshots: NotRequired[list[SnapshotLayout]]

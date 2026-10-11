@@ -38,6 +38,11 @@ def _code(axis: Axis, sign: int) -> str:
     return f"{'+' if sign > 0 else '-'}{axis}"
 
 
+def _flip(code: str) -> str:
+    """The opposite direction code: `-x` for `+x`."""
+    return ("-" if code[0] == "+" else "+") + code[1:]
+
+
 @dataclass(frozen=True)
 class Direction:
     name: str
@@ -87,13 +92,16 @@ class Frame:
 
     def __init__(
         self,
-        front: str = "-x", back: str = "+x",
-        left: str = "-y", right: str = "+y",
-        top: str = "+z", bottom: str = "-z",
+        front: str = "-x", back: str | None = None,
+        left: str = "-y", right: str | None = None,
+        top: str = "+z", bottom: str | None = None,
         aliases: dict[str, str] | None = None,
     ):
-        spec = {"front": front, "back": back, "left": left, "right": right,
-                "top": top, "bottom": bottom}
+        """Each direction as a world axis with a sign, `Frame(front="-x",
+        left="-y", top="+z")`; back, right and bottom default to the
+        opposites."""
+        spec = {"front": front, "back": back or _flip(front), "left": left, "right": right or _flip(left),
+                "top": top, "bottom": bottom or _flip(top)}
         self._by_name: dict[str, Direction] = {}
         self._by_axis: dict[tuple[Axis, int], Direction] = {}
         for name, code in spec.items():

@@ -30,6 +30,10 @@
   input[type=range] { flex: 1; }
   .keys { color: var(--muted); font-size: 12px; }
   .keys div { display: flex; justify-content: space-between; padding: 1px 0; }
+  .labels { position: absolute; inset: 0 300px 0 0; pointer-events: none; }
+  .mlabel { font: 11px/1.2 ui-monospace, Menlo, monospace; color: #2f5f8f; background: rgba(255,255,255,.72);
+    padding: 0 3px; border-radius: 2px; white-space: nowrap; }
+  .mlabel.contour { color: #1f5a96; }
 </style>
 <script type="importmap">
 { "imports": {
@@ -57,6 +61,14 @@
     </select>
   </div>
 
+  <h2>Master</h2>
+  <div id="masterInfo" class="keys">no snapshot</div>
+  <div class="row">
+    <label><input type="checkbox" id="mBoxes" checked> boxes</label>
+    <label><input type="checkbox" id="mContours" checked> contours</label>
+    <label><input type="checkbox" id="mNames" checked> names</label>
+  </div>
+
   <h2>Section</h2>
   <div class="row"><label><input type="checkbox" id="secOn"> on</label>
     <select id="secAxis"><option value="x">x</option><option value="y">y</option><option value="z">z</option></select>
@@ -75,6 +87,7 @@
     <div><span>isolate selected / show all</span><kbd>i</kbd></div>
     <div><span>show all</span><kbd>a</kbd></div>
     <div><span>display mode</span><kbd>e</kbd></div>
+    <div><span>master boxes and contours</span><kbd>m</kbd></div>
     <div><span>section on / off</span><kbd>s</kbd></div>
     <div><span>section axis</span><kbd>x</kbd> <kbd>y</kbd> <kbd>z</kbd></div>
     <div><span>move section (shift: coarse)</span><kbd>[</kbd> <kbd>]</kbd></div>
@@ -89,6 +102,9 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
 import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
 import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
+import { Line2 } from 'three/addons/lines/Line2.js';
+import { LineGeometry } from 'three/addons/lines/LineGeometry.js';
+import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { attachSpaceMouse } from './spacemouse.js';
 
 const $ = (id) => document.getElementById(id);
@@ -97,6 +113,10 @@ const renderer = new THREE.WebGLRenderer({ antialias: true, stencil: true });
 renderer.setPixelRatio(window.devicePixelRatio);
 renderer.localClippingEnabled = true;   // materials carry the section plane, so caps can sit on it
 view.appendChild(renderer.domElement);
+// Names of the master's boxes and contours, as HTML over the canvas.
+const labelRenderer = new CSS2DRenderer();
+labelRenderer.domElement.className = 'labels';
+document.body.appendChild(labelRenderer.domElement);
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0xf4f2ee);
 // z is up in the layout; three.js defaults to y up, so we set the camera's up.
@@ -129,10 +149,25 @@ const edgeThrough = new THREE.LineBasicMaterial({ color: 0x3a3a3a, transparent: 
 // Fat lines for the section borders: width in screen pixels, so they stay bold at any zoom.
 const outlineMaterial = new LineMaterial({ color: 0x000000, linewidth: 2.5, worldUnits: false });
 
+// The master around the modules: placeholder boxes as ghosts (a body that is
+// not a cuboid, only its bounding box, in a warmer tone) and contours as lines.
+const masterGroup = new THREE.Group();
+scene.add(masterGroup);
+const masterShow = { boxes: true, contours: true, names: true };
+const ghostFill = new THREE.MeshBasicMaterial({ color: 0x4f7cac, transparent: true, opacity: 0.07,
+  depthWrite: false, side: THREE.DoubleSide });
+const ghostFillBounds = new THREE.MeshBasicMaterial({ color: 0xb87a45, transparent: true, opacity: 0.07,
+  depthWrite: false, side: THREE.DoubleSide });
+const ghostEdge = new THREE.LineBasicMaterial({ color: 0x4f7cac, transparent: true, opacity: 0.55 });
+const ghostEdgeBounds = new THREE.LineBasicMaterial({ color: 0xb87a45, transparent: true, opacity: 0.55 });
+const contourMaterial = new LineMaterial({ color: 0x1f6fc0, linewidth: 2, worldUnits: false });
+
 function resize() {
   const w = view.clientWidth, h = view.clientHeight;
   renderer.setSize(w, h);
+  labelRenderer.setSize(w, h);
   outlineMaterial.resolution.set(w * window.devicePixelRatio, h * window.devicePixelRatio);
+  contourMaterial.resolution.set(w * window.devicePixelRatio, h * window.devicePixelRatio);
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
 }
@@ -141,7 +176,8 @@ resize();
 
 function fit() {
   if (!root) return;
-  const box = new THREE.Box3().setFromObject(root);
+  let box = new THREE.Box3().setFromObject(root);
+  if (box.isEmpty()) box = new THREE.Box3().setFromObject(masterGroup);
   if (box.isEmpty()) return;
   const size = box.getSize(new THREE.Vector3()), center = box.getCenter(new THREE.Vector3());
   const radius = size.length() / 2;
@@ -262,11 +298,76 @@ async function load(first) {
       order += 2;
     });
     scene.add(root);
+    buildMaster();
     bounds = new THREE.Box3().setFromObject(root);
     if (first) fit();
     applyAll();
   }, undefined, (err) => { status.textContent = 'scene failed to load: ' + err; status.className = 'error'; });
 }
+
+// -- the master ------------------------------------------------------------
+
+function masterLabel(text, kind) {
+  const el = document.createElement('div');
+  el.className = 'mlabel ' + kind;
+  el.textContent = text;
+  const label = new CSS2DObject(el);
+  label.userData.role = 'label';
+  return label;
+}
+
+function buildMaster() {
+  masterGroup.traverse((o) => { if (o.isCSS2DObject) o.element.remove(); });
+  masterGroup.clear();
+  const snapshots = layout?.snapshots ?? [];
+  for (const snap of snapshots) {
+    for (const [name, b] of Object.entries(snap.boxes)) {
+      const size = [0, 1, 2].map((i) => b.max[i] - b.min[i]);
+      const geometry = new THREE.BoxGeometry(...size);
+      const ghost = new THREE.Mesh(geometry, b.cuboid ? ghostFill : ghostFillBounds);
+      ghost.position.set(...[0, 1, 2].map((i) => (b.min[i] + b.max[i]) / 2));
+      ghost.renderOrder = 2;
+      ghost.userData.role = 'box';
+      ghost.add(new THREE.LineSegments(new THREE.EdgesGeometry(geometry), b.cuboid ? ghostEdge : ghostEdgeBounds));
+      const label = masterLabel(b.cuboid ? name : name + ' (bounding box)', 'box');
+      label.position.set(0, 0, size[2] / 2);
+      ghost.add(label);
+      masterGroup.add(ghost);
+    }
+    for (const [name, c] of Object.entries(snap.contours)) {
+      const points = c.closed ? [...c.points, c.points[0]] : c.points;
+      const geometry = new LineGeometry();
+      geometry.setPositions(points.flat());
+      const line = new Line2(geometry, contourMaterial);
+      line.computeLineDistances();
+      line.userData.role = 'contour';
+      const label = masterLabel(name, 'contour');
+      label.position.set(...c.points[Math.floor(c.points.length / 2)]);
+      line.add(label);
+      masterGroup.add(line);
+    }
+  }
+  $('masterInfo').textContent = snapshots.length
+    ? snapshots.map((s) => `${s.file}: ${s.source}, ${Object.keys(s.boxes).length} boxes, ` +
+        `${Object.keys(s.contours).length} contours (${s.hash.slice(0, 8)})`).join('\n')
+    : 'no snapshot';
+  applyMaster();
+}
+
+function applyMaster() {
+  for (const item of masterGroup.children) {
+    item.visible = item.userData.role === 'box' ? masterShow.boxes : masterShow.contours;
+    // CSS labels follow their own flag only, not their parent's.
+    for (const child of item.children) if (child.isCSS2DObject) child.visible = item.visible && masterShow.names;
+  }
+  $('mBoxes').checked = masterShow.boxes;
+  $('mContours').checked = masterShow.contours;
+  $('mNames').checked = masterShow.names;
+}
+
+$('mBoxes').onchange = (e) => { masterShow.boxes = e.target.checked; applyMaster(); };
+$('mContours').onchange = (e) => { masterShow.contours = e.target.checked; applyMaster(); };
+$('mNames').onchange = (e) => { masterShow.names = e.target.checked; applyMaster(); };
 
 // -- visibility, selection and display modes ------------------------------
 
@@ -422,6 +523,7 @@ function applySection() {
   // Local clipping on every material except the caps, which lie on the plane.
   setClipping(edgeFront, planes);
   setClipping(edgeThrough, planes);
+  for (const m of [ghostFill, ghostFillBounds, ghostEdge, ghostEdgeBounds, contourMaterial]) setClipping(m, planes);
   meshes((o) => {
     setClipping(o.material, planes);
     for (const m of o.userData.stencil?.children ?? []) setClipping(m.material, planes);
@@ -479,6 +581,12 @@ window.addEventListener('keydown', (e) => {
     case 'i': if (selectedPath) isolate(selectedPath); break;
     case 'a': showAll(); break;
     case 'e': setMode(modes[(modes.indexOf(mode) + 1) % modes.length]); break;
+    case 'm': {
+      const on = !(masterShow.boxes || masterShow.contours);
+      masterShow.boxes = masterShow.contours = on;
+      applyMaster();
+      break;
+    }
     case 's': section.on = !section.on; applySection(); break;
     case 'x': case 'y': case 'z': section.axis = e.key; section.on = true; applySection(); break;
     case '[': section.pos = Math.max(0, section.pos - step); section.on = true; applySection(); break;
@@ -508,6 +616,7 @@ poll();
 function animate() {
   requestAnimationFrame(animate);
   renderer.render(scene, camera);
+  labelRenderer.render(scene, camera);
 }
 animate();
 

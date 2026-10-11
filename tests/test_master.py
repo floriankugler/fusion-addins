@@ -1,0 +1,203 @@
+"""Reading the master's snapshot, and contours as limits (fixture:
+examples/van_snapshot.json, the snapshot of tools/van_master.py)."""
+from pathlib import Path
+
+import pytest
+from shapely.geometry import Point
+
+from lang import *
+from lang.core.layout import build_layout
+from lang.core.refs import as_pos
+from lang.core.scope import registry
+
+FIXTURE = Path(__file__).resolve().parents[1] / "examples" / "van_snapshot.json"
+
+ply15 = material("birch", t=15)
+ply12 = material("birch", t=12)
+
+
+@pytest.fixture(autouse=True)
+def fresh_registry():
+    registry.reset()
+    yield
+    registry.reset()
+
+
+@pytest.fixture
+def van() -> Master:
+    return master(FIXTURE)
+
+
+# -- reading ---------------------------------------------------------------------
+
+def test_relative_paths_start_at_the_calling_file():
+    van = master("../examples/van_snapshot.json")
+    assert van.path == FIXTURE
+    assert van.source == "van master (tools/van_master.py)"
+
+
+def test_planes_are_positions(van: Master):
+    level = van.plane("Bodenniveau")
+    assert as_pos(level) == Pos("z", 40)
+    assert level - 12 == Pos("z", 28)
+    assert van.plane("Wand FS").position == Pos("y", -890)
+    assert (van.plane("Boden vorne") + van.plane("Boden hinten")) / 2 == Pos("x", 1700)
+    # a plane in a moved component, in world coordinates
+    assert van.plane("Bett oben").position == Pos("z", 1000)
+
+
+def test_a_tilted_plane_is_an_error_when_used(van: Master):
+    roof = van.plane("Dach geneigt")         # binding it is fine
+    with pytest.raises(LangError, match="tilted"):
+        board("x", ply15).on(roof, toward=frame.direction("top")).box()
+
+
+def test_boxes_and_parameters(van: Master):
+    k = van.box("Kueche")
+    assert (k.lo["x"], k.lo["y"], k.lo["z"]) == (300, -890, 40)
+    assert (k.width, k.depth, k.height) == (500, 600, 720)
+    assert van.param("Lattenabstand") == 400
+    assert van.param("Neigung") == pytest.approx(10)
+
+
+def test_contours(van: Master):
+    outline = van.contour("Bodenumriss")
+    assert outline.closed and outline.normal_axis == "z"
+    profile = van.contour("Bodenprofil")
+    assert not profile.closed and profile.normal_axis == "x"
+
+
+def test_missing_names_and_problems(van: Master):
+    with pytest.raises(LangError, match="did you mean 'Bodenniveau'"):
+        van.plane("Bodenniveu")
+    with pytest.raises(LangError, match="separate chains"):
+        van.contour("Fenster")
+    with pytest.raises(LangError, match="no box 'Garage'"):
+        van.box("Garage")
+
+
+def test_frame_takes_the_opposites_from_three_directions():
+    f = Frame(front="+y", left="+x", top="+z")
+    assert f.direction("back").code == "-y" and f.direction("right").code == "-x"
+    assert f.direction("bottom").code == "-z"
+
+
+def test_layout_records_the_snapshot(van: Master):
+    with module("m", van.box("Radkasten FS")):
+        board("b", ply15).on(Box.from_sides(front=Pos("x", 2000), back=Pos("x", 2900), left=Pos("y", -890),
+                                            right=Pos("y", -675), top=Pos("z", 250),
+                                            bottom=Pos("z", 0)).top)
+    layout = build_layout()
+    [snapshot] = layout.get("snapshots", [])
+    assert snapshot["hash"] == van.hash and snapshot["file"] == "van_snapshot.json"
+    assert set(snapshot["boxes"]) >= {"Kueche", "Bett"} and "Bodenumriss" in snapshot["contours"]
+    # the filleted body is only a bounding box, which the layout says
+    assert any("Radkasten FS" in p and "cuboid" in p for p in layout["problems"])
+
+
+# -- contours as limits ---------------------------------------------------------------
+
+def _battens(van: Master, *xs: float) -> list[Board]:
+    outline, profile = van.contour("Bodenumriss"), van.contour("Bodenprofil")
+    top = van.plane("Bodenniveau") - ply12.t
+    with module("floor", van.box("Boden")):
+        return [board(f"batten{i}", ply15).center(Pos("x", x)).between(top, profile.gap(2), outline)
+                for i, x in enumerate(xs)]
+
+
+def test_a_batten_follows_the_floor_profile(van: Master):
+    [b] = _battens(van, 100)
+    box = b.box()
+    assert (box.lo["y"], box.hi["y"]) == pytest.approx((-890, 890))
+    assert box.hi["z"] == pytest.approx(28)
+    assert box.lo["z"] == pytest.approx(-6)          # 2 mm above the valleys at -8
+    g = b.outline.geometry                            # (y, z)
+    assert g.contains(Point(0, -5)) and not g.contains(Point(0, -6.5))       # in a valley
+    assert g.contains(Point(-450, 2.5)) and not g.contains(Point(-450, 1.5))  # on a rib at 0
+    assert not g.contains(Point(-889, 16.5))         # the floor rises to 15 at the wall
+
+
+def test_battens_end_at_the_tighter_face_of_the_floor_outline(van: Master):
+    clear, arch, arch_end = _battens(van, 1700, 2500, 2900)
+    assert (clear.box().lo["y"], clear.box().hi["y"]) == pytest.approx((-890, 890))
+    assert (arch.box().lo["y"], arch.box().hi["y"]) == pytest.approx((-675, 675))
+    # Centred on the arch's rear end: the front face (x = 2892.5) is still
+    # beside the arch's rounded corner, the rear face (2907.5) beside the
+    # rounded wall corner (866.34), and the front one is tighter. The arc is
+    # sampled at 0.1 mm, which is up to 0.2 mm on y where it runs steeply.
+    lo, hi = arch_end.box().lo["y"], arch_end.box().hi["y"]
+    assert lo == pytest.approx(-698.66, abs=0.25) and hi == pytest.approx(698.66, abs=0.25)
+
+
+def test_a_panel_takes_the_outline_in_its_own_plane(van: Master):
+    outline = van.contour("Bodenumriss")
+    with module("floor", van.box("Boden")) as floor:
+        panel = board("panel", ply12).on(floor.top).between(outline.gap(1), Pos("x", 1700), floor.back)
+    box = panel.box()
+    assert (box.lo["x"], box.hi["x"]) == pytest.approx((1700, 3399))
+    assert (box.lo["y"], box.hi["y"]) == pytest.approx((-889, 889))
+    g = panel.outline.geometry                        # (x, y)
+    assert g.contains(Point(2500, 670)) and not g.contains(Point(2500, 680))   # the wheel arch notch
+    assert g.contains(Point(3000, 880))
+
+
+def test_an_open_contour_in_the_board_plane_is_an_edge(van: Master):
+    edge = van.contour("Bettkante")                    # a line along x at y = -890, z = 900
+    shelf = board("shelf", ply15).on(Pos("z", 1000), toward=frame.direction("bottom")).between(
+        edge.gap(10), Pos("y", -500), Pos("x", 2400), Pos("x", 3000))
+    box = shelf.box()
+    assert (box.lo["y"], box.hi["y"]) == pytest.approx((-880, -500))
+
+
+def test_an_open_contour_in_a_perpendicular_plane_gives_a_position(van: Master):
+    edge = van.contour("Bettkante")
+    side = board("side", ply15).center(Pos("x", 3000)).between(edge.gap(5), Pos("y", 0), Pos("z", 0), Pos("z", 500))
+    assert (side.box().lo["y"], side.box().hi["y"]) == pytest.approx((-885, 0))
+    with pytest.raises(LangError, match="does not reach"):
+        board("past", ply15).center(Pos("x", 3500)).between(edge, Pos("y", 0), Pos("z", 0), Pos("z", 500)).box()
+
+
+def test_contour_errors(van: Master):
+    with pytest.raises(LangError, match="outside contour 'Bodenumriss'"):
+        _battens(van, 3500)[0].box()
+    with pytest.raises(LangError, match="split the board into 2 pieces"):
+        with module("floor", van.box("Boden")) as floor:
+            # a strip along the wall is cut in two by the wheel arch
+            board("strip", ply12).on(floor.top).between(van.contour("Bodenumriss"), Pos("x", 1900),
+                                                        Pos("x", 3000), Pos("y", -800), Pos("y", -750)).box()
+    with pytest.raises(LangError, match="leave nothing"):
+        with module("floor2", van.box("Boden")) as floor:
+            board("strip", ply12).on(floor.top).between(van.contour("Bodenumriss"), Pos("x", 2400),
+                                                        Pos("x", 2600), Pos("y", -800), Pos("y", -700)).box()
+
+
+# -- checks ------------------------------------------------------------------------
+
+def test_inside_box_and_inside_contour(van: Master):
+    outline = van.contour("Bodenumriss")
+    with module("cab", van.box("Kueche")) as cab:
+        board("left", ply15).on(cab.left)
+        board("top", ply15).on(cab.top).between(Pos("y", -890), Pos("y", -300))   # 90 mm too deep
+        check(inside_box, inside(outline))
+    with module("over_arch", Box.from_size(width=400, depth=400, height=500, origin=(2300, -890, 40))) as m:
+        board("bottom", ply15).on(m.bottom)
+        check(inside(outline, gap=5))
+    problems = build_layout()["problems"]
+    assert any(p.startswith("cab.top reaches out of cab's box") and "by 90" in p for p in problems)
+    assert any(p.startswith("over_arch.bottom is not inside Bodenumriss with 5 mm") for p in problems)
+    assert not any(p.startswith("cab.left") for p in problems)
+
+
+# -- the example ------------------------------------------------------------------
+
+def test_the_van_example_builds_without_problems(tmp_path: Path):
+    from lang.build import run_build
+    layout = run_build(FIXTURE.parent / "van.py", tmp_path, scene=False)
+    floor = next(m for m in layout["modules"] if m["path"] == "floor")
+    battens = {p["path"]: p["box"] for p in floor["parts"] if "batten" in p["path"]}
+    assert len(battens) == 9
+    # the battens beside the wheel arches are shorter (batten7 straddles the rear end)
+    short = sorted(path for path, b in battens.items() if b["max"][1] < 700)
+    assert short == ["floor.batten5", "floor.batten6", "floor.batten7"]
+    assert layout["problems"] == []
+    assert layout.get("snapshots", [])[0]["hash"] == master(FIXTURE).hash
