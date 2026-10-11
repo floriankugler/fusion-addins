@@ -10,6 +10,16 @@
 // github.com/kchellappan/spacemouse_linux_ws (docs 01-03), observed from
 // 3Dconnexion's own client library. Matrices are column-major, translation
 // at indices 12, 13, 14, as every client since library version 0.5.
+//
+// Safari: the page connects fine (checked in WebKit 2026-10-11), but the
+// driver does not route the puck to the navigation server while Safari is
+// frontmost; it applies its default mapping and zooms the page instead.
+// Nothing in the page can change that, so the preview's SpaceMouse support
+// is for Chrome (and the Claude app's browser pane). A workaround would be
+// the preview server taking over the puck for Safari through the legacy
+// 3DconnexionClient framework (RegisterConnexionClient with Safari's
+// signature, take-over mode) and streaming the raw axes to the page, which
+// then navigates itself; not built, by decision.
 
 const HOST = '127.51.68.120';
 const DISCOVERY = `https://${HOST}:8181/3dconnexion/nlproxy`;

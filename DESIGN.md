@@ -790,6 +790,14 @@ below is proposed]
   without Fusion, validates the layout format before the emitter exists, and
   Claude can see it through the built-in browser after each edit.
 - Click-to-path in the viewer is the Copy Path helper outside Fusion.
+- SpaceMouse: the viewer talks to 3DxWare's navigation server
+  (`lang/preview/viewer/spacemouse.js`), which works in Chrome and in the
+  Claude app's browser pane, not in Safari. The page connects in Safari too,
+  but the driver does not route the puck to the navigation server while
+  Safari is frontmost and zooms the page instead (checked 2026-10-11). A
+  workaround through 3DxWare's legacy client framework, taking over the
+  puck for Safari in the preview server and navigating the page from the
+  raw axes, was considered and not built. [decided 2026-10-11]
 
 ## Examples
 
