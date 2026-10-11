@@ -953,9 +953,12 @@ class Board:
         return self
 
     def _cut_through(self, placed: Shape, name: str | None, chamfer: float) -> None:
-        self.outline = self.outline.difference(placed)
-        if self.outline.is_empty():
+        cut = self.outline.difference(placed)
+        if cut.is_empty():
             raise LangError("the cut removes the whole board.", self.path)
+        if len(cut.polygons()) > len(self.outline.polygons()):
+            raise LangError(f"the cut{f' {name}' if name else ''} splits the board in pieces.", self.path)
+        self.outline = cut
         self._record(Cut(placed, name, chamfer), name)
 
     def _cut_region(self, region: Board | Box, name: str | None, chamfer: float) -> Self:
@@ -1089,6 +1092,19 @@ class Board:
         self._big_face_of_mine(face, "add_pocket()")
         d, spec, _ = self._depth(face, depth)
         self._record(Pocket(shape, face.world_name, d, spec, name), name)
+        return self
+
+    def add_cut(self, shape: Shape, name: str | None = None) -> Self:
+        """A through cut with `shape` already in the outline's frame (world
+        coordinates on its two axes); see `add_pocket`."""
+        self._cut_through(shape, name, 0.0)
+        return self
+
+    def add_to_outline(self, shape: Shape) -> Self:
+        """Widens the outline by `shape`, in the outline's frame: material a
+        joint adds, such as tenons growing out of the board's end. The
+        board's box, its placement, stays as it was."""
+        self.outline = self.outline.union(shape)
         return self
 
     def add_hole(self, face: Face, point: Point2, d: float, depth: DepthSpec, name: str | None = None) -> Self:

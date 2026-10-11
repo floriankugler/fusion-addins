@@ -77,3 +77,45 @@ def test_a_cut_corner_keeps_its_arc():
     curves = fit(_ring(Shape(box(0, 0, 50, 30).difference(Point(50, 30).buffer(10)))))
     arcs = [c for c in curves if isinstance(c, Arc2)]
     assert len(arcs) == 1 and arcs[0].center == pytest.approx((50, 30), abs=1e-9)
+
+
+def _on_circle(p: tuple[float, float], center: tuple[float, float], r: float) -> bool:
+    return abs(math.dist(p, center) - r) < 1e-9
+
+
+def test_a_corner_relief_meets_the_rectangle_exactly():
+    # a mortise corner at the origin, the relief on its bisector inside, through the corner
+    d = 6.0
+    o = d / (2 * math.sqrt(2))
+    shape = Shape(box(0, 0, 50, 15).union(Point(o, o).buffer((d + 0.1) / 2, quad_segs=16)))
+    curves = fit(_ring(shape))
+    (arc,) = [c for c in curves if isinstance(c, Arc2)]
+    assert arc.center == pytest.approx((o, o), abs=1e-9) and arc.radius == pytest.approx(3.05, abs=1e-9)
+    # its ends lie on the circle and on the rectangle's edges, where the lines pick up
+    ends = {(round(p[0], 9), round(p[1], 9)) for p in (arc.a, arc.b)}
+    assert all(_on_circle(p, (o, o), 3.05) for p in (arc.a, arc.b))
+    assert sorted(min(abs(p[0]), abs(p[1])) for p in ends) == pytest.approx([0, 0], abs=1e-12)
+    for c in curves:                                   # no stray chord pieces left
+        if isinstance(c, Line2):
+            assert math.dist(c.a, c.b) > 1
+
+
+def test_a_relief_cut_from_an_outline_is_one_arc_between_lines():
+    # the root of a tab: the board below y = 0, the tab at x >= 0, the relief outside the corner
+    o = 6 / (2 * math.sqrt(2))
+    board = box(-50, -20, 50, 0).union(box(0, 0, 50, 30))
+    curves = fit(_ring(Shape(board.difference(Point(-o, o).buffer(3.05, quad_segs=16)))))
+    (arc,) = [c for c in curves if isinstance(c, Arc2)]
+    assert all(_on_circle(p, (-o, o), 3.05) for p in (arc.a, arc.b, arc.mid))
+    for p in (arc.a, arc.b):
+        assert abs(p[0]) < 1e-12 or abs(p[1]) < 1e-12        # on the tab's side or on the shoulder
+
+
+def test_two_overlapping_circles_meet_at_their_crossing():
+    shape = Shape(Point(0, 0).buffer(7.5, quad_segs=16).union(Point(11.2, 0).buffer(7.5, quad_segs=16)))
+    curves = fit(_ring(shape))
+    assert _kinds(curves) == "AA"
+    for c in curves:
+        assert isinstance(c, Arc2)
+        for p in (c.a, c.b):
+            assert _on_circle(p, (0, 0), 7.5) and _on_circle(p, (11.2, 0), 7.5)

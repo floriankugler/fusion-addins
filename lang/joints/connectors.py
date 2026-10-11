@@ -36,16 +36,17 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import ClassVar, Literal, Protocol
+from typing import ClassVar, Literal
 
 from lib import connector_data as data
 
-from ..core.contact import Contact, contacts
-from ..core.directions import Axis, Direction
+from ..core.contact import Contact
 from ..core.errors import LangError
 from ..core.part import Board, Face
-from ..core.refs import DepthSpec, Pos, PosLike, Side, as_pos, through, to
+from ..core.refs import DepthSpec, PosLike, through, to
 from ..core.shapes import circle, slot_shape
+from .common import (EPS, ContactGeometry, FaceChoice, Spacing, big_face, hidden_face, join_contacts,
+                     make_spacing, opposite_face, start_index)
 
 DominoSize = Literal["4x20", "5x30", "6x40", "8x36", "8x40", "8x50", "8x80", "8x100", "10x50", "10x80",
                      "10x100", "12x100", "12x140", "14x75", "14x100", "14x140"]
@@ -56,166 +57,11 @@ CabineoSurface = Literal["flush", "anti-break"]
 #: Which Dominos get a mark: all, or all but the first and last, which the
 #: machine's end stops locate.
 DominoMarks = Literal["all", "middle"]
-#: A big face named for a connector: a box side or direction it faces, or
-#: inner/outer; None for the connector's default.
-FaceChoice = Side | Direction | Literal["inner", "outer"] | None
-
-_EPS = 1e-6
 #: A Domino mark starts this far outside the board, so it runs out of the
 #: board's end cleanly, mm.
 _RUN_OUT = 1.0
 _INSERT_KEYS: dict[str, str] = {"M6 x 12.3": "8 M6 x 12.3", "M6 x 15.3": "8 M6 x 15.3",
                                 "threaded insert": "8 M6 threaded insert"}
-Point2 = tuple[float, float]
-
-
-# -- where along a contact -----------------------------------------------------------------------
-
-@dataclass(frozen=True)
-class Spacing:
-    """`count` connectors with the outer ones `end` from the contact's ends,
-    or one at each position of `at`."""
-    count: int | None
-    end: float
-    at: tuple[Pos, ...] | None
-
-    def stations(self, label: str, c: Contact) -> list[float]:
-        """The positions along the contact, ascending."""
-        path, other = c.edge_on.path, c.face_on.path
-        if self.at is not None:
-            values: list[float] = []
-            for pos in self.at:
-                if pos.axis != c.axis:
-                    raise LangError(f"{label}: at={pos} is not on the axis the contact with {other} runs "
-                                    f"along ({c.axis}).", path)
-                if not c.lo - _EPS <= pos.value <= c.hi + _EPS:
-                    raise LangError(f"{label}: at={pos} lies outside the contact with {other} "
-                                    f"({c.lo:g} to {c.hi:g}).", path)
-                values.append(pos.value)
-            values.sort()
-            if any(b - a <= _EPS for a, b in zip(values, values[1:])):
-                raise LangError(f"{label}: two positions in at= coincide.", path)
-            return values
-        assert self.count is not None
-        if self.count > 1 and 2 * self.end >= c.length - _EPS:
-            raise LangError(f"{label}: end={self.end:g} leaves no room for {self.count} connectors on the "
-                            f"{c.length:g} mm contact with {other}.", path)
-        return [c.lo + s for s in data.stations(c.length, self.count, self.end)]
-
-
-def _spacing(label: str, count: int | None, end: float, at: Sequence[PosLike] | None) -> Spacing:
-    if (count is None) == (at is None):
-        raise LangError(f"{label}: give count= or at=.")
-    if count is not None and count < 1:
-        raise LangError(f"{label}: count must be at least 1.")
-    if end < 0:
-        raise LangError(f"{label}: end must not be negative.")
-    positions = tuple(as_pos(p, f"{label}(at=)") for p in at) if at is not None else None
-    if positions == ():
-        raise LangError(f"{label}: at= is empty.")
-    return Spacing(count, float(end), positions)
-
-
-# -- geometry of one contact ---------------------------------------------------------------------
-
-class _Geometry:
-    """Points of a contact: on the other board's face by (along, across),
-    on this board's big faces by (along, distance from the edge)."""
-
-    def __init__(self, c: Contact):
-        self.c = c
-        #: Across the contact plane: the axis the face-on board is thick on.
-        self.normal: Axis = c.face_on.t_axis
-        #: From the contact plane into the edge-on board, along `normal`.
-        self.away = -c.end.direction.sign
-
-    def on_face(self, along: float, across: float) -> Point2:
-        """A point on the face-on board's face, in that face's frame."""
-        f = self.c.face_on
-        coords: dict[Axis, float] = {self.c.axis: along, self.c.across: across}
-        return (coords[f.u_axis], coords[f.v_axis])
-
-    def on_board(self, along: float, from_edge: float) -> Point2:
-        """A point on a big face of the edge-on board, `from_edge` in from
-        its end, in that face's frame."""
-        e = self.c.edge_on
-        coords: dict[Axis, float] = {self.c.axis: along, self.normal: self.c.plane + self.away * from_edge}
-        return (coords[e.u_axis], coords[e.v_axis])
-
-    @staticmethod
-    def inside(face: Face, distance: float) -> float:
-        """The coordinate `distance` into a board's thickness from its big
-        face `face`."""
-        return face.value - face.direction.sign * distance
-
-    @property
-    def middle(self) -> float:
-        """The middle of the edge-on board's thickness."""
-        b, t = self.c.edge_on.box(), self.c.across
-        return (b.lo[t] + b.hi[t]) / 2
-
-
-def _face_toward(part: Board, sign: int, axis: Axis) -> Face:
-    return part.face(part.scope.frame.direction_of(axis, sign))
-
-
-def _opposite(face: Face) -> Face:
-    return _face_toward(face.part, -face.direction.sign, face.axis)
-
-
-def _big_face(label: str, part: Board, choice: FaceChoice, default: Face) -> Face:
-    if choice is None:
-        return default
-    if isinstance(choice, str):
-        return part.face(choice)
-    d = choice.outward if isinstance(choice, Side) else choice
-    if d.axis != part.t_axis:
-        raise LangError(f"{label}: face={d.name} is not a big face of this board.", part.path)
-    return _face_toward(part, d.sign, d.axis)
-
-
-def _hidden(part: Board) -> Face:
-    """The big face that is not the show face."""
-    return _opposite(part.show_face)
-
-
-# -- joining ---------------------------------------------------------------------------------------
-
-class _Connector(Protocol):
-    label: ClassVar[str]
-
-    @property
-    def spacing(self) -> Spacing: ...
-
-    def check(self, c: Contact, stations: list[float]) -> None: ...
-
-    def place(self, c: Contact, stations: list[float]) -> None: ...
-
-
-def _join(connector: _Connector, part: Board, partners: list[Board]) -> None:
-    """Finds the contacts with the boards named, either one edge-on, checks
-    every one, then machines them."""
-    label = connector.label
-    found: list[Contact] = []
-    for other in partners:
-        here = contacts(part, other) or contacts(other, part)
-        if not here:
-            raise LangError(f"{label}: {other.path} does not touch this board with an end or edge on a face.",
-                            part.path)
-        found.extend(here)
-    planned = [(c, connector.spacing.stations(label, c)) for c in found]
-    for c, stations in planned:
-        connector.check(c, stations)
-    for c, stations in planned:
-        connector.place(c, stations)
-
-
-def _start_index(part: Board, axis: Axis, count: int) -> int:
-    """The index of the first of `count` ascending stations as the part's
-    frame counts them: from the front, the left or the bottom."""
-    frame = part.scope.frame
-    start = next(d for d in (frame.direction(n) for n in ("front", "left", "bottom")) if d.axis == axis)
-    return 0 if start.sign < 0 else count - 1
 
 
 # -- Domino ------------------------------------------------------------------------------------------
@@ -247,13 +93,16 @@ class Domino:
         return self.size.width + self.length_offset
 
     def join(self, part: Board, /, partners: list[Board]) -> None:
-        _join(self, part, partners)
+        join_contacts(self, part, partners)
+
+    def stations(self, c: Contact) -> list[float]:
+        return self.spacing.stations(self.label, c)
 
     def _reference(self, e: Board) -> Face:
         """The face the machine's fence rests on, which carries the marks."""
-        return _big_face(self.label, e, self.face, e.show_face)
+        return big_face(self.label, e, self.face, e.show_face)
 
-    def _centre(self, g: _Geometry) -> float:
+    def _centre(self, g: ContactGeometry) -> float:
         if self.fence is None:
             return g.middle
         return g.inside(self._reference(g.c.edge_on), self.fence)
@@ -261,37 +110,37 @@ class Domino:
     def check(self, c: Contact, stations: list[float]) -> None:
         e, f = c.edge_on, c.face_on
         h = self.slot_height
-        if h >= e.thickness - _EPS:
+        if h >= e.thickness - EPS:
             raise LangError(f"domino: the {h:g} mm high slot is not thinner than this board ({e.thickness:g}).",
                             e.path)
-        centre = self._centre(_Geometry(c))
+        centre = self._centre(ContactGeometry(c))
         b, t = e.box(), c.across
-        if centre - h / 2 < b.lo[t] - _EPS or centre + h / 2 > b.hi[t] + _EPS:
+        if centre - h / 2 < b.lo[t] - EPS or centre + h / 2 > b.hi[t] + EPS:
             raise LangError(f"domino: at fence={self.fence} the slot does not fit within {e.path}'s "
                             "thickness.", e.path)
-        if self.marks is not None and self.mark_depth >= e.thickness - _EPS:
+        if self.marks is not None and self.mark_depth >= e.thickness - EPS:
             raise LangError(f"domino: mark_depth={self.mark_depth:g} is not less than {e.path}'s thickness.",
                             e.path)
         if self.remaining is None:
             depth = self.size.length / 2 + data.DOMINO_DEPTH_OFFSET
-            if depth >= f.thickness - _EPS:
+            if depth >= f.thickness - EPS:
                 raise LangError(f"domino: a {self.size.key} needs a {depth:g} mm deep slot, {f.path} is "
                                 f"{f.thickness:g} thick; pick a shorter Domino or give remaining=.", e.path)
-        elif self.remaining >= f.thickness - _EPS:
+        elif self.remaining >= f.thickness - EPS:
             raise LangError(f"domino: remaining={self.remaining:g} leaves no slot in {f.path} "
                             f"({f.thickness:g} thick).", e.path)
         for s in stations:
-            if s - self.slot_length / 2 < c.lo - _EPS or s + self.slot_length / 2 > c.hi + _EPS:
+            if s - self.slot_length / 2 < c.lo - EPS or s + self.slot_length / 2 > c.hi + EPS:
                 raise LangError(f"domino: the slot at {c.axis}={s:g} reaches past the contact with {f.path} "
                                 f"({c.lo:g} to {c.hi:g}).", e.path)
 
     def place(self, c: Contact, stations: list[float]) -> None:
-        g = _Geometry(c)
+        g = ContactGeometry(c)
         e, f = c.edge_on, c.face_on
         centre, h = self._centre(g), self.slot_height
         depth: DepthSpec = (self.size.length / 2 + data.DOMINO_DEPTH_OFFSET if self.remaining is None
-                            else to(_opposite(c.face), -self.remaining))
-        exact = _start_index(e, c.axis, len(stations))
+                            else to(opposite_face(c.face), -self.remaining))
+        exact = start_index(e, c.axis, len(stations))
         for i, s in enumerate(stations):
             length = self.slot_length + (self.loose if i != exact else 0.0)
             half_span = (length - h) / 2
@@ -332,10 +181,10 @@ def domino(size: DominoSize, *, count: int | None = None, at: Sequence[PosLike] 
     that much longer, as the machine's wider settings do (6 or 10);
     `length_offset` and `height_offset` change every slot's size."""
     spec = data.domino_size(size)
-    spacing = _spacing("domino", count, end, at)
+    spacing = make_spacing("domino", count, end, at)
     if spec.thickness + height_offset <= 0:
         raise LangError("domino: height_offset leaves no slot.")
-    if spec.width + length_offset - (spec.thickness + height_offset) <= _EPS:
+    if spec.width + length_offset - (spec.thickness + height_offset) <= EPS:
         raise LangError("domino: length_offset leaves the slot no longer than it is high.")
     if fence is not None and fence <= 0:
         raise LangError("domino: fence must be positive.")
@@ -362,18 +211,21 @@ class Clamex:
     label: ClassVar[str] = "clamex"
 
     def join(self, part: Board, /, partners: list[Board]) -> None:
-        _join(self, part, partners)
+        join_contacts(self, part, partners)
+
+    def stations(self, c: Contact) -> list[float]:
+        return self.spacing.stations(self.label, c)
 
     def check(self, c: Contact, stations: list[float]) -> None:
         f = c.face_on
-        if not self.through and data.CLAMEX_GUIDE_DEPTH >= f.thickness - _EPS:
+        if not self.through and data.CLAMEX_GUIDE_DEPTH >= f.thickness - EPS:
             raise LangError(f"clamex: the {data.CLAMEX_GUIDE_DEPTH:g} mm guide holes go through {f.path}; "
                             "give through=True.", c.edge_on.path)
 
     def place(self, c: Contact, stations: list[float]) -> None:
-        g = _Geometry(c)
+        g = ContactGeometry(c)
         e, f = c.edge_on, c.face_on
-        access = _big_face(self.label, e, self.face, _hidden(e))
+        access = big_face(self.label, e, self.face, hidden_face(e))
         centres, width = self.model.access_centers, self.model.access_width
         guide_depth: DepthSpec = through if self.through else data.CLAMEX_GUIDE_DEPTH
         for i, s in enumerate(stations, 1):
@@ -399,7 +251,7 @@ def clamex(model: ClamexModel = "P-10", *, count: int | None = None, at: Sequenc
     contact's ends."""
     if guide_d <= 0:
         raise LangError("clamex: guide_d must be positive.")
-    return Clamex(data.CLAMEX_MODELS[model], _spacing("clamex", count, end, at), face, float(guide_d), through)
+    return Clamex(data.CLAMEX_MODELS[model], make_spacing("clamex", count, end, at), face, float(guide_d), through)
 
 
 # -- Cabineo ---------------------------------------------------------------------------------------------
@@ -421,21 +273,24 @@ class Cabineo:
         return data.CABINEO_FLUSH_ACCESS_DEPTH if self.surface == "flush" else data.CABINEO_ACCESS_DEPTH
 
     def join(self, part: Board, /, partners: list[Board]) -> None:
-        _join(self, part, partners)
+        join_contacts(self, part, partners)
+
+    def stations(self, c: Contact) -> list[float]:
+        return self.spacing.stations(self.label, c)
 
     def check(self, c: Contact, stations: list[float]) -> None:
         e, f = c.edge_on, c.face_on
-        if self.access_depth >= e.thickness - _EPS:
+        if self.access_depth >= e.thickness - EPS:
             raise LangError(f"cabineo: the {self.access_depth:g} mm deep pocket goes through this board "
                             f"({e.thickness:g} thick).", e.path)
-        if not self.through and self.guide.depth >= f.thickness - _EPS:
+        if not self.through and self.guide.depth >= f.thickness - EPS:
             raise LangError(f"cabineo: the {self.guide.depth:g} mm deep hole goes through {f.path}; "
                             "give through=True.", e.path)
 
     def place(self, c: Contact, stations: list[float]) -> None:
-        g = _Geometry(c)
+        g = ContactGeometry(c)
         e, f = c.edge_on, c.face_on
-        access = _big_face(self.label, e, self.face, _hidden(e))
+        access = big_face(self.label, e, self.face, hidden_face(e))
         centres = data.CABINEO_ACCESS_CENTERS
         offset = data.CABINEO_FLUSH_GUIDE_OFFSET if self.surface == "flush" else data.CABINEO_GUIDE_OFFSET
         across = g.inside(access, offset)
@@ -490,5 +345,5 @@ def cabineo(model: CabineoModel = "8", *, count: int | None = None, at: Sequence
     depth, widening = anti_break
     if depth <= 0 or widening < 0:
         raise LangError("cabineo: anti_break needs a positive depth and a widening of at least 0.")
-    return Cabineo(model, data.CABINEO_GUIDE_HOLES[key], _spacing("cabineo", count, end, at), face, surface,
+    return Cabineo(model, data.CABINEO_GUIDE_HOLES[key], make_spacing("cabineo", count, end, at), face, surface,
                    (float(depth), float(widening)), through)
