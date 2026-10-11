@@ -89,6 +89,11 @@ class PartLayout(TypedDict):
     outline: Rings
     grain: str | None
     show: str
+    #: The big face the part is machined from, which faces up on the
+    #: machine (world name).
+    machine: str
+    #: Whether the material has a grain (`grain` may still be None, unset).
+    grained: bool
     manual: bool
     ops: list[OpLayout]
 

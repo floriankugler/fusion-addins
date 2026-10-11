@@ -63,8 +63,8 @@ class ButtonInput(inputs.Input):
     value: bool
     input: adsk.core.BoolValueCommandInput
 
-    def __init__(self, id, name, text, tool_tip):
-        super().__init__(id, name, tool_tip, lambda: True)
+    def __init__(self, id, name, text, tool_tip, update_visibility=lambda: True):
+        super().__init__(id, name, tool_tip, update_visibility)
         self.text = text
         self.value = False
 
@@ -89,7 +89,8 @@ class ButtonInput(inputs.Input):
 
 
 class ArrangeInputs(inputs.Inputs):
-    def __init__(self, units: str, initial_sheet_rows: list[tuple] | None = None):
+    def __init__(self, units: str, initial_sheet_rows: list[tuple] | None = None,
+                 compiled_labels: list[str] | None = None):
         self.update = inputs.SelectionByEntityTokenInput(
             id='update',
             name='Update arrangement',
@@ -114,6 +115,29 @@ class ArrangeInputs(inputs.Inputs):
             lower_bound=0,
             upper_bound=0,
             tool_tip='Select the top face of every part to nest.',
+        )
+        # Parts compiled by the modeling language carry their grain and the
+        # face they are machined from; they can be added by material.
+        compiled_labels = compiled_labels or []
+        self.compiled = inputs.DropDownInput(
+            id='compiled',
+            name='Compiled parts',
+            options=[inputs.DropDownInput.Item(label, index) for index, label in enumerate(compiled_labels)]
+            or [inputs.DropDownInput.Item('none', 0)],
+            default_value=0,
+            tool_tip=(
+                'Parts compiled by the modeling language, by material. Add puts '
+                'every part of the chosen material into the list, with the face '
+                'it is machined from up and the grain its build gives it.'
+            ),
+            update_visibility=lambda: bool(compiled_labels),
+        )
+        self.add_compiled = ButtonInput(
+            id='add_compiled',
+            name=' ',
+            text='Add',
+            tool_tip='Adds the compiled parts of the chosen material that are not in the list yet.',
+            update_visibility=lambda: bool(compiled_labels),
         )
         self.parts_table = PartTableInput(
             id='parts_table',
@@ -371,6 +395,15 @@ class MultiArrange(addin.Addin):
         units = design.unitsManager.defaultLengthUnits if design else 'mm'
         initial_rows = None
         fusion_design = adsk.fusion.Design.cast(design) if design else None
+        # Materials of the compiled parts, in dropdown order.
+        self._compiled_materials: list[str] = []
+        compiled_labels: list[str] = []
+        if fusion_design:
+            counts: dict[str, int] = {}
+            for part in model.find_compiled_parts(fusion_design):
+                counts[part.material] = counts.get(part.material, 0) + 1
+            self._compiled_materials = sorted(counts)
+            compiled_labels = [f'{material} ({counts[material]} parts)' for material in self._compiled_materials]
         if fusion_design:
             stored = model.load_sheet_specs(fusion_design)
             if stored:
@@ -380,7 +413,7 @@ class MultiArrange(addin.Addin):
                     for row in stored
                     if row.get('width') and row.get('height')
                 ] or None
-        return ArrangeInputs(units, initial_rows)
+        return ArrangeInputs(units, initial_rows, compiled_labels)
 
     def _snapshot_selections(self, selection_inputs):
         return [(selection, list(selection.value)) for selection in selection_inputs
@@ -403,6 +436,35 @@ class MultiArrange(addin.Addin):
                 except RuntimeError:
                     pass
             selection.update_from_input()
+
+    def _add_compiled_parts(self):
+        """Adds every compiled part of the chosen material that is not in
+        the list yet, by the face it is machined from."""
+        if not self._compiled_materials:
+            return
+        self.inputs.compiled.update_from_input()
+        material = self._compiled_materials[self.inputs.compiled.value]
+        design = _active_design(self.app)
+        listed = [face.body for face in self.inputs.faces.value]
+        snapshot = self._snapshot_selections([self.inputs.plane, self.inputs.update])
+        added = 0
+        for part in model.find_compiled_parts(design):
+            if part.material != material or any(part.body == body for body in listed):
+                continue
+            face = model.machining_face(part)
+            if face is None:
+                continue
+            try:
+                self.inputs.faces.input.addSelection(face)
+                added += 1
+            except RuntimeError:
+                pass
+        self.inputs.faces.update_from_input()
+        self.inputs.parts_table.sync(
+            [cast(adsk.fusion.BRepFace, face) for face in self.inputs.faces.value])
+        self._restore_selections(snapshot)
+        self._set_notice(f'Added {added} compiled part(s) of {material}.' if added
+                         else f'All compiled parts of {material} are in the list already.')
 
     def _rebuild_faces_from_table(self):
         """Faces selection follows the table after a row was removed."""
@@ -440,6 +502,9 @@ class MultiArrange(addin.Addin):
             self._hook_destroy(input.parentCommand)
         if self.inputs.update.input and input.id == self.inputs.update.input.id:
             self._handle_update_selection(input)
+        if (self.inputs.add_compiled.input and input.id == self.inputs.add_compiled.input.id
+                and getattr(self, '_ui_ready', False)):
+            self._add_compiled_parts()
         if self.inputs.preview.input and input.id == self.inputs.preview.input.id:
             # The framework replays input_changed for every input while the
             # dialog is being built — only react to real clicks after that.

@@ -141,3 +141,14 @@ def test_example_plans_completely(tmp_path: Path):
     assert runners.axes == ((-1.0, 0.0, 0.0), (0.0, -1.0, 0.0), (0.0, 0.0, 1.0))
     assert runners.origin == (585.0, 481.0, 117.1)
     assert [b.offset for b in runners.bodies] == [(0.0, 0.0, 0.0), (170.0, 0.0, 0.0)]
+    # facts for Multi Arrange: the sides are machined from their inner faces,
+    # where the shelf-pin and pre-drill holes are, which face each other
+    left = next(p for p in plan.parts if p.path == "drawercab.left")
+    right = next(p for p in plan.parts if p.path == "drawercab.right")
+    assert left.facts is not None and right.facts is not None
+    assert left.facts.material == "birch 15" and left.facts.thickness == 15 and left.facts.grained
+    assert left.facts.grain is None                       # the example sets no grain
+    assert left.facts.up == (-1.0, 0.0, 0.0)              # left side at x 585..600, inner face toward -x
+    assert right.facts.up == (1.0, 0.0, 0.0)
+    face = next(p for p in plan.parts if p.path == "drawercab.drawer1.face")
+    assert face.facts is not None and face.facts.up == (0.0, 1.0, 0.0)   # nothing on it: its show face

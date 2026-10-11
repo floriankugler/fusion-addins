@@ -136,14 +136,18 @@ def part_frame(part: model.Part) -> adsk.core.Matrix3D:
     z_axis = face_normal(part.top_face)
 
     # Grain candidates, most authoritative first: a stored explicit reference,
-    # the appearance texture's grain axis (only meaningful when it lies in the
-    # face plane, i.e. the user oriented the wood texture), the longest
-    # straight edge of the top face, the parent component's X axis, then any
-    # world axis. Parts without straight edges (e.g. discs) always end up with
-    # a usable, stable direction.
+    # the grain a compiled part carries from its build, the appearance
+    # texture's grain axis (only meaningful when it lies in the face plane,
+    # i.e. the user oriented the wood texture), the longest straight edge of
+    # the top face, the parent component's X axis, then any world axis. Parts
+    # without straight edges (e.g. discs) always end up with a usable, stable
+    # direction.
     candidates = []
     if part.grain is not None:
         candidates.append(part.grain)
+    compiled = model.compiled_part(part.body)
+    if compiled is not None and compiled.grain is not None:
+        candidates.append(compiled.grain)
     texture_direction = model.texture_grain_direction(part.body)
     if texture_direction is not None:
         candidates.append(texture_direction)

@@ -190,9 +190,25 @@ proposed]
   on fully constrained sketches is for the interactive add-ins, whose results
   users edit in the timeline. Generated documents are never edited. [proposed]
 - After a compile, Multi Arrange nests and Auto Setup derives CAM from the
-  geometry. Multi Arrange wraps its result in a timeline group today, so nesting
-  and CAM happen in a separate parametric document that links or copies the
-  module documents, or Multi Arrange gets a direct-design mode. [open]
+  geometry. Multi Arrange works in the compiled direct documents as they
+  are (tested 2026-10-11): it solves in a parametric scratch document and
+  places the nested copies without base feature or timeline group. Where
+  Auto Setup runs is still open.
+- The compiler hands each part's facts to those tools as a JSON attribute
+  `lang`/`part` on its body [implemented 2026-10-11]: path, material,
+  thickness, whether the material has a grain, the grain direction (null
+  when the build left it unset) and `up`, the outward normal of the face it
+  is machined from. That face is the big face more pockets, holes and
+  chamfers are made from (a cut's chamfer counts for the show face), the
+  show face on a tie; the layout carries it as `machine`. Multi Arrange
+  uses the build's grain before its own guesses (texture, longest edge),
+  lets parts of a material without grain turn freely, and adds all
+  compiled parts of a material at once (Compiled parts + Add in its
+  dialog), each by its machining face, so it lands machining side up.
+- Later [open, noted 2026-10-11]: make the grain visible in Fusion, by
+  giving compiled parts an appearance whose texture runs along the grain
+  (Multi Arrange already reads 3D wood textures' direction, see its
+  model.py). Not needed for nesting, which reads the attribute.
 
 ### Names and paths
 
@@ -1179,8 +1195,8 @@ edge.
     API and `lib/` are English and Claude writes most of it, with an optional
     label override for the machine.
 13. ~~Direct-modeling documents as a faster backend~~: measured, 5-10x faster,
-    API coverage sufficient for the flat-part emitter. Open: where nesting
-    and CAM run, since Multi Arrange wraps its result in a timeline group.
+    API coverage sufficient for the flat-part emitter. Multi Arrange nests
+    in them (tested 2026-10-11, see Backend). Open: where CAM runs.
 14. The session-wide write slowdown seen in the benchmark: cause, and whether
     many compiles per session provoke it.
 15. Terminology: "module" collides with Python's term, and the files live in a

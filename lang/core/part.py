@@ -835,6 +835,26 @@ class Board:
         return (Face(self, self.scope.frame.direction_of(self.t_axis, 1)),
                 Face(self, self.scope.frame.direction_of(self.t_axis, -1)))
 
+    @property
+    def machine_face(self) -> Face:
+        """The big face the board is machined from, the one that faces up
+        on the machine: the one more pockets, holes and chamfers are made
+        from (a cut's chamfer is on the show face), or the show face when
+        both carry as many. Through cuts and operations on narrow faces do
+        not count."""
+        counts: dict[str, int] = {}
+        for op in self.ops:
+            if isinstance(op, (Pocket, Hole, Chamfer)):
+                face = op.face
+            elif isinstance(op, Cut) and op.chamfer:
+                face = self.show_face.world_name
+            else:
+                continue
+            counts[face] = counts.get(face, 0) + 1
+        show = self.show_face
+        other = next(f for f in self.big_faces() if f.direction != show.direction)
+        return other if counts.get(other.world_name, 0) > counts.get(show.world_name, 0) else show
+
     def has_operation(self, name: str) -> bool:
         return name in self._named_ops
 
@@ -1091,6 +1111,8 @@ class Board:
             "outline": _rings(self.outline),
             "grain": self._grain,
             "show": self.show_face.world_name,
+            "machine": self.machine_face.world_name,
+            "grained": self.material.grain,
             "manual": self.manual_part,
             "ops": [_op_to_layout(op) for op in self.ops],
         }

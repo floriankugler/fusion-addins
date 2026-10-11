@@ -12,7 +12,10 @@ What it draws, per part:
   per batch (through-all or a distance);
 - holes: one hole feature per hole, positioned by a point on the face, with
   a flat bottom, a distance extent or "to" the opposite face;
-- chamfers: equal-distance chamfers on the edges a contour names.
+- chamfers: equal-distance chamfers on the edges a contour names;
+- the part's facts (`PartFacts`) as a JSON attribute `lang`/`part` on the
+  body, for the tools that work on the compiled document: Multi Arrange
+  reads the grain and the face to machine from it.
 
 Faces and edges are found by position, never by index, because every
 feature gives the body new face identities. The feature calls and their
@@ -40,6 +43,11 @@ if TYPE_CHECKING:
 
 #: Centimetres (the API unit) per millimetre.
 MM = 0.1
+#: The attribute that carries a part's facts on its body (read by
+#: lib/multi_arrange/model.py). Its vectors are in the body's component
+#: space, which is world space: every component is placed at the origin.
+ATTRIBUTE_GROUP = "lang"
+ATTRIBUTE_NAME = "part"
 #: Positions closer than this (cm) coincide.
 TOL = 1e-3
 
@@ -253,6 +261,13 @@ class Emitter:
                 self._holes(comp, body, step, part.path)
             else:
                 self._chamfer(comp, body, step, part.path)
+        if part.facts is not None:
+            facts = part.facts
+            body.attributes.add(ATTRIBUTE_GROUP, ATTRIBUTE_NAME, json.dumps({
+                "path": part.path, "material": facts.material, "thickness": facts.thickness,
+                "grained": facts.grained, "grain": list(facts.grain) if facts.grain else None,
+                "up": list(facts.up),
+            }))
         self.report.parts += 1
 
     def _make_body(self, comp: adsk.fusion.Component, part: PartPlan) -> adsk.fusion.BRepBody:

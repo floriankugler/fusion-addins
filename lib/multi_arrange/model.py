@@ -53,6 +53,10 @@ def save_settings(body: adsk.fusion.BRepBody, settings: PartSettings):
 def load_settings(body: adsk.fusion.BRepBody) -> PartSettings:
     attribute = body.attributes.itemByName(ATTRIBUTE_GROUP, ATTRIBUTE_NAME)
     if attribute is None or not attribute.value:
+        # A compiled part of a material without grain may turn freely.
+        compiled = compiled_part(body)
+        if compiled is not None and not compiled.grained:
+            return PartSettings(rotation=ROTATION_FREE)
         return PartSettings()
     try:
         return PartSettings.from_json(attribute.value)
@@ -170,6 +174,101 @@ def direction_of(entity) -> adsk.core.Vector3D | None:
         vector.normalize()
         return vector
     return None
+
+
+# -- parts compiled by the modeling language -------------------------------------
+
+#: The attribute the modeling language's compiler writes on every body it
+#: makes (lang/emit/fusion.py): JSON with the part's path, material,
+#: thickness, whether the material has a grain, the grain direction (or
+#: null) and `up`, the outward normal of the face it is machined from. The
+#: vectors are in the body's component space.
+COMPILED_GROUP = 'lang'
+COMPILED_NAME = 'part'
+
+
+@dataclass
+class CompiledPart:
+    body: adsk.fusion.BRepBody          # in the root's context
+    path: str
+    material: str                       # as the build labels it, e.g. 'birch 15'
+    thickness: float                    # mm
+    grained: bool
+    grain: adsk.core.Vector3D | None    # world; None when the build left it unset
+    up: adsk.core.Vector3D              # world
+
+
+def _world_vector(values, body: adsk.fusion.BRepBody) -> adsk.core.Vector3D | None:
+    if not values:
+        return None
+    vector = adsk.core.Vector3D.create(*(float(v) for v in values))
+    if vector.length < 1e-9:
+        return None
+    context = body.assemblyContext
+    if context is not None:
+        vector.transformBy(context.transform2)
+    vector.normalize()
+    return vector
+
+
+def compiled_part(body: adsk.fusion.BRepBody) -> CompiledPart | None:
+    """The compiler's facts about a body, or None for a body it did not make."""
+    # The compiler writes on the body itself; a proxy (the body as seen
+    # through its occurrence) does not show those attributes.
+    native = body.nativeObject or body
+    attribute = native.attributes.itemByName(COMPILED_GROUP, COMPILED_NAME)
+    if attribute is None or not attribute.value:
+        return None
+    try:
+        data = json.loads(attribute.value)
+    except ValueError:
+        return None
+    up = _world_vector(data.get('up'), body)
+    if up is None:
+        return None
+    return CompiledPart(body=body, path=str(data.get('path', body.name)),
+                        material=str(data.get('material', '')), thickness=float(data.get('thickness', 0.0)),
+                        grained=bool(data.get('grained', True)),
+                        grain=_world_vector(data.get('grain'), body), up=up)
+
+
+def find_compiled_parts(design: adsk.fusion.Design) -> list[CompiledPart]:
+    """Every body the compiler made in this design, in the root's context
+    (one per occurrence of its component). Found through the attribute
+    index, so it stays cheap in a large design."""
+    root = design.rootComponent
+    found: list[CompiledPart] = []
+    for attribute in design.findAttributes(COMPILED_GROUP, COMPILED_NAME):
+        body = adsk.fusion.BRepBody.cast(attribute.parent)
+        if body is None:
+            continue
+        if body.parentComponent == root:
+            bodies = [body]
+        else:
+            bodies = [body.createForAssemblyContext(occurrence)
+                      for occurrence in root.allOccurrencesByComponent(body.parentComponent)]
+        for candidate in bodies:
+            part = compiled_part(candidate)
+            if part is not None:
+                found.append(part)
+    return found
+
+
+def machining_face(part: CompiledPart) -> adsk.fusion.BRepFace | None:
+    """The face to put up for a compiled part: the planar face facing `up`
+    that lies furthest along it (a pocket's floor faces up too, but lower)."""
+    best: tuple[float, float, adsk.fusion.BRepFace] | None = None
+    for face in part.body.faces:
+        if not isinstance(face.geometry, adsk.core.Plane):
+            continue
+        point = face.pointOnFace
+        ok, normal = face.evaluator.getNormalAtPoint(point)
+        if not ok or normal.dotProduct(part.up) < 0.999:
+            continue
+        key = (round(point.asVector().dotProduct(part.up), 6), face.area)
+        if best is None or key > best[:2]:
+            best = (key[0], key[1], face)
+    return best[2] if best else None
 
 
 @dataclass

@@ -118,12 +118,28 @@ Step = PocketStep | HoleStep | ChamferStep
 
 
 @dataclass
+class PartFacts:
+    """What the emitter stores on a part's body for the tools that work on
+    the compiled document (Multi Arrange, later Auto Setup): world vectors,
+    the material as the layout labels it, the thickness in mm."""
+    material: str
+    thickness: float
+    #: Whether the material has a grain at all.
+    grained: bool
+    #: The grain direction, or None when the build left it unset.
+    grain: Vec | None
+    #: The outward normal of the face machined from, which faces up on the machine.
+    up: Vec
+
+
+@dataclass
 class PartPlan:
     path: str
     component: tuple[str, ...]
     body: Body
     steps: list[Step] = field(default_factory=list[Step])
     manual: bool = False
+    facts: PartFacts | None = None
 
 
 @dataclass
@@ -225,6 +241,11 @@ def plan_part(part: PartLayout, frame: _Frame, problems: list[str]) -> PartPlan:
     body = Body(p.rings(lower, part["outline"]), _unit(p.t_axis, 1), p.thickness)
     plan = PartPlan(part["path"], tuple(segments[:-1]), body, manual=part["manual"])
     show = p.face(part["show"])
+    # Layouts written before the machine face existed: the show face is up.
+    machine = p.face(part.get("machine", part["show"]))
+    grain = part["grain"]
+    plan.facts = PartFacts(part["material"], part["thickness"], part.get("grained", True),
+                           _unit(_as_axis(grain), 1) if grain else None, machine.normal)
     named: dict[str, OpLayout] = {}
     for op in part["ops"]:
         name = op["op"]["name"] if op["kind"] == "edge" else (op["name"] if op["kind"] != "chamfer" else None)

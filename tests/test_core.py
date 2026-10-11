@@ -424,3 +424,27 @@ def test_interference_ignores_overlap_inside_a_pocket():
         side.pocket(rect(depth=300, height=9.5), at=side.inner.bottom(floor.bottom).front,
                     depth=5, name="groove")
     assert no_interference(m2) == ["box2.side overlaps box2.floor"]
+
+
+# -- the face to machine from ------------------------------------------------------
+
+def test_the_machine_face_is_the_one_with_the_operations():
+    with module("cab", Box.from_size(width=600, depth=500, height=720)) as cab:
+        plain = board("plain", ply15).on(cab.left)
+        drilled = board("drilled", ply15).on(cab.right)
+        drilled.hole(d=5, depth=10, at=drilled.inner.front(37).bottom(100))
+        drilled.hole(d=5, depth=10, at=drilled.inner.front(37).bottom(132))
+        drilled.chamfer(drilled.outer.outline, 1)          # one chamfer on the show face
+    assert plain.machine_face.direction == plain.show_face.direction == plain.outer.direction
+    assert drilled.machine_face.direction == drilled.inner.direction   # two holes beat one chamfer
+    layout = drilled.to_layout()
+    assert layout["machine"] == drilled.inner.world_name and layout["show"] == drilled.outer.world_name
+    assert layout["grained"] is True
+
+
+def test_a_tie_keeps_the_show_face_up():
+    with module("cab", Box.from_size(width=600, depth=500, height=720)) as cab:
+        side = board("side", ply15).on(cab.left)
+        side.hole(d=5, depth=10, at=side.inner.center)
+        side.hole(d=5, depth=10, at=side.outer.center)
+    assert side.machine_face.direction == side.show_face.direction
