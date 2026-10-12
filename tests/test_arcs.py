@@ -119,3 +119,15 @@ def test_two_overlapping_circles_meet_at_their_crossing():
         assert isinstance(c, Arc2)
         for p in (c.a, c.b):
             assert _on_circle(p, (0, 0), 7.5) and _on_circle(p, (11.2, 0), 7.5)
+
+
+def test_a_rounded_ring_started_near_an_arc_s_end_keeps_the_arc_whole():
+    """Every corner rounded with arcs of a vertex per degree, the ring
+    starting three vertices before an arc ends: those three would be too few
+    for an arc of their own, so the fit starts where a line meets an arc."""
+    from lang.core.cutouts import fillet
+    (piece,) = fillet(box(0, 0, 100, 60), 8)
+    ring = list(piece.exterior.coords)[:-1]
+    for start in range(len(ring)):
+        curves = fit(ring[start:] + ring[:start])
+        assert sorted(_kinds(curves)) == ["A"] * 4 + ["L"] * 4, start

@@ -9,7 +9,10 @@ from typing import Literal, NotRequired, TypedDict
 
 LAYOUT_VERSION = 1
 
-#: A polygon as rings of [u, v] points: exterior first, then holes.
+#: One or more polygons as rings of [u, v] points, one polygon after the
+#: other: its exterior ring, counter-clockwise, then its holes, clockwise.
+#: A pocket or cut with several pieces (a cutout's openings) has several
+#: counter-clockwise rings.
 Rings = list[list[list[float]]]
 
 

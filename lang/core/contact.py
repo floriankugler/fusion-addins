@@ -7,7 +7,9 @@ board's end has material and the other board's outline covers it; across
 it, the edge-on board's thickness, again as far as the other board covers
 it. That is exact for the outlines (through cuts included); pockets are not
 taken into account. An end interrupted by a notch meets the other board in
-several places, one contact each.
+several places, one contact each. A board meeting the other across an
+opening of a cutout made before is an error: the cutout should have kept
+material there.
 """
 from __future__ import annotations
 
@@ -17,6 +19,7 @@ from typing import TYPE_CHECKING
 from shapely.geometry import box as shapely_box
 
 from .directions import AXES, Axis
+from .errors import LangError
 
 if TYPE_CHECKING:
     from .part import Board, Face
@@ -81,6 +84,11 @@ def contacts(edge_on: Board, face_on: Board, tolerance: float = 1e-6) -> list[Co
         corners = {axis: (lo, hi), across: (eb.lo[across], eb.hi[across])}
         u, v = face_on.u_axis, face_on.v_axis
         window = shapely_box(corners[u][0], corners[v][0], corners[u][1], corners[v][1])
+        cutout = face_on.cutout_in(window)
+        if cutout is not None:
+            raise LangError(f"{edge_on.path} meets this board across the cutout {cutout!r}, which was made "
+                            f"before: make the cutout after the join, or keep material there with "
+                            f"keep=[{edge_on.name}].", face_on.path)
         covered = face_on.outline.geometry.intersection(window)
         for piece in getattr(covered, "geoms", [covered]):
             if piece.is_empty or piece.area <= tolerance:

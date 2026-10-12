@@ -8,7 +8,8 @@ Per part the plan holds the body (the outline on the part's lower big
 face, extruded along the thickness axis) and an ordered list of steps:
 
 - `PocketStep`: shapes cut from one face to one depth, batched while
-  consecutive pockets share face and depth;
+  consecutive pockets share face and depth; a pocket with several pieces
+  (a cutout's openings) gives one shape per piece;
 - `HoleStep`: holes of one diameter and depth from one face, batched alike;
 - `VGrooveStep`: one straight 90 degree V-groove, from its start to its end
   along the face, `depth` deep (twice as wide at the face), ends square;
@@ -225,6 +226,22 @@ class Plan:
     hardware: list[HardwarePlan] = field(default_factory=list[HardwarePlan])
 
 
+def pieces(rings: Rings) -> list[Rings]:
+    """A layout shape's polygons, each its exterior ring and its holes: an
+    exterior winds the way the first ring does, a hole the other way."""
+    def area(ring: list[list[float]]) -> float:
+        return sum(p[0] * q[1] - q[0] * p[1] for p, q in zip(ring, ring[1:] + ring[:1])) / 2
+
+    out: list[Rings] = []
+    first = area(rings[0]) > 0 if rings else True
+    for ring in rings:
+        if not out or (area(ring) > 0) == first:
+            out.append([ring])
+        else:
+            out[-1].append(ring)
+    return out
+
+
 def _unit(axis: Axis, sign: int) -> Vec:
     v = [0.0, 0.0, 0.0]
     v[AXES.index(axis)] = 1.0 if sign > 0 else -1.0
@@ -355,15 +372,15 @@ def _plan_op(p: _Part, plan: PartPlan, op: OpLayout, show: FaceRef,
 
 def _add_pocket(p: _Part, steps: list[Step], face: FaceRef, op: PocketLayout,
                 offset: tuple[float, float]) -> None:
-    loops = p.loops(face, op["shape"], offset)
+    shapes = [p.loops(face, piece, offset) for piece in pieces(op["shape"])]
     depth = p.depth(face, op["depth"])
     last = steps[-1] if steps else None
     if isinstance(last, PocketStep) and last.face == face and last.depth == depth:
-        last.shapes.append(loops)
+        last.shapes.extend(shapes)
     else:
-        steps.append(PocketStep(face, [loops], depth))
+        steps.append(PocketStep(face, shapes, depth))
     if op["chamfer"] > 0:
-        steps.append(ChamferStep(op["chamfer"], ShapeContour(face, loops)))
+        steps.append(ChamferStep(op["chamfer"], ShapeContour(face, [loop for s in shapes for loop in s])))
 
 
 def _add_hole(p: _Part, steps: list[Step], face: FaceRef, op: HoleLayout,

@@ -23,17 +23,19 @@ def build_layout() -> Layout:
         parts = [part.to_layout() for part in root.all_parts()]
         problems.extend(root.run_checks())
         box = root.box
+        notes = [note for part in root.all_parts() for note in part.notes]
         modules.append({
             "path": root.path,
             "box": box.as_dict() if box else None,  # type: ignore[typeddict-item]
             "parts": parts,
             "hardware": root.all_hardware(),
             "exports": {k: _export_value(v) for k, v in root.exports.items()},
-            "problems": list(root.problems),
+            "problems": list(root.problems) + notes,
         })
     loose = [part.to_layout() for part in registry.root_parts]
     if loose:
-        modules.append({"path": "", "box": None, "parts": loose, "hardware": [], "exports": {}, "problems": []})
+        notes = [note for part in registry.root_parts for note in part.notes]
+        modules.append({"path": "", "box": None, "parts": loose, "hardware": [], "exports": {}, "problems": notes})
     # One entry per snapshot file and hash, however often it was read.
     snapshots: dict[tuple[str, str], SnapshotLayout] = {}
     for snapshot in registry.snapshots:

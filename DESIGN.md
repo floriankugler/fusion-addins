@@ -301,6 +301,47 @@ proposed]
   per side and the operation stays a plain cut. A part as a `between()`
   limit means its nearest face; `part.into(n)` and `part.gap(n)` move it.
   This is the primitive the `groove` joint will reduce to.
+- **Cutouts** [decided and implemented 2026-10-11; `lang/core/cutouts.py`,
+  `Board.cutout`]: what the Face Cutout add-in (cutouts_native) does, as an
+  operation. `side.cutout()` cuts out a big face inside a `border=` (20),
+  keeping `around=` (20) mm of material around everything the board has so
+  far: its holes and through cuts, pockets and holes in either big face,
+  holes into its narrow faces, V-grooves. `pattern=cross(width)` leaves two
+  diagonal bands, `pattern=triangles(columns, rows, spacing)` a lattice of
+  triangles with a true gap between them (`aligned=True`: each rounded tip
+  reaches the next row's base line; `along=` the extent the columns run
+  along, the longer side by default; `start=` the corner, by default the
+  bottom, front, left one). `radius=` (8) rounds every corner of the
+  openings, `chamfer=` puts a 45 degree chamfer on their rims at the face
+  cut from, `depth=` makes it a pocket (`to(side.outer, -3)` leaves 3 mm),
+  and a region shape with `at=` limits it to part of the face (the add-in's
+  Bounding Box Points). Its defaults and the patterns' sizes are
+  `lib/cutout_patterns.py`, which the add-in now reads too. Decided with
+  Florian:
+  - the default face is the big face that is not the show face, the inner
+    face by default: usually the machined one, and the chamfer stays off
+    the visible face;
+  - Rhombuses, tabs and patterns at an angle to the board's edges are left
+    out for now; without tabs, material kept around a feature in the middle
+    of a through cutout would fall out, which is an error;
+  - a cutout is an ordered operation like any other: it spares what exists
+    when it is made, so it goes after the joins; an operation made later
+    inside an opening, or a board joined later across one, is an error;
+  - `keep=[shelf]` keeps a strip where another board meets the face (its
+    footprint grown by `around`), stated like every other relation;
+  - pieces too small for the radius are left out and noted in the layout's
+    problems (the add-in leaves them sharp); a region that rings and keeps
+    split into pieces is cut out whole (the add-in cuts its largest piece).
+  The geometry follows the add-in's tool bodies: the outline inset, less
+  the material kept, the pattern clipped to that, then every corner
+  filleted. Offsets keep sharp corners, as Fusion's sketch Offset does
+  (round joins gave rings with radius-20 corners where the add-in has
+  sharp ones that its fillets round with 8). Fillets are worked out on the
+  lines and arcs the polygons stand for, cusps included, so the arcs are
+  exact. Verified in Fusion against the add-in on the same boards (full,
+  cross, triangles, aligned triangles, a pocketed cross, each with a hole
+  and a pocket kept): zero boolean difference both ways and identical face
+  counts; `examples/cutouts.py` compiles with 71 features in 0.6 s.
 - **Positioning an operation, `at=`** [decided 2026-10-10]: an operation is
   positioned on a face by an anchor named through that face:
   `side.outer.bottom.front` is the corner, `side.outer.front` the middle of
@@ -899,8 +940,12 @@ below is proposed]
   grow with the module.
 - Shown: boards as extruded polygons in van coordinates; through cuts exact, since
   they are in the outline; holes and pockets exact through mesh booleans
-  (manifold); countersinks (hole chamfers) as cones, other chamfers
-  omitted [implemented]; hardware as catalog envelope boxes,
+  (manifold); chamfers too [implemented; all kinds since 2026-10-11]: a
+  hole's as a cone, one along a contour (a cut's or pocket's rim, a face's
+  outline) as a frustum from the contour at the chamfer's depth to the
+  contour moved its size into the material at the face, with mitred
+  corners, one along an edge as a triangular prism; hardware as catalog
+  envelope boxes,
   later the real meshes exported once from Fusion; the vehicle and master
   geometry from the snapshot mesh; grain as a subtle stripe per board; colors by
   material; check overlays (interference pairs, parts flagged not flat, sheet
@@ -1397,6 +1442,17 @@ screws and connectors in their gaps and screws through open tenons,
 verified against it too. Not done: the drawer boxes' joints (box joints,
 groove, screws to the face).
 
+Status 2026-10-11, cutouts: `side.cutout()` with full, cross and triangle
+patterns (see "Cutouts" under Primitives), verified against cutouts_native
+to zero difference with identical face counts. On the way: a pocket may
+have several pieces (the layout's rings come polygon by polygon, exteriors
+counter-clockwise, holes clockwise; plan and mesher split them); the
+emitter chamfers a contour's loops in one feature and, when Fusion fails
+it, by halves, leaving a loop it cannot chamfer sharp with a problem
+noted; `arcs.fit` starts a ring where no arc runs through it, and leaves a
+junction where curves meet at a glancing angle instead of moving it to an
+ill-conditioned crossing. The preview shows every kind of chamfer now (see "Preview backend"). 144 tests.
+
 1. `core`: the position algebra, box, board with `on`, `between` and `center`,
    scopes and paths, and layout JSON output with world transforms. With unit
    tests. [done]
@@ -1427,11 +1483,9 @@ groove, screws to the face).
 
 Still to do (listed by Florian 2026-10-11, roughly in his order of weight):
 
-- **Cutouts**, an important one: what the cutouts_native add-in (Face
-  Cutout) does, as an operation in the language: a full inset cutout of a
-  face, or a pattern of Cross, Triangles or Rhombuses that leaves material
-  bands, inner loops kept with tabs to the rim, rounded corners, and a 45
-  degree chamfer on the rim of the selected face only.
+- ~~**Cutouts**~~: done 2026-10-11 (full, cross, triangles; see "Cutouts"
+  under Primitives). Left out for now: Rhombuses, tabs, patterns at an
+  angle to the board's edges.
 - **Hardware** beyond the slides, as `Mountable` objects like
   `DrawerSlide`, each with its add-in as the reference: concealed hinges
   (concealed_hinge_native), hatch hinges (hatch_hinge), ball catches
@@ -1444,8 +1498,8 @@ Still to do (listed by Florian 2026-10-11, roughly in his order of weight):
   screws through a drawer face into the box front (two boards face to
   face, which contacts do not cover yet), dog bones on any inside corner
   (dog_bones_native).
-- Arcs from the snapshot's contours (open question 16); the preview's
-  other chamfers.
+- Arcs from the snapshot's contours (open question 16). (The preview's
+  other chamfers are done, 2026-10-11.)
 
 (Operations, the half lap, the connectors and the tenons are done; the
 assembly experiment from question 2 was dropped as a priority on

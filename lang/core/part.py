@@ -7,6 +7,12 @@ order-free modifiers (`on`, `between`, `center`, `inset`, `grain`, `show`,
 the first time a face, the box or the layout is asked for; from then on the
 placement modifiers are frozen.
 
+A cutout (`side.cutout()`, see `cutouts.py`) opens up a face inside a
+border, keeping material around everything the board has so far; it is an
+ordered operation like the others, so it goes after the joins whose holes
+it must spare, and an operation made later inside one of its openings is
+an error.
+
 Faces and edges are properties named by world direction (`side.front`,
 `side.front.inner`), so editors can complete them; project aliases go
 through `face()` and `edge()`. A point on a face for `at=` is named
@@ -20,6 +26,15 @@ from dataclasses import dataclass
 from collections.abc import Sequence
 from typing import Any, Literal, Protocol, Self, Union, overload
 
+from shapely.geometry import LineString, Polygon
+from shapely.geometry import box as shapely_box
+from shapely.geometry.base import BaseGeometry
+from shapely.geometry.polygon import orient
+from shapely.ops import unary_union
+
+from lib import cutout_patterns as cutout_data
+
+from . import cutouts as cutout_geometry
 from . import directions
 from . import scope as scopes
 from .box import Box
@@ -30,7 +45,7 @@ from .layout_types import (ChamferLayout, CutLayout, EdgeOpLayout, HoleLayout, O
                            PartLayout, PocketLayout, Rings, VGrooveLayout)
 from .material import Material
 from .ops import Chamfer, Cut, EdgeOp, Hole, Op, Pocket, VGroove
-from .refs import Affine, DepthSpec, HasPosition, Number, Pos, PosLike, Side, Through, ToFace, as_pos
+from .refs import Affine, DepthSpec, HasPosition, Number, Pos, PosLike, Side, Through, ToFace, as_pos, through
 from .shapes import Anchor as ShapeAnchor
 from .shapes import Shape, box_shape
 
@@ -371,7 +386,7 @@ class Operation:
     def __repr__(self) -> str:
         return f"Operation({self.part.path}.{self.name})"
 
-    def _extents(self) -> dict[Axis, tuple[float, float]]:
+    def extents(self) -> dict[Axis, tuple[float, float]]:
         """The region the operation occupies, per world axis."""
         part = self.part
         b = part.box()
@@ -416,7 +431,7 @@ class Operation:
     def side(self, name: str | Direction) -> Pos:
         """The operation's edge in the given direction, as a position."""
         d = self.part.scope.frame.direction(name)
-        extents = self._extents()
+        extents = self.extents()
         if d.axis not in extents:
             raise LangError(f"{self!r}: a through cut has no {d.name} edge in the thickness.", self.part.path)
         lo, hi = extents[d.axis]
@@ -455,7 +470,7 @@ class Operation:
         if isinstance(inner, (Cut, Chamfer)):
             raise LangError(f"{self!r}: only a pocket or hole has a floor.", self.part.path)
         face = directions.frame.direction(op.face if isinstance(op, EdgeOp) else inner.face)
-        lo, hi = self._extents()[face.axis]
+        lo, hi = self.extents()[face.axis]
         return Pos(face.axis, lo if face.sign > 0 else hi)
 
 
@@ -493,6 +508,10 @@ class Board:
         self._outline: Shape | None = None
         self.ops: list[Op] = []
         self._named_ops: dict[str, Op] = {}
+        #: The openings of the cutouts made so far, by operation name.
+        self._cutouts: list[tuple[str, BaseGeometry]] = []
+        #: Notes for the layout's problems, such as cutout pieces left out.
+        self.notes: list[str] = []
 
     # -- identity ----------------------------------------------------------------------
 
@@ -926,6 +945,14 @@ class Board:
     # -- operations (ordered) -----------------------------------------------------------------
 
     def _record(self, op: Op, name: str | None) -> None:
+        if self._cutouts and not isinstance(op, Chamfer):
+            footprint = self._footprint(op)
+            for cutout, opening in self._cutouts:
+                if footprint.intersection(opening).area > 1e-6:
+                    what = f"the {op.kind} {name!r}" if name else f"a {op.kind}"
+                    raise LangError(
+                        f"{what} lies in the cutout {cutout!r}, which was made before it: make the cutout "
+                        "after it, or keep material there with keep=.", self.path)
         self.ops.append(op)
         if name:
             if name in self._named_ops:
@@ -1076,6 +1103,191 @@ class Board:
             self._record(Chamfer(name, float(size), face), None)
         return self
 
+    def cutout(self, what: Face | Shape | None = None, at: Anchor | Edge | None = None, *,
+               pattern: cutout_geometry.Pattern | None = None, border: float = cutout_data.OUTER_INSET,
+               around: float = cutout_data.INNER_INSET, depth: DepthSpec = through,
+               radius: float = cutout_data.FILLET_RADIUS, chamfer: float = 0.0,
+               keep: Board | Box | Sequence[Board | Box] = (), name: str | None = None) -> Self:
+        """Cuts out a big face inside a border, as the Face Cutout add-in
+        does: `border=` mm of the outline stays, and `around=` mm around
+        everything the board has so far (its holes and through cuts,
+        pockets and holes in either big face, holes into its narrow faces,
+        V-grooves), and around where the boards and boxes in `keep=` lie on
+        it, such as a shelf meeting the board in the middle.
+
+        `what` is the face to cut from, by default the big face that is
+        not the show face (the inner face, usually the machined one, so the
+        chamfer stays off the visible face), or a region shape placed with
+        `at=` on a big face: then only that region is cut out, still inside
+        the border. `pattern=` leaves more material: `cross(width)` or
+        `triangles(columns, rows, spacing)`. `depth=` makes it a pocket
+        (`to(side.outer, -3)` leaves 3 mm); `radius=` rounds every corner
+        of the openings (0 leaves them sharp), and pieces too small for it
+        are left out; `chamfer=` puts a 45 degree chamfer on their rims at
+        the face cut from only.
+
+        A cutout spares only what exists when it is made, so write it after
+        the joins and holes it must leave material around; an operation
+        made later inside an opening is an error. Without tabs, material
+        kept around a feature in the middle of a through cutout would fall
+        out, which is an error too."""
+        for label, value in (("border", border), ("around", around), ("radius", radius), ("chamfer", chamfer)):
+            if value < 0:
+                raise LangError(f"cutout(): {label} must not be negative, got {value:g}.", self.path)
+        face, region = self._cutout_face(what, at)
+        d, spec, thru = self._depth(face, depth)
+        if chamfer > 0 and chamfer >= d - 1e-9:
+            raise LangError(f"cutout(): the chamfer ({chamfer:g}) must be smaller than the depth ({d:g}).",
+                            self.path)
+        name = name or self.unique_op_name("cutout")
+        if name in self._named_ops:
+            raise LangError(f"operation name {name!r} used twice.", self.path)
+
+        exterior = unary_union([Polygon(p.exterior) for p in self.outline.polygons()])
+        inset = cutout_geometry.grown(exterior, -border)
+        if inset.is_empty:
+            raise LangError(f"cutout(): border={border:g} leaves nothing of the face to cut out.", self.path)
+        area = inset if region is None else inset.intersection(region)
+        if area.is_empty:
+            raise LangError("cutout(): the region lies outside the border.", self.path)
+        kept = [(label, cutout_geometry.grown(g, around)) for label, g in self._kept_footprints(keep)]
+        cut_region = area.difference(unary_union([g for _, g in kept])) if kept else area
+        if cut_region.area <= 1e-6:
+            raise LangError("cutout(): the material kept leaves nothing to cut out.", self.path)
+        frame = self._pattern_frame(pattern, (region if region is not None else inset).bounds)
+        result = cutout_geometry.openings(cut_region, frame, pattern, radius, self.path)
+        if not result.pieces:
+            raise LangError(f"cutout(): every piece is too small for radius={radius:g}.", self.path)
+        if result.dropped:
+            self.notes.append(f"{self.path}: cutout {name!r} left out {result.dropped} piece(s) too small for "
+                              f"the {radius:g} mm corner radius.")
+        opening = result.geometry
+        shape = Shape(opening)
+        if thru:
+            self._check_islands(opening, kept, name)
+            self._cut_through(shape, name, 0.0)
+        else:
+            self._record(Pocket(shape, face.world_name, d, spec, name), name)
+        if chamfer > 0:
+            self._record(Chamfer(name, float(chamfer), face.world_name), None)
+        self._cutouts.append((name, opening))
+        return self
+
+    def _cutout_face(self, what: Face | Shape | None, at: Anchor | Edge | None) -> tuple[Face, BaseGeometry | None]:
+        """The face a cutout is cut from and its region, if one is given."""
+        if isinstance(what, Shape):
+            anchor = self._anchor(at) if at is not None else self._default_cutout_face().center
+            if not anchor.face.is_big:
+                raise LangError("cutout(): place the region on a big face.", self.path)
+            return anchor.face, self._place_shape(what, anchor).geometry
+        if at is not None:
+            raise LangError("cutout(): at= places a region shape; give the shape first.", self.path)
+        if what is None:
+            return self._default_cutout_face(), None
+        if what.part is not self:
+            raise LangError(f"cutout(): {what!r} is not a face of this board.", self.path)
+        if not what.is_big:
+            raise LangError(f"cutout(): {what!r} is a narrow face; a cutout is made from a big face.", self.path)
+        return what, None
+
+    def _default_cutout_face(self) -> Face:
+        show = self.show_face
+        return next(f for f in self.big_faces() if f.direction != show.direction)
+
+    def _pattern_frame(self, pattern: cutout_geometry.Pattern | None,
+                       bounds: tuple[float, float, float, float]) -> cutout_geometry.PatternFrame:
+        """Where a pattern is laid out: the rectangle `bounds`, the columns
+        along `along=` or the longer side, from the corner `start=` or the
+        one at the bottom, front and left."""
+        u0, v0, u1, v1 = bounds
+        u, v = self.u_axis, self.v_axis
+        columns: Literal[0, 1] = 0 if u1 - u0 >= v1 - v0 else 1
+        start = [0, 0]
+        for i, axis in enumerate((u, v)):
+            d = next(self.scope.frame.direction(n) for n in ("bottom", "front", "left")
+                     if self.scope.frame.direction(n).axis == axis)
+            start[i] = d.sign
+        if isinstance(pattern, cutout_geometry.Triangles):
+            if pattern.along is not None:
+                axis = self.scope.frame.axis_of_extent(pattern.along)
+                if axis not in (u, v):
+                    raise LangError(f"triangles(): along={pattern.along!r} is the board's thickness.", self.path)
+                columns = 0 if axis == u else 1
+            if pattern.start is not None:
+                anchor = pattern.start
+                if anchor.part is not self or not anchor.face.is_big:
+                    raise LangError("triangles(): start= names a corner of a big face of this board.", self.path)
+                _, corner = anchor.resolve()
+                if not (corner.names_u and corner.names_v):
+                    raise LangError("triangles(): start= must name a corner, e.g. side.inner.bottom.front.",
+                                    self.path)
+                start = [1 if corner.fu > 0.5 else -1, 1 if corner.fv > 0.5 else -1]
+        return cutout_geometry.PatternFrame(bounds, columns, (start[0], start[1]))
+
+    def _footprint(self, op: Op) -> BaseGeometry:
+        """The area an operation takes up in the outline's frame."""
+        if isinstance(op, (Cut, Pocket)):
+            return op.shape.geometry
+        if isinstance(op, Hole):
+            return cutout_geometry.circle_geometry((op.u, op.v), op.d / 2 + op.chamfer)
+        if isinstance(op, VGroove):
+            return LineString([(op.u0, op.v0), (op.u1, op.v1)]).buffer(op.depth, cap_style="flat")
+        if isinstance(op, EdgeOp):
+            extents = Operation(self, "", op).extents()
+            u, v = self.u_axis, self.v_axis
+            return shapely_box(extents[u][0], extents[v][0], extents[u][1], extents[v][1])
+        return Polygon()
+
+    def _kept_footprints(self, keep: Board | Box | Sequence[Board | Box]) -> list[tuple[str, BaseGeometry]]:
+        """What a cutout keeps material around, with a label each: the
+        board's holes, its operations, and the boards and boxes in `keep`."""
+        found: list[tuple[str, BaseGeometry]] = []
+        for poly in self.outline.polygons():
+            for hole in poly.interiors:
+                g = Polygon(hole)
+                cut = next((op for op in self.ops if isinstance(op, Cut) and op.shape.geometry.intersects(g)), None)
+                found.append((f"the cut {cut.name!r}" if cut is not None and cut.name else "a hole", g))
+        for op in self.ops:
+            if isinstance(op, (Cut, Chamfer)):
+                continue
+            name = op.op.name if isinstance(op, EdgeOp) else op.name
+            found.append((f"the {op.kind} {name!r}" if name else f"a {op.kind}", self._footprint(op)))
+        u, v, t = self.u_axis, self.v_axis, self.t_axis
+        for item in [keep] if isinstance(keep, (Board, Box)) else list(keep):
+            if isinstance(item, Board):
+                rb = item.box()
+                g = (item.outline.geometry if item.t_axis == t
+                     else shapely_box(rb.lo[u], rb.lo[v], rb.hi[u], rb.hi[v]))
+                label = item.path
+            else:
+                g = shapely_box(item.lo[u], item.lo[v], item.hi[u], item.hi[v])
+                label = "a box"
+            if g.intersection(self.outline.geometry).area <= 1e-6:
+                raise LangError(f"cutout(): keep= {label} does not lie on this board.", self.path)
+            found.append((label, g))
+        return found
+
+    def _check_islands(self, opening: BaseGeometry, kept: list[tuple[str, BaseGeometry]], name: str) -> None:
+        """A through cutout must not cut kept material free."""
+        rest = self.outline.geometry.difference(opening)
+        pieces = sorted(getattr(rest, "geoms", [rest]), key=lambda g: -g.area)
+        if len(pieces) <= len(self.outline.polygons()):
+            return
+        islands = pieces[len(self.outline.polygons()):]
+        labels = [label for label, g in kept if any(g.intersects(i) for i in islands)]
+        around = ", ".join(dict.fromkeys(labels)) or "material"
+        raise LangError(f"the cutout {name!r} cuts the material kept around {around} free, and it would fall out: "
+                        "keep it connected to the border with keep=, or cut out a region that leaves it out.",
+                        self.path)
+
+    def cutout_in(self, area: BaseGeometry) -> str | None:
+        """The name of a cutout of this board with an opening in `area`
+        (in the outline's frame), if any."""
+        for name, opening in self._cutouts:
+            if opening.intersection(area).area > 1e-6:
+                return name
+        return None
+
     # -- operations at computed positions (joints and hardware) ------------------------------------
 
     def _big_face_of_mine(self, face: Face, what: str) -> None:
@@ -1206,7 +1418,14 @@ def _in_plane(t_axis: Axis) -> tuple[Axis, Axis]:
 
 
 def _rings(shape: Shape) -> Rings:
-    return [[[u, v] for u, v in ring] for ring in shape.rings()]
+    """The shape's polygons one after the other, each its exterior ring
+    (counter-clockwise) and then its holes (clockwise)."""
+    rings: Rings = []
+    for poly in shape.polygons():
+        poly = orient(poly, 1.0)
+        for ring in [poly.exterior] + list(poly.interiors):
+            rings.append([[float(c[0]), float(c[1])] for c in list(ring.coords)[:-1]])
+    return rings
 
 
 def _op_to_layout(op: Op) -> OpLayout:

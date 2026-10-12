@@ -422,29 +422,32 @@ class Emitter:
             raise RuntimeError("no midpoint for edge")
         return (pt.x, pt.y, pt.z)
 
-    def _contour_edges(self, body: adsk.fusion.BRepBody, contour: Contour) -> list[adsk.fusion.BRepEdge]:
+    def _contour_edges(self, body: adsk.fusion.BRepBody, contour: Contour) -> list[list[adsk.fusion.BRepEdge]]:
+        """The edges a contour names, in groups that are chamfered or left
+        together: one per loop of a shape, else all of them."""
         if isinstance(contour, OutlineContour):
             face = self._face(body, contour.face)
             if face is None:
                 return []
             for loop in face.loops:
                 if loop.isOuter:
-                    return list(loop.edges)
+                    return [list(loop.edges)]
             return []
         if isinstance(contour, EdgeContour):
-            return [e for e in body.edges
-                    if self._edge_on_plane(e, contour.a) and self._edge_on_plane(e, contour.b)]
+            return [[e for e in body.edges
+                     if self._edge_on_plane(e, contour.a) and self._edge_on_plane(e, contour.b)]]
         if isinstance(contour, ShapeContour):
-            curves = [c for loop in contour.loops for c in loop]
             normal = contour.face.normal
-            found: list[adsk.fusion.BRepEdge] = []
+            groups: list[list[adsk.fusion.BRepEdge]] = [[] for _ in contour.loops]
             for e in body.edges:
                 if not self._edge_on_plane(e, contour.face):
                     continue
                 mid = self._edge_midpoint(e)
-                if any(_on_curve(mid, c, normal) for c in curves):
-                    found.append(e)
-            return found
+                for i, loop in enumerate(contour.loops):
+                    if any(_on_curve(mid, c, normal) for c in loop):
+                        groups[i].append(e)
+                        break
+            return [g for g in groups if g]
         circle_contour: CircleContour = contour
         center = _cm(circle_contour.center)
         found = []
@@ -462,7 +465,7 @@ class Emitter:
                 continue
             if math.dist((c.x, c.y, c.z), center) < TOL and abs(r - circle_contour.r * MM) < TOL:
                 found.append(e)
-        return found
+        return [found]
 
     # -- steps ---------------------------------------------------------------------------------------
 
@@ -541,16 +544,35 @@ class Emitter:
 
     def _chamfer(self, comp: adsk.fusion.Component, body: adsk.fusion.BRepBody, step: ChamferStep,
                  path: str) -> None:
-        edges = self._contour_edges(body, step.contour)
-        if not edges:
+        groups = [g for g in self._contour_edges(body, step.contour) if g]
+        if not groups:
             self._problem(f"{path}: chamfer finds no edges along {step.contour}.")
             return
+        failed = self._chamfer_groups(comp, groups, step.size)
+        if failed:
+            self._problem(f"{path}: {failed} of {len(groups)} contours could not be chamfered {step.size:g} "
+                          f"and stay sharp ({step.contour}).")
+
+    def _chamfer_groups(self, comp: adsk.fusion.Component, groups: list[list[adsk.fusion.BRepEdge]],
+                        size: float) -> int:
+        """Chamfers the groups of edges in one feature. Fusion fails a
+        chamfer as a whole when one contour is too small for it, so on
+        failure the groups are chamfered by halves; returns how many single
+        groups could not be chamfered. The edges of the others stay valid
+        after a partial chamfer."""
         chamfers = comp.features.chamferFeatures
         inp = chamfers.createInput2()
         inp.chamferEdgeSets.addEqualDistanceChamferEdgeSet(
-            _collection(list(edges)), adsk.core.ValueInput.createByReal(step.size * MM), False)
-        chamfers.add(inp)
-        self.report.features += 1
+            _collection([e for g in groups for e in g]), adsk.core.ValueInput.createByReal(size * MM), False)
+        try:
+            chamfers.add(inp)
+            self.report.features += 1
+            return 0
+        except RuntimeError:
+            if len(groups) == 1:
+                return 1
+        half = len(groups) // 2
+        return self._chamfer_groups(comp, groups[:half], size) + self._chamfer_groups(comp, groups[half:], size)
 
 
 # -- entry points ----------------------------------------------------------------------------------

@@ -18,6 +18,12 @@
       "runtimeExecutable": ".venv/bin/python",
       "runtimeArgs": ["-m", "lang.preview", "examples/shelf.py", "--out", "out/shelf", "--port", "8767"],
       "port": 8767
+    },
+    {
+      "name": "preview-cutouts",
+      "runtimeExecutable": ".venv/bin/python",
+      "runtimeArgs": ["-m", "lang.preview", "examples/cutouts.py", "--out", "out/cutouts", "--port", "8768"],
+      "port": 8768
     }
   ]
 }

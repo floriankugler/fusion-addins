@@ -9,6 +9,7 @@ The public surface is re-exported here so a build file can do
 from .core.box import Box
 from .core.checks import fits_sheet, inside, inside_box, no_interference
 from .core.contours import Contour
+from .core.cutouts import cross, triangles
 from .core.directions import Direction, Frame, frame, set_frame
 from .core.errors import LangError
 from .core.material import Material, material
@@ -22,7 +23,7 @@ from .master import Master, Plane, master
 __all__ = [
     "Direction", "Frame", "frame", "set_frame",
     "Pos", "Side", "spread", "to", "through",
-    "Box", "Shape", "rect", "circle", "polygon", "Material", "material",
+    "Box", "Shape", "rect", "circle", "polygon", "Material", "material", "cross", "triangles",
     "Board", "Face", "Edge", "Anchor", "Outline", "Operation", "board",
     "Scope", "module", "scope", "registry", "check",
     "no_interference", "fits_sheet", "inside", "inside_box", "LangError",

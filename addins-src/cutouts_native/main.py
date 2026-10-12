@@ -6,11 +6,15 @@ from typing import cast
 import adsk.core
 import adsk.fusion
 
-from lib import addin, inputs, ui_placement, utils
+from lib import addin, cutout_patterns, inputs, ui_placement, utils
 from lib.fusionbootstrap.runtime import RuntimeInfo
 
 
 _addin: addin.Addin | None = None
+
+
+def _cm(mm: float) -> float:
+    return mm / 10
 
 
 @dataclass(frozen=True)
@@ -169,7 +173,7 @@ class CutoutsNativeInputs(inputs.Inputs):
         self.outer_inset = inputs.FloatInput(
             id="outer_inset",
             name="Outer Inset",
-            default_value=2,
+            default_value=_cm(cutout_patterns.OUTER_INSET),
             tool_tip="Material to retain inside the outer boundary of the selected face.",
             units=units,
         )
@@ -177,7 +181,7 @@ class CutoutsNativeInputs(inputs.Inputs):
         self.inner_feature_inset = inputs.FloatInput(
             id="inner_feature_inset",
             name="Inner Feature Inset",
-            default_value=2,
+            default_value=_cm(cutout_patterns.INNER_INSET),
             tool_tip="Material to retain around each inner boundary of the selected face.",
             units=units,
         )
@@ -193,7 +197,7 @@ class CutoutsNativeInputs(inputs.Inputs):
         self.fillet_radius = inputs.FloatInput(
             id="fillet_radius",
             name="Fillet Radius",
-            default_value=0.8,
+            default_value=_cm(cutout_patterns.FILLET_RADIUS),
             tool_tip="Radius for the vertical edges of the cutout tool body. Use zero for no fillet.",
             units=units,
         )
@@ -211,7 +215,7 @@ class CutoutsNativeInputs(inputs.Inputs):
         self.chamfer_size = inputs.FloatInput(
             id="chamfer_size",
             name="Chamfer Size",
-            default_value=0.1,
+            default_value=_cm(cutout_patterns.CHAMFER),
             tool_tip=(
                 "Distance the 45 degree chamfer reaches into the face and "
                 "down the cutout wall."
@@ -290,7 +294,7 @@ class CutoutsNativeInputs(inputs.Inputs):
         self.triangle_columns = inputs.IntegerInput(
             id="triangle_columns",
             name="Columns",
-            default_value=8,
+            default_value=cutout_patterns.COLUMNS,
             minimum=1,
             maximum=100,
             tool_tip=(
@@ -302,7 +306,7 @@ class CutoutsNativeInputs(inputs.Inputs):
         self.triangle_rows = inputs.IntegerInput(
             id="triangle_rows",
             name="Rows",
-            default_value=6,
+            default_value=cutout_patterns.ROWS,
             minimum=1,
             maximum=100,
             tool_tip="Number of pattern rows perpendicular to the Pattern Axis.",
@@ -311,7 +315,7 @@ class CutoutsNativeInputs(inputs.Inputs):
         self.triangle_spacing = inputs.FloatInput(
             id="triangle_spacing",
             name="Spacing",
-            default_value=2,
+            default_value=_cm(cutout_patterns.SPACING),
             tool_tip="True edge-to-edge clearance between adjacent cutouts.",
             units=units,
             update_visibility=grid_input_visible,
@@ -331,7 +335,7 @@ class CutoutsNativeInputs(inputs.Inputs):
         self.cross_width = inputs.FloatInput(
             id="cross_width",
             name="Cross Width",
-            default_value=2,
+            default_value=_cm(cutout_patterns.CROSS_WIDTH),
             tool_tip="Width of each diagonal material band in the cross.",
             units=units,
             update_visibility=lambda: (
@@ -1365,11 +1369,7 @@ class CutoutsNative(addin.Addin):
             return None
         if self.inputs.pattern_type.value != CutoutsNativeInputs.CROSS.value:
             return None
-        # For a rectangle every side midpoint has the same distance to both
-        # diagonals, so the widest usable cross band is w*h/hypot(w, h).
-        maximum_width = (
-            extent_u * extent_v / math.hypot(extent_u, extent_v)
-        )
+        maximum_width = cutout_patterns.cross_max_width(extent_u, extent_v)
         if self.inputs.cross_width.value >= maximum_width - 1e-6:
             design = cast(adsk.fusion.Design, self.app.activeProduct)
             units = design.unitsManager
@@ -2440,23 +2440,22 @@ class CutoutsNative(addin.Addin):
         columns = self.inputs.triangle_columns.value
         rows = self.inputs.triangle_rows.value
         spacing = self.inputs.triangle_spacing.value
-        triangle_width, triangle_height = self._triangle_dimensions(
+        align_triangles = self.inputs.align_triangles.value
+        # The sizes come from lib/cutout_patterns.py. With aligned tips the
+        # constraints below decide the final geometry; the computed sizes
+        # only start the solver at the solution.
+        sizes = cutout_patterns.triangles(
             extent_u,
             extent_v,
             columns,
             rows,
             spacing,
+            aligned_radius=(
+                self.inputs.fillet_radius.value if align_triangles else None
+            ),
         )
-        align_triangles = self.inputs.align_triangles.value
-        seed_height = (
-            self._aligned_triangle_seed_height(
-                triangle_width,
-                triangle_height,
-                self.inputs.fillet_radius.value,
-            )
-            if align_triangles
-            else triangle_height
-        )
+        triangle_width, triangle_height = sizes.width, sizes.height
+        seed_height = sizes.apex_height
 
         pitch_u_expression = (
             f"({extent_u_parameter.name}) / {columns}"
@@ -2781,21 +2780,7 @@ class CutoutsNative(addin.Addin):
         pitch_v: float,
         spacing: float,
     ) -> tuple[float, float]:
-        """Solve rhombus width and height from the pitches and the true
-        edge-to-edge spacing.
-
-        For a rhombus with diagonals w (along u) and h (along v), the gap
-        measured along u between two neighbours is s*hypot(w, h)/h and the
-        gap along v is s*hypot(w, h)/w. Requiring pitch_u = w + gap_u and
-        pitch_v = h + gap_v forces w/h == pitch_u/pitch_v, which reduces to
-        the closed form below.
-        """
-        if pitch_u <= 0 or pitch_v <= 0:
-            raise ValueError("The pattern boundary has no usable extent.")
-        ratio = pitch_u / pitch_v
-        height = pitch_v - spacing * math.sqrt(1 + ratio * ratio) / ratio
-        width = ratio * height
-        return width, height
+        return cutout_patterns.rhombus_dimensions(pitch_u, pitch_v, spacing)
 
     def _create_rhombus_pattern_sketch(
         self,
@@ -3630,34 +3615,6 @@ class CutoutsNative(addin.Addin):
         point.translateBy(v_offset)
         return point
 
-    def _aligned_triangle_seed_height(
-        self,
-        width: float,
-        visible_height: float,
-        radius: float,
-    ) -> float:
-        half_width = width / 2
-        if half_width <= 1e-6:
-            raise ValueError("The requested triangle pattern has no usable width.")
-
-        # This only supplies stable initial geometry to Fusion's solver. The
-        # sketch constraints determine the final virtual apex position.
-        seed_height = visible_height
-        for _ in range(12):
-            half_angle_sine = half_width / math.hypot(
-                half_width,
-                seed_height,
-            )
-            if half_angle_sine <= 1e-6:
-                raise ValueError(
-                    "The fillet radius is too large for the triangle pattern."
-                )
-            seed_height = (
-                visible_height
-                + radius * (1 / half_angle_sine - 1)
-            )
-        return seed_height
-
     def _fillet_seed_triangle_tip(
         self,
         sketch: adsk.fusion.Sketch,
@@ -3821,46 +3778,6 @@ class CutoutsNative(addin.Addin):
                     ),
                 )
         return pattern
-
-    def _triangle_dimensions(
-        self,
-        extent_u: float,
-        extent_v: float,
-        columns: int,
-        rows: int,
-        spacing: float,
-    ) -> tuple[float, float]:
-        height = (extent_v - (rows - 1) * spacing) / rows
-        if height <= 1e-6:
-            raise ValueError(
-                "Triangle spacing and row count leave no room for triangle height."
-            )
-        # The first triangle is centered on the start boundary and the final
-        # triangle is centered on the opposite boundary. The requested column
-        # count therefore describes the number of center-to-center pitches
-        # across the rectangle:
-        #
-        #   extent_u = columns * (width / 2 + projected_edge_spacing)
-        #
-        # Solving that equation for width keeps both clipped end triangles
-        # exactly one half wide.
-        a = columns / 2
-        b = columns * spacing
-        coefficient = a * a - b * b / (4 * height * height)
-        if abs(coefficient) <= 1e-9:
-            raise ValueError("Triangle spacing is too large for the requested columns.")
-        discriminant = (
-            a * a * extent_u * extent_u
-            - coefficient * (extent_u * extent_u - b * b)
-        )
-        if discriminant < -1e-8:
-            raise ValueError("Triangle spacing is too large for the pattern boundary.")
-        width = (
-            a * extent_u - math.sqrt(max(0, discriminant))
-        ) / coefficient
-        if width <= 1e-6 or extent_u - a * width < -1e-6:
-            raise ValueError("The requested triangle pattern does not fit the boundary.")
-        return width, height
 
     def _create_tool_extrude(
         self,

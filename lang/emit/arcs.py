@@ -168,6 +168,28 @@ def _onto_circles(a: tuple[Point2, float], b: tuple[Point2, float], near: Point2
     return min(points, key=lambda x: math.dist(x, near))
 
 
+#: Curves meeting at less than this angle meet at a glancing angle.
+_GLANCING = math.radians(10.0)
+
+
+def _glancing(p: Point2, a: tuple[Point2, float], b: tuple[Point2, float] | None,
+              toward: Point2 | None = None) -> bool:
+    """Whether the circle `a` meets the circle `b`, or the line from `p`
+    toward `toward`, at `p` at a glancing angle."""
+    (ca, ra) = a
+    na = ((p[0] - ca[0]) / ra, (p[1] - ca[1]) / ra)        # the normal of circle a at p
+    if b is not None:
+        (cb, rb) = b
+        nb = ((p[0] - cb[0]) / rb, (p[1] - cb[1]) / rb)
+        return abs(na[0] * nb[1] - na[1] * nb[0]) < math.sin(_GLANCING)
+    assert toward is not None
+    dx, dy = toward[0] - p[0], toward[1] - p[1]
+    length = math.hypot(dx, dy)
+    if length == 0:
+        return True
+    return abs(na[0] * dx + na[1] * dy) / length < math.sin(_GLANCING)
+
+
 def _chord_of(piece: _Piece, on_arc: Point2, x: Point2, outward: int) -> bool:
     """Whether the segment from the arc's end `on_arc` to `x` is a piece of
     one of its chords: a boolean with another shape cut the circle's
@@ -228,6 +250,17 @@ def _snap(pieces: list[_Piece], points: Sequence[Point2], moved: dict[int, Point
         reach = 2 * arc[0].circle[1] * math.sin(MAX_STEP / 2)
         if target is None or math.dist(target, x) > reach:
             continue
+        # Where the arc meets the line or the other arc at a glancing angle
+        # (a fillet touching them), the crossing found is ill-conditioned
+        # and may lie far along the curves; the vertex stays.
+        if end is not None and start is not None:
+            assert end[0].circle is not None and start[0].circle is not None
+            glancing = _glancing(target, end[0].circle, start[0].circle)
+        else:
+            following = at(m + 1) if end is not None else at(m - 1)
+            glancing = _glancing(target, arc[0].circle, None, following)
+        if glancing:
+            continue
         moved[m] = target
         if end is not None:
             end[0].j += 1
@@ -253,12 +286,39 @@ def _curve(piece: _Piece, at: Callable[[int], Point2], n: int) -> Curve2:
     return Arc2(a, mid, b, center, radius)
 
 
+def _from_corner(points: list[Point2]) -> list[Point2]:
+    """The ring started where no arc runs through: at its sharpest corner,
+    a vertex turning more than an arc's segments do, or, when every corner
+    is rounded, where the segments' length changes most (a line meeting an
+    arc, or arcs of different radii meeting). An arc wrapping around the
+    start would be split, and its part before the start would not be found
+    when it has fewer than MIN_SEGMENTS segments."""
+    n = len(points)
+    if n < 3:
+        return points
+    best, best_key = 0, (0, 0.0)
+    for i in range(n):
+        p, q, r = points[i - 1], points[i], points[(i + 1) % n]
+        ax, ay = q[0] - p[0], q[1] - p[1]
+        bx, by = r[0] - q[0], r[1] - q[1]
+        turn = abs(math.atan2(ax * by - ay * bx, ax * bx + ay * by))
+        if turn > MAX_STEP:
+            key = (2, turn)
+        else:
+            a, b = math.hypot(ax, ay), math.hypot(bx, by)
+            key = (1, max(a, b) / max(min(a, b), 1e-12))
+        if key > best_key:
+            best, best_key = i, key
+    return points if best == 0 else points[best:] + points[:best]
+
+
 def fit(ring: Sequence[Sequence[float]]) -> list[Curve2]:
     """The closed ring (no repeated closing point needed) as lines, arcs
     and full circles, in the ring's order."""
     points: list[Point2] = [(float(p[0]), float(p[1])) for p in ring]
     if len(points) > 1 and points[0] == points[-1]:
         points.pop()
+    points = _from_corner(points)
     n = len(points)
     pieces: list[_Piece] = []
     i = 0
