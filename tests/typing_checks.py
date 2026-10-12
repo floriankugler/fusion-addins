@@ -44,3 +44,40 @@ def shapes() -> None:
     rect(depth=50, height=50).clip(top=10, back=10)
     rect(depth=50, height=50).clip("top.back", top=10, back=10)               # type: ignore  # no strings
     rect(depth=50, height=50).clip(top=10, bak=10)                            # type: ignore  # a misspelt edge
+
+
+def hardware() -> None:
+    """`scope.mount(hardware, ...)` takes the hardware's own typed keywords."""
+    with module("m", Box.from_size(width=600, depth=400, height=700)) as m:
+        side = board("side", ply15).on(m.left)
+        other = board("other", ply15).on(m.right)
+        door = board("door", ply15).on(m.front)
+        hinge = ConcealedHinge(count=3, end=80, pilot=(3, 3))
+        m.mount(hinge, door=door, carcass=side)                                   # fine
+        m.mount(hinge, door=door, carcass=side.inner)                             # a face: fine
+        m.mount(hinge, dor=door, carcass=side)                                    # type: ignore  # a misspelt keyword
+        m.mount(hinge, door=door)                                                 # type: ignore  # carcass= missing
+        m.mount(hinge, door=side.inner, carcass=side)                             # type: ignore  # a face as the door
+        m.mount(hinge, door, side)                                                # type: ignore  # keywords only
+        ConcealedHinge(margin=60)                                                 # type: ignore  # end=, not margin=
+        ConcealedHinge(predrill=(3, 3))                                           # type: ignore  # pilot=
+        slide = DrawerSlide("Dynapro 40", nl=450, pilot=(2, 4))
+        m.mount(slide, sides=(side, other), front=door.back)                      # fine
+        m.mount(slide, sides=side, front=door.back)                               # type: ignore  # one side
+        m.mount(slide, sides=(side, other))                                       # type: ignore  # front= missing
+        DrawerSlide("Dynapro 41", nl=450)                                         # type: ignore  # no such model
+        DrawerSlide("Dynapro 40", 450, 4)                                         # type: ignore  # holes= keyword-only
+        latch = DoorLatch("Pull Lock 44", count=2)
+        m.mount(latch, door=door, carcass=side.inner)                             # fine
+        m.mount(latch, door=door, carcass=side, count=2)                          # type: ignore  # count is latch's
+        DoorLatch("Pull Lock 44", 2)                                              # type: ignore  # count keyword-only
+        DoorLatch("Pull Lock 44", predrill=(3, 3))                                # type: ignore  # pilot=
+        HatchHinge("Free space 1.11", opening=90)                                 # fine
+        m.mount(HatchHinge("Free space 1.11"), hatch=door, sides=(side, other), top=m.top)    # fine
+        m.mount(HatchHinge("Free space 1.11"), hatch=door, side=side, top=m.top)  # type: ignore  # sides=
+        SlidingBracket("Pacofix PF-L", count=3, frame_hole="euro")                # fine
+        m.mount(SlidingBracket(), panel=door, frame=[side, other.inner])          # fine
+        m.mount(SlidingBracket(), panel=door, frame=[side], at=[m.bottom])        # type: ignore  # at= is the bracket's
+        SlidingBracket(frame_hole="m4")                                           # type: ignore  # no such hole
+        BallCatch(count=4, end=40)                                                # fine
+        BallCatch("GN 450", 4)                                                    # type: ignore  # count keyword-only

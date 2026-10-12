@@ -9,8 +9,6 @@ arches, the cross-section of the ribbed floor, the batten pitch and the
 kitchen's place all come from the master.
 """
 from lang import *
-from lang.hardware.slides import DrawerSlide
-from lib.drawer_slides import DYNAPRO_40
 
 from drawer_cabinet import drawer_cabinet, ply12, ply15
 
@@ -75,6 +73,6 @@ floor("floor", van.box("Boden"))
 # The cabinet stands in the master's kitchen box, against the driver's wall,
 # and opens toward the aisle.
 kitchen_box = van.box("Moebel.Kueche")
-slide = DrawerSlide(DYNAPRO_40, nl=450)
+slide = DrawerSlide("Dynapro 40", nl=450)
 kitchen = drawer_cabinet("kitchen", kitchen_box, 3, slide, front=kitchen_box.right, bottom_drawer=230)
 kitchen.check(inside_box, inside(floor_outline))

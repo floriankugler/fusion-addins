@@ -1,5 +1,7 @@
 import math
 import re
+from collections.abc import Callable
+from pathlib import Path
 
 import pytest
 
@@ -527,3 +529,103 @@ def test_one_hardware_name_per_scope():
     assert m.unique_hardware_name("door_hinges") == "door_hinges_2"
     assert m.unique_hardware_name("panel") == "panel_2"
     assert m.unique_hardware_name("runners") == "runners"
+
+
+# -- the hardware in the language (review finding 43) --------------------------------------------------
+
+def test_lang_exports_the_hardware_and_no_example_imports_it_from_elsewhere():
+    import lang
+    import lang.hardware
+    names = {"DrawerSlide", "SlideModel", "ConcealedHinge", "HingeModel", "HatchHinge", "HatchHingeModel",
+             "BallCatch", "CatchModel", "DoorLatch", "LatchModel", "SlidingBracket", "BracketModel"}
+    assert names <= set(lang.__all__) and names == set(lang.hardware.__all__)
+    examples = Path(__file__).resolve().parent.parent / "examples"
+    for path in examples.glob("*.py"):
+        text = path.read_text()
+        assert "lang.hardware" not in text and "from lib" not in text and "import lib" not in text, path.name
+
+
+# -- every hardware: a refused mount changes nothing (review finding 32) --------------------------------
+
+def _refused_slide() -> tuple[Scope, Callable[[], object], str]:
+    cab, d, parts = _bay()
+    return cab, lambda: d.mount(DrawerSlide("Dynapro 40", nl=450), sides=(parts["left"], parts["top"]),
+                                front=parts["face"].back), "is not a side of the drawer's bay"
+
+
+def _refused_hinge() -> tuple[Scope, Callable[[], object], str]:
+    """The door holes fit; the carcass holes of the second hinge land in a
+    hole drilled before."""
+    box = Box.from_size(width=500, depth=350, height=700)
+    with module("cab", box) as cab:
+        left = board("left", ply15).on(cab.left).between(cab.front.into(12))
+        door = board("door", ply12).on(cab.front)
+        left.hole(d=5, depth=10, at=left.right.front(Pos("x", 50.5)).bottom(Pos("z", 640 + 16)))
+    return cab, lambda: cab.mount(ConcealedHinge(), door=door, carcass=left), "does not fit on cab.left's right face"
+
+
+def _refused_hatch_hinge() -> tuple[Scope, Callable[[], object], str]:
+    """The left hinge fits; a hole in the hatch where the right one's
+    upper pilot goes (in the van's terms the hatch's right is -y: 25 in
+    from the side at y 18)."""
+    box = Box.from_size(width=600, depth=320, height=350)
+    with module("cab", box) as cab:
+        left = board("left", ply18).on(cab.left).between(cab.front.into(18), cab.back)
+        right = board("right", ply18).on(cab.right).between(cab.front.into(18), cab.back)
+        top = board("top", ply18).on(cab.top).between(left, right, cab.front.into(18), cab.back)
+        hatch = board("hatch", ply18).on(cab.front)
+        hatch.hole(d=6, depth=5, at=hatch.back.left(Pos("y", 43)).bottom(Pos("z", 320)))
+    return cab, lambda: cab.mount(HatchHinge("Free space 1.11"), hatch=hatch, sides=(left, right), top=top), \
+        "pilot holes do not fit"
+
+
+def _refused_catch() -> tuple[Scope, Callable[[], object], str]:
+    """Catches 1 and 2 fit on the left edge; a hole in the panel under the
+    holder of catch 3, on the right edge."""
+    with module("floor", Box.from_size(width=800, depth=1000, height=100)) as f:
+        panel = board("panel", ply15).on(f.bottom).show(f.top)
+        panel.cut(rect(width=400, depth=300).rounded(20), at=panel.top.center, name="opening")
+        catch = BallCatch()
+        hatch = catch.hatch("hatch", panel.opening)
+        panel.hole(d=4, depth=5, at=panel.bottom.front(Pos("x", 410)).left(Pos("y", 608.4)))
+    return f, lambda: f.mount(catch, opening=panel.opening, edge=panel.opening.left, hatch=hatch), \
+        "the holder of catch 3 does not fit"
+
+
+def _refused_latch() -> tuple[Scope, Callable[[], object], str]:
+    """The door's holes fit; a hole in the top where the strike's pair goes."""
+    box = Box.from_size(width=600, depth=500, height=720)
+    with module("cab", box) as cab:
+        left = board("left", ply15).on(cab.left)
+        right = board("right", ply15).on(cab.right)
+        top = board("top", ply15).on(cab.top).between(left, right)
+        door = board("door", ply15).on(cab.front).between(left, right, cab.bottom, top).inset(2)
+        top.hole(d=5, depth=5, at=top.bottom.front(Pos("x", 29)).left(Pos("y", 309.5)))
+    return cab, lambda: cab.mount(DoorLatch("Pull Lock 44"), door=door, carcass=top), \
+        "does not fit on cab.top's bottom face"
+
+
+def _refused_bracket() -> tuple[Scope, Callable[[], object], str]:
+    """The brackets on the left side fit; a pocket on the right side under
+    the frame part of bracket 3."""
+    with module("cab", Box.from_size(width=600, depth=400, height=500)) as cab:
+        left = board("left", ply18).on(cab.left).between(cab.front.into(12))
+        right = board("right", ply18).on(cab.right).between(cab.front.into(12))
+        cover = board("cover", ply12).on(cab.front)
+        right.pocket(rect(depth=20, height=20), at=right.left.front(10).bottom(40), depth=5)   # x 22..42, z 40..60
+    return cab, lambda: cab.mount(SlidingBracket(), panel=cover, frame=[left, right]), \
+        "the frame part of bracket 3 does not fit on cab.right"
+
+
+@pytest.mark.parametrize("case", [_refused_slide, _refused_hinge, _refused_hatch_hinge, _refused_catch,
+                                  _refused_latch, _refused_bracket])
+def test_a_refused_mount_changes_nothing(case: Callable[[], tuple[Scope, Callable[[], object], str]]):
+    """Each hardware works out and checks every hole and box before it
+    drills or places one: a mount refused late, after the first hinges,
+    catches or brackets were found to fit, leaves every board's operations
+    and outline and the scope's hardware as they were."""
+    scope_, mount, message = case()
+    before = _untouched(scope_)
+    with pytest.raises(LangError, match=re.escape(message)):
+        mount()
+    assert _untouched(scope_) == before

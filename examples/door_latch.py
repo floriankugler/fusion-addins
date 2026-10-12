@@ -10,9 +10,6 @@ boxes. Behind a drawer face it takes room, so the drawer box stays
 here. Built on its own, the cabinet stands against the driver's wall and
 opens toward the aisle, like the drawer cabinet."""
 from lang import *
-from lang.hardware.latches import DoorLatch, LatchModel
-from lang.hardware.slides import DrawerSlide
-from lib.drawer_slides import DYNAPRO_40
 
 from drawer_cabinet import ply9, ply12, ply15
 
@@ -80,4 +77,4 @@ if __name__ == "__build__":   # run as the build file, not imported
     # world terms 500 across the vehicle and 600 along it; inside the
     # module the cabinet is 600 wide and 500 deep.
     box = Box.from_size(width=500, depth=600, height=720)
-    latched_cabinet("locker", box, DrawerSlide(DYNAPRO_40, nl=450), front=box.right)
+    latched_cabinet("locker", box, DrawerSlide("Dynapro 40", nl=450), front=box.right)

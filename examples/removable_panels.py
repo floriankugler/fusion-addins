@@ -13,7 +13,6 @@ off square to itself. Top and bottom are joined to the sides with
 Cabineos. Built on its own, the base stands across the vehicle behind
 the cab and opens toward the rear."""
 from lang import *
-from lang.hardware.sliding_brackets import SlidingBracket
 
 ply18 = material("birch", t=18, sheet=(2500, 1250))
 ply12 = material("birch", t=12, sheet=(2500, 1250))

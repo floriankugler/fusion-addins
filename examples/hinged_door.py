@@ -10,7 +10,6 @@ inner face as the Concealed Hinge add-in does and places the hinges as
 boxes. `carcass=right` hangs it on the other side. Built on its own, it
 hangs on the driver's wall and opens toward the aisle."""
 from lang import *
-from lang.hardware.hinges import ConcealedHinge
 
 ply15 = material("birch", t=15, sheet=(2500, 1250))
 ply12 = material("birch", t=12, sheet=(2500, 1250))

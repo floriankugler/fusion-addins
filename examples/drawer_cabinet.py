@@ -7,8 +7,6 @@ corners, their floors set into grooves in all four boards. Built on its
 own, it stands in a box of its own; van.py imports `drawer_cabinet` and
 places it in the master's kitchen box."""
 from lang import *
-from lang.hardware.slides import DrawerSlide
-from lib.drawer_slides import DYNAPRO_40
 
 ply15 = material("birch", t=15, sheet=(2500, 1250))
 ply12 = material("birch", t=12, sheet=(2500, 1250))
@@ -108,5 +106,5 @@ if __name__ == "__build__":   # run as the build file, not imported
     # box is 500 wide (across the vehicle) and 600 deep (along it); inside the
     # module the cabinet is 600 wide and 500 deep.
     box = Box.from_size(width=500, depth=600, height=720)
-    slide = DrawerSlide(DYNAPRO_40, nl=450)
+    slide = DrawerSlide("Dynapro 40", nl=450)
     cabinet = drawer_cabinet("drawercab", box, 3, slide, front=box.right, bottom_drawer=230)

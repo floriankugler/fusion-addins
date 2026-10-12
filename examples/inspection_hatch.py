@@ -9,7 +9,6 @@ edges, and one for each ball into the hatch's underside, and they hang
 under the floor as boxes, between the battens. Both rims are chamfered on
 top, and the hatch has a finger hole to lift it by."""
 from lang import *
-from lang.hardware.ball_catches import BallCatch
 
 ply15 = material("birch", t=15, sheet=(2500, 1250))
 

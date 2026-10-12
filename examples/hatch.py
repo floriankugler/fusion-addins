@@ -9,8 +9,6 @@ far down they reach inside, so the shelf below them stays clear. Bottom,
 top and shelf are joined to the sides with Cabineos, the back to all four
 with Dominos."""
 from lang import *
-from lang.hardware.hatch_hinges import HatchHinge
-from lib.hatch_hinges import FREE_SPACE_1_11
 
 ply18 = material("birch", t=18, sheet=(2500, 1250))
 ply9 = material("birch", t=9, sheet=(2500, 1250))
@@ -50,4 +48,4 @@ if __name__ == "__build__":   # run as the build file, not imported
     # the aisle: 800 along the vehicle, 330 deep across it, 400 high. Inside
     # the module the cabinet is 800 wide and 330 deep.
     box = Box.from_size(width=330, depth=800, height=400, origin=(0, 0, 1400))
-    wall_cabinet("wallcab", box, HatchHinge(FREE_SPACE_1_11), front=box.right)
+    wall_cabinet("wallcab", box, HatchHinge("Free space 1.11"), front=box.right)
