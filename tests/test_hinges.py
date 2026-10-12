@@ -45,7 +45,7 @@ def _overlay(hinge: ConcealedHinge, front: bool = False, gap: float = 0.0,
     the side at y 0..15 (the module's left in the van's terms, its right
     in the cabinet's), or the one at y 485..500. Returns the scope, the
     door, the side it is hinged on and the other side."""
-    with (module("cab", BOX, front=BOX.front) if front else module("cab", BOX)) as cab:
+    with (cabinet("cab", BOX, front=BOX.front) if front else module("cab", BOX)) as cab:
         behind = cab.front.into(12 + gap)
         low, high = (cab.right, cab.left) if front else (cab.left, cab.right)
         near = board("near", ply15).on(low).between(behind)
@@ -119,7 +119,7 @@ def test_a_flap_hinged_on_the_top_numbers_its_hinges_from_its_own_left():
     658, the edge along y. Seen from in front of the door (from -x) its left
     is +y, the cabinet's left, so hinge 1 is the one at y 498.5 - 60 and
     its hole a the one nearer the door's left end."""
-    with module("cab", BOX, front=BOX.front) as cab:
+    with cabinet("cab", BOX, front=BOX.front) as cab:
         behind = cab.front.into(12)
         left = board("left", ply15).on(cab.left).between(behind)
         right = board("right", ply15).on(cab.right).between(behind)
@@ -137,7 +137,7 @@ def test_two_doors_on_a_partition_take_its_two_faces():
     its own and named alike: each door's holes 27 from the partition's
     face toward it, the plates' holes on that face, and the hinge items
     named apart in the cabinet."""
-    with module("cab", BOX, front=BOX.front) as cab:
+    with cabinet("cab", BOX, front=BOX.front) as cab:
         behind = cab.front.into(12)
         wall = board("wall", ply15).center(cab.center("width")).between(behind)
         doors: list[Board] = []
@@ -180,7 +180,7 @@ def test_hinges_on_the_cabinetmakers_left_or_right():
     side near its right edge, each in the side's inner face."""
     def build(on: str) -> tuple[Board, Board]:
         registry.reset()
-        with module("cab", BOX, front=BOX.front) as cab:
+        with cabinet("cab", BOX, front=BOX.front) as cab:
             behind = cab.front.into(12)
             left = board("left", ply15).on(cab.left).between(behind)
             right = board("right", ply15).on(cab.right).between(behind)
@@ -393,7 +393,7 @@ def test_carcass_takes_a_face_like_the_latches():
     """`carcass=` takes the face the mounting plates go on, as a latch's
     does: needed where the door's middle lies within the carcass board's
     thickness, such as a door centred on a partition."""
-    with module("cab", BOX, front=BOX.front) as cab:
+    with cabinet("cab", BOX, front=BOX.front) as cab:
         behind = cab.front.into(12)
         wall = board("wall", ply15).center(cab.center("width")).between(behind)
         door = board("door", ply12).on(cab.front).between(cab.center("width") - 100, cab.center("width") + 100)

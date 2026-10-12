@@ -15,10 +15,10 @@ from stock import ply9, ply18
 GAP = 1.5   # between the hatch and its neighbours, at each side
 
 
-def wall_cabinet(name: str, box: Box, hinge: HatchHinge, front: Side | None = None) -> Scope:
+def wall_cabinet(name: str, box: Box, hinge: HatchHinge, *, front: Side) -> Scope:
     """A wall cabinet in its own frame, opening toward `front`, with a
     lift-up hatch over its whole front and a fixed shelf below the hinges."""
-    with module(name, box, front=front) as cab:
+    with cabinet(name, box, front=front) as cab:
         hatch = (board("hatch", ply18).on(cab.front)
                  .between(cab.left.into(GAP), cab.right.into(GAP), cab.bottom, cab.top))
         # The carcass behind the closed hatch; its front is the hatch's inner face.

@@ -151,7 +151,7 @@ def test_clip_follows_the_frame_the_shape_is_made_in():
     """In a cabinet facing the van's right, front is +y: the cabinet's
     front corner of a width x height rectangle is the van's right one."""
     van = Box.from_size(width=2000, depth=1000, height=1000)
-    with module("cab", van, front=van.right):
+    with cabinet("cab", van, front=van.right):
         shape = rect(depth=100, height=100).clip(top=10, front=10)
     assert shape.axes == ("y", "z")
     assert not shape.geometry.contains(Point(99, 99)) and shape.geometry.contains(Point(1, 99))

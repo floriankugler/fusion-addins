@@ -1,15 +1,15 @@
 """Scopes and modules: namespaces of parts with a path, a box and a frame.
 
-A module is a scope with a box that compiles into its own document. It is
-written in its own frame: `module(name, box, front=box.right)` makes it
-face the box's right side, and inside it front, back, left, right, width
-and depth are the module's own (see `directions`), and left and right are
-a cabinetmaker's, standing in front of it. Without `front=` it takes the
-enclosing frame as it is: in the van, the van's own terms, left being the
-driver's side, as for the floor or a wall panel. So a cabinet says which
-way it opens, also when that is the van's front. Parts register in the
-current scope under their
-name. Direction names on a scope are its box's sides (`cab.left`), since
+A module is a scope with a box that compiles into its own document.
+`module(name, box)` takes the enclosing frame as it is: in the van, the
+van's own terms, left being the driver's side, as for the floor or a wall
+panel. A cabinet is a module written in its own frame:
+`cabinet(name, box, front=box.right)` makes it open toward the box's right
+side, and inside it front, back, left, right, width and depth are the
+cabinet's own (see `directions`), left and right a cabinetmaker's,
+standing in front of it. A cabinet always says which way it opens, also
+when that is the van's front. Parts register in the current scope under
+their name. Direction names on a scope are its box's sides (`cab.left`), since
 carcass parts are usually named after directions too; such parts are
 reached with `cab["left"]`. Other names resolve to parts, child scopes and
 exports through attribute access.
@@ -346,21 +346,31 @@ class Scope:
         return f"Scope({self.path})"
 
 
-def module(name: str, box: Box, front: Side | Direction | None = None, mirrored: bool = False) -> Scope:
-    """A module: a scope with a box that compiles into its own document,
-    written in its own frame. `front=` says which way it opens, as a side
-    of its box (`front=box.right`) or a direction, and makes it a cabinet:
-    top stays up and left is a cabinetmaker's, standing in front of the
-    module. Without `front=` the enclosing frame is used as it is, the
-    van's terms in the van (left is the driver's side): give a cabinet its
-    front, also `front=box.front`. `mirrored=True` swaps left and right."""
+def module(name: str, box: Box, front: None = None, mirrored: bool = False) -> Scope:
+    """A module: a scope with a box that compiles into its own document, in
+    the enclosing frame as it is: in the van, the van's own terms (left is
+    the driver's side), as for the floor, the ceiling or a wall panel.
+    `mirrored=True` swaps left and right. Something that opens toward a
+    side is a `cabinet()`; `front=` here is an error saying so."""
+    if front is not None:
+        raise LangError(f"module({name!r}, front=...): a module that opens toward a side is a cabinet; write "
+                        f"cabinet({name!r}, box, front=...).")
     parent_frame = current().frame
-    if front is None:
-        frame = parent_frame.mirrored() if mirrored else parent_frame
-    else:
-        facing = front.outward if isinstance(front, Side) else front
-        frame = Frame.derived(facing, parent_frame.direction("top"), mirrored)
+    frame = parent_frame.mirrored() if mirrored else parent_frame
     return Scope(name, box, is_module=True, frame=frame)
+
+
+def cabinet(name: str, box: Box, *, front: Side | Direction, mirrored: bool = False) -> Scope:
+    """A cabinet: a module written in its own frame [decided by Florian
+    2026-10-12]. `front=` is where it opens, a side of its box
+    (`front=box.right`) or a direction, also when that is the van's front
+    (`front=box.front`); top stays up, and left and right are a
+    cabinetmaker's, standing in front of it. `mirrored=True` swaps them."""
+    facing = front.outward if isinstance(front, Side) else front
+    up = current().frame.direction("top")
+    if facing.axis == up.axis:
+        raise LangError(f"cabinet({name!r}): front= must face sideways; {facing.name} is up or down.")
+    return Scope(name, box, is_module=True, frame=Frame.derived(facing, up, mirrored))
 
 
 def scope(name: str, box: Box | None = None) -> Scope:

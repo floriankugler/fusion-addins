@@ -235,7 +235,7 @@ proposed]
   vehicle's front), left is -y (the driver's side), top is +z, as in the
   Planung document. Aliases are possible (`fs`, `bfs` for driver and passenger
   side). [decided; the axes confirmed 2026-10-10]
-- A module is written in its own frame and placed: `module(name, box,
+- A cabinet is written in its own frame and placed: `cabinet(name, box,
   front=box.right)` makes it open toward the box's right side; top stays up,
   left and right are a cabinetmaker's, standing in front of it; `mirrored=True`
   swaps them. Inside, `cab.back`, `side.inner.front(37)`, `rect(depth=...)`
@@ -244,10 +244,14 @@ proposed]
   emitter never see module frames. A cabinet type is written once and placed
   on either wall, rotated or mirrored, which is the usual case when a module
   is designed before it has a project. [decided 2026-10-10]
-  `front=` is what makes a module a cabinet [decided 2026-10-12]: without
-  it a module takes the enclosing frame as it is, in the van the van's own
-  terms, the driver's left, which suits van-level modules such as the
-  floor, the ceiling or wall panels. A cabinet says which way it opens,
+  `front=` is what makes a module a cabinet [decided 2026-10-12], and the
+  constructor says so [decided by Florian 2026-10-12, after the review]:
+  `cabinet(name, box, front=...)` with `front=` required, and
+  `module(name, box)` for van-level modules such as the floor, the
+  ceiling or wall panels, which take the enclosing frame as it is, in the
+  van the van's own terms, the driver's left; `module(..., front=)` is an
+  error pointing to `cabinet()`, and `cabinet()` refuses a front facing up
+  or down. A cabinet says which way it opens,
   also when that is the van's front (`front=box.front`): seen from its
   front, a module in the van's terms that opens toward the windshield has
   its left on the right, since one front cannot serve a left measured
@@ -594,7 +598,7 @@ proposed]
 - Four kinds of reference [decided 2026-10-11]: planes, which give a
   position; contours, which give a shape to follow; placeholder boxes, rough
   bodies drawn in the master to divide up the room, which become module
-  boxes (`module("kitchen", van.box("Kueche"), front=...)`); and the
+  boxes (`cabinet("kitchen", van.box("Kueche"), front=...)`); and the
   master's user parameters, which are plain numbers (`van.param("Bodenhoehe")`).
   A box's front is stated in Python at placement, never read from the master.
 - Naming uses what is visibly named in Fusion: one construction plane per plane
@@ -1735,8 +1739,8 @@ from stock import ply9, ply12, ply15       # examples/stock.py: the birch sheets
 GAP = 3  # between fronts
 
 
-def drawer_cabinet(name, box, n, slide, front=None):
-    with module(name, box, front=front) as cab:          # written in its own frame
+def drawer_cabinet(name, box, n, slide, *, front):
+    with cabinet(name, box, front=front) as cab:         # written in its own frame
         left   = board("left", ply15).on(cab.left)
         right  = board("right", ply15).on(cab.right)
         for side in (left, right):
@@ -2181,13 +2185,14 @@ preview's mesher reads the layout through the plan, the emitter carries
 on past refused features, the viewer frees its GPU memory and no longer
 hangs `loaded()`. Compiled in Fusion the same day: all eleven examples,
 no problems, every body one solid, volumes within 0.03 % of the preview.
-Left for Florian to decide (kept as they were): `Material.t` next to
-`Board.thickness`; `Board.center(pos)` next to `Box.center(name)`;
-`dogbones()` acting when the board is finished; a `cabinet()` constructor
-or a required `front=`; a sheet-first material form; a helper for the
-drawer box recipe; a named tuple for clearances; whether the Cabineo's
-threaded-insert collar may reach past a 15 mm board's face (it does, by
-1.35 mm, as in the add-in).
+Florian's answers on the review's open points (2026-10-12): `dogbones()`
+acts where it is written, and cabinets are made with `cabinet(name, box,
+front=)` (both done, see "Dog bones" and "Names and paths"); kept as they
+are: `Material.t` next to `Board.thickness`, `center` as a placement
+modifier, a box query and a face anchor, `material()` without a
+sheet-first form, the drawer box recipe in the builds (later the catalog),
+clearances as tuples, and the Cabineo's threaded-insert collar reaching
+past a 15 mm board's face by 1.35 mm, as in the add-in.
 
 1. `core`: the position algebra, box, board with `on`, `between` and `center`,
    scopes and paths, and layout JSON output with world transforms. With unit

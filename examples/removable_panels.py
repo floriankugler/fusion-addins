@@ -19,11 +19,11 @@ from stock import ply12, ply18
 CLEARANCE = 1.5  # around the rear panel
 
 
-def seat_base(name: str, box: Box, front: Side | None = None) -> Scope:
+def seat_base(name: str, box: Box, *, front: Side) -> Scope:
     """A seat base in its own frame: two sides, a top and a bottom, a
     removable cover over the front and a removable panel set in at the
     back."""
-    with module(name, box, front=front) as cab:
+    with cabinet(name, box, front=front) as cab:
         behind = cab.front.into(ply12.t)          # the sides' front edges, against the cover
         left = board("left", ply18).on(cab.left).between(behind)
         right = board("right", ply18).on(cab.right).between(behind)

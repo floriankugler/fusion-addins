@@ -10,9 +10,8 @@ from lang import *
 from stock import ply15
 
 
-# a cabinet opening toward the front: its left and right are a cabinetmaker's
 box = Box.from_size(width=600, depth=400, height=700)
-with module("cutouts", box, front=box.front) as unit:
+with cabinet("cutouts", box, front=box.front) as unit:
     left = board("left", ply15).on(unit.left)
     right = board("right", ply15).on(unit.right)
     bottom = board("bottom", ply15).on(unit.bottom).between(left, right)

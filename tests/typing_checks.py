@@ -81,3 +81,11 @@ def hardware() -> None:
         SlidingBracket(frame_hole="m4")                                           # type: ignore  # no such hole
         BallCatch(count=4, end=40)                                                # fine
         BallCatch("GN 450", 4)                                                    # type: ignore  # count keyword-only
+
+
+def modules() -> None:
+    van = Box.from_size(width=2000, depth=1000, height=1000)
+    cabinet("kitchen", van, front=van.right)
+    module("floor", van)
+    module("kitchen", van, front=van.right)                                  # type: ignore  # a cabinet
+    cabinet("kitchen", van)                                                  # type: ignore  # no front

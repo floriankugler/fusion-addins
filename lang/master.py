@@ -9,7 +9,7 @@ Fusion:
   position, usable wherever one is expected (`on`, `between`, `spread`,
   arithmetic); a tilted one is an error when it is used as a position.
 - `van.box(name)`: a placeholder body as a `Box`, for a module to stand
-  in (`module("kitchen", van.box("Kueche"), front=...)`). A body that is
+  in (`cabinet("kitchen", van.box("Kueche"), front=...)`). A body that is
   not an axis-aligned cuboid gives its bounding box and a note in the
   layout's problems.
 - `van.param(name)`: a user parameter as a number (mm for lengths,

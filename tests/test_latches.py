@@ -41,7 +41,7 @@ def _carcass(cab: Scope) -> dict[str, Board]:
 def _inset_door(latch: DoorLatch | None = None, carcass: str = "top", front: bool = False,
                 thickness: float = 15) -> tuple[Scope, dict[str, Board]]:
     box = Box.from_size(width=600, depth=500, height=720)
-    with (module("cab", box, front=box.front) if front else module("cab", box)) as cab:
+    with (cabinet("cab", box, front=box.front) if front else module("cab", box)) as cab:
         parts = _carcass(cab)
         door = board("door", material("birch", t=thickness)).on(cab.front).between(
             parts["left"], parts["right"], parts["bottom"], parts["top"]).inset(2)

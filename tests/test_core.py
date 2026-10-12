@@ -72,7 +72,7 @@ def test_box_sides_and_extents():
 
 def test_split_runs_from_the_frames_own_side():
     box = Box.from_size(width=500, depth=600, height=720)
-    with module("cab", box, front=box.right) as cab:
+    with cabinet("cab", box, front=box.right) as cab:
         first, rest = cab.interior.split("width", [100])
         assert first.left.value == cab.left.value and first.width == 100
         assert rest.right.value == cab.right.value
@@ -373,7 +373,7 @@ def test_cut_with_a_part_that_misses_or_floats_is_an_error():
 def test_module_frame_follows_placement():
     # a cabinet against the driver's wall (left, -y) that opens toward the aisle
     box = Box.from_size(width=500, depth=600, height=720)
-    with module("cab", box, front=box.right) as cab:
+    with cabinet("cab", box, front=box.right) as cab:
         assert cab.front.value == 500 and cab.front.axis == "y"
         assert cab.back.value == 0
         # a cabinetmaker's left, standing in front of it: toward the vehicle's rear (+x)
@@ -408,13 +408,29 @@ def test_face_names_leave_out_inner_and_outer_when_ambiguous():
 
 def test_module_frame_mirrored_and_default():
     box = Box.from_size(width=500, depth=600, height=720)
-    with module("cab", box, front=box.right, mirrored=True) as cab:
+    with cabinet("cab", box, front=box.right, mirrored=True) as cab:
         assert cab.left.value == 0 and cab.right.value == 600 and cab.front.value == 500
         assert cab.frame.is_mirrored
     with module("plain", box) as plain:
         assert plain.left.value == 0 and plain.left.axis == "y"   # the world frame
-    with pytest.raises(ValueError):
-        module("up", box, front=box.top)
+    with pytest.raises(LangError, match="front= must face sideways; top is up or down"):
+        cabinet("up", box, front=box.top)
+
+
+def test_a_module_that_opens_toward_a_side_is_a_cabinet():
+    """Florian 2026-10-12: cabinet(name, box, front=) for anything that
+    opens toward a side, module(name, box) for van-level parts in the
+    enclosing frame; module(front=) points to cabinet()."""
+    van = Box.from_size(width=2000, depth=1000, height=1000)
+    with cabinet("cab", van, front=van.right) as cab:
+        assert cab.is_module and cab.frame.direction("front").code == "+y"
+        assert cab.frame.direction("left").code == "+x"          # a cabinetmaker's, facing it: front x up
+    with module("floor", van) as floor:
+        assert floor.frame.direction("left").code == "-y"        # the van's: the driver's side
+    with pytest.raises(LangError, match=r"write cabinet\('kitchen', box, front=\.\.\.\)"):
+        module("kitchen", van, front=van.right)  # type: ignore[arg-type]
+    with pytest.raises(TypeError, match="front"):
+        cabinet("cab2", van)  # type: ignore[call-arg]
 
 
 def test_interference_ignores_overlap_inside_a_pocket():
@@ -530,7 +546,7 @@ def test_a_limit_that_limits_neither_in_plane_axis_is_an_error():
 
 def test_directions_are_equal_when_they_point_the_same_way():
     van = Box.from_size(width=2000, depth=1000, height=1000)
-    with module("cab", van, front=van.right) as cab:
+    with cabinet("cab", van, front=van.right) as cab:
         assert cab.frame.direction("front") == world_frame().direction("right")
         assert cab.frame.direction("front").name == "front"
         assert cab.frame.cross(cab.frame.direction("back"), cab.frame.direction("top")).name == "right"
@@ -541,7 +557,7 @@ def test_show_takes_a_side_of_an_enclosing_box_in_its_own_terms():
     (`show(van.right)`) shows its front face; machined from the other one,
     which carries the holes, and cut out from it by default."""
     van = Box.from_size(width=2000, depth=1000, height=1000)
-    with module("cab", van, front=van.right) as cab:
+    with cabinet("cab", van, front=van.right) as cab:
         back = board("back", ply15).on(cab.back).show(van.right)
         rear = back.back
         back.hole(d=5, at=rear.top(20), depth=5).hole(d=5, at=rear.top(60), depth=5)

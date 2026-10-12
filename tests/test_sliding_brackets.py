@@ -40,7 +40,7 @@ def _cover(bracket: SlidingBracket | None = None, *, gap: float = 0.0, cover: Ma
            frame: str = "both", front: bool = False) -> tuple[Scope, dict[str, Board]]:
     """The test box with its cover; `frame` names the frame boards the
     cover is mounted on: "left", "right" or "both"."""
-    with (module("cab", BOX, front=BOX.front) if front else module("cab", BOX)) as cab:
+    with (cabinet("cab", BOX, front=BOX.front) if front else module("cab", BOX)) as cab:
         behind = cab.front.into(cover.t + gap)
         left = board("left", ply18).on(cab.left).between(behind)
         right = board("right", ply18).on(cab.right).between(behind)
@@ -183,7 +183,7 @@ def test_brackets_on_horizontal_rails_are_numbered_from_the_panels_left():
     holes 15 below the rail. The same in a cabinet with front=."""
     for front in (False, True):
         registry.reset()
-        with (module("cab", BOX, front=BOX.front) if front else module("cab", BOX)) as cab:
+        with (cabinet("cab", BOX, front=BOX.front) if front else module("cab", BOX)) as cab:
             rail = board("rail", ply18).on(cab.top).between(cab.front.into(12))
             cover = board("cover", ply12).on(cab.front)
             cab.mount(SlidingBracket(PF_L), panel=cover, frame=rail)

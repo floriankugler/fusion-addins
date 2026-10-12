@@ -16,12 +16,12 @@ from stock import ply9, ply12, ply15
 REVEAL = 2.0  # around each inset front
 
 
-def latched_cabinet(name: str, box: Box, slide: DrawerSlide, latch: LatchModel = "Pull Lock 44",
-                    front: Side | None = None, drawer_height: float = 180) -> Scope:
+def latched_cabinet(name: str, box: Box, slide: DrawerSlide, latch: LatchModel = "Pull Lock 44", *,
+                    front: Side, drawer_height: float = 180) -> Scope:
     """A cabinet in its own frame: from the bottom up a drawer bay
     `drawer_height` high, a rail, a second bay, a shelf and the door's
     compartment above it. `latch` holds every front."""
-    with module(name, box, front=front) as cab:
+    with cabinet(name, box, front=front) as cab:
         left = board("left", ply15).on(cab.left)
         right = board("right", ply15).on(cab.right)
         bottom = board("bottom", ply15).on(cab.bottom).between(left, right)

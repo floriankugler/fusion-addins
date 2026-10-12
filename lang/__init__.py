@@ -16,7 +16,7 @@ from .core.material import Material, material
 from .core.faces import Anchor, Edge, Face, Operation, Outline
 from .core.part import Board, board
 from .core.refs import Pos, Side, spread, through, to
-from .core.scope import Scope, check, module, scope
+from .core.scope import Scope, cabinet, check, module, scope
 from .core.shapes import Shape, circle, polygon, rect
 from .hardware import (BallCatch, BracketModel, CatchModel, ConcealedHinge, DoorLatch, DrawerSlide, HatchHinge,
                        HatchHingeModel, HingeModel, LatchModel, SlideModel, SlidingBracket)
@@ -28,7 +28,7 @@ __all__ = [
     "Pos", "Side", "spread", "to", "through",
     "Box", "Shape", "rect", "circle", "polygon", "Material", "material", "cross", "triangles",
     "Board", "Face", "Edge", "Anchor", "Outline", "Operation", "board",
-    "Scope", "module", "scope", "check",
+    "Scope", "module", "cabinet", "scope", "check",
     "no_interference", "fits_sheet", "inside", "inside_box", "LangError",
     "master", "Master", "Plane", "Contour", "half_lap", "domino", "clamex", "cabineo", "tenons", "screws",
     "box_joint", "groove",

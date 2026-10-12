@@ -16,10 +16,10 @@ from stock import ply9, ply12, ply15
 GAP = 3  # around the door
 
 
-def hinged_cabinet(name: str, box: Box, hinge: ConcealedHinge, front: Side | None = None) -> Scope:
+def hinged_cabinet(name: str, box: Box, hinge: ConcealedHinge, *, front: Side) -> Scope:
     """A cabinet in its own frame with one overlay door hinged on its left
-    side, the hinges `hinge`. `front=` places it (see `module`)."""
-    with module(name, box, front=front) as cab:
+    side, the hinges `hinge`. `front=` places it (see `cabinet`)."""
+    with cabinet(name, box, front=front) as cab:
         behind = cab.front.into(ply12.t)          # the carcass stands behind the door
         left = board("left", ply15).on(cab.left).between(behind)
         right = board("right", ply15).on(cab.right).between(behind)
@@ -50,4 +50,4 @@ if __name__ == "__build__":   # run as the build file, not imported
     # front runs along the vehicle, so in world terms the box is 350 wide
     # (across the vehicle) and 450 deep (along it).
     box = Box.from_size(width=350, depth=450, height=600)
-    cabinet = hinged_cabinet("hingecab", box, ConcealedHinge("Blum CLIP top 110 Thin +0"), front=box.right)
+    hinged_cabinet("hingecab", box, ConcealedHinge("Blum CLIP top 110 Thin +0"), front=box.right)

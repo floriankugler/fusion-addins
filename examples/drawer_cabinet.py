@@ -13,13 +13,13 @@ from stock import ply9, ply12, ply15
 GAP = 3  # between fronts
 
 
-def drawer_cabinet(name: str, box: Box, n: int, slide: DrawerSlide, front: Side | None = None,
+def drawer_cabinet(name: str, box: Box, n: int, slide: DrawerSlide, *, front: Side,
                    bottom_drawer: float | None = None) -> Scope:
     """A drawer cabinet in its own frame: front is where the drawers open,
-    wherever the cabinet stands. `front=` places it (see `module`). With
+    wherever the cabinet stands. `front=` places it (see `cabinet`). With
     `bottom_drawer=` the lowest bay gets that height and the others share
     the rest; otherwise all bays are equal."""
-    with module(name, box, front=front) as cab:
+    with cabinet(name, box, front=front) as cab:
         left = board("left", ply15).on(cab.left)
         right = board("right", ply15).on(cab.right)
         # toe kick notch in both sides, named so its edges can be referred to
@@ -105,4 +105,4 @@ if __name__ == "__build__":   # run as the build file, not imported
     # module the cabinet is 600 wide and 500 deep.
     box = Box.from_size(width=500, depth=600, height=720)
     slide = DrawerSlide("Dynapro 40", nl=450)
-    cabinet = drawer_cabinet("drawercab", box, 3, slide, front=box.right, bottom_drawer=230)
+    drawer_cabinet("drawercab", box, 3, slide, front=box.right, bottom_drawer=230)
