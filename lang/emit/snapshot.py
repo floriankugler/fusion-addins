@@ -127,7 +127,10 @@ def _planes(ctx: _Context, collector: Collector) -> None:
 
 
 def _strokes(curve: adsk.fusion.SketchCurve) -> list[Point3]:
-    geometry = cast(adsk.core.Curve3D, curve.worldGeometry)  # type: ignore[attr-defined]
+    """The curve sampled to a polyline in world mm; a RuntimeError when
+    Fusion cannot sample it."""
+    # Every concrete sketch curve has worldGeometry; the stubs declare it per class.
+    geometry = cast(adsk.core.Curve3D, getattr(curve, "worldGeometry"))
     evaluator = geometry.evaluator
     ok, t0, t1 = evaluator.getParameterExtents()
     if not ok:
@@ -149,11 +152,16 @@ def _sketches(ctx: _Context, collector: Collector) -> None:
             sketch = sketch.createForAssemblyContext(ctx.occurrence)
         polylines: list[list[Point3]] = []
         curves = sketch.sketchCurves
-        for k in range(curves.count):
-            curve = curves.item(k)
-            if curve.isConstruction:
-                continue
-            polylines.append(_strokes(curve))
+        try:
+            for k in range(curves.count):
+                curve = curves.item(k)
+                if curve.isConstruction:
+                    continue
+                polylines.append(_strokes(curve))
+        except RuntimeError as error:
+            # one sketch's bad curve is a problem of that contour, not of the snapshot
+            collector.problem("contours", ctx.path, sketch.name, ctx.where, str(error))
+            continue
         origin, normal = _sketch_plane(sketch)
         collector.contour(ctx.path, sketch.name, ctx.where, polylines, origin, normal)
 

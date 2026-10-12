@@ -48,6 +48,7 @@ from watchfiles import watch
 VIEWER_DIR = Path(__file__).parent / "viewer"
 REPO = Path(__file__).resolve().parents[2]
 SHOWN = 3.0     # seconds a page counts as open after it last asked for its design
+TIMEOUT = 120.0  # seconds a build may take before it is stopped and counts as failed
 
 # Read as text, not parsed, so that a file stays listed while an edit
 # leaves it unparsable.
@@ -200,7 +201,7 @@ class _Handler(http.server.SimpleHTTPRequestHandler):
     def translate_path(self, path: str) -> str:
         path = path.split("?", 1)[0].split("#", 1)[0]
         if path.startswith("/out/"):
-            out = self.designs.out_dir
+            out = self.designs.out_dir.resolve()
             target = (out / unquote(path[len("/out/"):])).resolve()
             return str(target if target.is_relative_to(out) else out / "missing")
         return super().translate_path(path)
@@ -213,16 +214,22 @@ class _Handler(http.server.SimpleHTTPRequestHandler):
         pass
 
 
-def rebuild(build_file: Path, out_dir: Path) -> bool:
+def rebuild(build_file: Path, out_dir: Path, timeout: float = TIMEOUT) -> bool:
     """Builds into a scratch directory and moves the result into `out_dir`,
     the version last, so that the page never reads a file half written. A
-    failed build leaves the last good one in place."""
+    failed build, or one stopped after `timeout` seconds (an endless loop
+    in a build file would otherwise hold up every design), leaves the last
+    good one in place."""
     scratch = out_dir / ".build"
     shutil.rmtree(scratch, ignore_errors=True)
-    result = subprocess.run(
-        [sys.executable, "-m", "lang.build", str(build_file), "--out", str(scratch)],
-        capture_output=True, text=True, cwd=str(REPO),
-    )
+    command = [sys.executable, "-m", "lang.build", str(build_file), "--out", str(scratch)]
+    try:
+        result = subprocess.run(command, capture_output=True, text=True, cwd=str(REPO), timeout=timeout)
+    except subprocess.TimeoutExpired as expired:
+        output = expired.stdout or ""
+        output = output.decode() if isinstance(output, bytes) else output
+        result = subprocess.CompletedProcess(command, -1, output,
+                                             f"error: the build took longer than {timeout:g} s and was stopped.")
     ok = result.returncode == 0
     out_dir.mkdir(parents=True, exist_ok=True)
     if ok:

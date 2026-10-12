@@ -8,12 +8,19 @@ chamfer's size into the material at the face, vertex by vertex, so its
 sides are flat at 45 degrees. A chamfer along the edge between two faces
 is a triangular prism; a hole's is a cone (a countersink). Pockets and
 holes in narrow faces are prisms and cylinders along the face's axis,
-from the plane they start at (`offset` in front of the face). Hardware is
-the union of its boxes.
+from the plane they start at (`offset` in front of the face), with their
+chamfers. Hardware is the union of its boxes.
+
+The layout is read as the emitter's plan reads it (`lang.emit.plan`:
+`LayoutFrame`, `PartFrame`, `named_ops`, `chamfer_target`), so the preview
+shows the faces, depths and chamfers Fusion gets. A boolean that fails
+leaves the board uncut and is reported, not hidden.
 """
 from __future__ import annotations
 
 import math
+import sys
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -24,14 +31,23 @@ from shapely.geometry import box as shapely_box
 from shapely.geometry.polygon import orient
 from trimesh.creation import extrude_polygon, triangulate_polygon
 
-from ..core.layout_types import (BoxDict, ChamferLayout, EdgeOpLayout, HardwareLayout, HoleLayout, Layout, OpLayout,
-                                 PartLayout, Rings, VGrooveLayout)
-from ..emit.plan import pieces
+from ..core.layout_types import (BoxDict, ChamferLayout, EdgeOpLayout, HardwareLayout, Layout, OpLayout, PartLayout,
+                                 Rings, VGrooveLayout)
+from ..emit.plan import (EdgeTarget, LayoutFrame, OpTarget, OutlineTarget, PartFrame, chamfer_target, check_version,
+                         named_ops, pieces)
 
 AXES = ("x", "y", "z")
-#: How far a chamfer's tool reaches past the face it starts from and past
-#: its depth, so the boolean cuts cleanly, mm.
+#: How far a tool reaches past the face it starts from and past its depth,
+#: so the boolean cuts cleanly and leaves no skin, mm.
 _PAST = 0.01
+#: How far a countersink's cone reaches into its hole beyond the chamfer,
+#: so it meets the hole's cylinder inside the material, mm.
+_INTO_HOLE = 0.05
+#: Sides of a hole's cylinder and of a countersink's cone.
+_HOLE_SECTIONS = 24
+_CONE_SECTIONS = 32
+#: Something that takes a problem the preview ran into.
+Report = Callable[[str], None]
 
 
 def _polygon(rings: Rings) -> Polygon:
@@ -60,94 +76,121 @@ def _part_transform(part: PartLayout) -> Any:
     return m
 
 
-def _from_face(tool: Any, face: str, frame: dict[str, str], t_axis: str, t: float, depth: float) -> Any:
-    """Moves a tool built upward from z=0 so that it starts at the named big
-    face and goes into the part. A narrow face yields an empty tool. Face
-    names are the layout's world names, decoded with its frame."""
-    code = frame[face]
-    if code[1] != t_axis:
-        return trimesh.Trimesh()
-    tool.apply_translation([0, 0, t - depth - 0.005 if code[0] == "+" else -0.005])
+def _big_face(pf: PartFrame, face: str) -> float | None:
+    """For a big face, which way is out of the part along its thickness
+    (+1 for the face at t, -1 for the one at 0); None for a narrow face."""
+    ref = pf.face(face)
+    return float(ref.sign) if pf.is_big(ref) else None
+
+
+def _from_face(tool: Any, out: float, t: float, depth: float) -> Any:
+    """Moves a tool built upward from z=0, `depth` plus a little high, so
+    that it starts a little outside the big face on the side `out` and goes
+    `depth` into the part."""
+    tool.apply_translation([0, 0, t - depth - _PAST / 2 if out > 0 else -_PAST / 2])
     return tool
 
 
-def _edge_tool(part: PartLayout, op: EdgeOpLayout, frame: dict[str, str]) -> Any:
-    """A pocket or hole in a narrow face, in the part's (u, v, t) frame:
-    its shape (or circle) in the face's (s, t) frame, extruded along the
-    face's axis from a little in front of where it starts to its depth."""
-    code = frame[op["face"]]
-    axes, box = part["axes"], part["box"]
-    axis, out = code[1], (1.0 if code[0] == "+" else -1.0)
-    if axis == axes["t"]:
-        return trimesh.Trimesh()
-    i_face = AXES.index(axis)
-    start = (box["max"] if out > 0 else box["min"])[i_face] + out * op.get("offset", 0.0)
-    inner = op["op"]
-    height = inner["depth"] + 0.01
-    if inner["kind"] == "pocket":
-        tool = _extruded(inner["shape"], height)
+def _cylinder(d: float, height: float) -> Any:
+    """A hole's cylinder standing on z=0, `height` high."""
+    tool = trimesh.creation.cylinder(radius=d / 2, height=height, sections=_HOLE_SECTIONS)
+    tool.apply_translation([0.0, 0.0, height / 2])
+    return tool
+
+
+def _countersink(d: float, c: float) -> Any:
+    """A hole's chamfer, a 90 degree countersink, for a hole of diameter
+    `d` going up from z=0 at the origin: a cone from the hole's radius plus
+    `c` at z=0 to the hole's radius at z=c, reaching a little below z=0 and
+    on into the hole so the boolean cuts cleanly."""
+    r = d / 2
+    into = c + _INTO_HOLE
+    # (radius, depth into the part), revolved about the hole's axis
+    profile = np.array([[0.0, -_PAST], [r + c + _PAST, -_PAST], [r + c - into, into], [0.0, into]])
+    return trimesh.creation.revolve(profile, sections=_CONE_SECTIONS)
+
+
+def _big_countersink(u: float, v: float, d: float, c: float, out: float, t: float) -> Any:
+    """A countersink on a big face (`out` +1 the face at t, -1 the one at
+    0), in the part's (u, v, t) frame."""
+    tool = _countersink(d, c)
+    if out > 0:
+        # into the part is down from the upper face: turn the cone over
+        tool.apply_transform(trimesh.transformations.rotation_matrix(math.pi, [1, 0, 0]))
+        tool.apply_translation([u, v, t])
     else:
-        tool = trimesh.creation.cylinder(radius=inner["d"] / 2, height=height, sections=24)
-        tool.apply_translation([0.0, 0.0, height / 2])
-    # The tool is built in (s, t, depth); s is the in-plane axis that is not
-    # the face's, t the thickness, depth runs into the part from `start`.
-    local = {axes["u"]: 0, axes["v"]: 1}
-    s_axis = axes["v"] if axis == axes["u"] else axes["u"]
+        tool.apply_translation([u, v, 0.0])
+    return tool
+
+
+def _edge_transform(pf: PartFrame, op: EdgeOpLayout) -> Any:
+    """4x4 from a narrow-face operation's own frame to the part's (u, v, t)
+    frame. Its own frame: x along the face (s) and y across the thickness
+    (t), both measured from the operation's (s, t), and z into the part
+    from the plane the operation starts at (its face, `offset` in front)."""
+    face = pf.edge_face(op)
+    s_axis, _ = pf.in_face(face)
+    local = {pf.u_axis: 0, pf.v_axis: 1}
     m = np.zeros((4, 4))
     m[3, 3] = 1.0
     m[local[s_axis], 0] = 1.0
     m[local[s_axis], 3] = op["s"]
     m[2, 1] = 1.0
-    m[2, 3] = op["t"] - box["min"][AXES.index(axes["t"])]
-    m[local[axis], 2] = -out
-    m[local[axis], 3] = start + out * 0.005
-    tool.apply_transform(m)
-    return tool
+    m[2, 3] = op["t"] - pf.lo[pf.t_axis]
+    m[local[face.axis], 2] = -face.sign
+    m[local[face.axis], 3] = face.value
+    return m
 
 
-def _vgroove_tool(op: VGrooveLayout, frame: dict[str, str], t_axis: str, t: float) -> Any:
-    """The groove as a prism in the part's (u, v, t) frame, its opening a
-    little above the face so the boolean cuts cleanly. A narrow face
-    yields an empty tool."""
-    code = frame[op["face"]]
-    if code[1] != t_axis:
-        return trimesh.Trimesh()
-    out = 1.0 if code[0] == "+" else -1.0
+def _edge_tools(pf: PartFrame, op: EdgeOpLayout) -> list[Any]:
+    """A pocket or hole in a narrow face and its chamfer, in the part's
+    (u, v, t) frame: its shape (or circle) in the face's (s, t) frame,
+    extruded along the face's axis from a little in front of where it
+    starts to its depth, through to the far face when it goes through."""
+    face = pf.edge_face(op)
+    inner = op["op"]
+    depth = pf.depth(face, inner["depth"], inner["kind"] == "hole" and inner["through"])
+    height = (pf.extent(face) if depth is None else depth) + _PAST
+    if inner["kind"] == "pocket":
+        tool = _extruded(inner["shape"], height)
+    else:
+        tool = _cylinder(inner["d"], height)
+    tool.apply_translation([0.0, 0.0, -_PAST / 2])
+    tools = [tool]
+    if inner["chamfer"] > 0:
+        tools += _edge_chamfers(op, inner["chamfer"])
+    m = _edge_transform(pf, op)
+    for tool in tools:
+        tool.apply_transform(m)
+    return tools
+
+
+def _edge_chamfers(op: EdgeOpLayout, size: float) -> list[Any]:
+    """The chamfer of a narrow-face operation's rim, in its own frame (see
+    `_edge_transform`): a frustum along a pocket's contour, a countersink
+    on a hole."""
+    inner = op["op"]
+    if inner["kind"] == "hole":
+        return [_countersink(inner["d"], size)]
+    tools = [_contour_chamfer(region, size, -1.0, 0.0) for region in _regions(inner["shape"])]
+    return [tool for tool in tools if tool is not None]
+
+
+def _vgroove_tool(op: VGrooveLayout, out: float, t: float) -> Any:
+    """The groove as a prism in the part's (u, v, t) frame, on the big face
+    on the side `out`, its opening a little above the face so the boolean
+    cuts cleanly."""
     face = t if out > 0 else 0.0
     (u0, v0), (u1, v1) = op["start"], op["end"]
     length = math.hypot(u1 - u0, v1 - v0)
     wu, wv = -(v1 - v0) / length, (u1 - u0) / length       # across the groove, in the face
-    above = 0.01
-    half = op["depth"] + above                              # 90 degrees: as wide on each side as deep
+    half = op["depth"] + _PAST                               # 90 degrees: as wide on each side as deep
     points: list[tuple[float, float, float]] = []
     for u, v in ((u0, v0), (u1, v1)):
-        points += [(u + wu * half, v + wv * half, face + out * above),
-                   (u - wu * half, v - wv * half, face + out * above),
+        points += [(u + wu * half, v + wv * half, face + out * _PAST),
+                   (u - wu * half, v - wv * half, face + out * _PAST),
                    (u, v, face - out * op["depth"])]
     return trimesh.convex.convex_hull(np.array(points))
-
-
-def _countersink_tool(op: HoleLayout, frame: dict[str, str], t_axis: str, t: float) -> Any:
-    """A hole's chamfer, a 90 degree countersink: a cone from the hole's
-    radius plus the chamfer at the face down to the hole's radius, reaching
-    a little above the face and on into the hole so the boolean cuts
-    cleanly. Built in the part's (u, v, t) frame; a narrow face yields an
-    empty tool."""
-    code = frame[op["face"]]
-    if code[1] != t_axis:
-        return trimesh.Trimesh()
-    r, c = op["d"] / 2, op["chamfer"]
-    above, into = 0.01, c + 0.05
-    # (radius, depth into the part), revolved about the hole's axis
-    profile = np.array([[0.0, -above], [r + c + above, -above], [r + c - into, into], [0.0, into]])
-    tool = trimesh.creation.revolve(profile, sections=32)
-    if code[0] == "+":
-        # into the part is down from the upper face: turn the cone over
-        tool.apply_transform(trimesh.transformations.rotation_matrix(math.pi, [1, 0, 0]))
-        tool.apply_translation([op["u"], op["v"], t])
-    else:
-        tool.apply_translation([op["u"], op["v"], 0.0])
-    return tool
 
 
 def _offset_ring(ring: Any, d: float) -> Any | None:
@@ -221,15 +264,6 @@ def _frustum(region: Polygon, d_low: float, z_low: float, d_high: float, z_high:
     return mesh if mesh.is_volume else None
 
 
-def _face_level(face: str, frame: dict[str, str], t_axis: str, t: float) -> float | None:
-    """For a big face, which way is out of the part along its thickness
-    (+1 for the face at t, -1 for the one at 0); None for a narrow face."""
-    code = frame[face]
-    if code[1] != t_axis:
-        return None
-    return 1.0 if code[0] == "+" else -1.0
-
-
 def _contour_chamfer(region: Polygon, size: float, out: float, t: float) -> Any | None:
     """The tool chamfering the contour of `region`, the side of the contour
     without material (an opening, or what lies outside an outline), on the
@@ -239,29 +273,22 @@ def _contour_chamfer(region: Polygon, size: float, out: float, t: float) -> Any 
     return _frustum(region, size + _PAST, face + out * _PAST, -_PAST, face - out * (size + _PAST))
 
 
-def _edge_chamfer(part: PartLayout, a: str, b: str, size: float, frame: dict[str, str]) -> Any | None:
+def _edge_chamfer(pf: PartFrame, a: str, b: str, size: float) -> Any | None:
     """The tool chamfering the edge where faces `a` and `b` meet: a prism
     along the edge, `size` into the part from either face, over the part's
     length."""
-    axes = part["axes"]
-    local = {axes["u"]: 0, axes["v"]: 1, axes["t"]: 2}
-    box = part["box"]
-    t_index = AXES.index(axes["t"])
+    local = {pf.u_axis: 0, pf.v_axis: 1, pf.t_axis: 2}
+    t0 = pf.lo[pf.t_axis]
     planes: list[tuple[int, float, float]] = []      # local axis, coordinate, outward sign
     for name in (a, b):
-        code = frame[name]
-        world = AXES.index(code[1])
-        sign = 1.0 if code[0] == "+" else -1.0
-        value = (box["max"] if sign > 0 else box["min"])[world]
-        if world == t_index:
-            value -= box["min"][t_index]
-        planes.append((local[code[1]], value, sign))
+        face = pf.face(name)
+        planes.append((local[face.axis], face.value - (t0 if face.axis == pf.t_axis else 0.0), float(face.sign)))
     (ia, va, sa), (ib, vb, sb) = planes
     if ia == ib:
         return None
     along = 3 - ia - ib
-    lo = {0: box["min"][AXES.index(axes["u"])], 1: box["min"][AXES.index(axes["v"])], 2: 0.0}[along] - 1
-    hi = {0: box["max"][AXES.index(axes["u"])], 1: box["max"][AXES.index(axes["v"])], 2: part["thickness"]}[along] + 1
+    lo = {0: pf.lo[pf.u_axis], 1: pf.lo[pf.v_axis], 2: 0.0}[along] - 1
+    hi = {0: pf.hi[pf.u_axis], 1: pf.hi[pf.v_axis], 2: pf.thickness}[along] + 1
     points: list[list[float]] = []
     for da, db in ((-_PAST, -_PAST), (size + _PAST, -_PAST), (-_PAST, size + _PAST)):
         for s in (lo, hi):
@@ -273,15 +300,12 @@ def _edge_chamfer(part: PartLayout, a: str, b: str, size: float, frame: dict[str
     return trimesh.convex.convex_hull(np.array(points))
 
 
-def _chamfer_tools(part: PartLayout, frame: dict[str, str]) -> list[Any]:
+def _chamfer_tools(part: PartLayout, pf: PartFrame) -> list[Any]:
     """The tools for the part's chamfers along cuts, pockets, outlines and
-    edges, and along holes named by a chamfer (a hole's own chamfer is its
-    countersink)."""
-    t, t_axis = part["thickness"], part["axes"]["t"]
-    named: dict[str, OpLayout] = {}
-    for op in part["ops"]:
-        if (op["kind"] == "cut" or op["kind"] == "pocket" or op["kind"] == "hole") and op["name"]:
-            named[op["name"]] = op
+    edges, and along the operations a chamfer names (a hole's own chamfer
+    is its countersink, a narrow-face operation's goes with it)."""
+    t = part["thickness"]
+    named = named_ops(part)
     jobs: list[tuple[list[Polygon], str, float]] = []     # regions without material, face, size
     tools: list[Any] = []
     for op in part["ops"]:
@@ -290,9 +314,9 @@ def _chamfer_tools(part: PartLayout, frame: dict[str, str]) -> list[Any]:
         elif op["kind"] == "pocket" and op["chamfer"] > 0:
             jobs.append((_regions(op["shape"]), op["face"], op["chamfer"]))
         elif op["kind"] == "chamfer":
-            tools += _named_chamfer(part, op, named, jobs, frame)
+            tools += _named_chamfer(part, pf, op, named, jobs)
     for regions, face, size in jobs:
-        out = _face_level(face, frame, t_axis, t)
+        out = _big_face(pf, face)
         if out is None:
             continue
         for region in regions:
@@ -306,13 +330,14 @@ def _regions(rings: Rings) -> list[Polygon]:
     return [_polygon(piece) for piece in pieces(rings)]
 
 
-def _named_chamfer(part: PartLayout, op: ChamferLayout, named: dict[str, OpLayout],
-                   jobs: list[tuple[list[Polygon], str, float]], frame: dict[str, str]) -> list[Any]:
-    """A chamfer op: along the outline of a face, along a named cut, pocket
-    or hole, or along an edge named by two faces. Contours go to `jobs`;
-    the tools of edges and holes are returned."""
-    what, size, face = op["what"], op["size"], op["face"]
-    if what == "outline":
+def _named_chamfer(part: PartLayout, pf: PartFrame, op: ChamferLayout, named: dict[str, OpLayout],
+                   jobs: list[tuple[list[Polygon], str, float]]) -> list[Any]:
+    """A chamfer op: along the outline of a face, along a named operation,
+    or along an edge named by two faces (`plan.chamfer_target`). Contours
+    on big faces go to `jobs`; the other tools are returned."""
+    size, face = op["size"], op["face"]
+    target = chamfer_target(op, named, pf.frame)
+    if isinstance(target, OutlineTarget):
         # what lies around the outline, out to a frame beyond its chamfer
         outline = _polygon(pieces(part["outline"])[0])
         b = outline.bounds
@@ -320,68 +345,93 @@ def _named_chamfer(part: PartLayout, op: ChamferLayout, named: dict[str, OpLayou
         around = shapely_box(b[0] - margin, b[1] - margin, b[2] + margin, b[3] + margin)
         jobs.append(([Polygon(around.exterior.coords, [outline.exterior.coords])], face, size))
         return []
-    target = named.get(what)
-    if target is not None:
-        if target["kind"] == "hole":
-            hole = target.copy()
-            hole["face"], hole["chamfer"] = face, size
-            return [_countersink_tool(hole, frame, part["axes"]["t"], part["thickness"])]
-        if target["kind"] == "cut" or target["kind"] == "pocket":
-            jobs.append((_regions(target["shape"]), face, size))
-        return []
-    names = what.split(".")
-    if len(names) == 2 and all(n in frame for n in names):
-        tool = _edge_chamfer(part, names[0], names[1], size, frame)
+    if isinstance(target, EdgeTarget):
+        tool = _edge_chamfer(pf, target.a, target.b, size)
         return [tool] if tool is not None else []
+    if not isinstance(target, OpTarget):
+        return []
+    named_op = target.op
+    if named_op["kind"] == "hole":
+        out = _big_face(pf, named_op["face"])
+        return [] if out is None else [
+            _big_countersink(named_op["u"], named_op["v"], named_op["d"], size, out, part["thickness"])]
+    if named_op["kind"] == "edge":
+        tools = _edge_chamfers(named_op, size)
+        m = _edge_transform(pf, named_op)
+        for tool in tools:
+            tool.apply_transform(m)
+        return tools
+    if named_op["kind"] == "cut" or named_op["kind"] == "pocket":
+        jobs.append((_regions(named_op["shape"]), face, size))
     return []
 
 
-def mesh_part(part: PartLayout, frame: dict[str, str]) -> Any:
+def mesh_part(part: PartLayout, frame: dict[str, str], report: Report | None = None) -> Any:
+    """The part as a mesh in world coordinates, its operations cut. When
+    the boolean fails the board is left uncut and `report` (or stderr) is
+    told so."""
     t = part["thickness"]
     outline = _polygon(part["outline"])
     if outline.is_empty:
         return None
+    pf = PartFrame(part, LayoutFrame(frame))
     mesh = extrude_polygon(outline, t)
     tools: list[Any] = []
-    t_axis = part["axes"]["t"]
     for op in part["ops"]:
-        if op["kind"] == "pocket":
+        if op["kind"] == "pocket" or op["kind"] == "hole":
+            out = _big_face(pf, op["face"])
+            if out is None:
+                continue
             depth = min(op["depth"], t)
-            tool = _extruded(op["shape"], depth + 0.01)
-            tools.append(_from_face(tool, op["face"], frame, t_axis, t, depth))
-        elif op["kind"] == "hole":
-            depth = min(op["depth"], t)
-            tool = trimesh.creation.cylinder(radius=op["d"] / 2, height=depth + 0.01, sections=24)
-            tool.apply_translation([op["u"], op["v"], (depth + 0.01) / 2])
-            tools.append(_from_face(tool, op["face"], frame, t_axis, t, depth))
-            if op["chamfer"] > 0:
-                tools.append(_countersink_tool(op, frame, t_axis, t))
+            if op["kind"] == "pocket":
+                tools.append(_from_face(_extruded(op["shape"], depth + _PAST), out, t, depth))
+            else:
+                tool = _cylinder(op["d"], depth + _PAST)
+                tool.apply_translation([op["u"], op["v"], 0.0])
+                tools.append(_from_face(tool, out, t, depth))
+                if op["chamfer"] > 0:
+                    tools.append(_big_countersink(op["u"], op["v"], op["d"], op["chamfer"], out, t))
         elif op["kind"] == "vgroove":
-            tools.append(_vgroove_tool(op, frame, t_axis, t))
+            out = _big_face(pf, op["face"])
+            if out is not None:
+                tools.append(_vgroove_tool(op, out, t))
         elif op["kind"] == "edge":
-            tools.append(_edge_tool(part, op, frame))
-    tools += _chamfer_tools(part, frame)
+            tools += _edge_tools(pf, op)
+    tools += _chamfer_tools(part, pf)
     tools = [tool for tool in tools if len(tool.faces)]
     if tools:
         try:
             mesh = trimesh.boolean.difference([mesh] + tools, engine="manifold")
-        except BaseException:
-            pass
+        except Exception as error:
+            _report(report, f"{part['path']}: the preview could not cut its operations ({error}); "
+                            "it shows the board uncut.")
     mesh.apply_transform(_part_transform(part))
     mesh.metadata["path"] = part["path"]
     return mesh
 
 
-def mesh_hardware(item: HardwareLayout) -> list[tuple[str, Any]]:
+def mesh_hardware(item: HardwareLayout, report: Report | None = None) -> list[tuple[str, Any]]:
     """Each body of a bought part in world coordinates: the union of its
-    boxes."""
+    boxes, or the boxes side by side when the union fails (reported)."""
     out: list[tuple[str, Any]] = []
     for body in item["bodies"]:
+        path = f"{item['path']}.{body['name']}"
         boxes = [_box_mesh(box) for box in body["boxes"]]
-        mesh = boxes[0] if len(boxes) == 1 else trimesh.boolean.union(boxes, engine="manifold")
-        mesh.metadata["path"] = f"{item['path']}.{body['name']}"
-        out.append((mesh.metadata["path"], mesh))
+        try:
+            mesh = boxes[0] if len(boxes) == 1 else trimesh.boolean.union(boxes, engine="manifold")
+        except Exception as error:
+            _report(report, f"{path}: the preview could not unite its boxes ({error}); it shows them apart.")
+            mesh = trimesh.util.concatenate(boxes)
+        mesh.metadata["path"] = path
+        out.append((path, mesh))
     return out
+
+
+def _report(report: Report | None, message: str) -> None:
+    if report is not None:
+        report(message)
+    else:
+        print(f"preview: {message}", file=sys.stderr)
 
 
 def _box_mesh(box: BoxDict) -> Any:
@@ -391,20 +441,26 @@ def _box_mesh(box: BoxDict) -> Any:
     return mesh
 
 
-def build_scene(layout: Layout) -> Any:
+def build_scene(layout: Layout, report: Report | None = None) -> Any:
+    """Every part and hardware body of the layout as one scene; a ValueError
+    for a layout of another version."""
+    check_version(layout)
     scene = trimesh.Scene()
     for module in layout["modules"]:
         for part in module["parts"]:
-            mesh = mesh_part(part, layout["frame"])
+            mesh = mesh_part(part, layout["frame"], report)
             if mesh is not None and len(mesh.faces):
                 scene.add_geometry(mesh, node_name=part["path"], geom_name=part["path"])
-        for item in module.get("hardware", []):
-            for name, mesh in mesh_hardware(item):
+        for item in module["hardware"]:
+            for name, mesh in mesh_hardware(item, report):
                 scene.add_geometry(mesh, node_name=name, geom_name=name)
     return scene
 
 
-def write_scene(layout: Layout, path: str | Path) -> None:
-    scene = build_scene(layout)
+def write_scene(layout: Layout, path: str | Path) -> list[str]:
+    """Writes the scene as glTF; returns the problems meshing it ran into."""
+    problems: list[str] = []
+    scene = build_scene(layout, problems.append)
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     scene.export(str(path))
+    return problems

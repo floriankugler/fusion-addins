@@ -18,11 +18,16 @@ What it draws, per part:
   reads the grain and the face to machine from it.
 
 Hardware (a slide's runners) is drawn as boxes, one body per piece, in a
-component of its own below its scope's.
+component of its own below its scope's, named as the hardware is named in
+its scope (`runners`).
 
 Faces and edges are found by position, never by index, because every
 feature gives the body new face identities. The feature calls and their
 gotchas come from tools/perf/compile_bench.py.
+
+A feature Fusion refuses does not stop the compile: the part goes on
+without it and the report lists it under problems, beside the build's own
+checks, so the document shows everything that worked.
 """
 from __future__ import annotations
 
@@ -36,9 +41,10 @@ from typing import TYPE_CHECKING, Callable, cast
 import adsk.core
 import adsk.fusion
 
-from .plan import (AXES, Arc, Axis, ChamferStep, Circle, CircleContour, Contour, Curve, EdgeContour, FaceRef,
-                   HardwarePlan, HoleStep, Line, Loop, Loops, OutlineContour, PartPlan, Plan, PocketStep, Point3,
-                   ShapeContour, Step, Vec, VGrooveStep, loop_points, plan_layout)
+from .loops import cross, dot, on_curve, oriented, polygon_loop
+from .plan import (AXES, Arc, Axis, ChamferStep, CircleContour, Contour, EdgeContour, FaceRef, HardwarePlan,
+                   HoleStep, Line, Loops, OutlineContour, PartPlan, Plan, PocketStep, Point3, ShapeContour, Step, Vec,
+                   VGrooveStep, plan_layout)
 
 if TYPE_CHECKING:
     from ..core.layout_types import Layout
@@ -71,22 +77,22 @@ class Report:
     parts: int = 0
     features: int = 0
     seconds: float = 0.0
+    #: The build's own problems, as the layout lists them (its checks, notes).
+    checks: list[str] = field(default_factory=list[str])
+    #: What the emitter could not draw.
     problems: list[str] = field(default_factory=list[str])
     document: str = ""
 
     def summary(self) -> str:
         text = f"{self.parts} parts, {self.features} features in {self.seconds:.1f} s -> {self.document}"
-        return text + "".join(f"\n  problem: {p}" for p in self.problems)
+        return (text + "".join(f"\n  check: {c}" for c in self.checks)
+                + "".join(f"\n  problem: {p}" for p in self.problems))
 
 
 # -- small geometry helpers ---------------------------------------------------------------------
 
 def _pt(p: Point3) -> adsk.core.Point3D:
     return adsk.core.Point3D.create(p[0] * MM, p[1] * MM, p[2] * MM)
-
-
-def _cm(p: Point3) -> Point3:
-    return (p[0] * MM, p[1] * MM, p[2] * MM)
 
 
 def _vec(v: Vec) -> adsk.core.Vector3D:
@@ -97,12 +103,9 @@ def _coord(point: adsk.core.Point3D, axis: Axis) -> float:
     return (point.x, point.y, point.z)[AXES.index(axis)]
 
 
-def _dot(a: Vec, b: Vec) -> float:
-    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
-
-
-def _cross(a: Vec, b: Vec) -> Vec:
-    return (a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0])
+def _mm(p: Point3) -> Point3:
+    """A point in Fusion's centimetres as millimetres."""
+    return (p[0] / MM, p[1] / MM, p[2] / MM)
 
 
 def _collection(items: list[adsk.core.Base]) -> adsk.core.ObjectCollection:
@@ -110,70 +113,6 @@ def _collection(items: list[adsk.core.Base]) -> adsk.core.ObjectCollection:
     for item in items:
         coll.add(item)
     return coll
-
-
-def _newell_normal(ring: list[Point3]) -> Vec:
-    nx = ny = nz = 0.0
-    for i, a in enumerate(ring):
-        b = ring[(i + 1) % len(ring)]
-        nx += (a[1] - b[1]) * (a[2] + b[2])
-        ny += (a[2] - b[2]) * (a[0] + b[0])
-        nz += (a[0] - b[0]) * (a[1] + b[1])
-    return (nx, ny, nz)
-
-
-def _reversed(curve: Curve) -> Curve:
-    if isinstance(curve, Line):
-        return Line(curve.b, curve.a)
-    if isinstance(curve, Arc):
-        return Arc(curve.b, curve.mid, curve.a, curve.center, curve.radius)
-    return curve
-
-
-def _oriented(loop: Loop, normal: Vec) -> Loop:
-    """The loop wound so that the face made from it has `normal`
-    (right-hand rule). A full circle is drawn about `normal` anyway."""
-    points = loop_points(loop)
-    if not points or _dot(_newell_normal(points), normal) >= 0:
-        return loop
-    return [_reversed(c) for c in reversed(loop)]
-
-
-def _polygon(points: list[Point3]) -> Loop:
-    return [Line(a, points[(i + 1) % len(points)]) for i, a in enumerate(points)]
-
-
-def _on_arc(p: Point3, arc: Arc, normal: Vec) -> bool:
-    """Whether `p` (cm), a point on the arc's circle, lies between its ends
-    (mm), going the way its middle point does."""
-    c = _cm(arc.center)
-    def angle(q: Point3) -> float:
-        u = (_cm(arc.a)[0] - c[0], _cm(arc.a)[1] - c[1], _cm(arc.a)[2] - c[2])
-        v = (q[0] - c[0], q[1] - c[1], q[2] - c[2])
-        return math.atan2(_dot(normal, _cross(u, v)), _dot(u, v)) % (2 * math.pi)
-    mid, end, at = angle(_cm(arc.mid)), angle(_cm(arc.b)), angle(p)
-    slack = 1e-6
-    if mid < end:                         # counter-clockwise about the normal
-        return at <= end + slack or at >= 2 * math.pi - slack
-    return at >= end - slack or at <= slack
-
-
-def _on_curve(p: Point3, curve: Curve, normal: Vec) -> bool:
-    """Whether `p` (cm), a point on the curve's plane, lies on the curve (mm)."""
-    if isinstance(curve, Line):
-        return _dist_to_segment(p, _cm(curve.a), _cm(curve.b)) < TOL
-    if abs(math.dist(p, _cm(curve.center)) - curve.radius * MM) >= TOL:
-        return False
-    return isinstance(curve, Circle) or _on_arc(p, curve, normal)
-
-
-def _dist_to_segment(p: Point3, a: Point3, b: Point3) -> float:
-    ab = (b[0] - a[0], b[1] - a[1], b[2] - a[2])
-    ap = (p[0] - a[0], p[1] - a[1], p[2] - a[2])
-    length2 = _dot(ab, ab)
-    t = 0.0 if length2 == 0 else max(0.0, min(1.0, _dot(ap, ab) / length2))
-    c = (a[0] + t * ab[0], a[1] + t * ab[1], a[2] + t * ab[2])
-    return math.dist(p, c)
 
 
 def _describe(step: Step) -> str:
@@ -200,16 +139,22 @@ class Emitter:
 
     def emit(self, plan: Plan) -> Report:
         t0 = time.perf_counter()
-        self.report.problems.extend(plan.problems)
+        self.report.checks.extend(plan.problems)
         for part in plan.parts:
             if part.manual:
                 self.report.problems.append(f"{part.path}: manual part, not generated.")
                 continue
             self.log(f"part {part.path}")
-            self._emit_part(part)
+            try:
+                self._emit_part(part)
+            except RuntimeError as error:
+                self._problem(f"{part.path}: the body could not be made ({error}); the part is left out.")
         for item in plan.hardware:
             self.log(f"hardware {item.path}")
-            self._emit_hardware(item)
+            try:
+                self._emit_hardware(item)
+            except RuntimeError as error:
+                self._problem(f"{item.path}: could not be drawn ({error}).")
         self.report.seconds = time.perf_counter() - t0
         self.report.document = self.design.parentDocument.name
         return self.report
@@ -218,9 +163,9 @@ class Emitter:
 
     def _emit_hardware(self, item: HardwarePlan) -> None:
         """Draws each body as the union of its boxes, made as temporary
-        B-rep boxes, in a component of its own below the scope's, named by
-        its path (Fusion renames a repeated name, "runners (1)")."""
-        comp = self._component(item.component + (item.path,))
+        B-rep boxes, in a component of its own below the scope's, named as
+        the hardware is in its scope; its bodies carry the full path."""
+        comp = self._component(item.component + (item.name,))
         for body_plan in item.bodies:
             body: adsk.fusion.BRepBody | None = None
             for lo, hi in body_plan.boxes:
@@ -253,18 +198,23 @@ class Emitter:
         return comp
 
     def _emit_part(self, part: PartPlan) -> None:
+        """The body, then its steps in order; a step Fusion refuses is
+        reported and left out, and the next one goes on."""
         comp = self._component(part.component)
         body = self._make_body(comp, part)
         for step in part.steps:
             self.log(f"  {_describe(step)}")
-            if isinstance(step, PocketStep):
-                self._pockets(comp, body, step, part.path)
-            elif isinstance(step, HoleStep):
-                self._holes(comp, body, step, part.path)
-            elif isinstance(step, VGrooveStep):
-                self._vgroove(comp, body, step)
-            else:
-                self._chamfer(comp, body, step, part.path)
+            try:
+                if isinstance(step, PocketStep):
+                    self._pockets(comp, body, step, part.path)
+                elif isinstance(step, HoleStep):
+                    self._holes(comp, body, step, part.path)
+                elif isinstance(step, VGrooveStep):
+                    self._vgroove(comp, body, step)
+                else:
+                    self._chamfer(comp, body, step, part.path)
+            except RuntimeError as error:
+                self._problem(f"{part.path}: {_describe(step)} failed ({error}); left out.")
         if part.facts is not None:
             facts = part.facts
             body.attributes.add(ATTRIBUTE_GROUP, ATTRIBUTE_NAME, json.dumps({
@@ -296,7 +246,7 @@ class Emitter:
         wires: list[adsk.fusion.BRepBody] = []
         for loop in loops:
             curves: list[adsk.core.Curve3D] = []
-            for c in _oriented(loop, normal):
+            for c in oriented(loop, normal):
                 if isinstance(c, Line):
                     if math.dist(c.a, c.b) < 1e-6:
                         continue
@@ -345,7 +295,7 @@ class Emitter:
     def _direction_toward(self, face: adsk.fusion.BRepFace, into: Vec) -> adsk.fusion.ExtentDirections:
         """The extent direction that moves the face's profile along `into`.
         A temporary face's normal follows its wire winding."""
-        return _POSITIVE if _dot(self._normal(face), into) > 0 else _NEGATIVE
+        return _POSITIVE if dot(self._normal(face), into) > 0 else _NEGATIVE
 
     # -- finding geometry by position ------------------------------------------------------------
 
@@ -360,7 +310,7 @@ class Emitter:
         for face in body.faces:
             if cast(adsk.core.Plane | None, adsk.core.Plane.cast(face.geometry)) is None:
                 continue
-            if _dot(self._normal(face), want) < 0.99:
+            if dot(self._normal(face), want) < 0.99:
                 continue
             c = _coord(face.centroid, axis)
             if value is not None and abs(c - value * MM) > TOL:
@@ -408,14 +358,14 @@ class Emitter:
             for e in body.edges:
                 if not self._edge_on_plane(e, contour.face):
                     continue
-                mid = self._edge_midpoint(e)
+                mid = _mm(self._edge_midpoint(e))
                 for i, loop in enumerate(contour.loops):
-                    if any(_on_curve(mid, c, normal) for c in loop):
+                    if any(on_curve(mid, c, normal, TOL / MM) for c in loop):
                         groups[i].append(e)
                         break
             return [g for g in groups if g]
         circle_contour: CircleContour = contour
-        center = _cm(circle_contour.center)
+        center = _pt(circle_contour.center)
         found = []
         for e in body.edges:
             if not self._edge_on_plane(e, circle_contour.face):
@@ -429,7 +379,7 @@ class Emitter:
                 c, r = arc.center, arc.radius
             else:
                 continue
-            if math.dist((c.x, c.y, c.z), center) < TOL and abs(r - circle_contour.r * MM) < TOL:
+            if c.distanceTo(center) < TOL and abs(r - circle_contour.r * MM) < TOL:
                 found.append(e)
         return [found]
 
@@ -456,22 +406,25 @@ class Emitter:
 
     def _holes(self, comp: adsk.fusion.Component, body: adsk.fusion.BRepBody, step: HoleStep,
                path: str) -> None:
+        """One hole feature per point; a hole that cannot be made is
+        reported and the others are still drilled."""
         holes = comp.features.holeFeatures
         for point in step.points:
             face = self._face(body, step.face)
             if face is None:
-                self._problem(f"{path}: no face at {step.face} for a hole.")
-                return
+                self._problem(f"{path}: no face at {step.face} for the hole at {point}; left out.")
+                continue
             inp = holes.createSimpleInput(adsk.core.ValueInput.createByReal(step.d * MM))
             inp.setPositionByPoint(face, _pt(point))
             # The hole's natural direction is opposite the face normal.
-            natural = tuple(-c for c in self._normal(face))
-            inp.isDefaultDirection = _dot(natural, step.face.into) > 0  # type: ignore[arg-type]
+            n = self._normal(face)
+            natural: Vec = (-n[0], -n[1], -n[2])
+            inp.isDefaultDirection = dot(natural, step.face.into) > 0
             if step.depth is None:
                 opposite = self._find_face(body, step.face.axis, -step.face.sign)
                 if opposite is None:
-                    self._problem(f"{path}: no face opposite {step.face} for a through hole.")
-                    return
+                    self._problem(f"{path}: no face opposite {step.face} for the through hole at {point}; left out.")
+                    continue
                 # Without the direction hint Fusion finds no target body
                 # (probed 2026-10-10), whatever isDefaultDirection says.
                 inp.setOneSideToExtent(opposite, False, adsk.core.Vector3D.create(*step.face.into))
@@ -479,17 +432,21 @@ class Emitter:
                 inp.setDistanceExtent(adsk.core.ValueInput.createByReal(step.depth * MM))
             inp.tipAngle = adsk.core.ValueInput.createByString("180 deg")
             inp.participantBodies = [body]
-            holes.add(inp)
+            try:
+                holes.add(inp)
+            except RuntimeError as error:
+                self._problem(f"{path}: the hole d{step.d:g} at {point} failed ({error}); left out.")
+                continue
             self.report.features += 1
 
     def _vgroove(self, comp: adsk.fusion.Component, body: adsk.fusion.BRepBody, step: VGrooveStep) -> None:
         """The groove's cross-section at its start, a triangle with its
         opening on the face, cut along the groove to its end."""
         line: Vec = (step.end[0] - step.start[0], step.end[1] - step.start[1], step.end[2] - step.start[2])
-        length = math.sqrt(_dot(line, line))
+        length = math.sqrt(dot(line, line))
         along: Vec = (line[0] / length, line[1] / length, line[2] / length)
         into = step.face.into
-        across = _cross(along, into)          # a unit vector in the face, across the groove
+        across = cross(along, into)           # a unit vector in the face, across the groove
         half = step.depth                     # a 90 degree V is twice as wide as it is deep
         s = step.start
         ring: list[Point3] = [
@@ -497,7 +454,7 @@ class Emitter:
             (s[0] - across[0] * half, s[1] - across[1] * half, s[2] - across[2] * half),
             (s[0] + into[0] * step.depth, s[1] + into[1] * step.depth, s[2] + into[2] * step.depth),
         ]
-        added = self._add_faces(comp, [[_polygon(ring)]], along)
+        added = self._add_faces(comp, [[polygon_loop(ring)]], along)
         profile = added[0].faces.item(0)
         extrudes = comp.features.extrudeFeatures
         inp = extrudes.createInput(profile, _CUT)

@@ -3,7 +3,10 @@
     python -m lang.build examples/drawer_cabinet.py --out out/
 
 A build file is ordinary Python that creates modules with `from lang import *`.
-The build runs in a fresh registry every time.
+The build runs in a fresh registry and the default world frame every time,
+and the modules in the build file's folder that it imported (its own
+helpers, other build files) are imported afresh by the next build in the
+same process.
 
 An error prints its message and the lines of the build files that led to
 it (`examples/van.py:39: bottom.join(...)`), not the frames of runpy, this
@@ -31,20 +34,35 @@ _NOT_BUILD_CODE = (*_LANGUAGE, Path(sys.prefix).resolve(), Path(sys.base_prefix)
 
 
 def run_build(build_file: str | Path, out_dir: str | Path, scene: bool = True) -> Layout:
+    """Runs the build file, writes its layout (and with `scene` the
+    preview's glTF scene) into `out_dir`, and returns the layout. Problems
+    meshing the scene are printed to stderr as `preview: ...`."""
     registry.reset()
     build_path = Path(build_file).resolve()
     out_path = Path(out_dir)
+    before = set(sys.modules)
     sys.path.insert(0, str(build_path.parent))
     try:
         runpy.run_path(str(build_path), run_name="__build__")
     finally:
         sys.path.pop(0)
+        _forget_modules_in(build_path.parent, before)
     layout = write_layout(out_path / "layout.json")
     if scene:
         from .preview.mesh import write_scene
-        write_scene(layout, out_path / "scene.glb")
+        for problem in write_scene(layout, out_path / "scene.glb"):
+            print(f"preview: {problem}", file=sys.stderr)
     (out_path / "version.txt").write_text(str(time.time_ns()))
     return layout
+
+
+def _forget_modules_in(folder: Path, before: set[str]) -> None:
+    """Removes the modules from `folder` that the build imported, so the
+    next build in this process imports them again, edited or not."""
+    for name in set(sys.modules) - before:
+        file = getattr(sys.modules[name], "__file__", None)
+        if file and Path(file).resolve().is_relative_to(folder):
+            del sys.modules[name]
 
 
 def _is_build_code(filename: str) -> bool:

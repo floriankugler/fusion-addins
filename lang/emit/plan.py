@@ -24,6 +24,16 @@ Outlines and shapes are loops of lines, arcs and circles: the layout's
 polygons with the runs that lie on a circle recovered as arcs (`arcs.fit`),
 so a slot's round end becomes one cylindrical face in Fusion instead of a
 fan of flat ones.
+
+How a layout is read is shared with the preview's mesher
+(`lang.preview.mesh`), so both see the same faces, depths and chamfer
+targets: `LayoutFrame` decodes the layout's world direction names,
+`PartFrame` a part's faces, points, depths and narrow-face start planes,
+`named_ops` and `chamfer_target` what a chamfer names.
+
+This module is loaded inside Fusion without the `lang` package (see
+`lang.emit`), so it imports the layout's types only for the type checker
+and repeats `LAYOUT_VERSION`; a test keeps the two equal.
 """
 from __future__ import annotations
 
@@ -35,6 +45,9 @@ from .arcs import Arc2, Curve2, Line2, fit
 if TYPE_CHECKING:
     from ..core.layout_types import (ChamferLayout, EdgeOpLayout, HardwareLayout, HoleLayout, Layout, OpLayout,
                                      PartLayout, PocketLayout, Rings)
+
+#: The layout version this plan reads (`lang.core.layout_types.LAYOUT_VERSION`).
+LAYOUT_VERSION = 3
 
 Axis = Literal["x", "y", "z"]
 AXES: tuple[Axis, Axis, Axis] = ("x", "y", "z")
@@ -252,7 +265,9 @@ def _as_axis(value: str) -> Axis:
     raise ValueError(f"not an axis: {value!r}")
 
 
-class _Frame:
+class LayoutFrame:
+    """The layout's world direction names (`front`: `-x`), decoded."""
+
     def __init__(self, frame: dict[str, str]):
         self._dirs: dict[str, tuple[Axis, int]] = {}
         for name, code in frame.items():
@@ -262,16 +277,19 @@ class _Frame:
         return name in self._dirs
 
     def direction(self, name: str) -> tuple[Axis, int]:
+        """The world axis and sign (+1, -1) a direction name stands for."""
         try:
             return self._dirs[name]
         except KeyError:
             raise ValueError(f"unknown direction {name!r}") from None
 
 
-class _Part:
-    """One part of the layout with its frame conversions."""
+class PartFrame:
+    """One part of the layout with its frame conversions: its faces as
+    planes, points in a face's 2D frame, depths, and the plane a
+    narrow-face operation starts from."""
 
-    def __init__(self, part: PartLayout, frame: _Frame):
+    def __init__(self, part: PartLayout, frame: LayoutFrame):
         self.part = part
         self.frame = frame
         self.t_axis: Axis = _as_axis(part["axes"]["t"])
@@ -285,14 +303,21 @@ class _Part:
         axis, sign = self.frame.direction(name)
         return FaceRef(axis, sign, self.hi[axis] if sign > 0 else self.lo[axis])
 
+    def is_big(self, face: FaceRef) -> bool:
+        return face.axis == self.t_axis
+
+    def in_face(self, face: FaceRef) -> tuple[Axis, Axis]:
+        """The two world axes of the face's 2D frame: (u, v) on a big face,
+        (s, t) on a narrow one, s along the face and t across the
+        thickness."""
+        if face.axis == self.t_axis:
+            return self.u_axis, self.v_axis
+        return (self.v_axis if face.axis == self.u_axis else self.u_axis), self.t_axis
+
     def point(self, face: FaceRef, a: float, b: float) -> Point3:
         """A point given in the face's 2D frame as world coordinates: (u, v)
         on a big face, (s, t) on a narrow face."""
-        if face.axis == self.t_axis:
-            first, second = self.u_axis, self.v_axis
-        else:
-            first = self.v_axis if face.axis == self.u_axis else self.u_axis
-            second = self.t_axis
+        first, second = self.in_face(face)
         coords = {first: a, second: b, face.axis: face.value}
         return (coords["x"], coords["y"], coords["z"])
 
@@ -310,13 +335,17 @@ class _Part:
                        self.point(face, *c.center), c.radius)
         return Circle(self.point(face, *c.center), c.radius)
 
-    def depth(self, face: FaceRef, depth: float, through: bool = False) -> float | None:
-        """A depth from `face`, or None when it reaches the opposite face:
-        the thickness for a big face, the part's extent for a narrow one
-        (and the offset for an operation starting in front of the face)."""
+    def extent(self, face: FaceRef) -> float:
+        """How far the part reaches from `face` to the opposite face: the
+        thickness from a big face, the part's length or width from a narrow
+        one (plus the offset of a plane in front of the face)."""
         far = self.lo[face.axis] if face.sign > 0 else self.hi[face.axis]
-        extent = abs(face.value - far)
-        return None if through or depth >= extent - 1e-9 else depth
+        return abs(face.value - far)
+
+    def depth(self, face: FaceRef, depth: float, through: bool = False) -> float | None:
+        """A depth from `face`, or None when it reaches the opposite face
+        (`through`, or as deep as `extent`)."""
+        return None if through or depth >= self.extent(face) - 1e-9 else depth
 
     def edge_face(self, op: EdgeOpLayout) -> FaceRef:
         """The plane a narrow-face operation starts from: its face, moved
@@ -326,29 +355,72 @@ class _Part:
         return FaceRef(face.axis, face.sign, face.value + face.sign * offset) if offset else face
 
 
-def plan_part(part: PartLayout, frame: _Frame, problems: list[str]) -> PartPlan:
-    p = _Part(part, frame)
-    segments = part["path"].split(".")
-    lower = FaceRef(p.t_axis, -1, p.lo[p.t_axis])
-    body = Body(p.loops(lower, part["outline"]), _unit(p.t_axis, 1), p.thickness)
-    plan = PartPlan(part["path"], tuple(segments[:-1]), body, manual=part["manual"])
-    show = p.face(part["show"])
-    # Layouts written before the machine face existed: the show face is up.
-    machine = p.face(part.get("machine", part["show"]))
-    grain = part["grain"]
-    plan.facts = PartFacts(part["material"], part["thickness"], part.get("grained", True),
-                           _unit(_as_axis(grain), 1) if grain else None, machine.normal)
+def named_ops(part: PartLayout) -> dict[str, OpLayout]:
+    """The part's named operations by name; a narrow-face operation under
+    its own operation's name."""
     named: dict[str, OpLayout] = {}
     for op in part["ops"]:
         name = op["op"]["name"] if op["kind"] == "edge" else (op["name"] if op["kind"] != "chamfer" else None)
         if name:
             named[name] = op
+    return named
+
+
+@dataclass(frozen=True)
+class OutlineTarget:
+    """A chamfer along the outer contour of a face."""
+
+
+@dataclass(frozen=True)
+class OpTarget:
+    """A chamfer along a named operation's contour: a cut, a pocket, a hole
+    or a narrow-face operation."""
+    op: OpLayout
+
+
+@dataclass(frozen=True)
+class EdgeTarget:
+    """A chamfer along the edge where two faces meet, by world name."""
+    a: str
+    b: str
+
+
+ChamferTarget = OutlineTarget | OpTarget | EdgeTarget
+
+
+def chamfer_target(op: ChamferLayout, named: dict[str, OpLayout], frame: LayoutFrame) -> ChamferTarget | None:
+    """What a chamfer operation names, or None when it names nothing the
+    chamfer can follow (an unknown name, a V-groove)."""
+    what = op["what"]
+    if what == "outline":
+        return OutlineTarget()
+    if what in named:
+        target = named[what]
+        return OpTarget(target) if target["kind"] in ("cut", "pocket", "hole", "edge") else None
+    parts = what.split(".")
+    if len(parts) == 2 and all(frame.is_direction(n) for n in parts):
+        return EdgeTarget(parts[0], parts[1])
+    return None
+
+
+def plan_part(part: PartLayout, frame: LayoutFrame, problems: list[str]) -> PartPlan:
+    p = PartFrame(part, frame)
+    segments = part["path"].split(".")
+    lower = FaceRef(p.t_axis, -1, p.lo[p.t_axis])
+    body = Body(p.loops(lower, part["outline"]), _unit(p.t_axis, 1), p.thickness)
+    plan = PartPlan(part["path"], tuple(segments[:-1]), body, manual=part["manual"])
+    show = p.face(part["show"])
+    machine = p.face(part["machine"])
+    grain = part["grain"]
+    plan.facts = PartFacts(part["material"], part["thickness"], part["grained"],
+                           _unit(_as_axis(grain), 1) if grain else None, machine.normal)
+    named = named_ops(part)
     for op in part["ops"]:
         _plan_op(p, plan, op, show, named, problems)
     return plan
 
 
-def _plan_op(p: _Part, plan: PartPlan, op: OpLayout, show: FaceRef,
+def _plan_op(p: PartFrame, plan: PartPlan, op: OpLayout, show: FaceRef,
              named: dict[str, OpLayout], problems: list[str]) -> None:
     steps = plan.steps
     if op["kind"] == "cut":
@@ -377,7 +449,7 @@ def _plan_op(p: _Part, plan: PartPlan, op: OpLayout, show: FaceRef,
             steps.append(ChamferStep(op["size"], contour))
 
 
-def _add_pocket(p: _Part, steps: list[Step], face: FaceRef, op: PocketLayout,
+def _add_pocket(p: PartFrame, steps: list[Step], face: FaceRef, op: PocketLayout,
                 offset: tuple[float, float]) -> None:
     shapes = [p.loops(face, piece, offset) for piece in pieces(op["shape"])]
     depth = p.depth(face, op["depth"])
@@ -390,7 +462,7 @@ def _add_pocket(p: _Part, steps: list[Step], face: FaceRef, op: PocketLayout,
         steps.append(ChamferStep(op["chamfer"], ShapeContour(face, [loop for s in shapes for loop in s])))
 
 
-def _add_hole(p: _Part, steps: list[Step], face: FaceRef, op: HoleLayout,
+def _add_hole(p: PartFrame, steps: list[Step], face: FaceRef, op: HoleLayout,
               at: tuple[float, float]) -> None:
     point = p.point(face, at[0], at[1])
     depth = p.depth(face, op["depth"], op["through"])
@@ -403,46 +475,52 @@ def _add_hole(p: _Part, steps: list[Step], face: FaceRef, op: HoleLayout,
         steps.append(ChamferStep(op["chamfer"], CircleContour(face, point, op["d"] / 2)))
 
 
-def _chamfer_contour(p: _Part, op: ChamferLayout, show: FaceRef,
+def _chamfer_contour(p: PartFrame, op: ChamferLayout, show: FaceRef,
                      named: dict[str, OpLayout]) -> Contour | None:
-    what = op["what"]
+    target = chamfer_target(op, named, p.frame)
     face = p.face(op["face"])
-    if what == "outline":
+    if isinstance(target, OutlineTarget):
         return OutlineContour(face)
-    if what in named:
-        target = named[what]
-        if target["kind"] == "cut":
-            return ShapeContour(face, p.loops(face, target["shape"]))
-        if target["kind"] == "pocket":
-            f = p.face(target["face"])
-            return ShapeContour(f, p.loops(f, target["shape"]))
-        if target["kind"] == "hole":
-            f = p.face(target["face"])
-            return CircleContour(f, p.point(f, target["u"], target["v"]), target["d"] / 2)
-        if target["kind"] == "edge":
-            f = p.edge_face(target)
-            inner = target["op"]
-            if inner["kind"] == "pocket":
-                return ShapeContour(f, p.loops(f, inner["shape"], (target["s"], target["t"])))
-            return CircleContour(f, p.point(f, target["s"], target["t"]), inner["d"] / 2)
+    if isinstance(target, EdgeTarget):
+        return EdgeContour(p.face(target.a), p.face(target.b))
+    if target is None:
         return None
-    parts = what.split(".")
-    if len(parts) == 2 and all(p.frame.is_direction(n) for n in parts):
-        return EdgeContour(p.face(parts[0]), p.face(parts[1]))
+    named_op = target.op
+    if named_op["kind"] == "cut":
+        return ShapeContour(face, p.loops(face, named_op["shape"]))
+    if named_op["kind"] == "pocket":
+        f = p.face(named_op["face"])
+        return ShapeContour(f, p.loops(f, named_op["shape"]))
+    if named_op["kind"] == "hole":
+        f = p.face(named_op["face"])
+        return CircleContour(f, p.point(f, named_op["u"], named_op["v"]), named_op["d"] / 2)
+    if named_op["kind"] == "edge":
+        f = p.edge_face(named_op)
+        inner = named_op["op"]
+        if inner["kind"] == "pocket":
+            return ShapeContour(f, p.loops(f, inner["shape"], (named_op["s"], named_op["t"])))
+        return CircleContour(f, p.point(f, named_op["s"], named_op["t"]), inner["d"] / 2)
     return None
 
 
+def check_version(layout: Layout) -> None:
+    """A ValueError for a layout written in another version, which this
+    code would misread: rebuild it."""
+    if layout.get("version") != LAYOUT_VERSION:
+        raise ValueError(f"layout version {layout.get('version')} is not supported (this reads "
+                         f"{LAYOUT_VERSION}); build the layout again.")
+
+
 def plan_layout(layout: Layout) -> Plan:
-    if layout["version"] != 2:
-        raise ValueError(f"layout version {layout['version']} is not supported (expected 2).")
-    frame = _Frame(layout["frame"])
+    check_version(layout)
+    frame = LayoutFrame(layout["frame"])
     problems: list[str] = list(layout["problems"])       # every module's too
     parts: list[PartPlan] = []
     hardware: list[HardwarePlan] = []
     for module in layout["modules"]:
         for part in module["parts"]:
             parts.append(plan_part(part, frame, problems))
-        for item in module.get("hardware", []):
+        for item in module["hardware"]:
             hardware.append(plan_hardware(item))
     return Plan(parts, problems, hardware)
 

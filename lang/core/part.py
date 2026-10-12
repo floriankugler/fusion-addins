@@ -782,7 +782,10 @@ class Board:
             if what.face.part is not self:
                 raise LangError(f"chamfer(): {what.face!r} is not a face of this board.", self.path)
             self._record(Chamfer("outline", size, what.face.world_name), None)
-        elif isinstance(what, (Cut, Pocket, Hole, Chamfer, VGroove, EdgeOp)):
+        elif isinstance(what, VGroove):
+            raise LangError("chamfer(): a V-groove has no rim to chamfer; its flanks are 45 degrees already.",
+                            self.path)
+        elif isinstance(what, (Cut, Pocket, Hole, EdgeOp)):
             name = next((n for n, op in self._named_ops.items() if op is what), None)
             if name is None:
                 raise LangError("chamfer(): the operation is not a named operation of this board.", self.path)

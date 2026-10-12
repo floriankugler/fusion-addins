@@ -18,7 +18,7 @@ import json
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     from ..core.snapshot_types import (BoxDict, ContourDict, ParameterDict, PlaneDict, ProblemDict,
@@ -224,14 +224,14 @@ def dumps(value: object, indent: int = 0) -> str:
     snapshot diffs readably."""
     pad, inner = "  " * indent, "  " * (indent + 1)
     if isinstance(value, dict):
-        items: dict[str, object] = value  # type: ignore[assignment]
+        items = cast(dict[str, object], value)
         if not items:
             return "{}"
         body = ",\n".join(f"{inner}{json.dumps(k, ensure_ascii=False)}: {dumps(v, indent + 1)}"
                           for k, v in items.items())
         return "{\n" + body + "\n" + pad + "}"
     if isinstance(value, list):
-        elements: list[object] = value  # type: ignore[assignment]
+        elements = cast(list[object], value)
         if not elements:
             return "[]"
         if all(_is_number(e) for e in elements):

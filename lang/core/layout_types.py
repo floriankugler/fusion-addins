@@ -1,13 +1,21 @@
-"""The layout file's shape, version 2.
+"""The layout file's shape, version 3.
 
 This is the contract between the language and its consumers (the preview
-mesher, the Fusion emitter). Bump LAYOUT_VERSION on incompatible changes.
+mesher, the Fusion emitter, the viewer page). Bump LAYOUT_VERSION on
+incompatible changes; `lang.emit.plan` and the viewer repeat it and refuse
+other versions.
+
+Version 3 (2026-10-12): every key below is written; the top-level
+`problems` list every problem once, the modules' repeat their own; a
+depth through a narrow face is the part's extent across it. Version 2
+layouts were written while parts gained `machine`, `grained` and `faces`
+and modules `hardware`, so some lack them.
 """
 from __future__ import annotations
 
 from typing import Literal, NotRequired, TypedDict
 
-LAYOUT_VERSION = 2
+LAYOUT_VERSION = 3
 
 #: One or more polygons as rings of [u, v] points, one polygon after the
 #: other: its exterior ring, counter-clockwise, then its holes, clockwise.
@@ -184,5 +192,5 @@ class Layout(TypedDict):
     #: Every problem of the build, once: the modules' and the snapshots'
     #: notes. What a consumer shows or reports.
     problems: list[str]
-    #: Snapshots of the master the build read (absent in older layouts).
-    snapshots: NotRequired[list[SnapshotLayout]]
+    #: Snapshots of the master the build read.
+    snapshots: list[SnapshotLayout]

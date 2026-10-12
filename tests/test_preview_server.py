@@ -1,9 +1,11 @@
 """The preview server's bookkeeping (`lang.preview.__main__`): which files
 of a folder are build files, which designs a change makes stale, which
-ones it builds, and a build that fails keeping the last good one."""
+ones it builds, a build that fails or runs too long keeping the last good
+one, and the files it serves."""
+import os
 from pathlib import Path
 
-from lang.preview.__main__ import Designs, rebuild, scan
+from lang.preview.__main__ import VIEWER_DIR, Designs, _Handler, rebuild, scan  # type: ignore[reportPrivateUsage]
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
 
@@ -132,3 +134,38 @@ def test_a_failed_build_keeps_the_last_good_one(tmp_path: Path):
     assert (out / "version.txt").read_text() == version
     assert "NameError" in (out / "build.log").read_text()
     assert not (out / ".build").exists()
+
+
+def test_a_build_that_runs_too_long_is_stopped_and_keeps_the_last_good_one(tmp_path: Path):
+    build = write(tmp_path, "cabinet.py", CABINET)
+    out = tmp_path / "out"
+    assert rebuild(build, out)
+    good = (out / "version.txt").read_text()
+    write(tmp_path, "cabinet.py", "from lang import *\nwhile True:\n    pass\n")
+    assert not rebuild(build, out, timeout=1.0)
+    assert (out / "version.txt").read_text() == good
+    assert "took longer than 1 s and was stopped" in (out / "build.log").read_text()
+
+
+def _handler(out: Path) -> _Handler:
+    """A request handler without a request, for its path translation."""
+    handler = _Handler.__new__(_Handler)
+    handler.designs = Designs(write(out.parent, "cabinet.py", CABINET), out)
+    handler.directory = str(VIEWER_DIR)
+    return handler
+
+
+def test_the_server_serves_nothing_outside_out(tmp_path: Path):
+    real = tmp_path / "real"
+    real.mkdir()
+    os.symlink(real, tmp_path / "out")          # --out given through a symlink
+    out = tmp_path / "out"
+    (out / "cabinet").mkdir(parents=True)
+    (out / "cabinet" / "layout.json").write_text("{}")
+    (tmp_path / "secret.txt").write_text("no")
+    os.symlink(tmp_path / "secret.txt", out / "link.txt")
+    handler = _handler(out)
+    assert handler.translate_path("/out/cabinet/layout.json?v=3") == str((out / "cabinet" / "layout.json").resolve())
+    for escape in ("/out/../secret.txt", "/out/%2e%2e/secret.txt", "/out/cabinet/../../secret.txt", "/out/link.txt"):
+        assert handler.translate_path(escape) == str(out.resolve() / "missing"), escape
+    assert handler.translate_path("/index.html") == str(VIEWER_DIR / "index.html")
