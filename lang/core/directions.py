@@ -16,6 +16,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Callable, Literal
 
+from .errors import LangError, one_of
+
 Axis = Literal["x", "y", "z"]
 AXES: tuple[Axis, Axis, Axis] = ("x", "y", "z")
 DIRECTION_NAMES = ("front", "back", "left", "right", "top", "bottom")
@@ -23,6 +25,9 @@ DIRECTION_NAMES = ("front", "back", "left", "right", "top", "bottom")
 #: build file uses them (`split("height", 3)`, `grain("depth")`).
 ExtentName = Literal["width", "depth", "height"]
 EXTENT_NAMES: tuple[ExtentName, ...] = ("width", "depth", "height")
+#: A big face named relative to the enclosing box, for the chained forms
+#: (`show("inner")`, `to("outer")`, a joint's `face=`).
+InnerOuter = Literal["inner", "outer"]
 #: The direction whose axis each extent name measures along.
 EXTENT_OF: dict[str, str] = {"depth": "front", "width": "left", "height": "top"}
 _OPPOSITES = (("front", "back"), ("left", "right"), ("top", "bottom"))
@@ -159,7 +164,7 @@ class Frame:
         try:
             return self._by_name[key]
         except KeyError:
-            raise ValueError(
+            raise LangError(
                 f"Unknown direction {name!r}; expected one of "
                 f"{', '.join(self._by_name)} or an alias."
             ) from None
@@ -177,8 +182,10 @@ class Frame:
     def directions(self) -> list[Direction]:
         return list(self._by_name.values())
 
-    def axis_of_extent(self, name: ExtentName) -> Axis:
-        return self.extents[name]
+    def axis_of_extent(self, name: ExtentName, what: str = "extent") -> Axis:
+        """The axis an extent name measures along; `what` names the call
+        for the error when the name is none."""
+        return self.extents[one_of(name, ExtentName, what)]
 
     def axis_of(self, axis_or_name: str) -> Axis:
         """An axis letter, an extent name or a direction name, as an axis."""

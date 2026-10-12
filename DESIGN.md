@@ -413,6 +413,17 @@ proposed]
   faces, edges, anchors, operations. Side keywords (`shrunk(left=5)`,
   `with_sides(front=...)`, `Box.from_sides(...)`) are explicit parameters,
   so a misspelt side is a type error. [decided 2026-10-10]
+  Enums instead of these literals were considered and dropped
+  [2026-10-12]: Python has no `.height` shorthand, so `Extent.HEIGHT`
+  would be noise, catalog names such as "4x20" or "8 M6" cannot be
+  identifiers, and pyright already completes a `Literal`'s values once
+  the quote is open (checked against its language server: exactly the
+  three extents in `split("|")`, the sixteen sizes in `domino("|")`; an
+  enum parameter got the whole scope). Since the preview builds without
+  the type checker, every such value is also checked at run time
+  (`errors.one_of`, reading the allowed values from the `Literal`), so a
+  misspelling is a `LangError` naming the call and the choices; tests
+  keep the connector literals equal to `lib/connector_data.py`.
 - Contour limits: a contour in the part's own plane bounds the outline directly;
   a contour in a perpendicular plane is sectioned at both big faces of the part
   and the tighter result wins, so the part fits over its whole thickness. Both

@@ -9,7 +9,7 @@ from lang.core.layout import build_layout
 from lang.core.ops import Hole, Pocket, VGroove
 from lang.core.scope import registry
 from lang.preview.mesh import mesh_part
-from lang.joints.connectors import DominoSize
+from lang.joints.connectors import CabineoInsert, CabineoModel, ClamexModel, DominoSize
 from lib import connector_data
 
 ply15 = material("birch", t=15)
@@ -148,6 +148,17 @@ def test_dominos_around_a_back_panel():
 
 def test_domino_sizes_match_the_data():
     assert list(get_args(DominoSize)) == [s.key for s in connector_data.DOMINO_SIZES]
+
+
+def test_clamex_and_cabineo_models_match_the_data():
+    """The names a build file may give are the data's keys: a model added
+    to lib/connector_data.py must be added to the type too."""
+    assert set(get_args(ClamexModel)) == set(connector_data.CLAMEX_MODELS)
+    # every model, and the 8 M6 with every insert, reaches one of the screw
+    # holes in the data, and together they reach all of them
+    reached = {cabineo(m, count=2).guide for m in get_args(CabineoModel) if m != "8 M6"}
+    reached |= {cabineo("8 M6", count=2, insert=i).guide for i in get_args(CabineoInsert)}
+    assert reached == set(connector_data.CABINEO_GUIDE_HOLES.values())
 
 
 # -- Cabineo ------------------------------------------------------------------------------------

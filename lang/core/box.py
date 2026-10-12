@@ -96,7 +96,7 @@ class Box:
     # -- extents ----------------------------------------------------------------
 
     def extent(self, name: ExtentName) -> float:
-        axis = self.frame.axis_of_extent(name)
+        axis = self.frame.axis_of_extent(name, "extent()")
         return self.hi[axis] - self.lo[axis]
 
     @property
@@ -113,7 +113,7 @@ class Box:
 
     def center(self, name: ExtentName) -> Pos:
         """The middle of the box along one extent, as a position."""
-        axis = self.frame.axis_of_extent(name)
+        axis = self.frame.axis_of_extent(name, "center()")
         return Pos(axis, (self.lo[axis] + self.hi[axis]) / 2)
 
     def center_point(self) -> tuple[float, float, float]:
@@ -131,7 +131,7 @@ class Box:
         with several sizes the remainder is the last box, left out when the
         sizes fill the box exactly. The bays run from bottom to top, left to
         right or front to back of this box's frame."""
-        axis = self.frame.axis_of_extent(name)
+        axis = self.frame.axis_of_extent(name, "split()")
         extent = self.extent(name)
         if isinstance(parts, int):
             if parts < 1:

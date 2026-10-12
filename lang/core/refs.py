@@ -19,11 +19,11 @@ position is expected; `as_pos` does the coercion.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal, Protocol, overload, runtime_checkable
+from typing import Protocol, overload, runtime_checkable
 
 from . import directions
-from .directions import Axis, Direction
-from .errors import LangError
+from .directions import Axis, Direction, InnerOuter
+from .errors import LangError, one_of
 
 Number = int | float
 EPS = 1e-9
@@ -244,11 +244,13 @@ class ToFace:
     offset: float = 0.0
 
 
-def to(face: HasName | Literal["inner", "outer"], offset: float = 0.0) -> ToFace:
+def to(face: HasName | InnerOuter, offset: float = 0.0) -> ToFace:
     """A depth reaching a face of the same part, `to(side.outer, -3)`
     stopping 3 mm short of it. `"inner"` and `"outer"` name the face
     without naming the part, for the chained form."""
-    return ToFace(face if isinstance(face, str) else face.name, offset)
+    if isinstance(face, str):
+        return ToFace(one_of(face, InnerOuter, "to()"), offset)
+    return ToFace(face.name, offset)
 
 
 class Through:

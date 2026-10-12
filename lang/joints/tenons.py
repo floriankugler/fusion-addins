@@ -38,7 +38,7 @@ from typing import ClassVar, Literal
 from shapely.geometry import Point
 
 from ..core.contact import Contact
-from ..core.errors import LangError
+from ..core.errors import LangError, one_of
 from ..core.part import Board
 from ..core.refs import DepthSpec, Pos, PosLike, to
 from ..core.shapes import Shape, box_shape, circle
@@ -255,6 +255,7 @@ def tenons(count: int | None = None, *, width: float | None = None, margin: floa
         raise LangError("tenons: margin, remaining, extra_depth, clearance and relief must not be negative.")
     if tool <= 0:
         raise LangError("tenons: tool must be positive.")
+    one_of(dogbones, DogBones, "tenons(dogbones=)")
     return Tenons(count, None if width is None else float(width), float(margin), even, positions, float(remaining),
                   (float(clearance[0]), float(clearance[1])), float(extra_depth), float(tool), float(relief),
                   dogbones)

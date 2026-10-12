@@ -40,7 +40,7 @@ from lib import cutout_patterns as data
 
 from ..emit.arcs import Arc2, Circle2, Line2, fit
 from .directions import ExtentName
-from .errors import LangError
+from .errors import LangError, one_of
 
 if TYPE_CHECKING:
     from .part import Anchor
@@ -98,6 +98,8 @@ def triangles(columns: int = data.COLUMNS, rows: int = data.ROWS, spacing: float
         raise LangError(f"triangles: columns and rows must be at least 1, got {columns} and {rows}.")
     if spacing <= 0:
         raise LangError(f"triangles: spacing must be positive, got {spacing:g}.")
+    if along is not None:
+        one_of(along, ExtentName, "triangles(along=)")
     return Triangles(columns, rows, float(spacing), aligned, along, start)
 
 

@@ -14,19 +14,19 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import ClassVar, Literal, Protocol
+from typing import ClassVar, Protocol
 
 from lib import connector_data as data
 
 from ..core.contact import Contact, contacts
-from ..core.directions import Axis, Direction
-from ..core.errors import LangError
+from ..core.directions import Axis, Direction, InnerOuter
+from ..core.errors import LangError, one_of
 from ..core.part import Board, Face
 from ..core.refs import Pos, PosLike, Side, as_pos
 
 #: A big face named for a joint: a box side or direction it faces, or
 #: inner/outer; None for the joint's default.
-FaceChoice = Side | Direction | Literal["inner", "outer"] | None
+FaceChoice = Side | Direction | InnerOuter | None
 EPS = 1e-6
 Point2 = tuple[float, float]
 
@@ -189,6 +189,14 @@ def face_toward(part: Board, sign: int, axis: Axis) -> Face:
 
 def opposite_face(face: Face) -> Face:
     return face_toward(face.part, -face.direction.sign, face.axis)
+
+
+def face_choice(label: str, choice: FaceChoice) -> FaceChoice:
+    """A joint's `face=` as given, checked when it names a face as
+    `"inner"` or `"outer"`."""
+    if isinstance(choice, str):
+        one_of(choice, InnerOuter, f"{label}(face=)")
+    return choice
 
 
 def big_face(label: str, part: Board, choice: FaceChoice, default: Face) -> Face:

@@ -41,11 +41,11 @@ from typing import ClassVar, Literal
 from lib import connector_data as data
 
 from ..core.contact import Contact
-from ..core.errors import LangError
+from ..core.errors import LangError, one_of
 from ..core.part import Board, Face
 from ..core.refs import DepthSpec, PosLike, through, to
 from ..core.shapes import circle, slot_shape
-from .common import (EPS, ContactGeometry, FaceChoice, Spacing, big_face, hidden_face, join_contacts,
+from .common import (EPS, ContactGeometry, FaceChoice, Spacing, big_face, face_choice, hidden_face, join_contacts,
                      check_gaps, make_spacing, opposite_face, start_index)
 from .tenons import Tenons
 
@@ -184,7 +184,10 @@ def domino(size: DominoSize, *, count: int | None = None, at: Sequence[PosLike] 
     `loose` makes every slot but the first (from the front, left or bottom)
     that much longer, as the machine's wider settings do (6 or 10);
     `length_offset` and `height_offset` change every slot's size."""
-    spec = data.domino_size(size)
+    spec = data.domino_size(one_of(size, DominoSize, "domino()"))
+    face = face_choice("domino", face)
+    if marks is not None:
+        one_of(marks, DominoMarks, "domino(marks=)")
     spacing = make_spacing("domino", count, end, at)
     if spec.thickness + height_offset <= 0:
         raise LangError("domino: height_offset leaves no slot.")
@@ -260,7 +263,8 @@ def clamex(model: ClamexModel = "P-10", *, count: int | None = None, at: Sequenc
     middle of each gap between and beside them, which must be 120 long."""
     if guide_d <= 0:
         raise LangError("clamex: guide_d must be positive.")
-    return Clamex(data.CLAMEX_MODELS[model], make_spacing("clamex", count, end, at, gaps), face, float(guide_d),
+    face = face_choice("clamex", face)
+    return Clamex(data.CLAMEX_MODELS[one_of(model, ClamexModel, "clamex()")], make_spacing("clamex", count, end, at, gaps), face, float(guide_d),
                   through)
 
 
@@ -353,6 +357,12 @@ def cabineo(model: CabineoModel = "8", *, count: int | None = None, at: Sequence
     `end` is the distance of the outer connectors from the contact's ends;
     with `gaps=` tenons joined before, one sits in the middle of each gap
     between and beside them, which must be 40 long."""
+    one_of(model, CabineoModel, "cabineo()")
+    face = face_choice("cabineo", face)
+    if insert is not None:
+        one_of(insert, CabineoInsert, "cabineo(insert=)")
+    if surface is not None:
+        one_of(surface, CabineoSurface, "cabineo(surface=)")
     if model == "8 M6":
         key = _INSERT_KEYS[insert or "threaded insert"]
     elif insert is not None:

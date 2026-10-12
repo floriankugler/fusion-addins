@@ -39,8 +39,8 @@ from . import directions
 from . import scope as scopes
 from .box import Box
 from .contours import Contour, ContourLimit, ContourLimits, as_contour_limit
-from .directions import AXES, Axis, Direction, ExtentName
-from .errors import LangError
+from .directions import AXES, Axis, Direction, ExtentName, InnerOuter
+from .errors import LangError, one_of
 from .layout_types import (ChamferLayout, CutLayout, EdgeOpLayout, HoleLayout, OpLayout,
                            PartLayout, PocketLayout, Rings, VGrooveLayout)
 from .material import Material
@@ -594,18 +594,18 @@ class Board:
         a direction (`grain(cab.top)`), or a face of a part."""
         self._placement("grain")
         if isinstance(along, str):
-            self._grain = self.scope.frame.axis_of_extent(along)
+            self._grain = self.scope.frame.axis_of_extent(one_of(along, ExtentName, "grain()", self.path))
         else:
             self._grain = along.axis
         return self
 
-    def show(self, face: Face | Side | Direction | Literal["inner", "outer"]) -> Self:
+    def show(self, face: Face | Side | Direction | InnerOuter) -> Self:
         """The visible big face: `"inner"` or `"outer"` relative to the
         enclosing box, a box side or direction (`show(cab.front)`), or one
         of this board's own faces (`side.show(side.inner)`)."""
         self._placement("show")
         if isinstance(face, str):
-            self._show = face
+            self._show = one_of(face, InnerOuter, "show()", self.path)
         elif isinstance(face, Face):
             if face.part is not self:
                 raise LangError(f"show(): {face!r} is not a face of this board.", self.path)
