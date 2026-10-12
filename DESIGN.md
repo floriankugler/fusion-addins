@@ -917,8 +917,9 @@ proposed]
   mm finger hole through the door 30 below and four pilots 26 to either
   side at 26 and 42, strike pair 14 to either side at 25; Pull Lock a
   38.1 hole through 34 below and a 48 counterbore from the inner face
-  leaving 10 at the front (none on a door of 10 or less), strike 9.5 at
-  29; LL-66 two pilots 28 to either side at 10, counter plate 10 at 24.
+  leaving 10 at the front (none on a door of 10 or less), keeper 9.5 at
+  29 behind the door's front face, where the lock sits; LL-66 two pilots
+  28 to either side at 10, counter plate 10 at 24.
   One latch in the middle of the edge, more from `end=` from its ends.
   Refused like the add-in: a pre-drill not below the narrowest pilot
   spacing, an edge no longer than twice `end=`, a carcass board parallel
@@ -929,8 +930,8 @@ proposed]
   Florian 2026-10-12), the Pull Lock from its drawing (bezel 44, panels
   1 to 10 thick, which the counterbore leaves), its parts in the door's
   holes as squares inside them and its lock measured from the door's
-  front, the keeper by its screws, 29 behind the door's inner face
-  (confirmed by Florian 2026-10-12), the LL-66 from Sugatsune's CAD
+  front, the keeper too, its screws 29 behind the door's front face as
+  the drawing measures them from the bezel, the LL-66 from Sugatsune's CAD
   model; `latch.reach`
   is how far the part behind the door's front reaches from the carcass
   face (Everlock 60, Pull Lock 50.9, LL-66 24.6), which a drawer box
@@ -941,7 +942,10 @@ proposed]
   through `no_interference`; the small `_world_box` helpers each hardware
   module carries could move to one place. Decided by Florian: the hinge's
   end margin is at least 27 (the add-in's dialog), the Everlock hole stays
-  25, the Pull Lock keeper's screws stay 29 behind the door's inner face.
+  25, the Pull Lock keeper's screws go 29 behind the door's front face, as
+  the lock's drawing has them (door_latch_native measured them from the
+  inner face before; corrected in the add-in too, whose sketch now
+  dimensions the pair from the door's projected front edge).
 - Not covered by an add-in today, as far as seen: a groove for drawer floors
   (done with `side.cut(floor.box().grown(...))`), and the drawer-box
   dimensions per slide model (box width, length, recess, the coupling and

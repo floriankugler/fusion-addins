@@ -265,6 +265,7 @@ class DoorLatchNative(addin.Addin):
             carcass_edge,
             carcass_face,
             latch_positions,
+            door_face,
         )
 
         design = cast(adsk.fusion.Design, self.app.activeProduct)
@@ -539,6 +540,7 @@ class DoorLatchNative(addin.Addin):
             carcass_edge,
             carcass_face,
             latch_positions,
+            door_face,
         )
         for group in door_groups:
             if not self._holes_fit_face(
@@ -689,6 +691,7 @@ class DoorLatchNative(addin.Addin):
         carcass_edge: adsk.fusion.BRepEdge,
         carcass_face: adsk.fusion.BRepFace,
         positions: list[adsk.core.Vector3D],
+        door_face: adsk.fusion.BRepFace,
     ) -> list[_Hole]:
         normal_into_carcass_face = utils.brep.normal_into_face(
             carcass_edge,
@@ -701,6 +704,10 @@ class DoorLatchNative(addin.Addin):
         gap = normal_into_carcass_face.dotProduct(gap_vector)
 
         pair_offset, inset = self._carcass_pattern()
+        if self._carcass_from_front():
+            # Measured from the door's front face: the door's thickness
+            # nearer to its inner face, where the positions lie.
+            inset -= utils.brep.get_board_thickness(door_face)
         offsets = [
             (-pair_offset, inset - gap),
             (pair_offset, inset - gap),
@@ -712,6 +719,38 @@ class DoorLatchNative(addin.Addin):
             offsets,
             self.inputs.predrill_diameter.value,
         )
+
+    def _carcass_from_front(self) -> bool:
+        """Whether the carcass pilot pair is measured from the door's front
+        face instead of its inner face: the Pull Lock's keeper, which its
+        drawing measures from the bezel on the front."""
+        return (
+            self.inputs.type.value
+            == DoorLatchNativeInputs.Types.PULL_LOCK_44.value
+            and door_latches.PULL_LOCK_44.carcass_from_front
+        )
+
+    def _door_front_edge(
+        self,
+        door_edge: adsk.fusion.BRepEdge,
+    ) -> adsk.fusion.BRepEdge:
+        """The edge on the door's front face that runs along the selected
+        Door Edge, across the narrow face they share."""
+        door_face = utils.brep.largest_face_of_edge(door_edge)
+        if not door_face:
+            raise RuntimeError("The Door Edge borders no planar board face.")
+        front_face = utils.brep.get_opposite_face(door_face)
+        for narrow in door_edge.faces:
+            if narrow == door_face:
+                continue
+            for edge in narrow.edges:
+                if (
+                    edge != door_edge
+                    and utils.brep.is_parallel(edge, door_edge)
+                    and any(face == front_face for face in edge.faces)
+                ):
+                    return edge
+        raise RuntimeError("Could not find the door's front edge.")
 
     def _carcass_pattern(self) -> tuple[float, float]:
         """The carcass pilot pair's half spacing and its inset from the
@@ -1683,6 +1722,19 @@ class DoorLatchNative(addin.Addin):
             sketch_occurrence=carcass_occurrence,
             entity_occurrence=door_occurrence,
         )
+        # The Pull Lock's keeper is measured from the door's front face, so
+        # its pair is dimensioned from that face's projected edge.
+        projected_front_edge = (
+            self._project_line(
+                sketch,
+                self._door_front_edge(door_edge),
+                "Door Front Edge",
+                sketch_occurrence=carcass_occurrence,
+                entity_occurrence=door_occurrence,
+            )
+            if self._carcass_from_front()
+            else None
+        )
 
         # One batched project2 call: each call pays a full document
         # transaction, so per-point calls are several times slower in large
@@ -1753,20 +1805,21 @@ class DoorLatchNative(addin.Addin):
                         "Fusion failed to orient the carcass inset from the "
                         "projected Door Edge."
                     )
-                _, inset_value = self._carcass_pattern()
-                inset_dimension = self._add_length_dimension(
-                    sketch,
-                    inset_line,
-                    inset_value,
-                )
-                self._set_parameter_expression(
-                    inset_dimension.parameter,
-                    _mm(inset_value),
-                )
-                self._name_parameter(
-                    inset_dimension.parameter,
-                    "carcassPilotInsetFromDoorEdge",
-                )
+                if not projected_front_edge:
+                    _, inset_value = self._carcass_pattern()
+                    inset_dimension = self._add_length_dimension(
+                        sketch,
+                        inset_line,
+                        inset_value,
+                    )
+                    self._set_parameter_expression(
+                        inset_dimension.parameter,
+                        _mm(inset_value),
+                    )
+                    self._name_parameter(
+                        inset_dimension.parameter,
+                        "carcassPilotInsetFromDoorEdge",
+                    )
                 first_inset_line = inset_line
 
             left_center = sketch.modelToSketchSpace(left_hole.center)
@@ -1818,6 +1871,24 @@ class DoorLatchNative(addin.Addin):
                         "Fusion failed to equalize the carcass pilot spacing."
                     )
             else:
+                if projected_front_edge:
+                    # The pair's line runs along the door's edges, so its
+                    # offset from the front edge places it.
+                    _, inset_value = self._carcass_pattern()
+                    front_dimension = self._add_offset_dimension(
+                        sketch,
+                        projected_front_edge,
+                        left_line,
+                        inset_value,
+                    )
+                    self._set_parameter_expression(
+                        front_dimension.parameter,
+                        _mm(inset_value),
+                    )
+                    self._name_parameter(
+                        front_dimension.parameter,
+                        "carcassPilotInsetFromDoorFront",
+                    )
                 pair_offset, _ = self._carcass_pattern()
                 pair_dimension = self._add_length_dimension(
                     sketch,
@@ -1958,6 +2029,27 @@ class DoorLatchNative(addin.Addin):
             )
         self._set_parameter_expression(dimension.parameter, expression)
         self._name_parameter(dimension.parameter, parameter_role)
+
+    def _add_offset_dimension(
+        self,
+        sketch: adsk.fusion.Sketch,
+        line_one: adsk.fusion.SketchLine,
+        line_two: adsk.fusion.SketchLine,
+        value: float,
+    ) -> adsk.fusion.SketchOffsetDimension:
+        """The distance between two parallel lines, driving."""
+        a = line_one.startSketchPoint.geometry
+        b = line_two.endSketchPoint.geometry
+        text = adsk.core.Point3D.create((a.x + b.x) / 2, (a.y + b.y) / 2, 0)
+        dimension = sketch.sketchDimensions.addOffsetDimension(
+            line_one,
+            line_two,
+            text,
+        )
+        if not dimension or not dimension.parameter:
+            raise RuntimeError("Fusion failed to create a sketch offset.")
+        dimension.parameter.value = value
+        return dimension
 
     def _add_length_dimension(
         self,

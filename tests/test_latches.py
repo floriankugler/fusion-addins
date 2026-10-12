@@ -75,8 +75,10 @@ def test_pull_lock_on_an_inset_door():
     15..585, 705). distance = -(0, 0, -1).((15, 17, 703) - (0, 15, 705)) =
     -2, so the hole lies 34 - 2 = 32 below the door edge, at z 671, 34 below
     the carcass face; gap = (1, 0, 0).((0, 15, 705) - (15, 300, 703)) = -15,
-    so the strike's pair lies 29 + 15 = 44 behind the carcass edge, 29
-    behind the door's inner face. One latch: the middle of the edge, y 300."""
+    and the keeper's pair lies 29 behind the door's front face (x 0), as the
+    lock's drawing measures it from the bezel: 29 - 15 = 14 behind its inner
+    face, 14 + 15 = 29 behind the carcass edge. One latch: the middle of the
+    edge, y 300."""
     _, parts = _inset_door(DoorLatch("Pull Lock 44"))
     door, top = parts["door"], parts["top"]
     # the door's inner face is its back (+x); u, v are y, z
@@ -86,8 +88,8 @@ def test_pull_lock_on_an_inset_door():
     assert counterbore.shape.bounds == pytest.approx((276, 647, 324, 695))
     assert [type(op) for op in door.ops] == [Hole, Pocket]          # the hole first, as in the add-in
     # the strike's pair in the top's underside, the door's own left (+y) first; u, v are x, y
-    assert _holes(top) == {"pull_lock_door_1a": (44, 309.5, PREDRILL, "bottom", 3, False),
-                           "pull_lock_door_1b": (44, 290.5, PREDRILL, "bottom", 3, False)}
+    assert _holes(top) == {"pull_lock_door_1a": (29, 309.5, PREDRILL, "bottom", 3, False),
+                           "pull_lock_door_1b": (29, 290.5, PREDRILL, "bottom", 3, False)}
 
 
 def test_pull_lock_counterbore_only_on_a_door_thicker_than_the_remaining_material():
@@ -196,13 +198,16 @@ def test_the_latch_and_its_strike_as_boxes():
     assert body["name"] == "latch_1"
     boxes = body["boxes"]
     shape = LATCH_SHAPES["Pull Lock 44"]
-    assert len(boxes) == len(shape.front) + len(shape.strike)
+    assert len(boxes) == len(shape.front) + len(shape.strike_front)
     bezel, housing = boxes[0], boxes[1]
     (a0, a1), (b0, b1), (c0, c1) = shape.front[0]
     assert bezel == {"min": [c0, 300 + a0, 705 - b1], "max": [c1, 300 + a1, 705 - b0]}   # x = depth behind the front
     assert bezel["max"][0] == 0 and housing["min"][0] == 0                                  # on and from the front
-    (a0, a1), (b0, b1), (c0, c1) = shape.strike[0]
-    assert boxes[len(shape.front)] == {"min": [15 + c0, 300 + a0, 705 - b1], "max": [15 + c1, 300 + a1, 705 - b0]}
+    (a0, a1), (b0, b1), (c0, c1) = shape.strike_front[0]                          # also from the front
+    assert boxes[len(shape.front)] == {"min": [c0, 300 + a0, 705 - b1], "max": [c1, 300 + a1, 705 - b0]}
+    # the pawl reaches behind the keeper's lip, which it catches
+    pawl, lip = boxes[len(shape.front) - 1], boxes[-1]
+    assert pawl["max"][0] > lip["max"][0] and pawl["min"][0] <= lip["min"][0]
     assert DoorLatch("Pull Lock 44").reach == 50.9 == shape.reach       # the backing plate, not the bezel
     assert DoorLatch("Everlock").reach == 60 and DoorLatch("LL-66").reach == 24.6
     # nothing overlaps a board's material, holes and the counterbore counted out

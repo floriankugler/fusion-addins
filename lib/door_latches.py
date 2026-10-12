@@ -76,7 +76,9 @@ PULL_LOCK_DIAMETER = 38.1
 #: it leaves at the door's front; a door no thicker than that has none.
 PULL_LOCK_COUNTERBORE_DIAMETER = 48.0
 PULL_LOCK_MIN_REMAINING = 10.0
-#: The strike's pilot pair: to either side of the station, behind the door's inner face.
+#: The keeper's pilot pair: to either side of the station (its slots 19
+#: apart), behind the door's FRONT face: the lock's drawing measures the
+#: keeper's slots 29 from the bezel, which sits on the front.
 PULL_LOCK_CARCASS_PAIR_OFFSET = 9.5
 PULL_LOCK_CARCASS_INSET = 29.0
 
@@ -132,17 +134,25 @@ class Latch:
     name: str
     door: tuple[DoorHole, ...]
     #: The strike's pilot pair: half its spacing along the edge, and its
-    #: distance behind the door's inner face.
+    #: distance behind the door's inner face, or behind its front face where
+    #: `carcass_from_front` (the Pull Lock, which sits on the front).
     carcass_pair_offset: float
     carcass_inset: float
     #: Where the add-in's layout anchors each station, below the carcass
     #: face: the main hole, or the middle of the LL-66's pilot pair. The
     #: add-in checks that a pilot-sized circle there lies on the door face.
     station_inset: float
+    carcass_from_front: bool = False
 
-    def carcass_holes(self) -> tuple[tuple[float, float], tuple[float, float]]:
-        """The strike's pilot pair as (along, behind)."""
-        return ((-self.carcass_pair_offset, self.carcass_inset), (self.carcass_pair_offset, self.carcass_inset))
+    def carcass_behind(self, door_thickness: float) -> float:
+        """The strike's pilot pair behind the door's inner face, on a door
+        `door_thickness` thick."""
+        return self.carcass_inset - (door_thickness if self.carcass_from_front else 0.0)
+
+    def carcass_holes(self, door_thickness: float) -> tuple[tuple[float, float], tuple[float, float]]:
+        """The strike's pilot pair as (along, behind the door's inner face)."""
+        behind = self.carcass_behind(door_thickness)
+        return ((-self.carcass_pair_offset, behind), (self.carcass_pair_offset, behind))
 
     @property
     def max_predrill(self) -> float:
@@ -178,6 +188,7 @@ PULL_LOCK_44 = Latch(
     carcass_pair_offset=PULL_LOCK_CARCASS_PAIR_OFFSET,
     carcass_inset=PULL_LOCK_CARCASS_INSET,
     station_inset=PULL_LOCK_MAIN_INSET,
+    carcass_from_front=True,
 )
 LL_66 = Latch(
     "LL-66",
@@ -228,8 +239,10 @@ def _self_check() -> None:
         gap = ((EVERLOCK_PILOT_COLUMN_OFFSET ** 2 + (row - EVERLOCK_MAIN_INSET) ** 2) ** 0.5
                - EVERLOCK_MAIN_DIAMETER / 2 - PREDRILL_DIAMETER / 2)
         assert gap > 0, gap
-    # Pull Lock: the counterbore around the through hole, leaving material
+    # Pull Lock: the counterbore around the through hole, leaving material;
+    # the keeper from the door's front, the others from its inner face
     assert PULL_LOCK_COUNTERBORE_DIAMETER > PULL_LOCK_DIAMETER and PULL_LOCK_MIN_REMAINING > 0
+    assert PULL_LOCK_44.carcass_behind(15) == 14 and EVERLOCK.carcass_behind(15) == 25
     assert PULL_LOCK_MAIN_INSET - PULL_LOCK_COUNTERBORE_DIAMETER / 2 > 0     # below the carcass face
     # LL-66, from the datasheet's dimensions
     assert LL66_DOOR_PILOT_INSET == 10 and 2 * LL66_DOOR_PILOT_HALF_SPACING == 56
@@ -249,8 +262,9 @@ def _self_check() -> None:
     for latch in LATCHES.values():
         holes = ", ".join(f"{h.kind} {h.diameter or PREDRILL_DIAMETER:g} at ({h.along:g}, {h.below:g})"
                           for h in latch.door)
+        face = "front" if latch.carcass_from_front else "inner face"
         print(f"  {latch.name}: door {holes}; strike +-{latch.carcass_pair_offset:g} at "
-              f"{latch.carcass_inset:g} behind; pre-drill below {latch.max_predrill:g}")
+              f"{latch.carcass_inset:g} behind the door's {face}; pre-drill below {latch.max_predrill:g}")
 
 
 if __name__ == "__main__":

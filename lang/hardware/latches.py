@@ -21,12 +21,14 @@ Per latch the door gets (positions and sizes from `lib.door_latches`):
   the front, on a door thicker than that;
 - LL-66: two pilot holes for the body, 28 mm to either side, 10 mm below;
 
-and the carcass face a pilot pair for the strike, behind the door's inner
-face: 14 mm to either side at 25 mm (Everlock), 9.5 at 29 (Pull Lock), 10
-at 24 (LL-66). "Below" is on the door, square to its edge, from the plane
-of the carcass face away from the carcass board, "behind" on the carcass
-face from the plane of the door's inner face, so an inset and an overlay
-door get the same latch relative to the carcass. Pilot holes are
+and the carcass face a pilot pair for the strike: 14 mm to either side at
+25 mm behind the door's inner face (Everlock), 10 at 24 (LL-66), and the
+Pull Lock's keeper 9.5 to either side at 29 behind the door's front face,
+where the lock sits (its drawing measures the keeper from the bezel).
+"Below" is on the door, square to its edge, from the plane of the carcass
+face away from the carcass board, "behind" on the carcass face from the
+plane of the door's inner or front face, so an inset and an overlay door
+get the same latch relative to the carcass. Pilot holes are
 `predrill` (diameter, depth), by default 1/8" x 3 mm. One latch sits in the
 middle of the door's edge (the door's extent along it), more run from
 `end=` from its ends, evenly spaced; they are numbered from the door's own
@@ -94,16 +96,22 @@ class LatchShape:
     boxes behind the door's inner face, `front` boxes measured from the
     door's front face instead (behind it; negative: proud of it), for the
     parts that rest on the front or are dimensioned from it, and `strike`
-    boxes, the counterpart on the carcass face. Only these numbers decide
-    the boxes and `reach`."""
+    boxes, the counterpart on the carcass face, behind the door's inner
+    face or (`strike_front`) its front face. Only these numbers decide the
+    boxes and `reach`."""
     door: tuple[LatchBox, ...]
-    strike: tuple[LatchBox, ...]
+    strike: tuple[LatchBox, ...] = ()
     front: tuple[LatchBox, ...] = ()
+    #: Strike boxes measured from the door's front face, as `front`.
+    strike_front: tuple[LatchBox, ...] = ()
 
     def latch_boxes(self, door_thickness: float) -> list[LatchBox]:
         """The part on the door as boxes, on a door `door_thickness` thick."""
-        return list(self.door) + [(along, below, (d0 - door_thickness, d1 - door_thickness))
-                                  for along, below, (d0, d1) in self.front]
+        return list(self.door) + _from_front(self.front, door_thickness)
+
+    def strike_boxes(self, door_thickness: float) -> list[LatchBox]:
+        """The strike as boxes, on a door `door_thickness` thick."""
+        return list(self.strike) + _from_front(self.strike_front, door_thickness)
 
     @property
     def reach(self) -> float:
@@ -111,6 +119,11 @@ class LatchShape:
         leaving out what stands proud of the door's front."""
         inside = list(self.door) + [box for box in self.front if box[2][1] > 0]
         return max(below[1] for _, below, _ in inside)
+
+
+def _from_front(boxes: tuple[LatchBox, ...], door_thickness: float) -> list[LatchBox]:
+    """Boxes measured from the door's front face, behind its inner face."""
+    return [(along, below, (d0 - door_thickness, d1 - door_thickness)) for along, below, (d0, d1) in boxes]
 
 
 #: Per latch, closed (measured 2026-10-12). Everlock: from the maker's
@@ -137,10 +150,11 @@ LATCH_SHAPES: dict[str, LatchShape] = {
     ),
     "Pull Lock 44": LatchShape(
         door=(),
-        # The keeper by its screws, the drilled pair 29 behind the door's
-        # inner face: its plate on the carcass face, its lip toward the latch.
-        strike=(((-16.25, 16.25), (0.0, 1.5), (20.4, 36.5)),    # plate
-                ((-16.25, 16.25), (0.0, 12.5), (20.4, 21.9))),  # lip
+        # The keeper, from the door's front as the drawing has it (its slots
+        # 29 behind the front, the drilled pair): its plate on the carcass
+        # face, its lip toward the latch, where the pawl catches behind it.
+        strike_front=(((-16.25, 16.25), (0.0, 1.5), (20.4, 36.5)),    # plate
+                      ((-16.25, 16.25), (0.0, 12.5), (20.4, 21.9))),  # lip
         front=(((-22.0, 22.0), (12.0, 56.0), (-2.5, 0.0)),      # bezel, 34 below the carcass face
                ((-13.4, 13.4), (20.6, 47.4), (0.0, 20.4)),      # housing, a square in the 38.1 hole
                ((-16.9, 16.9), (17.1, 50.9), (10.0, 11.5)),     # clamp plate, a square in the 48 counterbore
@@ -347,7 +361,7 @@ class DoorLatch:
                 elif h.remaining is not None and door.thickness > h.remaining:
                     counterbores.append(_Hole(door, where.inner, point, h.diameter, base + "_counterbore",
                                               "counterbore", h.remaining))
-            pair = sorted(pattern.carcass_holes(), key=lambda p: p[0] * sign)
+            pair = sorted(pattern.carcass_holes(door.thickness), key=lambda p: p[0] * sign)
             for letter, (a, behind) in zip("ab", pair):
                 strikes.append(_Hole(carcass, where.face, where.on_carcass(s, a, behind), pd,
                                      f"{kind}_{door.name}_{i}{letter}", "pilot", pdepth))
@@ -360,7 +374,8 @@ class DoorLatch:
 
     def _place(self, scope: Scope, where: _Where) -> None:
         """The latches, closed, as boxes: each latch and its strike one body."""
-        boxes = self.shape.latch_boxes(where.door.thickness) + list(self.shape.strike)
+        t = where.door.thickness
+        boxes = self.shape.latch_boxes(t) + self.shape.strike_boxes(t)
         bodies = [HardwareBodyLayout(name=f"latch_{i}", boxes=[where.world_box(s, b) for b in boxes])
                   for i, s in enumerate(where.stations, 1)]
         name, n = "latches", 2
