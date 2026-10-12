@@ -831,8 +831,14 @@ proposed]
   grooves cannot be milled from the inner face with a round cutter.) The
   drawer back stays machined from both faces; only the slide's rear hook
   holes may go through it from its inner face instead (`hook_hole=(d,
-  through)`, see the slides below). Not yet verified in Fusion against
-  the add-in.
+  through)`, see the slides below). Verified in Fusion 2026-10-12 against
+  the add-in on the same board pair in seven settings (the dialog's
+  defaults, Florian's 7 / 2 / 6 / 0.1, square with and without
+  clearance, 3 and 9 fingers): zero boolean difference both ways and
+  equal face counts; with margin 0 and a clearance the add-in fails (its
+  known bug) and the language's joint comes out whole. The drawer cabinet
+  compiles with its box-jointed drawers in 1.6 s (208 features), every
+  body one solid, no side overlapping its front or back.
 - **Dog bones** (`lang/core/dogbones.py`) [decided by Florian 2026-10-12,
   implemented 2026-10-12]: a router leaves its radius in every inside
   corner, so a part with square corners does not go in; a dog bone takes
@@ -905,8 +911,11 @@ proposed]
   a hole, a well in a recess, a pocket from below, round shapes without),
   a shelf relieving only its notch, and a lapped frame with corner and
   hidden dog bones. The van's floor battens get corner dog bones by the
-  half lap's default. Not yet verified in Fusion against the add-in; the
-  comparison script is queued.
+  half lap's default. Verified in Fusion 2026-10-12 against
+  dog_bones_native on the example's boards without dog bones (the
+  panel's top face, recess floor and bottom face, the shelf's one corner
+  edge, a face of each lapped board): zero boolean difference both ways
+  and equal face counts on all seven parts.
 - Hardware carries its own rules. A drawer slide determines the drawer box width,
   length, position and floor recess, so those numbers never appear in cabinet
   code. [decided; first hardware implemented 2026-10-11]
@@ -1167,7 +1176,10 @@ proposed]
   on the sides' System 32 line). Left out for now: snapping the frame
   holes to an existing System 32 row, Häfele's 1.5 mm spacer plate under
   the panel part (the PF-L's frame holes then 38.5), the hang-in fittings
-  for panels parallel to the frame (SF/EH).
+  for panels parallel to the frame (SF/EH). Verified in Fusion
+  2026-10-12: the example compiles with every bracket body one solid,
+  none intersecting a board or another bracket, and all its pilot and
+  Euro holes in the sides.
 - Open from these [2026-10-12]: the hatch hinge's probe points miss a
   shelf 64 to 82 below the top, which the hardware boxes now catch
   through `no_interference`; the small `_world_box` helpers each hardware
@@ -1923,12 +1935,11 @@ Still to do (listed by Florian 2026-10-11, roughly in his order of weight):
 - ~~**Complete the slides**~~: done 2026-10-12 (Blum drawer-box
   machining; runners as boxes for every model and length).
 - **Joints**: ~~box joints~~ (done 2026-10-12, see "Box joints" under
-  Joints and hardware; the Fusion comparison is pending), the drawer floor's groove as a join,
-  screws through a drawer face into the box front (two boards face to
-  face, which contacts do not cover yet), ~~dog bones on any inside
-  corner~~ (done 2026-10-12, `board.dogbones()` and half laps'
-  `dogbones=`, see "Dog bones" under Joints and hardware; the Fusion
-  comparison with dog_bones_native is pending).
+  Joints and hardware), the drawer floor's groove as a join, ~~dog bones
+  on any inside corner~~ (done 2026-10-12, `board.dogbones()` and half
+  laps' `dogbones=`, see "Dog bones" under Joints and hardware). Screws
+  through a drawer face into the box front were dropped by Florian on
+  2026-10-12 as not important.
 - Arcs from the snapshot's contours (open question 16). (The preview's
   other chamfers are done, 2026-10-11.)
 
