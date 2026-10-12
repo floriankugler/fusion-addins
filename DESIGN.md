@@ -142,6 +142,16 @@ proposed]
   editor. Positions, sides, faces, anchor and depth specs and the layout file
   are all typed; the layout file's shape lives in `layout_types.py` and is the
   contract the emitter is checked against. [decided while implementing]
+  Since the review of 2026-10-12 this covers the calls that used to slip
+  through: a hardware object's `mount` names its parts as typed keywords,
+  which `cab.mount(hardware, ...)` passes on through a ParamSpec, so
+  `cab.mount(hinge, dor=door)` is a type error like a missing `using=`;
+  `pocket()` and `hole()` take `depth=` as a required keyword; a misspelt
+  method on a board is an `Operation` to the checker, which then reports
+  the call. `tests/typing_checks.py` lists what pyright must reject (each
+  line carries a `# type: ignore` that pyright reports once it is no longer
+  needed). `cab.<name>` (parts, child scopes, exports) stays untyped,
+  since an export can be any value; `cab.part(name)` is the typed form.
 - **Two layouts on the page, one object.** A chain in parentheses for a few
   calls; a `with board(...) as side:` block when a part has many operations, so
   the receiver is not repeated. Both build the same part.
@@ -312,7 +322,8 @@ proposed]
   with a box. Room for a fit is stated on the region, not on the operation:
   `side.cut(floor.box().grown(top=0.5, left=0.5))`, so the gap is explicit
   per side and the operation stays a plain cut. A part as a `between()`
-  limit means its nearest face; `part.into(n)` and `part.gap(n)` move it.
+  limit means its face toward the board (see "Placement and references");
+  `part.into(n)` and `part.gap(n)` move it.
   A drawer floor's grooves are the `groove` joint now [2026-10-12], which
   grows the floor into the boards and cuts what it then occupies in each
   (see "Grooves" under Joints and hardware).
@@ -366,7 +377,16 @@ proposed]
   edge they are measured from, `side.inner.front(37).bottom(z)`, and a
   position from the reference algebra may stand in for a distance, which is
   how a hole lines up with another part. Patterns come from `spread()` along
-  one axis of the face.
+  one axis of the face (`pitch=` or `count=`, not both).
+- **Depths** [rules fixed 2026-10-12]: `depth=` is a number, `through` or
+  `to(face, offset)`. Through and `to()` measure the board from the face
+  the operation is on to the opposite face: its thickness from a big face,
+  its length or width from a narrow one, so a hole through a board's front
+  edge runs out at its back edge (the layout used to write the thickness
+  there, and the preview drilled 15 mm where Fusion drilled across). A
+  depth past the opposite face, or `to()` with a positive offset, is an
+  error; `to()` names a face of the board the operation is on, and a face
+  of another part is an error. A V-groove cannot be chamfered.
 - **Shapes name their extents** [decided 2026-10-10]: `rect(depth=60,
   height=100)` says which plane it lies in and reads the same on every face;
   placing it on a face in another plane is an error. `circle(d)` has no
@@ -406,7 +426,7 @@ proposed]
   Anything that does not fit the flat model goes through the escape hatches
   below; that flags the part as no longer plain flat work. [proposed]
 - **Fillets** [implemented 2026-10-12; `lang/core/corners.py`,
-  `Board.fillet`]: `board.fillet(what, r)` rounds corners of a board's
+  `Board.fillet`]: `board.fillet(what, radius)` rounds corners of a board's
   outline, through its thickness, as the router cutting the outline leaves
   them; Florian asked for it the same day ("Not the long edges running
   around the top face of the board, but to change the shape of the
@@ -450,16 +470,31 @@ proposed]
   the whole outline.
 - **Polygons** [proposed]: clip a rectangle's corner; trim by reference planes with
   `between`; walk an outline step by step; a raw point list as escape hatch.
+  `shape.clip(top=380, back=120)` [implemented 2026-10-12, replacing
+  `clip("top.right", top=..., right=...)`] cuts off the corner where the
+  two named edges meet, each value the length of the cut along that edge;
+  a rectangle's edges are named as the frame names its plane, a raw shape's
+  left, right, bottom and top.
 
 ### Placement and references
 
 - A module is a box with six named sides. Boards sit `on` a side or reference and
   are trimmed `between` neighbours, so most parts carry no dimensions of their own.
   `interior.split()` divides space, for example into drawer bays. [proposed]
+  `interior` is the box inside the boards lying on its sides that cover the
+  side's middle (a carcass side, a bottom between the sides, a back); a
+  foot or a cleat in a corner does not count. [2026-10-12]
 - Which side the thickness goes: `.on()` a module side puts the thickness
   inward; `.on()` a bare plane requires a side. Limits missing from `.between()`
   default to the enclosing scope's box. When a part is given as a limit, its
-  nearest face is meant. [proposed]
+  face toward the board is meant: the face toward the other limit on that
+  axis, or toward the middle of the enclosing box when it is the only one.
+  [proposed; the rule for two limits fixed 2026-10-12: it used to judge
+  every part against the box's middle, so a shelf between two partitions
+  on one side of the middle ran through the second one] A box as a limit
+  gives both ends on each in-plane axis, `between(drawer_box)`. A limit that
+  limits neither in-plane axis (a position on the thickness axis, a board
+  parallel to this one) is an error rather than being dropped.
 - The constructor is `board(name, material, shape=None)`; the placement
   modifiers are `.on(ref, toward=)`, `.between(*limits)`, `.center(pos)`,
   `.inset(n)`, `.grain(along)`, `.show(face)`, `.manual()`. `.inset(n)` shrinks
@@ -572,7 +607,10 @@ proposed]
 - The master's axes are the world axes. Which world axis is front, left or
   up is a per-project choice made in the build file with `set_frame(Frame(...))`;
   the planning documents use front = -x, left (driver's side) = -y, top = +z.
-  [decided 2026-10-11]
+  [decided 2026-10-11] Every build starts from that default frame
+  (`registry.reset()` restores it); `world_frame()` reads the frame in use
+  (the language no longer exports a `frame` object, which `set_frame` left
+  stale in a build file that imported it).
 - `master.py` is an index that binds those names and says where exceptions apply.
   Compile fails early on a missing name, a duplicate name, or a sketch with more
   than one chain of curves. [proposed; the errors are implemented, exceptions
@@ -584,9 +622,12 @@ proposed]
   level. The master holds vehicle facts, which is what a hand-made document is
   good at; `master.py` may also hold plain measured numbers where nothing needs
   drawing. [proposed]
-  Spelling [proposed]: inside a module, `cab.export("top", top.top)` publishes a
+  Spelling [proposed]: inside a module, `cab.export("worktop", top.top)` publishes a
   reference; a module function returns its module object, and the importer reads
-  `kitchen.top`. Modules import the build's master index as `van`
+  `kitchen.worktop`. An export cannot take a name that a scope already
+  answers to (a direction or alias such as `top`, an extent, an attribute
+  such as `interior` or `mount`), since `cab.top` would hide it
+  [2026-10-12]. Modules import the build's master index as `van`
   (`from . import master as van`), which is the name the examples use.
 - The snapshot is the compile's only view of the master. It holds planes
   (origin and normal), contours as polylines sampled at 0.1 mm with a closed
@@ -626,7 +667,9 @@ proposed]
     deterministic (rounded to 0.1 micrometre, sorted, one point per line),
     so an unchanged master gives an unchanged file.
 - Reading it [implemented 2026-10-11]: `van = master("snapshot.json")` in
-  the build file (a relative path starts at the calling file's directory),
+  the build file (a relative path starts at the calling file's directory,
+  or at that of the file given as `relative_to=`, for a helper that reads
+  the master on its callers' behalf),
   then `van.plane(name)`, `van.box(name)`, `van.param(name)` (mm for
   lengths, degrees for angles), `van.contour(name)` (`lang/master.py`). A
   plane is a `Plane` that acts as a position (`on`, `between`, `spread`,
@@ -1516,7 +1559,15 @@ below is proposed]
 
 - The preview is a second consumer of the layout file. A mesher turns parts into
   triangles, a browser page shows them. No kernel, no Fusion, so the time does not
-  grow with the module.
+  grow with the module. The mesher reads the layout through the emitter
+  plan's own readers (`lang.emit.plan`: `LayoutFrame`, `PartFrame`,
+  `named_ops`, `chamfer_target`), so both see the same faces, depths and
+  chamfer targets [2026-10-12; they had drifted apart: a through hole into
+  a narrow face and chamfers on narrow-face operations came out
+  differently]; `tests/test_plan_and_mesh.py` checks every operation kind
+  against hand-worked volumes. A mesh boolean that fails leaves the board
+  uncut and says so (`preview: ...` in the build's output) instead of
+  hiding it.
 - Shown: boards as extruded polygons in van coordinates; through cuts exact, since
   they are in the outline; holes and pockets exact through mesh booleans
   (manifold); chamfers too [implemented; all kinds since 2026-10-11]: a
@@ -1565,7 +1616,9 @@ below is proposed]
   of them, and a stale design builds when a page shows it. The folder is
   rescanned on every change, so new build files appear without a restart.
   A build goes to a scratch directory and moves in when it went through,
-  so a failed one shows its log and leaves the last good scene. The log
+  so a failed one shows its log and leaves the last good scene; a build
+  still running after 120 s is stopped and counts as failed, so an endless
+  loop in a build file holds up no other design. The log
   holds the error and the lines of the build files it passed through
   (`examples/van.py:39: bottom.join(...)`), not runpy's or the language's
   frames; a Python error raised inside the language also names where
@@ -1604,7 +1657,7 @@ with board("left", ply15, rect(depth=500, height=720)) as side:
     for z in spread(side.bottom + 100, side.top - 100, pitch=32):
         side.hole(d=5, depth=10, at=side.inner.front(37).bottom(z))   # a shelf-pin column
 
-shape = rect(depth=500, height=720).clip("top.back", top=380, back=120)   # polygon
+shape = rect(depth=500, height=720).clip(top=380, back=120)   # the top back corner cut off, 380 x 120
 ```
 
 Placement modifiers chain freely; an operation that names a point or an
@@ -1928,7 +1981,10 @@ Found on the way: a through hole "to" the opposite face needs the
 `directionHint` argument or Fusion reports no target body; a 128-segment
 polyline circle chamfers fine; an edge can only be chamfered once, so a
 build must not let an outline chamfer and an edge or cut chamfer share an
-edge.
+edge. A feature Fusion refuses does not stop the compile [2026-10-12]: the
+part goes on without it, the other holes of a batch are still drilled,
+and the report lists it under problems, apart from the build's own checks,
+so the document shows everything that worked.
 
 **Arcs** [implemented 2026-10-11]: layout shapes stay polygons, since all
 of the layout step's 2D work is shapely, but the emitter plan recovers the
