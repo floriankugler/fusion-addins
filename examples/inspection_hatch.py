@@ -32,4 +32,4 @@ with module("floor", Box.from_size(width=800, depth=1200, height=60)) as f:
     # the catches on the opening's left and right edges, two each, screwed
     # to the underside (the faces that are not shown)
     f.mount(catch, opening=panel.opening, edge=panel.opening.left, hatch=hatch)
-    check(fits_sheet)
+    check(no_interference, fits_sheet)

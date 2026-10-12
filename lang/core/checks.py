@@ -22,10 +22,12 @@ if TYPE_CHECKING:
 def no_interference(scope: Scope) -> list[str]:
     """Pairs of parts in the scope (and below) whose material overlaps. A
     part's material is its outline through its thickness minus its pockets,
-    so a floor sitting in a groove does not count. Perpendicular parts must
-    also pass through each other (`crossing`), so two lapped battens, each
-    filling half of the box they share, do not count either. Pockets in
-    narrow faces are not taken into account yet."""
+    so a floor sitting in a groove does not count. Parallel parts must have
+    material in the same place, so a hatch in a rounded opening, whose box
+    reaches into the opening's corners, does not count. Perpendicular parts
+    must also pass through each other (`crossing`), so two lapped battens,
+    each filling half of the box they share, do not count either. Pockets
+    in narrow faces are not taken into account yet."""
     parts = scope.all_parts()
     problems: list[str] = []
     for i, a in enumerate(parts):
@@ -33,18 +35,26 @@ def no_interference(scope: Scope) -> list[str]:
             if not a.box().overlaps(b.box()):
                 continue
             region = a.box().intersection(b.box())
-            if not (_has_material(a, region) and _has_material(b, region)):
-                continue
-            if a.t_axis != b.t_axis and crossing(a, b) is None:
+            if a.t_axis == b.t_axis:
+                if _material(a, region).intersection(_material(b, region)).area <= _TOLERANCE:
+                    continue
+            elif not (_has_material(a, region) and _has_material(b, region)) or crossing(a, b) is None:
                 continue
             problems.append(f"{a.path} overlaps {b.path}")
     return problems
 
 
-def _has_material(part: Board, region: Box, tolerance: float = 1e-6) -> bool:
-    """Whether the part's material reaches into `region`: the outline
-    within it, minus the pockets deep enough to span the region's range
-    along the thickness axis."""
+_TOLERANCE = 1e-6
+
+
+def _has_material(part: Board, region: Box) -> bool:
+    return _material(part, region).area > _TOLERANCE
+
+
+def _material(part: Board, region: Box) -> Shape:
+    """The part's material inside `region`, seen along its thickness: the
+    outline within the region, minus the pockets deep enough to span the
+    region's range along the thickness axis."""
     b = part.box()
     t, u, v = part.t_axis, part.u_axis, part.v_axis
     window = Shape(shapely_box(region.lo[u], region.lo[v], region.hi[u], region.hi[v]))
@@ -55,9 +65,9 @@ def _has_material(part: Board, region: Box, tolerance: float = 1e-6) -> bool:
             continue
         face = directions.frame.direction(op.face)
         band = (b.hi[t] - op.depth, b.hi[t]) if face.sign > 0 else (b.lo[t], b.lo[t] + op.depth)
-        if band[0] <= t0 + tolerance and t1 <= band[1] + tolerance:
+        if band[0] <= t0 + _TOLERANCE and t1 <= band[1] + _TOLERANCE:
             material = material.difference(op.shape)
-    return material.area > tolerance
+    return material
 
 
 def fits_sheet(scope: Scope) -> list[str]:

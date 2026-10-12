@@ -436,6 +436,23 @@ def test_interference_ignores_overlap_inside_a_pocket():
     assert no_interference(m2) == ["box2.side overlaps box2.floor"]
 
 
+def test_interference_of_parallel_parts_follows_their_outlines():
+    """A hatch with rounded corners in a rounded opening, 3 mm clear all
+    round: the boxes overlap in the corners, the material does not. A
+    square hatch of the same size hits the panel in the corners."""
+    for name, hatch_shape, expected in (("round", rect(width=394, depth=294).rounded(17), []),
+                                        ("square", rect(width=394, depth=294), ["square.panel overlaps square.hatch"])):
+        with module(name, Box.from_size(width=800, depth=600, height=15)) as m:
+            panel = board("panel", ply15).on(m.bottom)
+            panel.cut(rect(width=400, depth=300).rounded(20), at=panel.top.center, name="opening")
+            limits: list[Pos] = []
+            for a, b in ((panel.opening.front, panel.opening.back), (panel.opening.left, panel.opening.right)):
+                lo, hi = sorted((a.value, b.value))
+                limits += [Pos(a.axis, lo + 3), Pos(a.axis, hi - 3)]
+            board("hatch", ply15, hatch_shape).on(m.bottom).between(*limits)
+        assert no_interference(m) == expected
+
+
 # -- the face to machine from ------------------------------------------------------
 
 def test_the_machine_face_is_the_one_with_the_operations():
