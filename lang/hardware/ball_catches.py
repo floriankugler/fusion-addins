@@ -37,10 +37,10 @@ edge or less than a holder's width from its neighbour, a holder without
 its 28 x 15 mm of panel beside the opening or a ball without its 14 x 15
 mm of hatch beside the slot, and pilot holes as deep as a board is thick.
 
-The catches are placed too, one body of boxes per catch standing out of
-the catch face (`CATCH_SHAPES`, from Ganter's catalogue drawing): the
-holder on the panel, its jaw reaching over the slot, and the ball part on
-the hatch, in the jaw.
+The catches are placed too, one body of boxes per catch (`CATCH_SHAPES`,
+measured on Ganter's CAD model): the holder on the panel with its stop
+webs down the opening's edge, its jaw reaching over the slot, and the
+ball part on the hatch, in the jaw.
 
 Sources: Ganter GN 450-28-14 catalog drawing via `lib.ball_catches`
 (holder hole 8.4 mm out, ball hole 9.4 mm in, slot 2.5 to 3.5 mm, 15 mm
@@ -168,38 +168,48 @@ class _Plan:
 class PartBox:
     """One part of a catch as a box, mm: `width` along the edge, centred on
     the catch; `across` square to the edge, from the opening's contour,
-    outward over the panel positive; `height` out of the catch face."""
+    outward over the panel positive; `rise` out of the catch face,
+    negative into the slot."""
     width: float
     across: tuple[float, float]
-    height: float
+    rise: tuple[float, float]
 
 
 @dataclass(frozen=True)
 class CatchShape:
-    """A catch, closed, as three boxes standing out of the catch face, for
-    the layout's `hardware`: the space it takes, not its detail. The holder
-    sits on the panel beside the opening, its jaw reaches over the slot,
-    and the ball part sits on the hatch with its ball in the jaw, so the
-    boxes overlap and a catch is one body."""
+    """A catch, closed, as boxes, for the layout's `hardware`: the space it
+    takes, not its detail. The holder sits on the panel beside the opening,
+    its stop webs reach down the opening's edge into the slot, its jaw
+    reaches over the slot, and the ball part sits on the hatch with its
+    ball in the jaw, so the boxes join and a catch is one body. The holder
+    is placed by its screw, the ball part by its own, so the ball sits
+    where the drilled holes put it."""
     #: On the panel, beside the opening.
     holder: PartBox
+    #: The holder's stop webs against the opening's edge, in the slot.
+    webs: PartBox
     #: The holder's jaw, over the slot and the hatch's edge.
     jaw: PartBox
     #: On the hatch, its ball in the jaw.
     ball: PartBox
 
+    def parts(self) -> tuple[PartBox, ...]:
+        return (self.holder, self.webs, self.jaw, self.ball)
 
-#: Per catch model. GN 450-28-14 from Ganter's catalogue drawing
-#: (ganternorm.com, GN 450 sketch, 2026-10-12; no CAD download): the holder
-#: b = 28 wide and 16 deep, its screw 8.4 from its stop webs on the
-#: opening's edge, 16 high; the jaw between the stop ridges 18.5 wide,
-#: reaching 11 from the stop webs; the ball part d = 14 across its ball on
-#: a 13.5 high mount, its screw 9.4 inside the contour.
+
+#: Per catch model. GN 450-28-14 measured on Ganter's CAD model (STEP,
+#: 2026-10-12): the holder 28 wide and 16 high, its screw 8.4 from the stop
+#: webs' face on the opening's edge (as the drilling data has it); the
+#: webs 11 deep into the slot and 2.1 across; the jaw 18.8 wide, from the
+#: webs to 18.5 inside the contour, 1 above the hatch's face; the ball part
+#: 14 across its ball and 13.5 high, centred on its screw, here 9.4 inside
+#: the contour (the model's assembly has it at 10.15).
 CATCH_SHAPES: dict[str, CatchShape] = {
     "GN 450": CatchShape(
-        holder=PartBox(width=28.0, across=(0.0, 16.0), height=16.0),
-        jaw=PartBox(width=18.5, across=(-11.0, 0.0), height=16.0),
-        ball=PartBox(width=14.0, across=(-16.4, -2.4), height=13.5),
+        holder=PartBox(width=28.0, across=(-2.1, 15.5), rise=(0.0, 16.0)),
+        webs=PartBox(width=28.0, across=(-2.1, 0.0), rise=(-11.0, 0.0)),
+        jaw=PartBox(width=18.8, across=(-18.5, -2.1), rise=(1.0, 15.0)),
+        ball=PartBox(width=14.0, across=(-16.4, -2.4), rise=(0.0, 13.5)),
     ),
 }
 
@@ -592,23 +602,24 @@ class BallCatch:
         scope.place_hardware(name, bodies)
 
     def _catch_body(self, plan: _Plan, side: _Straight, c: _Catch, gap: float) -> list[BoxDict]:
-        """A catch as the boxes of its `CatchShape`: the holder and its jaw
-        on the panel's catch face, the ball part on the hatch's face, all
-        measured from the opening's contour. On an edge at an angle to the
-        axes each box is the axis-aligned box around it."""
+        """A catch as the boxes of its `CatchShape`: the holder, its webs
+        and its jaw from the panel's catch face, the ball part from the
+        hatch's face, all measured from the opening's contour. On an edge at
+        an angle to the axes each box is the axis-aligned box around it."""
         shape = self.shape
         # (width, from and to across the edge, outward from the contour; the face; height)
-        parts = [(part.width, part.across[0], part.across[1], face, part.height)
-                 for part, face in ((shape.holder, plan.face), (shape.jaw, plan.face), (shape.ball, plan.hatch_face))]
+        parts = [(part.width, part.across[0], part.across[1], face, part.rise)
+                 for part, face in ((shape.holder, plan.face), (shape.webs, plan.face), (shape.jaw, plan.face),
+                                    (shape.ball, plan.hatch_face))]
         boxes: list[BoxDict] = []
-        for width, across0, across1, face, height in parts:
+        for width, across0, across1, face, (rise0, rise1) in parts:
             corners = [side.at(c.distance + s * width / 2, across) for s in (-1, 1) for across in (across0, across1)]
             lo: dict[str, float] = {}
             hi: dict[str, float] = {}
             for i, axis in enumerate((plan.panel.u_axis, plan.panel.v_axis)):
                 lo[axis], hi[axis] = min(p[i] for p in corners), max(p[i] for p in corners)
-            out = face.value + face.direction.sign * height
-            lo[face.axis], hi[face.axis] = min(face.value, out), max(face.value, out)
+            ends = [face.value + face.direction.sign * rise for rise in (rise0, rise1)]
+            lo[face.axis], hi[face.axis] = min(ends), max(ends)
             boxes.append({"min": [lo[a] for a in AXES], "max": [hi[a] for a in AXES]})
         return boxes
 

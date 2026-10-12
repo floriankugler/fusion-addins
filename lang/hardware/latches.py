@@ -45,7 +45,7 @@ Mounted, a latch also places itself, closed, as boxes: the part on the
 door and its strike on the carcass board, which interlock when closed, as
 one body per latch (`latch_1`, ...). Their sizes are one table,
 `LATCH_SHAPES`, separate from the drilling data, measured from the
-makers' drawings and Sugatsune's CAD model. `reach` is how far the part
+latches' drawings and Sugatsune's CAD model. `reach` is how far the part
 behind the door's front reaches from the carcass face, which a drawer box
 behind a latched face keeps clear of.
 
@@ -116,11 +116,14 @@ class LatchShape:
 #: Per latch, closed (measured 2026-10-12). Everlock: from the maker's
 #: installation drawing (everlock.de, "Einbausituation"; body 40 wide, 32
 #: deep, 60 above the carcass face; mounting wings 52 between their screw
-#: columns; strike under the body, its screws 25 behind the door). Pull
-#: Lock 44: Southco M1-15-61 drawing J-M1-15-61 (bezel 44 across and 2.5
-#: proud, housing 38 across and 21 deep, backing plate 45.5 across and 10
-#: behind the front, pawl to 33 behind the front, keeper an L of 1.7 mm
-#: steel with its lip 23 behind the front and its screws 27 behind it); the
+#: columns; strike under the body, its screws 25 behind the door); without
+#: the aluminium inset, which needs a 30 mm hole, so nothing on the front.
+#: Pull Lock 44: from the lock's drawing (Florian, 2026-10-12; bezel 44
+#: across and 2.5 proud, for panels 1 to 10 thick, which the counterbore
+#: leaves; housing 38 across and 20.4 deep behind the front, clamp plate
+#: 46.8 across behind the 10 mm panel, pawl to 33 behind the front; keeper
+#: an L of 1.5 mm steel, 32.5 wide, its screw slots 19 apart, the plate from
+#: 8.6 in front of the slots to 7.5 behind them, the lip 12.5 long); the
 #: parts in the door's holes are squares inside them, so that no box reaches
 #: into the door. LL-66: Sugatsune's CAD model LL-66_0.step (base 66 x 18.5
 #: x 8.5, mechanism, counter plate 30 x 10.6 x 17), measured in its frame of
@@ -131,20 +134,17 @@ LATCH_SHAPES: dict[str, LatchShape] = {
               ((-32.0, 32.0), (16.6, 50.7), (0.0, 3.0)),        # mounting wings
               ((-6.0, 6.0), (0.0, 10.0), (17.0, 27.0))),        # bolt, rough width
         strike=(((-20.0, 20.0), (0.0, 9.0), (9.0, 34.0)),),
-        front=(((-18.0, 18.0), (12.0, 48.0), (-2.7, 0.0)),),    # bezel on the front
     ),
     "Pull Lock 44": LatchShape(
         door=(),
-        # The keeper by its screws, the drilled pair (29 behind the door's
-        # inner face, the add-in's number): its leg on the carcass face 7 in
-        # front of the screws to 9.2 behind them, its lip 7 to 4 in front of
-        # them. Southco puts the screws 27 behind the door's front face.
-        strike=(((-14.0, 14.0), (0.0, 1.7), (22.0, 38.2)),      # leg, rough width
-                ((-14.0, 14.0), (0.0, 13.8), (22.0, 25.0))),    # lip
+        # The keeper by its screws, the drilled pair 29 behind the door's
+        # inner face: its plate on the carcass face, its lip toward the latch.
+        strike=(((-16.25, 16.25), (0.0, 1.5), (20.4, 36.5)),    # plate
+                ((-16.25, 16.25), (0.0, 12.5), (20.4, 21.9))),  # lip
         front=(((-22.0, 22.0), (12.0, 56.0), (-2.5, 0.0)),      # bezel, 34 below the carcass face
-               ((-13.4, 13.4), (20.6, 47.4), (0.0, 21.0)),      # housing, a square in the 38.1 hole
-               ((-16.9, 16.9), (17.1, 50.9), (10.0, 11.1)),     # backing plate, a square in the 48 counterbore
-               ((-8.0, 8.0), (8.3, 24.2), (21.0, 33.0))),       # pawl, rough width
+               ((-13.4, 13.4), (20.6, 47.4), (0.0, 20.4)),      # housing, a square in the 38.1 hole
+               ((-16.9, 16.9), (17.1, 50.9), (10.0, 11.5)),     # clamp plate, a square in the 48 counterbore
+               ((-8.0, 8.0), (7.5, 24.0), (20.4, 33.0))),       # pawl, rough width
     ),
     "LL-66": LatchShape(
         door=(((-33.0, 33.0), (2.6, 21.1), (0.0, 8.5)),         # base

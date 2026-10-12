@@ -40,7 +40,7 @@ BOX = Box.from_size(width=800, depth=1000, height=100)
 #: The placeholder boxes; the expectations below follow them, so measured
 #: numbers only change this table.
 SHAPE = CATCH_SHAPES["GN 450"]
-HOLDER, JAW, BALL = SHAPE.holder, SHAPE.jaw, SHAPE.ball
+HOLDER, WEBS, JAW, BALL = SHAPE.holder, SHAPE.webs, SHAPE.jaw, SHAPE.ball
 
 
 @pytest.fixture(autouse=True)
@@ -351,15 +351,16 @@ def test_a_hatch_in_an_upright_panel():
     assert hatch.box().lo["y"] == 0 and hatch.box().hi["y"] == 15
     (item,) = cab.hardware
     for body in item["bodies"]:
-        assert [b["min"][1] for b in body["boxes"]] == [15, 15, 15]
-        assert [b["max"][1] for b in body["boxes"]] == [15 + HOLDER.height, 15 + JAW.height, 15 + BALL.height]
+        assert [b["min"][1] for b in body["boxes"]] == [15 + part.rise[0] for part in SHAPE.parts()]
+        assert [b["max"][1] for b in body["boxes"]] == [15 + part.rise[1] for part in SHAPE.parts()]
 
 
 def test_the_catches_are_placed_as_boxes():
-    """Each catch is a body of boxes standing out of the catch face (z = 0
+    """Each catch is a body of boxes from the catch face (z = 0, out of it
     down), measured from the opening's contour: the holder on the panel
-    outward, its jaw over the 3 mm slot and the hatch's edge, the ball part
-    on the hatch inward, each centred on the catch along the edge."""
+    outward, its webs up into the 3 mm slot, its jaw over the slot and the
+    hatch's edge, the ball part on the hatch inward, each centred on the
+    catch along the edge."""
     f, panel, hatch = _floor()
     (item,) = f.hardware
     assert item["path"] == "floor.hatch_catches" and item["kind"] == "hardware"
@@ -368,21 +369,22 @@ def test_the_catches_are_placed_as_boxes():
 
     def expected(x: float, contour: float, outward: int) -> list[dict[str, list[float]]]:
         out: list[dict[str, list[float]]] = []
-        for part in (HOLDER, JAW, BALL):
+        for part in SHAPE.parts():
             y0, y1 = sorted(contour + outward * a for a in part.across)
-            out.append({"min": [x - part.width / 2, y0, -part.height], "max": [x + part.width / 2, y1, 0]})
+            out.append({"min": [x - part.width / 2, y0, -part.rise[1]], "max": [x + part.width / 2, y1, -part.rise[0]]})
         return out
     # catch 1 at x 410 on the left edge (y = 200, the panel at y < 200),
     # catch 4 at x 590 on the right edge (y = 600, the panel at y > 600)
     assert bodies["catch_1"] == expected(410, 200, -1)
     assert bodies["catch_4"] == expected(590, 600, 1)
-    # under the boards, touching them; the holder and the ball part apart,
-    # the jaw overlapping both, so each body is one piece
+    # under the boards or in the slot, never in their material; the holder
+    # and the ball part apart, the jaw over the ball, the webs and the jaw
+    # against the holder, so each body is one piece
     for boxes in bodies.values():
-        for b in boxes:
-            box = Box(dict(zip("xyz", b["min"])), dict(zip("xyz", b["max"])))  # type: ignore[arg-type]
+        holder, webs, jaw, ball = (Box(dict(zip("xyz", b["min"])), dict(zip("xyz", b["max"]))) for b in boxes)  # type: ignore[arg-type]
+        for box in (holder, jaw, ball):
             assert not any(box.overlaps(p.box()) for p in (panel, hatch))
-        holder, jaw, ball = (Box(dict(zip("xyz", b["min"])), dict(zip("xyz", b["max"]))) for b in boxes)  # type: ignore[arg-type]
+        assert webs.overlaps(panel.box())                                   # in the slot, inside the panel's box
         assert jaw.overlaps(ball) and not holder.overlaps(ball)
         assert holder.hi["y"] == jaw.lo["y"] or holder.lo["y"] == jaw.hi["y"]
     assert no_interference(f) == []
@@ -403,8 +405,8 @@ def test_layout_and_emit_plan():
     (item,) = plan.hardware
     assert (item.path, item.component, item.name) == ("floor.hatch_catches", ("floor",), "hatch_catches")
     assert [b.name for b in item.bodies] == ["catch_1", "catch_2", "catch_3", "catch_4"]
-    assert item.bodies[0].boxes[0] == ((410 - HOLDER.width / 2, 200 - HOLDER.across[1], -HOLDER.height),
-                                       (410 + HOLDER.width / 2, 200 - HOLDER.across[0], 0))
+    assert item.bodies[0].boxes[0] == ((410 - HOLDER.width / 2, 200 - HOLDER.across[1], -HOLDER.rise[1]),
+                                       (410 + HOLDER.width / 2, 200 - HOLDER.across[0], -HOLDER.rise[0]))
     assert plan.problems == []
     # the emitter draws the hatch's corners as arcs of 17, like the opening's of 20
     hatch = next(p for p in plan.parts if p.path == "floor.hatch")
@@ -430,12 +432,16 @@ def test_preview_draws_the_catches():
     boxes = item["bodies"][0]["boxes"]
     assert mesh.bounds.round(4).tolist() == [[min(b["min"][i] for b in boxes) for i in range(3)],
                                              [max(b["max"][i] for b in boxes) for i in range(3)]]
-    # the union of its three boxes: the jaw overlaps the ball part
+    # the union of its boxes: the webs overlap the holder, the jaw the ball part
     def volume(part: Any) -> float:
-        return part.width * (part.across[1] - part.across[0]) * part.height
-    shared = (min(JAW.width, BALL.width) * (min(JAW.across[1], BALL.across[1]) - max(JAW.across[0], BALL.across[0]))
-              * min(JAW.height, BALL.height))
-    assert math.isclose(mesh.volume, volume(HOLDER) + volume(JAW) + volume(BALL) - shared, rel_tol=1e-6)
+        return part.width * (part.across[1] - part.across[0]) * (part.rise[1] - part.rise[0])
+
+    def shared(a: Any, b: Any) -> float:
+        spans = [(min(a.width, b.width), 0.0)] + [
+            (min(x[1], y[1]) - max(x[0], y[0]), 0.0) for x, y in ((a.across, b.across), (a.rise, b.rise))]
+        return math.prod(max(0.0, d) for d, _ in spans)
+    union = sum(volume(p) for p in SHAPE.parts()) - shared(HOLDER, WEBS) - shared(JAW, BALL)
+    assert math.isclose(mesh.volume, union, rel_tol=1e-6)
     assert "floor.hatch" in scene.geometry and "floor.panel" in scene.geometry
 
 
@@ -446,5 +452,9 @@ def test_the_example_builds(tmp_path: Path):
     (item,) = module_["hardware"]
     assert len(item["bodies"]) == 4
     hardware: HardwareLayout = item
-    # the catches hang under the floor panel (z 45 to 60)
-    assert all(box["max"][2] == 45 and box["min"][2] < 45 for b in hardware["bodies"] for box in b["boxes"])
+    # the catches hang under the floor panel (z 45 to 60), the holder's
+    # webs reaching 11 up into the slot
+    for body in hardware["bodies"]:
+        holder, webs, jaw, ball = body["boxes"]
+        assert all(box["max"][2] == 45 and box["min"][2] < 45 for box in (holder, ball))
+        assert jaw["max"][2] == 44 and (webs["min"][2], webs["max"][2]) == (45, 56)

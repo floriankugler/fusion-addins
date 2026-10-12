@@ -900,9 +900,9 @@ proposed]
   [...])` takes points instead. Checked as in the add-in: the hatch under
   every ball, the slot within range, 14 mm to the end of a straight edge
   and 28 between catches, mounting surface for holder and ball part,
-  pilots shallower than the boards. One body per catch (holder, its jaw
-  over the slot, ball part; `CATCH_SHAPES`, from Ganter's catalogue
-  drawing; Ganter offers CAD only on request).
+  pilots shallower than the boards. One body per catch (holder, its stop
+  webs down the opening's edge into the slot, its jaw over the slot, ball
+  part; `CATCH_SHAPES`, measured on Ganter's CAD model).
   `examples/inspection_hatch.py`: a floor panel on battens with a rounded
   opening and its hatch.
 - **Door latches** (`lang/hardware/latches.py`): `DoorLatch(model,
@@ -924,25 +924,24 @@ proposed]
   spacing, an edge no longer than twice `end=`, a carcass board parallel
   to the door, holes off their face. Each latch with its strike is one
   body (they interlock when closed) of boxes (`LATCH_SHAPES`): Everlock
-  from the maker's installation drawing, the Pull Lock (Southco
-  M1-15-61) from its drawing J-M1-15-61, its parts in the door's holes
-  as squares inside them and those it references to the door's front
-  measured from it, the LL-66 from Sugatsune's CAD model; `latch.reach`
+  from the maker's installation drawing, without the aluminium inset
+  (which needs a 30 mm hole; the 25 mm hole is for the lock without it,
+  Florian 2026-10-12), the Pull Lock from its drawing (bezel 44, panels
+  1 to 10 thick, which the counterbore leaves), its parts in the door's
+  holes as squares inside them and its lock measured from the door's
+  front, the keeper by its screws, 29 behind the door's inner face
+  (confirmed by Florian 2026-10-12), the LL-66 from Sugatsune's CAD
+  model; `latch.reach`
   is how far the part behind the door's front reaches from the carcass
   face (Everlock 60, Pull Lock 50.9, LL-66 24.6), which a drawer box
   behind a latched face stays clear of. `examples/door_latch.py`: an inset door with two pull
   locks and two latched drawers.
-- Open from these [2026-10-12]: the drawings disagree with door_latch_native
-  in two places, both kept as the add-in drills for now. Southco puts the
-  Pull Lock's keeper screws 27 behind the door's front face (its lip 23,
-  the pawl to 33), the add-in 29 behind the door's inner face, which on a
-  counterbored 20 mm door is 49 from the front, past the pawl's reach;
-  the keeper's boxes follow the drilled screws, so the model shows the
-  gap. Everlock's drawing and drilling template take a 30 mm finger hole
-  (30 mm Forstner bit), the add-in 25. The hatch hinge's probe points miss
-  a shelf 64 to 82 below the top; the hardware boxes now catch it through
-  `no_interference`. The small `_world_box` helpers each hardware module
-  carries could move to one place.
+- Open from these [2026-10-12]: the hatch hinge's probe points miss a
+  shelf 64 to 82 below the top, which the hardware boxes now catch
+  through `no_interference`; the small `_world_box` helpers each hardware
+  module carries could move to one place. Decided by Florian: the hinge's
+  end margin is at least 27 (the add-in's dialog), the Everlock hole stays
+  25, the Pull Lock keeper's screws stay 29 behind the door's inner face.
 - Not covered by an add-in today, as far as seen: a groove for drawer floors
   (done with `side.cut(floor.box().grown(...))`), and the drawer-box
   dimensions per slide model (box width, length, recess, the coupling and
@@ -1660,9 +1659,7 @@ Still to do (listed by Florian 2026-10-11, roughly in his order of weight):
   angle to the board's edges.
 - ~~**Hardware** beyond the slides~~: done 2026-10-12 (concealed
   hinges, hatch hinges, ball catches, door latches; see "Joints and
-  hardware"). Open: the Pull Lock keeper depth and the Everlock finger
-  hole, where the makers' drawings disagree with the add-in, and
-  whatever else the van needs.
+  hardware"). Open: whatever else the van needs.
 - ~~**Complete the slides**~~: done 2026-10-12 (Blum drawer-box
   machining; runners as boxes for every model and length).
 - **Joints**: box joints (box_joint), the drawer floor's groove as a join,
