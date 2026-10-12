@@ -59,6 +59,7 @@ def test_the_examples_are_build_files():
     files, _ = scan(EXAMPLES)
     names = {path.stem for path in files}
     assert {"drawer_cabinet", "van", "shelf", "cutouts"} <= names
+    assert "stock" not in names          # a library the build files import
 
 
 def test_a_save_makes_its_own_design_stale_and_a_shared_module_all(tmp_path: Path):
