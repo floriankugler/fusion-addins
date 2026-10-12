@@ -5,11 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Layout preview</title>
 <style>
-  :root { --bg: #f4f2ee; --panel: #ffffff; --text: #222; --muted: #777; --accent: #c0502c; }
+  :root { --bg: #f4f2ee; --panel: #ffffff; --text: #222; --muted: #777; --accent: #c0502c; --side: 300px; }
   html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
     font: 13px/1.4 -apple-system, system-ui, sans-serif; }
-  #view { position: absolute; inset: 0 300px 0 0; }
-  #side { position: absolute; top: 0; right: 0; bottom: 0; width: 300px; background: var(--panel);
+  #view { position: absolute; inset: 0 var(--side) 0 0; }
+  #side { position: absolute; top: 0; right: 0; bottom: 0; width: var(--side); background: var(--panel);
     border-left: 1px solid #ddd; overflow: auto; padding: 12px 14px; box-sizing: border-box; }
   h1 { font-size: 14px; margin: 0 0 8px; }
   h2 { font-size: 12px; margin: 14px 0 6px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
@@ -36,7 +36,7 @@
   input[type=range] { flex: 1; }
   .keys { color: var(--muted); font-size: 12px; }
   .keys div { display: flex; justify-content: space-between; padding: 1px 0; }
-  .labels { position: absolute; inset: 0 300px 0 0; pointer-events: none; }
+  .labels { position: absolute; inset: 0 var(--side) 0 0; pointer-events: none; }
   .mlabel { font: 11px/1.2 ui-monospace, Menlo, monospace; color: #2f5f8f; background: rgba(255,255,255,.72);
     padding: 0 3px; border-radius: 2px; white-space: nowrap; }
   .mlabel.contour { color: #1f5a96; }
@@ -138,6 +138,8 @@ import { Line2 } from 'three/addons/lines/Line2.js';
 import { LineGeometry } from 'three/addons/lines/LineGeometry.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { attachSpaceMouse } from './spacemouse.js';
+import { AXIS, ISO, UP, share, disposeTree, clearGroup } from './scene-utils.js';
+import { layoutVersionProblem, setHidden as markHidden, toggleHides, isolate as isolatePaths, LoadTracker } from './state.js';
 
 const $ = (id) => document.getElementById(id);
 const view = $('view');
@@ -153,7 +155,7 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0xf4f2ee);
 // z is up in the layout; three.js defaults to y up, so we set the camera's up.
 const camera = new THREE.PerspectiveCamera(40, 1, 1, 100000);
-camera.up.set(0, 0, 1);
+camera.up.set(...UP);
 camera.position.set(-1500, -1800, 1200);
 const controls = new OrbitControls(camera, renderer.domElement);
 scene.add(new THREE.HemisphereLight(0xffffff, 0x888877, 1.1));
@@ -198,30 +200,32 @@ let root = null;
 const caps = new THREE.Group();          // one striped cap per part, drawn where the section cuts it
 scene.add(caps);
 let layout = null;
-let version = null;
+let version = null;             // the shown design's latest version, as the server reported it
 let bounds = null;              // Box3 of the whole model, for the section slider
 const hidden = new Set();
 let selectedPath = null;
 let mode = 'shaded';
 
+// The materials and geometries below serve every scene the page loads, so
+// a rebuild's disposeTree() keeps them (share).
 // Edge materials: one that respects depth, one drawn through everything.
-const edgeFront = new THREE.LineBasicMaterial({ color: 0x3a3a3a, transparent: true, opacity: 0.35 });
-const edgeThrough = new THREE.LineBasicMaterial({ color: 0x3a3a3a, transparent: true, opacity: 0.16, depthTest: false });
+const edgeFront = share(new THREE.LineBasicMaterial({ color: 0x3a3a3a, transparent: true, opacity: 0.35 }));
+const edgeThrough = share(new THREE.LineBasicMaterial({ color: 0x3a3a3a, transparent: true, opacity: 0.16, depthTest: false }));
 // Fat lines for the section borders: width in screen pixels, so they stay bold at any zoom.
-const outlineMaterial = new LineMaterial({ color: 0x000000, linewidth: 2.5, worldUnits: false });
+const outlineMaterial = share(new LineMaterial({ color: 0x000000, linewidth: 2.5, worldUnits: false }));
 
 // The master around the modules: placeholder boxes as ghosts (a body that is
 // not a cuboid, only its bounding box, in a warmer tone) and contours as lines.
 const masterGroup = new THREE.Group();
 scene.add(masterGroup);
-const masterShow = { boxes: true, contours: true, names: true };
-const ghostFill = new THREE.MeshBasicMaterial({ color: 0x4f7cac, transparent: true, opacity: 0.07,
-  depthWrite: false, side: THREE.DoubleSide });
-const ghostFillBounds = new THREE.MeshBasicMaterial({ color: 0xb87a45, transparent: true, opacity: 0.07,
-  depthWrite: false, side: THREE.DoubleSide });
-const ghostEdge = new THREE.LineBasicMaterial({ color: 0x4f7cac, transparent: true, opacity: 0.55 });
-const ghostEdgeBounds = new THREE.LineBasicMaterial({ color: 0xb87a45, transparent: true, opacity: 0.55 });
-const contourMaterial = new LineMaterial({ color: 0x1f6fc0, linewidth: 2, worldUnits: false });
+const masterShow = { boxes: true, contours: true, names: true, ...stored('master', {}) };
+const ghostFill = share(new THREE.MeshBasicMaterial({ color: 0x4f7cac, transparent: true, opacity: 0.07,
+  depthWrite: false, side: THREE.DoubleSide }));
+const ghostFillBounds = share(new THREE.MeshBasicMaterial({ color: 0xb87a45, transparent: true, opacity: 0.07,
+  depthWrite: false, side: THREE.DoubleSide }));
+const ghostEdge = share(new THREE.LineBasicMaterial({ color: 0x4f7cac, transparent: true, opacity: 0.55 }));
+const ghostEdgeBounds = share(new THREE.LineBasicMaterial({ color: 0xb87a45, transparent: true, opacity: 0.55 }));
+const contourMaterial = share(new LineMaterial({ color: 0x1f6fc0, linewidth: 2, worldUnits: false }));
 
 function resize() {
   const w = view.clientWidth, h = view.clientHeight;
@@ -243,8 +247,8 @@ function fit() {
   const size = box.getSize(new THREE.Vector3()), center = box.getCenter(new THREE.Vector3());
   const radius = size.length() / 2;
   const dist = radius / Math.sin(THREE.MathUtils.degToRad(camera.fov / 2));
-  const dir = new THREE.Vector3(-1, -1.2, 0.8).normalize();
-  camera.up.set(0, 0, 1);
+  const dir = new THREE.Vector3(...ISO).normalize();
+  camera.up.set(...UP);
   camera.position.copy(center).addScaledVector(dir, dist * 1.1);
   controls.target.copy(center);
   controls.update();
@@ -261,7 +265,12 @@ function colorFor(label) {
 
 function meshes(fn) { root?.traverse((o) => { if (o.isMesh && o.userData.path) fn(o); }); }
 
+// The section caps' materials, one per colour, shared by the parts of that
+// colour and kept across rebuilds.
+const capMaterials = new Map();
 function capMaterial(color) {
+  const key = color.getHex();
+  if (capMaterials.has(key)) return capMaterials.get(key);
   const m = new THREE.ShaderMaterial({
     uniforms: { color: { value: new THREE.Color(color) } },
     vertexShader: `varying vec3 vWorld;
@@ -277,22 +286,25 @@ function capMaterial(color) {
   m.stencilFail = THREE.ReplaceStencilOp;
   m.stencilZFail = THREE.ReplaceStencilOp;
   m.stencilZPass = THREE.ReplaceStencilOp;
+  capMaterials.set(key, share(m));
   return m;
 }
+// Every cap is the same big plane, turned onto the section plane.
+const capPlane = share(new THREE.PlaneGeometry(20000, 20000));
 
 // Stencil pass: back faces of the clipped mesh increment, front faces decrement,
 // so the stencil is non-zero exactly where the plane passes through solid material.
+const stencilPass = { depthWrite: false, depthTest: false, colorWrite: false,
+  stencilWrite: true, stencilFunc: THREE.AlwaysStencilFunc };
+const stencilBack = share(new THREE.MeshBasicMaterial({ ...stencilPass, side: THREE.BackSide,
+  stencilFail: THREE.IncrementWrapStencilOp, stencilZFail: THREE.IncrementWrapStencilOp,
+  stencilZPass: THREE.IncrementWrapStencilOp }));
+const stencilFront = share(new THREE.MeshBasicMaterial({ ...stencilPass, side: THREE.FrontSide,
+  stencilFail: THREE.DecrementWrapStencilOp, stencilZFail: THREE.DecrementWrapStencilOp,
+  stencilZPass: THREE.DecrementWrapStencilOp }));
 function stencilGroup(geometry, order) {
   const group = new THREE.Group();
-  const base = new THREE.MeshBasicMaterial({ depthWrite: false, depthTest: false, colorWrite: false,
-    stencilWrite: true, stencilFunc: THREE.AlwaysStencilFunc });
-  const back = base.clone();
-  back.side = THREE.BackSide;
-  back.stencilFail = back.stencilZFail = back.stencilZPass = THREE.IncrementWrapStencilOp;
-  const front = base.clone();
-  front.side = THREE.FrontSide;
-  front.stencilFail = front.stencilZFail = front.stencilZPass = THREE.DecrementWrapStencilOp;
-  for (const mat of [back, front]) {
+  for (const mat of [stencilBack, stencilFront]) {
     const m = new THREE.Mesh(geometry, mat);
     m.renderOrder = order;
     m.userData.role = 'stencil';
@@ -304,36 +316,44 @@ function stencilGroup(geometry, order) {
 // Loads the shown design's layout and scene at `version`. Its first scene
 // gets the camera the design had when the page last showed it, or the URL
 // hash's, or is fitted. A load overtaken by a newer version or another
-// design is dropped.
+// design is dropped. A layout of another version than the page reads is
+// not drawn; the status line says so.
 const loader = new GLTFLoader();
 async function load() {
   const want = { design, version }, url = designUrl;
   const current = () => design === want.design && version === want.version;
   const status = $('status');
+  const fail = (reason) => {
+    if (!current()) return;
+    status.textContent = reason;
+    status.className = 'error';
+    tracker.failed(reason);
+  };
   let next, gltf;
   try {
     next = await (await fetch(url + 'layout.json', { cache: 'no-store' })).json();
-  } catch (e) { if (current()) { status.textContent = 'no layout yet'; status.className = 'error'; } return; }
+  } catch (e) { fail('no layout yet'); return; }
+  const problem = layoutVersionProblem(next);
+  if (problem) { fail(problem); return; }
   try {
     gltf = await loader.loadAsync(url + 'scene.glb?v=' + Date.now());
-  } catch (err) { if (current()) { status.textContent = 'scene failed to load: ' + err; status.className = 'error'; } return; }
-  if (!current()) return;
+  } catch (err) { fail('scene failed to load: ' + err); return; }
+  if (!current()) { disposeTree(gltf.scene); return; }
   layout = next;
   const first = !root;
-  if (root) scene.remove(root);
+  if (root) { scene.remove(root); disposeTree(root); }
   root = gltf.scene;
-  // GLTFLoader strips dots and slashes from node names; map them back to paths.
-  const sanitized = (p) => p.replace(/\s/g, '_').replace(/[\[\]\.:\/]/g, '');
-  const pathOf = {}, materialOf = {};
-  for (const mod of layout.modules) for (const part of mod.parts) {
-    pathOf[sanitized(part.path)] = part.path; materialOf[part.path] = part.material;
-  }
-  for (const { path } of hardwareBodies()) pathOf[sanitized(path)] = path;
+  // Each mesh carries its path: the mesher's metadata, which GLTFLoader
+  // puts into userData from the glTF mesh's extras.
+  const materialOf = {};
+  for (const mod of layout.modules) for (const part of mod.parts) materialOf[part.path] = part.material;
   meshes((obj) => {
-    obj.userData.path = pathOf[obj.name] || obj.name;
-    obj.geometry.deleteAttribute('normal');
-    obj.geometry = obj.geometry.toNonIndexed();
+    const loaded = obj.geometry;
+    loaded.deleteAttribute('normal');
+    obj.geometry = loaded.toNonIndexed();
     obj.geometry.computeVertexNormals();
+    loaded.dispose();
+    obj.material.dispose();
     obj.material = new THREE.MeshStandardMaterial({
       color: colorFor(materialOf[obj.userData.path] || ''), roughness: 0.85, metalness: 0.0,
       flatShading: true, side: THREE.DoubleSide });
@@ -346,12 +366,12 @@ async function load() {
     obj.add(front, through);
   });
   // section caps: stencil pass as children of the mesh (same transform), cap plane in world space
-  caps.clear();
+  clearGroup(caps);
   let order = 10;
   meshes((obj) => {
     const stencil = stencilGroup(obj.geometry, order);
     obj.add(stencil);
-    const cap = new THREE.Mesh(new THREE.PlaneGeometry(20000, 20000), capMaterial(obj.userData.baseColor));
+    const cap = new THREE.Mesh(capPlane, capMaterial(obj.userData.baseColor));
     cap.renderOrder = order + 1;
     cap.onAfterRender = () => renderer.clearStencil();
     cap.userData.owner = obj;
@@ -372,17 +392,16 @@ async function load() {
   bounds = new THREE.Box3().setFromObject(root);
   if (first) { const camera = views.get(design)?.camera; if (camera) setCamera(camera); else fit(); }
   applyAll();
-  loadedVersion = version;
-  for (const resolve of waiting.splice(0)) resolve(version);
+  tracker.shown(version);
 }
 
 // Takes the shown design off the page, for the next one to load.
 function clearScene() {
-  if (root) scene.remove(root);
+  if (root) { scene.remove(root); disposeTree(root); }
   root = null;
   layout = null;
   bounds = null;
-  caps.clear();
+  clearGroup(caps);
   buildMaster();
   buildLabels();
   renderList();
@@ -402,8 +421,7 @@ function masterLabel(text, kind) {
 }
 
 function buildMaster() {
-  masterGroup.traverse((o) => { if (o.isCSS2DObject) o.element.remove(); });
-  masterGroup.clear();
+  clearGroup(masterGroup);
   const snapshots = layout?.snapshots ?? [];
   for (const snap of snapshots) {
     for (const [name, b] of Object.entries(snap.boxes)) {
@@ -450,9 +468,15 @@ function applyMaster() {
   $('mNames').checked = masterShow.names;
 }
 
-$('mBoxes').onchange = (e) => { masterShow.boxes = e.target.checked; applyMaster(); };
-$('mContours').onchange = (e) => { masterShow.contours = e.target.checked; applyMaster(); };
-$('mNames').onchange = (e) => { masterShow.names = e.target.checked; applyMaster(); };
+// What of the master shows, kept across reloads like the other display settings.
+function setMaster(next) {
+  Object.assign(masterShow, next);
+  store('master', masterShow);
+  applyMaster();
+}
+$('mBoxes').onchange = (e) => setMaster({ boxes: e.target.checked });
+$('mContours').onchange = (e) => setMaster({ contours: e.target.checked });
+$('mNames').onchange = (e) => setMaster({ names: e.target.checked });
 
 // -- labels: the parts' names and their faces' names ---------------------------
 //
@@ -480,8 +504,7 @@ $('lFaces').onchange = (e) => setLabels({ faces: e.target.checked });
 setLabels({});
 
 function buildLabels() {
-  for (const label of labelGroup.children) label.element.remove();
-  labelGroup.clear();
+  clearGroup(labelGroup);
   labelRenderer.domElement.classList.toggle('with-names', labelShow.names);
   labelsDirty = true;
   if (!root || !layout || !(labelShow.names || labelShow.faces)) return;
@@ -543,11 +566,11 @@ function faceElement(names, big) {
 // points, a narrow face's names in the middle of its longest straight
 // stretch. Each label has its spots in order, the best first.
 function labelSpots(part) {
-  const idx = { x: 0, y: 1, z: 2 }, axes = part.axes, b = part.box;
-  const ti = idx[axes.t];
+  const axes = part.axes, b = part.box;
+  const ti = AXIS[axes.t];
   const world = (u, v, t) => {
     const p = [0, 0, 0];
-    p[idx[axes.u]] = u; p[idx[axes.v]] = v; p[ti] = t;
+    p[AXIS[axes.u]] = u; p[AXIS[axes.v]] = v; p[ti] = t;
     return new THREE.Vector3(...p);
   };
   const inside = insidePoints(part.outline);
@@ -555,7 +578,7 @@ function labelSpots(part) {
   const faces = [];
   for (const [worldName, list] of Object.entries(part.faces)) {
     const code = layout.frame[worldName];
-    const i = idx[code[1]], sign = code[0] === '+' ? 1 : -1;
+    const i = AXIS[code[1]], sign = code[0] === '+' ? 1 : -1;
     const normal = new THREE.Vector3();
     normal.setComponent(i, sign);
     let points;
@@ -784,20 +807,24 @@ function applyMode() {
 
 function setMode(next) { mode = next; applyMode(); }
 
-function toggle(path) {
-  if (hidden.has(path)) hidden.delete(path); else hidden.add(path);
-  applyVisibility(); renderList(); showSelected();
-}
+// The hidden parts change only through these, from the keys, the parts list
+// and window.preview alike, and each refreshes what shows them: the scene,
+// the parts list and the selection panel (which says when the selected
+// part is hidden).
+function refresh() { applyVisibility(); renderList(); showSelected(); }
 
-function showAll() { hidden.clear(); applyVisibility(); renderList(); showSelected(); }
+/** Hides the paths (`on`) or shows them. */
+function setHidden(paths, on) { markHidden(hidden, paths, on); refresh(); }
 
-function isolate(path) {
-  const others = listItems().map((item) => item.path).filter((p) => p !== path);
-  const alreadyIsolated = others.every((p) => hidden.has(p)) && !hidden.has(path);
-  if (alreadyIsolated) { showAll(); return; }
-  hidden.clear();
-  for (const p of others) hidden.add(p);
-  applyVisibility(); renderList(); showSelected();
+/** Shows the paths when all of them are hidden, else hides them. */
+function toggleHidden(paths) { setHidden(paths, toggleHides(hidden, paths)); }
+
+function showAll() { hidden.clear(); refresh(); }
+
+/** Shows only the paths; with `toggle`, everything when they already are the only ones shown. */
+function isolate(paths, toggle = false) {
+  isolatePaths(hidden, listItems().map((item) => item.path), paths, { toggle });
+  refresh();
 }
 
 function select(path) {
@@ -880,12 +907,6 @@ function revealInList(path) {
   store('open', openGroups);
 }
 
-function toggleGroup(paths) {
-  const show = paths.every((p) => hidden.has(p));
-  for (const p of paths) { if (show) hidden.delete(p); else hidden.add(p); }
-  applyVisibility(); renderList(); showSelected();
-}
-
 function row(kind, name, caret) {
   const div = document.createElement('div');
   div.className = 'node ' + kind;
@@ -914,7 +935,7 @@ function renderNode(node, ul) {
     if (hidden.has(leaf.path)) div.classList.add('hidden');
     if (leaf.path === selectedPath) div.classList.add('selected');
     div.title = leaf.path;
-    div.onclick = (e) => { if (e.altKey) select(leaf.path); else toggle(leaf.path); };
+    div.onclick = (e) => { if (e.altKey) select(leaf.path); else toggleHidden([leaf.path]); };
     li.append(div);
     ul.append(li);
   }
@@ -934,7 +955,7 @@ function renderNode(node, ul) {
       store('open', openGroups);
       renderList();
     };
-    div.onclick = () => toggleGroup(paths);
+    div.onclick = () => toggleHidden(paths);
     li.append(div);
     if (open) {
       const sub = document.createElement('ul');
@@ -971,16 +992,14 @@ function applySection() {
   setClipping(edgeFront, planes);
   setClipping(edgeThrough, planes);
   for (const m of [ghostFill, ghostFillBounds, ghostEdge, ghostEdgeBounds, contourMaterial]) setClipping(m, planes);
-  meshes((o) => {
-    setClipping(o.material, planes);
-    for (const m of o.userData.stencil?.children ?? []) setClipping(m.material, planes);
-  });
+  for (const m of [stencilBack, stencilFront]) setClipping(m, planes);
+  meshes((o) => setClipping(o.material, planes));
   $('secOn').checked = section.on;
   $('secAxis').value = section.axis;
   $('secFlip').checked = section.flip;
   $('secPos').value = Math.round(section.pos * 1000);
   if (!bounds) return;
-  const i = { x: 0, y: 1, z: 2 }[section.axis];
+  const i = AXIS[section.axis];
   const lo = bounds.min.getComponent(i), hi = bounds.max.getComponent(i);
   const at = lo + section.pos * (hi - lo);
   // Keep the side the normal points to; flip swaps the kept side.
@@ -1042,16 +1061,15 @@ window.addEventListener('keydown', (e) => {
     case ',': stepDesign(-1); break;
     case '.': stepDesign(1); break;
     case 'f': fit(); break;
-    case 'h': if (selectedPath) toggle(selectedPath); showSelected(); break;
-    case 'i': if (selectedPath) isolate(selectedPath); break;
+    case 'h': if (selectedPath) toggleHidden([selectedPath]); break;
+    case 'i': if (selectedPath) isolate([selectedPath], true); break;
     case 'a': showAll(); break;
     case 'e': setMode(modes[(modes.indexOf(mode) + 1) % modes.length]); break;
     case 'g': setGrid(!grid.visible); break;
     case 'w': setHardware(!hardwareOn); break;
     case 'm': {
       const on = !(masterShow.boxes || masterShow.contours);
-      masterShow.boxes = masterShow.contours = on;
-      applyMaster();
+      setMaster({ boxes: on, contours: on });
       break;
     }
     case 'n': setLabels({ names: !labelShow.names }); break;
@@ -1078,8 +1096,8 @@ window.addEventListener('keydown', (e) => {
 // are mirrored in the URL hash (#design=van&eye=x,y,z&target=x,y,z&fov=n),
 // so a link or a reload shows the same view.
 
-let loadedVersion = null;
-const waiting = [];
+// The version on screen, and the promises of loaded() and open().
+const tracker = new LoadTracker();
 
 // Draws a frame now, so that a screenshot taken right after a call shows it.
 function draw() {
@@ -1097,11 +1115,11 @@ function directionVector(from) {
   const names = Array.isArray(from) ? from : String(from).trim().split(/[\s,+]+/);
   const v = new THREE.Vector3();
   for (const name of names) {
-    if (name === 'iso') { v.add(new THREE.Vector3(-1, -1.2, 0.8).normalize()); continue; }
+    if (name === 'iso') { v.add(new THREE.Vector3(...ISO).normalize()); continue; }
     const code = layout?.frame?.[name];
     if (!code) throw new Error(`unknown direction ${JSON.stringify(name)}; use ${Object.keys(layout?.frame ?? {}).join(', ')} or iso`);
     const c = [0, 0, 0];
-    c[{ x: 0, y: 1, z: 2 }[code[1]]] = code[0] === '+' ? 1 : -1;
+    c[AXIS[code[1]]] = code[0] === '+' ? 1 : -1;
     v.add(new THREE.Vector3(...c));
   }
   if (v.lengthSq() < 1e-12) throw new Error(`directions ${JSON.stringify(from)} cancel out`);
@@ -1119,7 +1137,7 @@ function partOf(path) {
 // A point of a part's operation, in world mm: the centre of a hole, pocket,
 // cut or V-groove on the face it is made from.
 function opPoint(part, op) {
-  const axes = part.axes, b = part.box, idx = { x: 0, y: 1, z: 2 };
+  const axes = part.axes, b = part.box;
   const inner = op.kind === 'edge' ? op.op : op;
   const code = layout.frame[op.face ?? inner.face] ?? null;
   const p = [0, 0, 0];
@@ -1129,22 +1147,22 @@ function opPoint(part, op) {
     const s = faceAxis === axes.u ? axes.v : axes.u;
     [a, c] = [op.s, op.t];
     const [u0, v0, u1, v1] = inner.kind === 'pocket' ? ringBounds(inner.shape) : [0, 0, 0, 0];
-    p[idx[s]] = a + (u0 + u1) / 2; p[idx[axes.t]] = c + (v0 + v1) / 2;
+    p[AXIS[s]] = a + (u0 + u1) / 2; p[AXIS[axes.t]] = c + (v0 + v1) / 2;
   } else if (op.kind === 'hole') {
-    p[idx[axes.u]] = op.u; p[idx[axes.v]] = op.v;
+    p[AXIS[axes.u]] = op.u; p[AXIS[axes.v]] = op.v;
   } else if (op.kind === 'vgroove') {
-    p[idx[axes.u]] = (op.start[0] + op.end[0]) / 2; p[idx[axes.v]] = (op.start[1] + op.end[1]) / 2;
+    p[AXIS[axes.u]] = (op.start[0] + op.end[0]) / 2; p[AXIS[axes.v]] = (op.start[1] + op.end[1]) / 2;
   } else if (op.shape) {
     const [u0, v0, u1, v1] = ringBounds(op.shape);
-    p[idx[axes.u]] = (u0 + u1) / 2; p[idx[axes.v]] = (v0 + v1) / 2;
+    p[AXIS[axes.u]] = (u0 + u1) / 2; p[AXIS[axes.v]] = (v0 + v1) / 2;
   } else {
     throw new Error(`a ${op.kind} has no point to look at`);
   }
   if (code) {
-    const i = idx[code[1]];
+    const i = AXIS[code[1]];
     p[i] = code[0] === '+' ? b.max[i] : b.min[i];
   } else {
-    const i = idx[axes.t];
+    const i = AXIS[axes.t];
     p[i] = (b.min[i] + b.max[i]) / 2;
   }
   return p;
@@ -1188,7 +1206,7 @@ function resolveAt(at) {
 
 function setCamera({ eye, target, fov }) {
   if (fov !== undefined) { camera.fov = fov; camera.updateProjectionMatrix(); }
-  camera.up.set(0, 0, 1);
+  camera.up.set(...UP);
   if (target) controls.target.set(...target);
   if (eye) camera.position.set(...eye);
   controls.update();
@@ -1266,11 +1284,9 @@ window.preview = {
   /** The whole model, or the parts and scopes named, from the default oblique view. */
   fit: (at) => (at === undefined ? (fit(), cameraState()) : look({ at })),
   /** Shows only the parts (or scopes) named; show() shows everything again. */
-  isolate: (names) => { const keep = new Set(pathsOf(names)); hidden.clear();
-    for (const item of listItems()) if (!keep.has(item.path)) hidden.add(item.path);
-    applyVisibility(); renderList(); showSelected(); draw(); },
-  show: (names) => { if (names === undefined) showAll(); else { for (const p of pathsOf(names)) hidden.delete(p); applyVisibility(); renderList(); } draw(); },
-  hide: (names) => { for (const p of pathsOf(names)) hidden.add(p); applyVisibility(); renderList(); draw(); },
+  isolate: (names) => { isolate(pathsOf(names)); draw(); },
+  show: (names) => { if (names === undefined) showAll(); else setHidden(pathsOf(names), false); draw(); },
+  hide: (names) => { setHidden(pathsOf(names), true); draw(); },
   select: (path) => { select(path ?? null); draw(); },
   /** Section plane: {on, axis: 'x'|'y'|'z', at: mm, flip}. */
   section: ({ on = true, axis, at, flip } = {}) => {
@@ -1278,7 +1294,7 @@ window.preview = {
     if (axis) section.axis = axis;
     if (flip !== undefined) section.flip = flip;
     if (at !== undefined) {
-      const i = { x: 0, y: 1, z: 2 }[section.axis];
+      const i = AXIS[section.axis];
       const lo = bounds.min.getComponent(i), hi = bounds.max.getComponent(i);
       section.pos = Math.min(1, Math.max(0, (at - lo) / (hi - lo)));
     }
@@ -1298,11 +1314,13 @@ window.preview = {
       let at = null; try { at = opPoint(part, op); } catch (e) {}
       return { name, kind, at };
     }); },
-  /** The layout version on screen. */
-  get version() { return loadedVersion; },
-  /** Resolves with the version once the shown design's scene is loaded, or a newer one than `after`. */
-  loaded: (after) => (loadedVersion !== null && loadedVersion !== after
-    ? Promise.resolve(loadedVersion) : new Promise((resolve) => waiting.push(resolve))),
+  /** The version of the build on screen (the server's version.txt), null when none is. */
+  get version() { return tracker.version; },
+  /** Resolves with the version once the shown design's scene is on screen, or one other than `after`.
+   *  Rejects with the build's log when its latest build failed and nothing is on screen, or a build
+   *  finished after the call and failed; with the reason when the scene could not be drawn (a layout
+   *  of another version); and when the page switches to another design. */
+  loaded: (after) => tracker.loaded(after),
   /** The designs the server serves, by name (the build files' names). */
   designs: () => [...designs],
   /** The design shown. */
@@ -1313,7 +1331,7 @@ window.preview = {
     await listed;
     if (!designs.includes(name)) throw new Error(`no design ${JSON.stringify(name)}; there are ${designs.join(', ')}`);
     openDesign(name);
-    return new Promise((resolve, reject) => settling.push({ resolve, reject }));
+    return tracker.opened();
   },
 };
 
@@ -1331,7 +1349,6 @@ let designUrl = null;           // where the shown design's files are, e.g. 'out
 let shownBuild = null;          // the build count and state the status line shows
 let buildLog = '';
 const views = new Map();        // design name -> {camera, hidden, selected, section}
-const settling = [];            // preview.open() calls, settled once their design is up to date
 let isListed;
 const listed = new Promise((resolve) => { isListed = resolve; });
 
@@ -1355,10 +1372,10 @@ function openDesign(name) {
   if (design !== null && root) {
     views.set(design, { camera: cameraState(), hidden: [...hidden], selected: selectedPath, section: { ...section } });
   }
-  for (const { reject } of settling.splice(0)) reject(new Error(`switched to ${name}`));
+  tracker.switched(design, name);
   design = name;
   wanted = null;
-  version = loadedVersion = designUrl = shownBuild = null;
+  version = designUrl = shownBuild = null;
   const view = views.get(name);
   hidden.clear();
   for (const path of view?.hidden ?? []) hidden.add(path);
@@ -1403,11 +1420,7 @@ async function update(d) {
     version = d.version;
     await load();
   }
-  if (d.state !== 'building' && design === d.name && loadedVersion === d.version) {
-    for (const { resolve, reject } of settling.splice(0)) {
-      if (d.state === 'ok') resolve(loadedVersion); else reject(new Error(buildLog));
-    }
-  }
+  if (design === d.name) tracker.reported({ builds: d.builds, state: d.state, version: d.version, log: buildLog });
 }
 
 // -- reload loop ---------------------------------------------------------------
@@ -1468,6 +1481,8 @@ pivotMarker.renderOrder = 100;
 scene.add(pivotMarker);
 window.spaceMouse = attachSpaceMouse(THREE, camera, controls, renderer.domElement, () => bounds, {
   name: 'Layout preview',
+  // The driver's front view looks at the model from the layout's front.
+  front: () => (layout?.frame?.front ? directionVector('front').toArray() : null),
   onStatus: (text, ok) => { $('smStatus').textContent = text; $('smStatus').style.color = ok ? '' : '#a66'; },
   onLog: (kind, msg) => { smLog.push([kind, msg]); if (smLog.length > 200) smLog.shift(); },
   motion: (moving) => {
