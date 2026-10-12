@@ -29,6 +29,7 @@ from typing import TYPE_CHECKING, cast
 from lib import drawer_slides as data
 
 from ..core.box import Box
+from ..core.directions import Direction, Frame
 from ..core.errors import LangError
 from ..core.layout_types import BoxDict, HardwareBodyLayout
 from ..core.refs import Pos, PosLike, as_pos
@@ -250,21 +251,28 @@ class DrawerSlide:
         """Records the runner pair's model, when there is a file for this
         slide and length: the left runner's mounting face on the left side's
         inner face, its front 4 mm behind the runner front, its screw row
-        38 mm above the bay bottom; the right runner moved to the right side."""
+        38 mm above the bay bottom; the right runner moved to the right side.
+
+        Left and right are the drawer's, standing in front of it: the
+        runners are a left-hand and a right-hand part. A module written
+        without front= (in the van's terms) or mirrored calls the drawer's
+        right its left, so the drawer's right is worked out from its back
+        and up; the model's axes go to the drawer's right, back and up, a
+        rotation in any frame, so the model is never mirrored."""
         model = RUNNER_MODELS.get((self.model.name, self.nl))
         if model is None:
             return
         bay = scope._need_box("mount")  # type: ignore[reportPrivateUsage]
         frame = bay.frame
-        left_dir, right_dir = frame.direction("left"), frame.direction("right")
+        back, up = frame.direction("back"), frame.direction("top")
+        right_dir = _cross(frame, back, up)
         left_side = next((s for s in sides if s.inner.direction == right_dir), None)
-        right_side = next((s for s in sides if s.inner.direction == left_dir), None)
+        right_side = next((s for s in sides if s.inner.direction == -right_dir), None)
         if left_side is None or right_side is None:
             raise LangError(f"{self.name}: sides must be one left and one right carcass side.")
-        back, up = frame.direction("back"), frame.direction("top")
         inner_width = abs(right_side.inner.value - left_side.inner.value)
         origin = [0.0, 0.0, 0.0]
-        origin[_index(left_dir.axis)] = left_side.inner.value
+        origin[_index(right_dir.axis)] = left_side.inner.value
         origin[_index(back.axis)] = front_pos.value + back.sign * model.front_offset
         origin[_index(up.axis)] = bay.bottom.value + (data.HOLE_ROW_HEIGHT - model.row_z)
         def envelope(index: int) -> BoxDict:
@@ -281,3 +289,11 @@ class DrawerSlide:
 
 def _index(axis: str) -> int:
     return "xyz".index(axis)
+
+
+def _cross(frame: Frame, a: Direction, b: Direction) -> Direction:
+    """The direction of a x b, for two perpendicular directions."""
+    (ax, ay, az), (bx, by, bz) = a.vector, b.vector
+    v = (ay * bz - az * by, az * bx - ax * bz, ax * by - ay * bx)
+    i = next(k for k in range(3) if v[k])
+    return frame.direction_of(("x", "y", "z")[i], v[i])

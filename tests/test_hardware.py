@@ -3,6 +3,7 @@ import pytest
 from lang import *
 from lang.core.layout import build_layout
 from lang.core.ops import Cut, Hole
+from lang.core.layout_types import HardwareLayout
 from lang.core.scope import registry
 from lang.hardware.slides import BOTTOM_HEIGHT, INNER_FACE_OFFSET, DrawerSlide
 from lib.drawer_slides import DYNAPRO_40, MOVENTO_760H
@@ -109,9 +110,12 @@ def test_mount_predrills_the_carcass_sides():
     # the runner pair's model, placed from the left side's inner face
     (runners,) = d.hardware
     assert runners["path"] == "cab.drawer1.runners" and runners["model"].endswith("433.19.608.stp")
-    assert runners["axes"] == {"x": "+y", "y": "+x", "z": "+z"}      # model x toward the right, y to the back
-    # 4 behind the face's back, on the left side's inner face, the screw row 38 above the bay bottom (0 here)
-    assert runners["origin"] == pytest.approx([15 + 4, 15, 38 - 35.9])
+    # the module is in the van's terms (no front=), so the drawer's left, seen
+    # standing in front of it, is the module's right side, at y 585..600:
+    # model x toward the drawer's right (-y), y to the back, z up
+    assert runners["axes"] == {"x": "-y", "y": "+x", "z": "+z"}
+    # 4 behind the face's back, on the left runner's side's inner face, the screw row 38 above the bay bottom (0 here)
+    assert runners["origin"] == pytest.approx([15 + 4, 585, 38 - 35.9])
     assert runners["bodies"][0]["offset"] == [0, 0, 0]
     assert runners["bodies"][1]["offset"] == [570 - 400, 0, 0]       # the right runner at the right side
     layout = build_layout()
@@ -140,7 +144,37 @@ def test_preview_places_the_runner_meshes():
             mesh.apply_transform(transform)
             bounds[node.rsplit(".", 1)[1]] = mesh.bounds.round(1).tolist()
             assert len(mesh.faces) > 1000     # the real model, not an envelope box
-    assert bounds["Body1"][0][1] == 15.0 and bounds["Body1"][1][1] == pytest.approx(72.1)   # on the left side
-    assert bounds["Body2"][1][1] == 585.0 and bounds["Body2"][0][1] == pytest.approx(527.9)  # on the right side
+    # the left-hand runner on the drawer's left, seen from its front (+y here), the right-hand one on its right
+    assert bounds["Body1"][1][1] == 585.0 and bounds["Body1"][0][1] == pytest.approx(527.9)
+    assert bounds["Body2"][0][1] == 15.0 and bounds["Body2"][1][1] == pytest.approx(72.1)
     assert bounds["Body1"][0][0] == pytest.approx(19 - 2.6) and bounds["Body1"][1][0] == pytest.approx(19 + 447.5)
     assert bounds["Body1"][0][2] == pytest.approx(2.1 - 1.0)
+
+
+def _runners(front: bool) -> HardwareLayout:
+    """The runners of a drawer mounted in a module in the van's terms, or in
+    a cabinet opening the same way (front=box.front)."""
+    registry.reset()
+    slide = DrawerSlide(DYNAPRO_40, nl=450)
+    box = Box.from_size(width=600, depth=500, height=300)
+    with (module("cab", box, front=box.front) if front else module("cab", box)) as cab:
+        left = board("left", ply15).on(cab.left)
+        right = board("right", ply15).on(cab.right)
+        with scope("drawer1", cab.interior) as d:
+            face = board("face", ply15).on(cab.interior.front)
+        d.mount(slide, sides=(left, right), front=face.back)
+    (runners,) = d.hardware
+    return runners
+
+
+def test_runners_are_rotated_never_mirrored_whatever_the_frame():
+    """A left-hand and a right-hand runner, placed by the drawer's own left
+    and right: the same in a module in the van's terms, whose left is the
+    drawer's right, as in a cabinet. The model's axes form a rotation."""
+    import numpy as np
+    plain, cabinet = _runners(front=False), _runners(front=True)
+    assert plain["axes"] == cabinet["axes"] and plain["origin"] == pytest.approx(cabinet["origin"])
+    axes = plain["axes"]
+    m = np.array([[(1 if code[0] == "+" else -1) * (code[1] == a) for a in "xyz"] for code in
+                  (axes["x"], axes["y"], axes["z"])])
+    assert round(float(np.linalg.det(m))) == 1

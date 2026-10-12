@@ -3,8 +3,12 @@
 A module is a scope with a box that compiles into its own document. It is
 written in its own frame: `module(name, box, front=box.right)` makes it
 face the box's right side, and inside it front, back, left, right, width
-and depth are the module's own (see `directions`). Without `front=` it
-uses the enclosing frame. Parts register in the current scope under their
+and depth are the module's own (see `directions`), and left and right are
+a cabinetmaker's, standing in front of it. Without `front=` it takes the
+enclosing frame as it is: in the van, the van's own terms, left being the
+driver's side, as for the floor or a wall panel. So a cabinet says which
+way it opens, also when that is the van's front. Parts register in the
+current scope under their
 name. Direction names on a scope are its box's sides (`cab.left`), since
 carcass parts are usually named after directions too; such parts are
 reached with `cab["left"]`. Other names resolve to parts, child scopes and
@@ -317,9 +321,11 @@ class Scope:
 def module(name: str, box: Box, front: Side | Direction | None = None, mirrored: bool = False) -> Scope:
     """A module: a scope with a box that compiles into its own document,
     written in its own frame. `front=` says which way it opens, as a side
-    of its box (`front=box.right`) or a direction; top stays up and left is
-    a cabinetmaker's, standing in front of the module. `mirrored=True`
-    swaps left and right. Without `front=` the enclosing frame is used."""
+    of its box (`front=box.right`) or a direction, and makes it a cabinet:
+    top stays up and left is a cabinetmaker's, standing in front of the
+    module. Without `front=` the enclosing frame is used as it is, the
+    van's terms in the van (left is the driver's side): give a cabinet its
+    front, also `front=box.front`. `mirrored=True` swaps left and right."""
     parent_frame = current().frame
     if front is None:
         frame = parent_frame.mirrored() if mirrored else parent_frame

@@ -233,6 +233,17 @@ proposed]
   emitter never see module frames. A cabinet type is written once and placed
   on either wall, rotated or mirrored, which is the usual case when a module
   is designed before it has a project. [decided 2026-10-10]
+  `front=` is what makes a module a cabinet [decided 2026-10-12]: without
+  it a module takes the enclosing frame as it is, in the van the van's own
+  terms, the driver's left, which suits van-level modules such as the
+  floor, the ceiling or wall panels. A cabinet says which way it opens,
+  also when that is the van's front (`front=box.front`): seen from its
+  front, a module in the van's terms that opens toward the windshield has
+  its left on the right, since one front cannot serve a left measured
+  facing it (the driver's) and one measured looking at it (the
+  cabinetmaker's). Hardware is placed by the drawer's or door's own left
+  and right, seen from its front, so it comes out the same in either kind
+  of module and is never mirrored.
 - A face of a part is named by direction. An edge is named by two faces
   (`front.inner`), a corner by three. This is the scheme BOSL2 uses for anchors.
   [proposed]
