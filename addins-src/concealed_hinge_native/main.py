@@ -4,7 +4,7 @@ from typing import cast
 import adsk.core
 import adsk.fusion
 
-from lib import addin, inputs, ui_placement, utils
+from lib import addin, concealed_hinges, inputs, ui_placement, utils
 from lib.fusionbootstrap.runtime import RuntimeInfo
 
 
@@ -17,15 +17,17 @@ def _mm(value_cm: float) -> str:
     return f"{value_cm * 10:g} mm"
 
 
-# Blum CLIP top hinge drilling specification (all values in cm).
-HOLE_PAIR_SPACING = 3.2
+# Blum CLIP top hinge drilling specification, kept in mm in
+# lib/concealed_hinges.py (shared with the modeling language); in cm here.
+HOLE_PAIR_SPACING = concealed_hinges.HOLE_PAIR_SPACING / 10
 PAIR_HALF_SPACING = HOLE_PAIR_SPACING / 2
-DOOR_CUP_DIAMETER = 1.0
-DOOR_CUP_DEPTH = 0.5
-CARCASS_ROW_INSET = 3.85
+DOOR_CUP_DIAMETER = concealed_hinges.DOOR_CUP_DIAMETER / 10
+DOOR_CUP_DEPTH = concealed_hinges.DOOR_CUP_DEPTH / 10
+CARCASS_ROW_INSET = concealed_hinges.CARCASS_ROW_INSET / 10
+# By the Hinge Type dropdown's value: 0 is +0, 1 is +3.
 DOOR_PATTERN_OFFSETS = {
-    0: 2.7,  # Blum CLIP top 110 Thin +0
-    1: 3.0,  # Blum CLIP top 110 Thin +3
+    model.value: model.door_row / 10
+    for model in concealed_hinges.HINGE_MODELS.values()
 }
 # Outermost hole-pair extent from the hinge center: half the pair spacing
 # plus the cup radius. Two hinges must not come closer than twice this.
@@ -55,12 +57,12 @@ def stop(context):
 class ConcealedHingeNativeInputs(inputs.Inputs):
     class Types:
         BLUM_CLIP_TOP_THIN_0 = inputs.DropDownInput.Item(
-            "Blum CLIP top 110 Thin +0",
-            0,
+            concealed_hinges.CLIP_TOP_THIN_0.name,
+            concealed_hinges.CLIP_TOP_THIN_0.value,
         )
         BLUM_CLIP_TOP_THIN_3 = inputs.DropDownInput.Item(
-            "Blum CLIP top 110 Thin +3",
-            1,
+            concealed_hinges.CLIP_TOP_THIN_3.name,
+            concealed_hinges.CLIP_TOP_THIN_3.value,
         )
 
     def __init__(self, units_manager: adsk.core.UnitsManager):
@@ -96,30 +98,30 @@ class ConcealedHingeNativeInputs(inputs.Inputs):
         self.offset = inputs.FloatInput(
             id="offset",
             name="End Margin",
-            default_value=6,
+            default_value=concealed_hinges.DEFAULT_END_MARGIN / 10,
             tool_tip=(
                 "Distance from each end of the selected door edge to the "
                 "corresponding hinge center."
             ),
             units=units,
         )
-        self.offset.minimum_value = 2.7
+        self.offset.minimum_value = concealed_hinges.MIN_END_MARGIN / 10
         self.predrill_diameter = inputs.FloatInput(
             id="predrill_diameter",
             name="Predrill Diameter",
-            default_value=2.54 / 8,
+            default_value=concealed_hinges.DEFAULT_PREDRILL_DIAMETER / 10,
             tool_tip="Diameter of the carcass screw pilot holes.",
             units=units,
         )
-        self.predrill_diameter.minimum_value = 0.01
+        self.predrill_diameter.minimum_value = concealed_hinges.MIN_PREDRILL / 10
         self.predrill_depth = inputs.FloatInput(
             id="predrill_depth",
             name="Predrill Depth",
-            default_value=0.3,
+            default_value=concealed_hinges.DEFAULT_PREDRILL_DEPTH / 10,
             tool_tip="Depth of the carcass screw pilot holes.",
             units=units,
         )
-        self.predrill_depth.minimum_value = 0.01
+        self.predrill_depth.minimum_value = concealed_hinges.MIN_PREDRILL / 10
         super().__init__()
 
 
