@@ -5,7 +5,8 @@ from typing import cast
 import adsk.core
 import adsk.fusion
 
-from lib import addin, edge_sketch, hole_features, inputs, ui_placement, utils
+from lib import addin, ball_catches, edge_sketch, hole_features, inputs, ui_placement, utils
+from lib.ball_catches import CatchSpec
 from lib.fusionbootstrap.runtime import RuntimeInfo
 
 
@@ -28,51 +29,13 @@ def _format_mm(value_cm: float) -> str:
     return f"{value_cm * 10:.1f}".rstrip("0").rstrip(".") + " mm"
 
 
-@dataclass(frozen=True)
-class CatchSpec:
-    """Mounting data of a ball catch that holds an inspection hatch in its
-    opening, in cm.
-
-    The catch bridges the slot milled around the hatch: the holder is
-    screwed to the frame with its stop webs against the opening's edge
-    (the contour), the ball to the hatch. Both screws sit on the
-    perpendicular to the contour through the catch's position.
-    """
-
-    name: str
-    #: From the contour into the frame.
-    holder_hole_outward: float
-    #: From the contour into the hatch.
-    ball_hole_inward: float
-    #: Along the contour. The stop webs at its ends must bear on a straight
-    #: edge.
-    holder_width: float
-    #: Width of the ball along the contour.
-    ball_width: float
-    #: Diameter of the ball's base around its screw.
-    ball_base_diameter: float
-    #: Width range of the slot between frame and hatch.
-    min_gap: float
-    max_gap: float
-    #: Mounting surface each part needs beside the slot.
-    mounting_depth: float
+def _cm(mm: float) -> float:
+    return mm / 10
 
 
-# Ganter GN 450-28-14, from the catalog drawing: the holder's screw sits
-# 8.4 mm from its stop webs, and the two screws are s1 = 17.8-19.3 mm apart,
-# so the ball's screw goes 9.4 mm (s1 min) into the hatch. The slot must be
-# 2.5-3.5 mm wide, and each part needs 15 mm of mounting surface beside it.
-GN_450 = CatchSpec(
-    name="GN 450",
-    holder_hole_outward=0.84,
-    ball_hole_inward=0.94,
-    holder_width=2.8,
-    ball_width=1.4,
-    ball_base_diameter=1.0,
-    min_gap=0.25,
-    max_gap=0.35,
-    mounting_depth=1.5,
-)
+# The catch's dimensions and the dialog defaults live in lib/ball_catches.py,
+# in mm; the add-in works in cm.
+GN_450 = ball_catches.GN_450.in_cm()
 
 
 def run(context, runtime_info: RuntimeInfo):
@@ -133,7 +96,7 @@ class BallCatchInputs(inputs.Inputs):
         self.number_of_catches = inputs.IntegerInput(
             id="number_of_catches",
             name="Number of Catches",
-            default_value=4,
+            default_value=ball_catches.DEFAULT_COUNT,
             minimum=1,
             maximum=20,
             tool_tip=(
@@ -146,7 +109,7 @@ class BallCatchInputs(inputs.Inputs):
         self.end_offset = inputs.FloatInput(
             id="end_offset",
             name="End Offset",
-            default_value=4.0,
+            default_value=_cm(ball_catches.DEFAULT_END_OFFSET),
             tool_tip=(
                 "Distance of the first and last catch on an edge from the ends "
                 "of its straight part. A single catch on an edge is centered."
@@ -173,7 +136,7 @@ class BallCatchInputs(inputs.Inputs):
         self.pilot_diameter = inputs.FloatInput(
             id="pilot_diameter",
             name="Pilot Diameter",
-            default_value=0.2,
+            default_value=_cm(ball_catches.PILOT_DIAMETER),
             tool_tip="Diameter of the pilot holes for the holder and ball screws.",
             units=units,
         )
@@ -181,7 +144,7 @@ class BallCatchInputs(inputs.Inputs):
         self.pilot_depth = inputs.FloatInput(
             id="pilot_depth",
             name="Pilot Depth",
-            default_value=0.4,
+            default_value=_cm(ball_catches.PILOT_DEPTH),
             tool_tip="Depth of the flat-bottomed pilot holes.",
             units=units,
         )
