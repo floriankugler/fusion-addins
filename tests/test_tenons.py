@@ -7,7 +7,7 @@ from shapely.geometry import Point, box
 from lang import *
 from lang.core.layout import build_layout
 from lang.core.ops import Cut, Pocket
-from helpers import has_material, ply15, ply18
+from helpers import has_material, ply15, ply18, state
 
 O = 6 / (2 * math.sqrt(2))          # a corner relief's centre, along each edge from the corner
 R = 3.05                            # its radius: the 6 mm tool plus 0.1, halved
@@ -103,6 +103,22 @@ def test_either_board_can_make_the_call():
     with u:
         left.join(shelf, using=tenons(count=2, width=50))
     assert has_material(shelf, (55, 1)) == [True] and _named(left, "mortise_shelf") == ["mortise_shelf_1", "mortise_shelf_2"]
+
+
+def test_tenons_are_numbered_across_the_contacts_of_a_pair():
+    """The shelf's end notched in the middle meets the side twice, x 0..100
+    and 200..300: one tenon each, numbered on."""
+    u, left, _, shelf = _unit()
+    with u:
+        shelf.cut(rect(depth=100, width=20), at=shelf.top.left, name="notch")
+        shelf.join(left, using=tenons(count=1, width=50))
+    assert _named(shelf, "tenon_") == ["tenon_left_1_relief", "tenon_left_2_relief"]
+    assert _named(left, "mortise_") == ["mortise_shelf_1", "mortise_shelf_2"]
+    assert has_material(shelf, (50, 1), (250, 1), (150, 1)) == [True, True, False]
+    before = state(shelf, left)
+    with u, pytest.raises(LangError, match="unit.shelf and unit.left are joined with tenons already"):
+        shelf.join(left, using=tenons(count=1, width=10))         # on the shoulders the first join left
+    assert state(shelf, left) == before
 
 
 def test_tenon_errors():

@@ -10,7 +10,7 @@ from lang.core.ops import Hole, Pocket, VGroove
 from lang.preview.mesh import mesh_part
 from lang.joints.connectors import CabineoInsert, CabineoModel, ClamexModel, DominoSize
 from lib import connector_data
-from helpers import carcass, ply15
+from helpers import carcass, ply15, state
 
 
 
@@ -54,6 +54,74 @@ def test_a_notched_end_meets_in_two_places():
         divider.cut(rect(depth=100, height=50), at=divider.left.bottom)
     found = contacts(divider, p["bottom"])
     assert [(c.lo, c.hi) for c in found] == [(0, 200), (300, 500)]
+
+
+def _divider() -> tuple[Scope, dict[str, Board]]:
+    """The carcass with a divider between the bottom and the top, its lower
+    end notched 100 deep in the middle: it meets the bottom twice, x 0..200
+    and 300..500."""
+    cab, p = carcass()
+    with cab:
+        divider = board("divider", ply15).center(Pos("y", 300)).between(p["bottom"], p["top"])
+        divider.cut(rect(depth=100, height=50), at=divider.left.bottom)
+    return cab, {**p, "divider": divider}
+
+
+def _names(part: Board) -> list[str]:
+    return [name for op in part.ops if (name := getattr(op, "name", None))]
+
+
+def test_stations_are_numbered_across_the_contacts_of_a_pair():
+    cab, p = _divider()
+    with cab:
+        p["divider"].join(p["bottom"], using=domino("4x20", count=2))
+        p["divider"].join(p["top"], using=cabineo(count=2))
+    # two per contact, numbered on from the first contact to the second
+    assert _names(p["bottom"]) == [f"domino_divider_{i}" for i in (1, 2, 3, 4)]
+    assert [round((op.shape.bounds[0] + op.shape.bounds[2]) / 2, 6) for op in _pockets(p["bottom"], "domino")] == [
+        37, 163, 337, 463]
+    assert _names(p["divider"])[:4] == [f"domino_bottom_{i}_mark" for i in (1, 2, 3, 4)]
+    # the top meets the whole end: one contact, numbered as before
+    assert _names(p["top"]) == ["cabineo_divider_1", "cabineo_divider_2"]
+    assert _names(p["divider"])[4:] == [f"cabineo_top_{i}{x}" for i in (1, 2) for x in "abc"]
+
+
+def test_screws_and_cabineos_are_numbered_across_the_contacts_too():
+    cab, p = _divider()
+    with cab:
+        p["divider"].join(p["bottom"], using=cabineo(count=1))
+        p["bottom"].join(p["divider"], using=screws(count=1))
+    assert _names(p["divider"]) == ["cabineo_bottom_1a", "cabineo_bottom_1b", "cabineo_bottom_1c",
+                                    "cabineo_bottom_2a", "cabineo_bottom_2b", "cabineo_bottom_2c"]
+    assert _names(p["bottom"]) == ["cabineo_divider_1", "cabineo_divider_2", "screw_divider_1", "screw_divider_2"]
+
+
+def test_a_pair_joined_twice_with_the_same_kind_of_joint_is_an_error():
+    cab, p = _divider()
+    bottom, divider = p["bottom"], p["divider"]
+    with cab:
+        divider.join(bottom, using=domino("4x20", count=2))
+        before = state(bottom, divider)
+        with pytest.raises(LangError, match=r"^cab\.bottom: domino with cab\.divider: cab\.bottom and cab\.divider are "
+                                            r"joined with domino already \(cab\.bottom has domino_divider_1\); join a "
+                                            r"pair once with each kind of joint\.$"):
+            bottom.join(divider, using=domino("5x30", count=1, remaining=5))
+        assert state(bottom, divider) == before
+        bottom.join(divider, using=screws(count=1))              # another kind of joint: fine
+
+
+def test_boards_of_the_same_name_in_other_scopes_are_no_second_join():
+    """Two sides named left, in two modules: the shelf between them names
+    its marks for the second one with a suffix, as before."""
+    with module("unit", Box.from_size(width=600, depth=300, height=800)) as u:
+        with module("a", Box.from_size(width=300, depth=300, height=800)) as a:
+            first = board("left", ply15).on(a.left)
+        with module("b", Box.from_size(width=300, depth=300, height=800, origin=(0, 300, 0))) as b:
+            second = board("left", ply15).on(b.right)
+        shelf = board("shelf", ply15).on(Pos("z", 400), toward=u.top).between(first, second)
+        shelf.join(first, second, using=domino("4x20", count=2))
+    assert _names(shelf) == ["domino_left_1_mark", "domino_left_2_mark", "domino_left_1_mark_2", "domino_left_2_mark_2"]
+    assert _names(first) == _names(second) == ["domino_shelf_1", "domino_shelf_2"]
 
 
 # -- Domino -------------------------------------------------------------------------------------

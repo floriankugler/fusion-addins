@@ -11,12 +11,19 @@ Every error of a join is reported on the board whose `join()` was called,
 the message naming the joint and the other board (`reported`):
 `cab.bottom: domino with cab.left: ...`.
 
+Operations are named by kind, the board they are made for and a number
+counting the stations across all contacts of the pair (`Names`): the
+Dominos along a notched end are `domino_divider_1` to `_4`. A second join
+of a pair with the same kind of joint would make the same names, and is
+an error.
+
 A tenon joint records what it made along each contact (`TenonPlacement`),
 so that connectors and screws joined afterwards can sit in the gaps
 between the tenons (`gaps=`) along the contact as it was before.
 """
 from __future__ import annotations
 
+import weakref
 from collections.abc import Callable, Generator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -67,6 +74,57 @@ def reported(label: str, part: Board, other: Board | None = None) -> Generator[N
 def other_of(c: Contact, part: Board) -> Board:
     """The board of a contact that is not `part`."""
     return c.face_on if c.edge_on is part else c.edge_on
+
+
+# -- names ---------------------------------------------------------------------------------------
+
+#: Per board, the board each operation a join made in it was made for, kept
+#: as long as the boards are, so that a second join of a pair is found.
+_made_for: weakref.WeakKeyDictionary[Board, dict[str, weakref.ReferenceType[Board]]] = weakref.WeakKeyDictionary()
+
+
+class Names:
+    """The names of the operations one join makes, each for a board, the
+    other board of its pair (`domino_left_1` in the bottom, for the left
+    side). A name the board has from an earlier join for the same board
+    means the pair is joined twice with the same kind of joint, an error.
+    A name made for another board of the same name (in another scope)
+    gets a suffix, `_2`, as `Board.unique_op_name` gives it. `commit`
+    records the names once the whole join has succeeded."""
+
+    def __init__(self, label: str) -> None:
+        self.label = label
+        self._made: list[tuple[Board, str, Board]] = []
+
+    def __call__(self, board: Board, base: str, partner: Board) -> str:
+        made = _made_for.get(board, {}).get(base)
+        if board.has_operation(base) and made is not None and made() is partner:
+            raise LangError(f"{board.path} and {partner.path} are joined with {self.label} already ({board.path} has "
+                            f"{base}); join a pair once with each kind of joint.")
+        name = board.unique_op_name(base)
+        self._made.append((board, name, partner))
+        return name
+
+    def commit(self) -> None:
+        for board, name, partner in self._made:
+            _made_for.setdefault(board, {})[name] = weakref.ref(partner)
+
+
+@dataclass(frozen=True)
+class Naming:
+    """How a contact joint names what it makes along one contact: the
+    stations are numbered on from `first`, across the contacts of the
+    pair; `name(board, base)` names an operation in either board."""
+    names: Names
+    contact: Contact
+    first: int
+
+    def number(self, i: int) -> int:
+        """The number of the contact's station `i`, counted from 0."""
+        return self.first + i
+
+    def __call__(self, board: Board, base: str) -> str:
+        return self.names(board, base, other_of(self.contact, board))
 
 
 # -- tenons joined before ----------------------------------------------------------------------
@@ -310,7 +368,9 @@ class ContactJoint:
     def check(self, c: Contact, stations: list[float]) -> None:
         raise NotImplementedError
 
-    def place(self, c: Contact, stations: list[float]) -> None:
+    def place(self, c: Contact, stations: list[float], naming: Naming) -> None:
+        """Machines both boards along the contact, naming the operations
+        with `naming`."""
         raise NotImplementedError
 
 
@@ -326,10 +386,11 @@ class SpacedJoint(ContactJoint):
         return self.spacing.stations(c)
 
 
-def join_contacts(joint: ContactJoint, part: Board, partners: list[Board]) -> None:
+def join_contacts(joint: ContactJoint, part: Board, partners: list[Board]) -> list[tuple[Contact, list[float]]]:
     """Finds the contacts with the boards named, either one edge-on, checks
-    every one, then machines them. Errors are reported on `part`, naming
-    the other board (`reported`)."""
+    every one, then machines them, numbering the stations across the
+    contacts of each pair; what it joined, once all of it is done. Errors
+    are reported on `part`, naming the other board (`reported`)."""
     label = joint.label
     planned: list[tuple[Board, Contact, list[float]]] = []
     for other, found in find_contacts(label, part, partners, joint.contacts_with):
@@ -338,9 +399,15 @@ def join_contacts(joint: ContactJoint, part: Board, partners: list[Board]) -> No
     for other, c, stations in planned:
         with reported(label, part, other):
             joint.check(c, stations)
+    names = Names(label)
+    first: dict[int, int] = {}
     for other, c, stations in planned:
+        n = first.get(id(other), 1)
         with reported(label, part, other):
-            joint.place(c, stations)
+            joint.place(c, stations, Naming(names, c, n))
+        first[id(other)] = n + len(stations)
+    names.commit()
+    return [(c, stations) for _, c, stations in planned]
 
 
 def union_all(shapes: Sequence[Shape]) -> Shape:

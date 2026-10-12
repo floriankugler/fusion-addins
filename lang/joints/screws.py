@@ -33,7 +33,7 @@ from ..core.contact import Contact
 from ..core.errors import LangError
 from ..core.part import Board, Face
 from ..core.refs import PosLike, through
-from .common import (EPS, ContactGeometry, SpacedJoint, Spacing, TenonPlacement, TenonSource, face_toward,
+from .common import (EPS, ContactGeometry, Naming, SpacedJoint, Spacing, TenonPlacement, TenonSource, face_toward,
                      make_spacing, opposite_face, placement_of)
 from .tenons import Tenons
 
@@ -88,21 +88,21 @@ class Screws(SpacedJoint):
             if not c.lo - EPS <= s <= c.hi + EPS:
                 raise LangError(f"a screw at {c.axis}={s:g} lies outside the contact ({c.lo:g} to {c.hi:g}).")
 
-    def place(self, c: Contact, stations: list[float]) -> None:
+    def place(self, c: Contact, stations: list[float], naming: Naming) -> None:
         g = ContactGeometry(c)
         e, f = c.edge_on, c.face_on
         if self.tenons is None:
             # Through the board that is met, from its outer face.
             outer = opposite_face(c.face)
-            for i, s in enumerate(stations, 1):
-                f.add_hole(outer, g.on_face(s, g.middle), self.d, through, f.unique_op_name(f"screw_{e.name}_{i}"),
-                           chamfer=self.sink)
+            for i, s in enumerate(stations):
+                f.add_hole(outer, g.on_face(s, g.middle), self.d, through,
+                           naming(f, f"screw_{e.name}_{naming.number(i)}"), chamfer=self.sink)
             return
         p = placement_of(self.tenons, c)
         face = self._open_face(c, p)
-        for i, s in enumerate(stations, 1):
-            e.add_hole(face, g.on_board(s, -p.length / 2), self.d, through, e.unique_op_name(f"screw_{f.name}_{i}"),
-                       chamfer=self.sink)
+        for i, s in enumerate(stations):
+            e.add_hole(face, g.on_board(s, -p.length / 2), self.d, through,
+                       naming(e, f"screw_{f.name}_{naming.number(i)}"), chamfer=self.sink)
 
     def _open_face(self, c: Contact, p: TenonPlacement) -> Face:
         """The tenon board's big face that lies open: on the side where the

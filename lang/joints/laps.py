@@ -33,7 +33,7 @@ from ..core.errors import LangError, one_of
 from ..core.part import Board
 from ..core.refs import PosLike, Side, as_pos
 from ..core.shapes import Shape, box_shape
-from .common import PROBE, Point2, reported
+from .common import PROBE, Names, Point2, reported
 
 #: How far a notch reaches past the board's edge, so it opens cleanly.
 _PAST = 1.0
@@ -65,7 +65,7 @@ class HalfLap:
                     raise LangError("the two do not cross.")
                 laps.append((other, c, self._split(c)))
         outlines: dict[int, Shape] = {}
-        notches: list[tuple[Board, Board, Shape, str]] = []
+        notches: list[tuple[Board, Board, Shape, Board]] = []
         for other, c, split in laps:
             d = self.toward
             pb, ob = part.box(), other.box()
@@ -79,10 +79,12 @@ class HalfLap:
                 with reported(self.label, part, other):
                     shape = self._notch(board, across, c.axis, span, split, opens, outline)
                 outlines[id(board)] = outline.difference(shape)
-                notches.append((other, board, shape, f"lap_{across.name}"))
-        for other, board, shape, name in notches:
+                notches.append((other, board, shape, across))
+        names = Names(self.label)
+        for other, board, shape, across in notches:
             with reported(self.label, part, other):
-                board.add_cut(shape, name=board.unique_op_name(name))
+                board.add_cut(shape, name=names(board, f"lap_{across.name}", across))
+        names.commit()
 
     def _split(self, c: Crossing) -> float:
         if self.toward.axis != c.axis:

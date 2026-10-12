@@ -5,6 +5,7 @@ import pytest
 
 from lang import *
 from lang.core.ops import Hole
+from lang.core.scope import registry
 from lang.core.layout import build_layout
 from lang.preview.mesh import mesh_part
 from helpers import ply15, ply18
@@ -78,9 +79,15 @@ def test_screws_through_open_tenons():
     (a, b) = _holes(shelf, "screw_left_")
     # from the shelf's top face, the open one, halfway along the 15 mm tenons
     assert (a.face, a.u, a.v, b.u, a.through) == ("top", 55, 7.5, 245, True)
+    with u, pytest.raises(LangError, match="unit.shelf and unit.left are joined with screws already"):
+        shelf.join(left, using=screws(tenons=t, offset=12))         # a second join of the pair with screws
+    registry.reset()
+    u, left, _, shelf = _unit(shelf_at=782)
+    t = tenons(count=2, width=50)
     with u:
+        shelf.join(left, using=t)
         shelf.join(left, using=screws(tenons=t, offset=12))
-    assert [h.u for h in _holes(shelf, "screw_left_")][2:] == [42, 68, 232, 258]
+    assert [h.u for h in _holes(shelf, "screw_left_")] == [42, 68, 232, 258]
 
 
 def test_gap_and_tenon_screw_errors():

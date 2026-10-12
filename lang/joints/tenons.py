@@ -43,8 +43,8 @@ from ..core.errors import LangError, one_of
 from ..core.part import Board
 from ..core.refs import DepthSpec, Pos, PosLike, to
 from ..core.shapes import Shape, box_shape
-from .common import (EPS, PROBE, ContactGeometry, ContactJoint, Point2, Spacing, TenonPlacement, make_spacing,
-                     opposite_face, union_all)
+from .common import (EPS, PROBE, ContactGeometry, ContactJoint, Naming, Point2, Spacing, TenonPlacement,
+                     make_spacing, opposite_face, union_all)
 
 #: How far a tenon reaches back into its board, so it joins the outline cleanly, mm.
 _OVERLAP = 1.0
@@ -122,7 +122,7 @@ class Tenons(ContactJoint):
                 raise LangError("hidden dog bones would reach past the end of the tenon; use a smaller tool or less "
                                 "remaining.")
 
-    def place(self, c: Contact, stations: list[float]) -> None:
+    def place(self, c: Contact, stations: list[float], naming: Naming) -> None:
         g = ContactGeometry(c)
         e, f = c.edge_on, c.face_on
         w = self.width_on(c)
@@ -135,20 +135,21 @@ class Tenons(ContactJoint):
         e_outline, f_outline = e.outline, f.outline
         across_lo, across_hi = e.box().lo[c.across], e.box().hi[c.across]
         along_clear, across_clear = self.clearance[0] / 2, self.clearance[1] / 2
-        for i, s in enumerate(stations, 1):
+        for i, s in enumerate(stations):
+            n = naming.number(i)
             lo, hi = s - w / 2, s + w / 2
             e.add_to_outline(_box(g.on_board(lo, _OVERLAP), g.on_board(hi, -length)))
             reliefs = [self._root_relief(g, x, side) for x, side in ((lo, -1.0), (hi, 1.0))
                        if e_outline.geometry.contains(_point(g.on_board(x + side * PROBE, PROBE)))]
             if reliefs:
-                e.add_cut(union_all(reliefs), name=e.unique_op_name(f"tenon_{f.name}_{i}_relief"))
+                e.add_cut(union_all(reliefs), name=naming(e, f"tenon_{f.name}_{n}_relief"))
             corners = (lo - along_clear, across_lo - across_clear), (hi + along_clear, across_hi + across_clear)
             mortise = _box(g.on_face(*corners[0]), g.on_face(*corners[1]))
             for along, across, into_along, into_across in _corners(corners):
                 outside = g.on_face(along - into_along * PROBE, across - into_across * PROBE)
                 if f_outline.geometry.contains(_point(outside)):
                     mortise = mortise.union(self._mortise_relief(g, along, across, into_along, into_across))
-            name = f.unique_op_name(f"mortise_{e.name}_{i}")
+            name = naming(f, f"mortise_{e.name}_{n}")
             if mortise_depth is None:
                 f.add_cut(mortise, name=name)
             else:

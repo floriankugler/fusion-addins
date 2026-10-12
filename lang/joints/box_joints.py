@@ -65,7 +65,7 @@ from ..core.directions import Axis
 from ..core.errors import LangError
 from ..core.part import Face
 from ..core.shapes import Shape, circle
-from .common import EPS, ContactJoint, Point2, face_toward, union_all
+from .common import EPS, ContactJoint, Naming, Point2, face_toward, union_all
 
 #: How far notches and gaps reach past the end they open toward, so they open cleanly, mm.
 _PAST = 1.0
@@ -118,7 +118,7 @@ class BoxJoint(ContactJoint):
         elif w - along <= EPS:
             raise LangError(f"the clearance along the joint ({along:g}) leaves nothing of the {w:g} mm fingers.")
 
-    def place(self, c: Contact, stations: list[float]) -> None:
+    def place(self, c: Contact, stations: list[float], naming: Naming) -> None:
         corner = _Corner(c)
         a, b = corner.a, corner.b
         n, r = self.fingers, self.radius
@@ -141,26 +141,26 @@ class BoxJoint(ContactJoint):
             # cut leaves an arc.
             cut = corner.ta if across > EPS else None
             shape = _slot(seat, z0, z1, r, cut if i == 1 else None, cut if i == len(gaps) else None)
-            b.add_cut(corner.on_b(shape), name=b.unique_op_name(f"gap_{a.name}_{i}"))
+            b.add_cut(corner.on_b(shape), name=naming(b, f"gap_{a.name}_{i}"))
         if r > 0:
             grooves = union_all([corner.on_tips(_lens(corner.tb, z, r)) for z in sides])
-            b.add_edge_pocket(c.end, grooves, seat - r, name=b.unique_op_name(f"finger_{a.name}_grooves"),
+            b.add_edge_pocket(c.end, grooves, seat - r, name=naming(b, f"finger_{a.name}_grooves"),
                               offset=corner.tips_offset)
             reliefs = union_all([circle(2 * r, corner.point_b(seat - r, z), _QUARTER) for z in sides])
-            b.add_pocket(corner.b_inner, reliefs, r, name=b.unique_op_name(f"finger_{a.name}_reliefs"))
+            b.add_pocket(corner.b_inner, reliefs, r, name=naming(b, f"finger_{a.name}_reliefs"))
 
         # The notched board: the notches, the grooves along their walls
         # (open toward the notch) and the dog bones on those walls.
         for i, (z0, z1) in enumerate(notches, 1):
-            a.add_cut(corner.on_a(_slot(bottom, z0, z1, r)), name=a.unique_op_name(f"notch_{b.name}_{i}"))
+            a.add_cut(corner.on_a(_slot(bottom, z0, z1, r)), name=naming(a, f"notch_{b.name}_{i}"))
         if r > 0:
             grooves = union_all([corner.on_a_end(_lens(corner.ta, z, r, opens)) for z0, z1 in notches
                               for z, opens in ((z0, 1), (z1, -1))])
-            a.add_edge_pocket(corner.a_end, grooves, bottom, name=a.unique_op_name(f"notch_{b.name}_grooves"),
+            a.add_edge_pocket(corner.a_end, grooves, bottom, name=naming(a, f"notch_{b.name}_grooves"),
                               offset=corner.a_end_offset)
             reliefs = union_all([circle(2 * r, corner.point_a(bottom - r, z), _QUARTER) for z0, z1 in notches
                               for z in (z0, z1)])
-            a.add_pocket(c.face, reliefs, r, name=a.unique_op_name(f"notch_{b.name}_reliefs"))
+            a.add_pocket(c.face, reliefs, r, name=naming(a, f"notch_{b.name}_reliefs"))
 
 
 class _Corner:

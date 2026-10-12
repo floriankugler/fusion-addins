@@ -44,6 +44,12 @@ def has_material(part: Board, *points: tuple[float, float]) -> list[bool]:
     return [bool(part.outline.geometry.contains(Point(p))) for p in points]
 
 
+def state(*parts: Board) -> list[tuple[str, list[Any]]]:
+    """Each part's outline (as WKT) and operations: what a failed join
+    must leave as it was."""
+    return [(p.outline.geometry.wkt, list(p.ops)) for p in parts]
+
+
 def part_meshes() -> dict[str, Any]:
     """Every part of the build meshed as the preview meshes it, by path."""
     layout = build_layout()

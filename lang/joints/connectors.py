@@ -45,8 +45,8 @@ from ..core.errors import LangError, one_of
 from ..core.part import Board, Face
 from ..core.refs import DepthSpec, PosLike, through, to
 from ..core.shapes import circle, slot_shape
-from .common import (EPS, ContactGeometry, FaceChoice, SpacedJoint, Spacing, check_gaps, face_choice, hidden_face,
-                     make_spacing, opposite_face, pick_face, start_index)
+from .common import (EPS, ContactGeometry, FaceChoice, Naming, SpacedJoint, Spacing, check_gaps, face_choice,
+                     hidden_face, make_spacing, opposite_face, pick_face, start_index)
 from .tenons import Tenons
 
 DominoSize = Literal["4x20", "5x30", "6x40", "8x36", "8x40", "8x50", "8x80", "8x100", "10x50", "10x80",
@@ -125,7 +125,7 @@ class Domino(SpacedJoint):
             if s - self.slot_length / 2 < c.lo - EPS or s + self.slot_length / 2 > c.hi + EPS:
                 raise LangError(f"the slot at {c.axis}={s:g} reaches past the contact ({c.lo:g} to {c.hi:g}).")
 
-    def place(self, c: Contact, stations: list[float]) -> None:
+    def place(self, c: Contact, stations: list[float], naming: Naming) -> None:
         g = ContactGeometry(c)
         e, f = c.edge_on, c.face_on
         centre, h = self._centre(g), self.slot_height
@@ -136,7 +136,7 @@ class Domino(SpacedJoint):
             length = self.slot_length + (self.loose if i != exact else 0.0)
             half_span = (length - h) / 2
             shape = slot_shape(g.on_face(s - half_span, centre), g.on_face(s + half_span, centre), h)
-            f.add_pocket(c.face, shape, depth, name=f.unique_op_name(f"domino_{e.name}_{i + 1}"))
+            f.add_pocket(c.face, shape, depth, name=naming(f, f"domino_{e.name}_{naming.number(i)}"))
         if self.marks is None:
             return
         reference = self._reference(e)
@@ -146,7 +146,7 @@ class Domino(SpacedJoint):
             # Across the reference face from the board's end, where the
             # machine's centre mark is lined up with it.
             e.add_vgroove(reference, g.on_board(s, -_RUN_OUT), g.on_board(s, self.mark_length), self.mark_depth,
-                          e.unique_op_name(f"domino_{f.name}_{i + 1}_mark"))
+                          naming(e, f"domino_{f.name}_{naming.number(i)}_mark"))
 
 
 def domino(size: DominoSize, *, count: int | None = None, at: Sequence[PosLike] | None = None,
@@ -212,14 +212,15 @@ class Clamex(SpacedJoint):
             raise LangError(f"the {data.CLAMEX_GUIDE_DEPTH:g} mm guide holes go through {f.path}; "
                             "give through=True.")
 
-    def place(self, c: Contact, stations: list[float]) -> None:
+    def place(self, c: Contact, stations: list[float], naming: Naming) -> None:
         g = ContactGeometry(c)
         e, f = c.edge_on, c.face_on
         access = pick_face(e, self.face, hidden_face(e))
         centres, width = self.model.access_centers, self.model.access_width
         guide_depth: DepthSpec = through if self.through else data.CLAMEX_GUIDE_DEPTH
-        for i, s in enumerate(stations, 1):
-            name = e.unique_op_name(f"clamex_{f.name}_{i}")
+        for i, s in enumerate(stations):
+            n = naming.number(i)
+            name = naming(e, f"clamex_{f.name}_{n}")
             if len(centres) == 1:
                 e.add_hole(access, g.on_board(s, centres[0]), width, e.thickness / 2, name)
             else:
@@ -227,7 +228,7 @@ class Clamex(SpacedJoint):
                 e.add_pocket(access, shape, e.thickness / 2, name)
             for suffix, offset in (("a", -0.5), ("b", 0.5)):
                 at = g.on_face(s + offset * data.CLAMEX_GUIDE_SPACING, g.middle)
-                f.add_hole(c.face, at, self.guide_d, guide_depth, f.unique_op_name(f"clamex_{e.name}_{i}{suffix}"))
+                f.add_hole(c.face, at, self.guide_d, guide_depth, naming(f, f"clamex_{e.name}_{n}{suffix}"))
 
 
 def clamex(model: ClamexModel = "P-10", *, count: int | None = None, at: Sequence[PosLike] | None = None,
@@ -275,7 +276,7 @@ class Cabineo(SpacedJoint):
         if not self.through and self.guide.depth >= f.thickness - EPS:
             raise LangError(f"the {self.guide.depth:g} mm deep hole goes through {f.path}; give through=True.")
 
-    def place(self, c: Contact, stations: list[float]) -> None:
+    def place(self, c: Contact, stations: list[float], naming: Naming) -> None:
         g = ContactGeometry(c)
         e, f = c.edge_on, c.face_on
         access = pick_face(e, self.face, hidden_face(e))
@@ -284,28 +285,29 @@ class Cabineo(SpacedJoint):
         across = g.inside(access, offset)
         guide = self.guide
         guide_depth: DepthSpec = through if self.through else guide.depth
-        for i, s in enumerate(stations, 1):
-            base = f"cabineo_{f.name}_{i}"
+        for i, s in enumerate(stations):
+            n = naming.number(i)
+            base = f"cabineo_{f.name}_{n}"
             # Holes first: a hole is placed by a point on the face, which a
             # relief cut first would have removed.
             for letter, centre in zip("abc", centres):
                 e.add_hole(access, g.on_board(s, centre), data.CABINEO_ACCESS_DIAMETER, self.access_depth,
-                           e.unique_op_name(base + letter))
+                           naming(e, base + letter))
             if self.surface == "flush":
                 shape = slot_shape(g.on_board(s, 0.0), g.on_board(s, centres[-1]), data.CABINEO_FLUSH_RELIEF_WIDTH)
-                e.add_pocket(access, shape, data.CABINEO_FLUSH_RELIEF_DEPTH, e.unique_op_name(base + "_relief"))
+                e.add_pocket(access, shape, data.CABINEO_FLUSH_RELIEF_DEPTH, naming(e, base + "_relief"))
             elif self.surface == "anti-break":
                 depth, widening = self.anti_break
                 circles = [circle(data.CABINEO_ACCESS_DIAMETER + 2 * widening, g.on_board(s, centre), 16)
                            for centre in centres]
                 shape = circles[0].union(circles[1]).union(circles[2])
-                e.add_pocket(access, shape, depth, e.unique_op_name(base + "_relief"))
-            name = f.unique_op_name(f"cabineo_{e.name}_{i}")
+                e.add_pocket(access, shape, depth, naming(e, base + "_relief"))
+            name = naming(f, f"cabineo_{e.name}_{n}")
             at = g.on_face(s, across)
             f.add_hole(c.face, at, guide.diameter, guide_depth, name)
             if guide.collar_diameter is not None and guide.collar_depth is not None:
                 f.add_pocket(c.face, circle(guide.collar_diameter, at, 16), guide.collar_depth,
-                             f.unique_op_name(name + "_collar"))
+                             naming(f, name + "_collar"))
 
 
 def cabineo(model: CabineoModel = "8", *, count: int | None = None, at: Sequence[PosLike] | None = None,

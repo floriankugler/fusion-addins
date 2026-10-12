@@ -64,7 +64,7 @@ from ..core.dogbones import DogBones, corner_relief, hidden_relief
 from ..core.errors import LangError, one_of
 from ..core.part import Board, Face
 from ..core.shapes import Shape, box_shape
-from .common import EPS, PROBE, Point2, find_contacts, other_of, reported
+from .common import EPS, PROBE, Names, Point2, find_contacts, other_of, reported
 
 
 @dataclass(frozen=True)
@@ -86,8 +86,10 @@ class Groove:
             for c in found:
                 panels.setdefault(id(c.edge_on), []).append(c)
         plans = [self._plan(part, contacts) for contacts in panels.values()]
+        names = Names(self.label)
         for plan in plans:
-            plan.apply(part)
+            plan.apply(part, names)
+        names.commit()
 
     # -- one panel and the boards it goes into -----------------------------------------------
 
@@ -253,7 +255,7 @@ class _Plan:
                 return
         self.cuts.append(cut)
 
-    def apply(self, part: Board) -> None:
+    def apply(self, part: Board, names: Names) -> None:
         """Changes the panel and the boards; errors are reported on `part`,
         the board whose join() was called."""
         panel = self.panel
@@ -263,7 +265,7 @@ class _Plan:
         for cut in self.cuts:
             board = cut.board
             with reported(Groove.label, part, board if part is panel else panel):
-                board.add_pocket(cut.face, cut.shape, cut.depth, name=board.unique_op_name(f"groove_{panel.name}"))
+                board.add_pocket(cut.face, cut.shape, cut.depth, name=names(board, f"groove_{panel.name}", panel))
             board.notes.extend(cut.notes)
 
 
