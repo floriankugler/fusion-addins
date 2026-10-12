@@ -17,16 +17,18 @@ outside the opening's contour, and one for the ball's screw in the hatch,
 9.4 mm inside the contour (so 6.4 mm from the hatch's edge with a 3 mm
 slot), each 2 mm across and 4 deep unless `pilot=` says otherwise, from
 the face the catches are screwed to: the big face that is not the show
-face (the hidden one), unless `face=` names one.
+face (the hidden one), unless `face=` names one. They are named
+`catch_<hatch>_<n>` in the panel and `catch_<panel>_<n>` in the hatch, n
+numbering on past the catches an earlier mount put on the same pair.
 
 `scope.mount(catch, opening=panel.opening, edge=panel.opening.left,
 hatch=hatch)` spaces `count` catches (4) over the straight edge that
 `edge` names and the one across the opening from it: the edge named takes
 the larger half, the first and last catch on an edge sit `end` (40) from
 the ends of its straight part (where the rounded corners begin), the rest
-evenly between, and a single catch is centred. With `BallCatch(at=[...])`
-a catch goes to each point instead, moved square onto the nearest
-straight edge of the opening. The straight edges and their ends come from
+evenly between, and a single catch is centred (`lib.stations`). With
+`BallCatch(at=[...])` a catch goes to each point instead, moved square
+onto the nearest straight edge of the opening. The straight edges and their ends come from
 the opening's shape: its lines, between the arcs `lang.emit.arcs` finds.
 
 It refuses what the add-in refuses: an opening that is not a hole inside
@@ -35,12 +37,14 @@ under every ball, a slot narrower or wider than the catch takes, a catch
 less than half the holder's width (14 mm) from the end of its straight
 edge or less than a holder's width from its neighbour, a holder without
 its 28 x 15 mm of panel beside the opening or a ball without its 14 x 15
-mm of hatch beside the slot, and pilot holes as deep as a board is thick.
+mm of hatch beside the slot, pilot holes that do not fit on their faces
+(`Board.hole_fits`) and pilot holes as deep as a board is thick.
 
 The catches are placed too, one body of boxes per catch (`CATCH_SHAPES`,
-measured on Ganter's CAD model): the holder on the panel with its stop
-webs down the opening's edge, its jaw reaching over the slot, and the
-ball part on the hatch, in the jaw.
+measured on Ganter's CAD model), `catch_1`, ... in an item
+`<hatch>_catches`: the holder on the panel with its stop webs down the
+opening's edge, its jaw reaching over the slot, and the ball part on the
+hatch, in the jaw.
 
 Sources: Ganter GN 450-28-14 catalog drawing via `lib.ball_catches`
 (holder hole 8.4 mm out, ball hole 9.4 mm in, slot 2.5 to 3.5 mm, 15 mm
@@ -53,26 +57,27 @@ from __future__ import annotations
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Literal, cast
+from typing import TYPE_CHECKING, Literal
 
 from shapely.geometry import LineString, Point, Polygon
 from shapely.geometry.base import BaseGeometry
-from shapely.geometry.polygon import orient
 from shapely.ops import unary_union
 
 from lib import ball_catches as data
+from lib.stations import stations as spread
 
 from ..core import cutouts as cutout_geometry
 from ..core.directions import AXES, Direction, InnerOuter
 from ..core.errors import LangError, one_of
 from ..core.layout_types import BoxDict, HardwareBodyLayout
 from ..core.material import Material
-from ..core.ops import Cut, Hole, Pocket, VGroove
+from ..core.ops import Cut
 from ..core.part import Anchor, Board, Face, Operation, board
-from ..core.refs import Pos, Side, as_pos
+from ..core.refs import Pos, PosLike, Side, as_pos
 from ..core.shapes import Shape
-from ..emit.arcs import Arc2, Circle2, Curve2, Line2, fit
-from ..joints.common import big_face, face_choice, hidden_face
+from ..emit.arcs import Curve2, Line2, fit
+from ..joints.common import big_face, face_choice, hidden_face, make_spacing
+from .common import TOLERANCE, Point2, check_hole_size, check_pilot_depth, mm
 
 if TYPE_CHECKING:
     from ..core.scope import Scope
@@ -83,20 +88,9 @@ CatchModel = Literal["GN 450"]
 #: or direction it faces, or inner/outer; None for the hidden face.
 CatchFace = Face | Side | Direction | InnerOuter | None
 
-#: Geometric tolerance of the checks, mm (the add-in's 1e-4 cm).
-TOLERANCE = 1e-3
 #: How far inside a face the probes along its border sit, mm (the add-in's
 #: 0.01 cm).
 PROBE_INSET = 0.1
-#: The hatch's arcs get a vertex at least every this many degrees, so the
-#: emitter draws them as arcs again (`lang.emit.arcs`).
-_ARC_STEP = math.radians(1.0)
-
-Point2 = tuple[float, float]
-
-
-def _mm(value: float) -> str:
-    return f"{value:.1f}".rstrip("0").rstrip(".") + " mm"
 
 
 def _moved(p: Point2, direction: Point2, distance: float) -> Point2:
@@ -224,42 +218,36 @@ class BallCatch:
     takes, 3 mm for the GN 450). The defaults are the add-in's: 4 catches,
     40 from the ends, pilot holes 2 x 4."""
 
-    def __init__(self, model: CatchModel = "GN 450", count: int | None = None, end: float = data.DEFAULT_END_OFFSET,
-                 at: Sequence[Anchor] | None = None, pilot: tuple[float, float] = (data.PILOT_DIAMETER, data.PILOT_DEPTH),
-                 gap: float | None = None):
+    def __init__(self, model: CatchModel = "GN 450", *, count: int | None = None,
+                 end: float = data.DEFAULT_END_OFFSET, at: Sequence[Anchor] | None = None,
+                 pilot: tuple[float, float] = (data.PILOT_DIAMETER, data.PILOT_DEPTH), gap: float | None = None):
         self.spec = data.CATCHES[one_of(model, CatchModel, "BallCatch()")]
         #: The boxes the catches are drawn as.
         self.shape = CATCH_SHAPES[model]
-        if count is not None and at is not None:
-            raise LangError(f"{self.name}: give count= or at=, not both.")
-        if count is not None and count < 1:
-            raise LangError(f"{self.name}: count must be at least 1, not {count}.")
-        if end < 0:
-            raise LangError(f"{self.name}: end must not be negative, not {end:g}.")
         if at is not None:
+            if count is not None:
+                raise LangError(f"{self.name}: give count= or at=, not both.")
             if not at:
                 raise LangError(f"{self.name}: at= is empty.")
-            for anchor in at:
-                if not isinstance(anchor, Anchor):    # pyright: ignore[reportUnnecessaryIsInstance]
-                    raise LangError(f"{self.name}: at= takes points on a face, such as "
-                                    f"panel.bottom.left(panel.opening.left).front(200), not {anchor!r}.")
-        diameter, depth = pilot
-        if diameter <= 0:
-            raise LangError(f"{self.name}: the pilot diameter must be greater than zero.")
-        if depth <= 0:
-            raise LangError(f"{self.name}: the pilot depth must be greater than zero.")
+        else:
+            count = make_spacing(self.name, count if count is not None else data.DEFAULT_COUNT, end, None).count
+            assert count is not None
+            half = self.spec.holder_width / 2
+            if (count + 1) // 2 > 1 and end < half - TOLERANCE:
+                raise LangError(f"{self.name}: end must be at least {mm(half)}: the {mm(self.spec.holder_width)} "
+                                "wide holder must sit on the straight part of the edge.")
+        self.pilot = check_hole_size(self.name, "pilot", pilot)
         lo, hi = self.spec.min_gap, self.spec.max_gap
         if gap is None:
             gap = (lo + hi) / 2
         elif not lo <= gap <= hi:
             raise LangError(f"{self.name}: the slot must be {lo:g} to {hi:g} mm wide, not {gap:g}.")
         #: The catches on the edge named and the one opposite; None with at=.
-        self.count: int | None = None if at is not None else (count if count is not None else data.DEFAULT_COUNT)
+        self.count: int | None = count
         #: From the ends of an edge's straight part to its first and last catch.
         self.end = float(end)
         #: Points the catches are moved onto the opening's straight edges from.
         self.at: tuple[Anchor, ...] | None = tuple(at) if at is not None else None
-        self.pilot = (float(diameter), float(depth))
         #: The slot between the opening and the hatch that `hatch()` leaves.
         self.gap: float = float(gap)
 
@@ -280,7 +268,7 @@ class BallCatch:
         panel = opening.part
         cut = self._opening_cut(opening)
         catch_face = self._catch_face(panel, face)
-        geometry = _inset(cut.shape.polygons()[0], self.gap)
+        geometry = cutout_geometry.inset(cut.shape.polygons()[0], self.gap)
         if geometry.is_empty:
             raise LangError(f"{self.name}: the opening {opening.name!r} is too small for a hatch with a "
                             f"{self.gap:g} mm slot.", panel.path)
@@ -297,7 +285,8 @@ class BallCatch:
 
     # -- mounting ------------------------------------------------------------------------------------
 
-    def mount(self, scope: Scope, /, **options: object) -> None:
+    def mount(self, scope: Scope, /, *, opening: Operation, hatch: Board, edge: PosLike | None = None,
+              face: CatchFace = None) -> None:
         """`scope.mount(catch, opening=panel.opening, edge=panel.opening.left,
         hatch=hatch)`: drills the panel for the holders and the hatch for
         the balls, on the edge `edge` names (a position, the opening's side
@@ -305,29 +294,18 @@ class BallCatch:
         points (then without `edge=`), and places the catches. `face=`
         names the face they are screwed to, the panel's hidden face by
         default. Nothing is drilled unless every catch fits."""
-        allowed = {"opening", "hatch", "edge", "face"}
-        unknown = set(options) - allowed
-        if unknown or "opening" not in options or "hatch" not in options:
-            raise LangError(f"{self.name}: mount() takes opening=, hatch=, edge= and face=, got {sorted(options)}.")
-        opening, hatch = options["opening"], options["hatch"]
-        if not isinstance(opening, Operation):
-            raise LangError(f"{self.name}: opening= is a named through cut of the panel, such as panel.opening, "
-                            f"not {opening!r}.")
-        if not isinstance(hatch, Board):
-            raise LangError(f"{self.name}: hatch= is the board in the opening, not {hatch!r}.")
-        edge = options.get("edge")
         if self.at is None and edge is None:
             raise LangError(f"{self.name}: mount() needs edge=, the straight edge of the opening the catches "
                             f"go on, e.g. edge={opening.part.name}.{opening.name}.left.", opening.part.path)
         if self.at is not None and edge is not None:
             raise LangError(f"{self.name}: with at= each catch goes to the nearest straight edge; leave out edge=.",
                             opening.part.path)
-        plan = self._plan(opening, hatch, edge, cast(CatchFace, options.get("face")))
+        plan = self._plan(opening, hatch, edge, face)
         first = self._first_number(plan)
         self._drill(plan, first)
         self._place(scope, plan, first)
 
-    def _plan(self, opening: Operation, hatch: Board, edge: object, face: CatchFace) -> _Plan:
+    def _plan(self, opening: Operation, hatch: Board, edge: PosLike | None, face: CatchFace) -> _Plan:
         """Finds the edges, works out every hole and checks it, in the
         add-in's order."""
         spec = self.spec
@@ -335,35 +313,32 @@ class BallCatch:
         cut = self._opening_cut(opening)
         catch_face = self._catch_face(panel, face)
         hatch_face = self._hatch_face(panel, catch_face, hatch)
-        region = _face_region(panel, catch_face)
+        region = panel.face_region(catch_face)
         edges = self._straight_edges(panel, opening, cut, region)
         if not edges:
             raise LangError(f"{self.name}: the opening {opening.name!r} has no straight edges for the holders to "
                             "bear on.", panel.path)
-        if self.at is None:
+        if edge is not None:
             sides = self._spaced(panel, opening, edges, as_pos(edge, "mount(edge=)"))
         else:
             sides = self._at_points(panel, hatch, edges)
-        hatch_region = _face_region(hatch, hatch_face)
+        hatch_region = hatch.face_region(hatch_face)
         catches = sorted((c for side in sides for c in side.catches), key=lambda c: c.number)
         for c in catches:
             if not _on(hatch_region, c.ball):
                 raise LangError(f"{self.name}: there is no hatch under the ball of catch {c.number}: {hatch.path} "
                                 f"must fill the opening, a {spec.min_gap:g} to {spec.max_gap:g} mm slot all round.",
                                 panel.path)
-        depth = self.pilot[1]
-        for part, what in ((panel, "panel"), (hatch, "hatch")):
-            if depth >= part.thickness - TOLERANCE:
-                raise LangError(f"{self.name}: the pilot depth ({_mm(depth)}) must be less than the {what}'s "
-                                f"thickness ({_mm(part.thickness)}).", part.path)
+        for part in (panel, hatch):
+            check_pilot_depth(self.name, part, self.pilot[1], "pilot")
         gaps: list[float] = []
         for side in sides:
             gap = float(LineString([side.a, side.b]).distance(hatch.outline.geometry))
             if not spec.min_gap - TOLERANCE <= gap <= spec.max_gap + TOLERANCE:
-                raise LangError(f"{self.name}: the slot between {panel.path} and {hatch.path} is {_mm(gap)} wide "
-                                f"at {side.label}; the {spec.name} needs {_mm(spec.min_gap)} to "
-                                f"{_mm(spec.max_gap)}.", panel.path)
-            self._check_fit(panel, side, gap, region, hatch_region)
+                raise LangError(f"{self.name}: the slot between {panel.path} and {hatch.path} is {mm(gap)} wide "
+                                f"at {side.label}; the {spec.name} needs {mm(spec.min_gap)} to "
+                                f"{mm(spec.max_gap)}.", panel.path)
+            self._check_fit(panel, catch_face, hatch, hatch_face, side, gap, region, hatch_region)
             gaps.append(gap)
         return _Plan(panel, hatch, catch_face, hatch_face, sides, gaps)
 
@@ -454,26 +429,20 @@ class BallCatch:
         sides = [selected]
         if counts[1]:
             sides.append(self._opposite(panel, selected, edges))
-        half = spec.holder_width / 2
         number = 1
         for side, n in zip(sides, counts):
             length = side.length
             if n == 1:
                 if length < spec.holder_width - TOLERANCE:
-                    raise LangError(f"{self.name}: {side.label} is {_mm(length)} long, shorter than the "
-                                    f"{_mm(spec.holder_width)} wide holder.", panel.path)
+                    raise LangError(f"{self.name}: {side.label} is {mm(length)} long, shorter than the "
+                                    f"{mm(spec.holder_width)} wide holder.", panel.path)
                 distances = [length / 2]
             else:
-                if self.end < half - TOLERANCE:
-                    raise LangError(f"{self.name}: end must be at least {_mm(half)}: the "
-                                    f"{_mm(spec.holder_width)} wide holder must sit on the straight part of the "
-                                    "edge.", panel.path)
-                spacing = (length - 2 * self.end) / (n - 1)
-                if spacing < spec.holder_width - TOLERANCE:
+                distances = spread(length, n, self.end)
+                if distances[1] - distances[0] < spec.holder_width - TOLERANCE:
                     needed = 2 * self.end + (n - 1) * spec.holder_width
-                    raise LangError(f"{self.name}: {side.label} is {_mm(length)} long; {n} catches "
-                                    f"{_mm(self.end)} from its ends need {_mm(needed)}.", panel.path)
-                distances = [self.end + k * spacing for k in range(n)]
+                    raise LangError(f"{self.name}: {side.label} is {mm(length)} long; {n} catches "
+                                    f"{mm(self.end)} from its ends need {mm(needed)}.", panel.path)
             side.catches = [self._catch(side, d, number + k) for k, d in enumerate(distances)]
             number += n
         return sides
@@ -528,7 +497,7 @@ class BallCatch:
                 sides.append(side)
             if not half - TOLERANCE <= distance <= side.length - half + TOLERANCE:
                 raise LangError(f"{self.name}: point {number} of at= is too close to the end of the straight part "
-                                f"of {side.label}; the {_mm(spec.holder_width)} wide holder needs {_mm(half)} on "
+                                f"of {side.label}; the {mm(spec.holder_width)} wide holder needs {mm(half)} on "
                                 "both sides.", panel.path)
             side.catches.append(self._catch(side, distance, number))
         for side in sides:
@@ -537,51 +506,53 @@ class BallCatch:
                 spacing = second.distance - first.distance
                 if spacing < spec.holder_width - TOLERANCE:
                     low, high = sorted((first.number, second.number))
-                    raise LangError(f"{self.name}: points {low} and {high} of at= are {_mm(spacing)} apart; the "
-                                    f"holders are {_mm(spec.holder_width)} wide.", panel.path)
+                    raise LangError(f"{self.name}: points {low} and {high} of at= are {mm(spacing)} apart; the "
+                                    f"holders are {mm(spec.holder_width)} wide.", panel.path)
         return sides
 
-    def _check_fit(self, panel: Board, side: _Straight, gap: float, region: BaseGeometry,
-                   hatch_region: BaseGeometry) -> None:
-        """Each part needs its mounting surface beside the slot, and the
-        pilot holes must land on their faces."""
+    def _check_fit(self, panel: Board, face: Face, hatch: Board, hatch_face: Face, side: _Straight, gap: float,
+                   region: BaseGeometry, hatch_region: BaseGeometry) -> None:
+        """Each part needs its mounting surface beside the slot and the
+        ball's base on the hatch, and the pilot holes must fit on their
+        faces (`Board.hole_fits`)."""
         spec = self.spec
-        pilot_radius = self.pilot[0] / 2
-        base_radius = max(spec.ball_base_diameter / 2, pilot_radius)
+        pilot = self.pilot[0]
+        base_radius = max(spec.ball_base_diameter / 2, pilot / 2)
         for c in side.catches:
             holder = [side.at(c.distance + sign * spec.holder_width / 2, outward)
                       for sign in (-1, 1) for outward in (PROBE_INSET, spec.mounting_depth)]
-            if not all(_on(region, p) for p in holder + _rim(side, c.holder, pilot_radius)):
+            if not all(_on(region, p) for p in holder) or not panel.hole_fits(face, c.holder, pilot):
                 raise LangError(f"{self.name}: the holder of catch {c.number} does not fit on {panel.path}; it needs "
-                                f"{_mm(spec.holder_width)} x {_mm(spec.mounting_depth)} beside the opening.",
-                                panel.path)
+                                f"{mm(spec.holder_width)} x {mm(spec.mounting_depth)} beside the opening and its "
+                                "pilot hole on the panel.", panel.path)
             ball = [side.at(c.distance + sign * spec.ball_width / 2, -(gap + inward))
                     for sign in (-1, 1) for inward in (PROBE_INSET, spec.mounting_depth)]
-            if not all(_on(hatch_region, p) for p in ball + _rim(side, c.ball, base_radius)):
+            if (not all(_on(hatch_region, p) for p in ball + _rim(side, c.ball, base_radius))
+                    or not hatch.hole_fits(hatch_face, c.ball, pilot)):
                 raise LangError(f"{self.name}: the ball of catch {c.number} does not fit on the hatch; it needs "
-                                f"{_mm(spec.ball_width)} x {_mm(spec.mounting_depth)} beside the slot.", panel.path)
+                                f"{mm(spec.ball_width)} x {mm(spec.mounting_depth)} beside the slot.", panel.path)
 
     # -- machining and placing -------------------------------------------------------------------------
 
     def _drill(self, plan: _Plan, first: int) -> None:
         """A pilot hole per holder in the panel and per ball in the hatch,
-        from their catch faces; named `holder_<hatch>_<n>` and
-        `ball_<panel>_<n>`, n counting from `first`."""
+        from their catch faces; named `catch_<hatch>_<n>` and
+        `catch_<panel>_<n>`, n counting from `first`."""
         panel, hatch = plan.panel, plan.hatch
         diameter, depth = self.pilot
         for c in plan.catches():
             n = first + c.number - 1
-            panel.add_hole(plan.face, c.holder, diameter, depth, name=f"holder_{hatch.name}_{n}")
+            panel.add_hole(plan.face, c.holder, diameter, depth, name=f"catch_{hatch.name}_{n}")
         for c in plan.catches():
             n = first + c.number - 1
-            hatch.add_hole(plan.hatch_face, c.ball, diameter, depth, name=f"ball_{panel.name}_{n}")
+            hatch.add_hole(plan.hatch_face, c.ball, diameter, depth, name=f"catch_{panel.name}_{n}")
 
     def _first_number(self, plan: _Plan) -> int:
         """The number of the first catch: 1, or past the catches an earlier
         mount put on the same panel and hatch."""
         first = 1
-        while (plan.panel.has_operation(f"holder_{plan.hatch.name}_{first}")
-               or plan.hatch.has_operation(f"ball_{plan.panel.name}_{first}")):
+        while (plan.panel.has_operation(f"catch_{plan.hatch.name}_{first}")
+               or plan.hatch.has_operation(f"catch_{plan.panel.name}_{first}")):
             first += 1
         return first
 
@@ -594,12 +565,7 @@ class BallCatch:
                 bodies.append(HardwareBodyLayout(name=f"catch_{first + c.number - 1}",
                                                  boxes=self._catch_body(plan, side, c, gap)))
         bodies.sort(key=lambda b: int(b["name"].rsplit("_", 1)[1]))
-        base = f"{plan.hatch.name}_catches"
-        taken = {item["name"] for item in scope.hardware}
-        name, k = base, 2
-        while name in taken:
-            name, k = f"{base}_{k}", k + 1
-        scope.place_hardware(name, bodies)
+        scope.place_hardware(scope.unique_hardware_name(f"{plan.hatch.name}_catches"), bodies)
 
     def _catch_body(self, plan: _Plan, side: _Straight, c: _Catch, gap: float) -> list[BoxDict]:
         """A catch as the boxes of its `CatchShape`: the holder, its webs
@@ -658,158 +624,6 @@ def _before(p: Point2, q: Point2) -> bool:
     return p[1] < q[1]
 
 
-def _inset(polygon: Polygon, d: float) -> BaseGeometry:
-    """The polygon's outline moved `d` inward, as Fusion offsets a sketch
-    loop: lines move square to themselves and meet where they met, so a
-    sharp corner stays sharp, and arcs keep their centres, so a corner
-    rounded with r becomes one rounded with r - d. Exact: worked out on the
-    lines and arcs the polygon stands for (`lang.emit.arcs.fit`), with the
-    arcs' vertices on their circles and the lines where they belong.
-    Outlines it cannot offset that way (an arc or a line vanishing) are
-    left to `cutouts.grown`, which is exact up to a few ten-thousandths of
-    a millimetre where a line meets an arc."""
-    ring = [(float(x), float(y)) for x, y in list(orient(polygon, 1.0).exterior.coords)[:-1]]
-    curves = fit(ring)
-    if len(curves) == 1 and isinstance(curves[0], Circle2):
-        circle = curves[0]
-        return cutout_geometry.circle_geometry(circle.center, circle.radius - d) if circle.radius > d else Polygon()
-    moved = [_moved_curve(c, d) for c in curves]
-    n = len(moved)
-    joints: list[Point2 | None] = [_joint(moved[k], moved[(k + 1) % n]) for k in range(n)]
-    points: list[Point2] = []
-    for k, curve in enumerate(moved):
-        start, end = joints[k - 1], joints[k]
-        if start is None or end is None:
-            return cutout_geometry.grown(polygon, -d)
-        points.append(start)
-        if isinstance(curve, Arc2):
-            points += _arc_between(curve, start, end)
-    out = Polygon(points)
-    reference = cutout_geometry.grown(polygon, -d)
-    if not out.is_valid or out.is_empty or out.hausdorff_distance(reference) > 0.01:
-        return reference
-    return out
-
-
-def _moved_curve(curve: Curve2, d: float) -> Curve2:
-    """A line or arc of a counter-clockwise ring moved `d` to its left,
-    into the ring."""
-    if isinstance(curve, Line2):
-        (ax, ay), (bx, by) = curve.a, curve.b
-        length = math.hypot(bx - ax, by - ay)
-        nx, ny = -(by - ay) / length, (bx - ax) / length
-        return Line2((ax + nx * d, ay + ny * d), (bx + nx * d, by + ny * d))
-    assert isinstance(curve, Arc2)
-    (ax, ay), (mx, my), (bx, by) = curve.a, curve.mid, curve.b
-    left = (mx - ax) * (by - my) - (my - ay) * (bx - mx) > 0     # turning left: the centre is inside
-    radius = curve.radius - d if left else curve.radius + d
-    c = curve.center
-
-    def on(p: Point2) -> Point2:
-        dx, dy = p[0] - c[0], p[1] - c[1]
-        k = radius / math.hypot(dx, dy)
-        return (c[0] + dx * k, c[1] + dy * k)
-    return Arc2(on(curve.a), on(curve.mid), on(curve.b), c, radius) if radius > 1e-9 else Line2(c, c)
-
-
-def _joint(p: Curve2, q: Curve2) -> Point2 | None:
-    """Where the moved curve `p` ends and `q` begins: their common end
-    where they met tangentially, else where they cross (nearest the ends);
-    None when they do not."""
-    end, start = _ends(p)[1], _ends(q)[0]
-    if math.dist(end, start) <= 1e-6:
-        return ((end[0] + start[0]) / 2, (end[1] + start[1]) / 2)
-    near = ((end[0] + start[0]) / 2, (end[1] + start[1]) / 2)
-    if isinstance(p, Line2) and isinstance(q, Line2):
-        return _lines_cross(p, q)
-    if isinstance(p, Arc2) and isinstance(q, Arc2):
-        return _circles_cross(p, q, near)
-    line, arc = (p, q) if isinstance(p, Line2) else (q, p)
-    assert isinstance(line, Line2) and isinstance(arc, Arc2)
-    return _line_circle_cross(line, arc, near)
-
-
-def _ends(curve: Curve2) -> tuple[Point2, Point2]:
-    assert not isinstance(curve, Circle2)
-    return curve.a, curve.b
-
-
-def _lines_cross(p: Line2, q: Line2) -> Point2 | None:
-    (ax, ay), (bx, by) = p.a, p.b
-    (cx, cy), (dx, dy) = q.a, q.b
-    ux, uy, wx, wy = bx - ax, by - ay, dx - cx, dy - cy
-    den = ux * wy - uy * wx
-    if abs(den) < 1e-12:
-        return None
-    t = ((cx - ax) * wy - (cy - ay) * wx) / den
-    return (ax + t * ux, ay + t * uy)
-
-
-def _line_circle_cross(line: Line2, arc: Arc2, near: Point2) -> Point2 | None:
-    (ax, ay), (bx, by) = line.a, line.b
-    (cx, cy), r = arc.center, arc.radius
-    length = math.hypot(bx - ax, by - ay)
-    if length == 0:
-        return None
-    ux, uy = (bx - ax) / length, (by - ay) / length
-    fx, fy = ax - cx, ay - cy
-    b = fx * ux + fy * uy
-    disc = b * b - (fx * fx + fy * fy - r * r)
-    if disc < 0:
-        return None
-    points = [(ax + t * ux, ay + t * uy) for t in (-b - math.sqrt(disc), -b + math.sqrt(disc))]
-    return min(points, key=lambda x: math.dist(x, near))
-
-
-def _circles_cross(p: Arc2, q: Arc2, near: Point2) -> Point2 | None:
-    (pc, pr), (qc, qr) = (p.center, p.radius), (q.center, q.radius)
-    dist = math.dist(pc, qc)
-    if dist == 0 or dist > pr + qr or dist < abs(pr - qr):
-        return None
-    along = (dist * dist + pr * pr - qr * qr) / (2 * dist)
-    h = math.sqrt(max(pr * pr - along * along, 0.0))
-    ux, uy = (qc[0] - pc[0]) / dist, (qc[1] - pc[1]) / dist
-    mx, my = pc[0] + along * ux, pc[1] + along * uy
-    return min([(mx - h * uy, my + h * ux), (mx + h * uy, my - h * ux)], key=lambda x: math.dist(x, near))
-
-
-def _arc_between(arc: Arc2, start: Point2, end: Point2) -> list[Point2]:
-    """The vertices strictly between `start` and `end` on the arc's circle,
-    the way the arc turns, at most `_ARC_STEP` apart."""
-    c, r = arc.center, arc.radius
-    (ax, ay), (mx, my), (bx, by) = arc.a, arc.mid, arc.b
-    ccw = (mx - ax) * (by - my) - (my - ay) * (bx - mx) > 0
-    a0 = math.atan2(start[1] - c[1], start[0] - c[0])
-    a1 = math.atan2(end[1] - c[1], end[0] - c[0])
-    sweep = (a1 - a0) % (2 * math.pi) if ccw else -((a0 - a1) % (2 * math.pi))
-    steps = max(4, math.ceil(abs(sweep) / _ARC_STEP))
-    return [(c[0] + r * math.cos(a0 + sweep * i / steps), c[1] + r * math.sin(a0 + sweep * i / steps))
-            for i in range(1, steps)]
-
-
-def _face_region(part: Board, face: Face) -> BaseGeometry:
-    """A big face as an area in the outline's frame: the outline less the
-    pockets, holes and V-grooves made into that face, and the pockets and
-    holes from the other face that go through."""
-    region: BaseGeometry = part.outline.geometry
-    name, other = face.world_name, _opposite_name(part, face)
-    removed: list[BaseGeometry] = []
-    for op in part.ops:
-        if isinstance(op, (Pocket, Hole)):
-            through = op.depth >= part.thickness - 1e-9
-            if op.face == name or (op.face == other and through):
-                removed.append(op.shape.geometry if isinstance(op, Pocket)
-                               else cutout_geometry.circle_geometry((op.u, op.v), op.d / 2))
-        elif isinstance(op, VGroove) and op.face == name:
-            removed.append(LineString([(op.u0, op.v0), (op.u1, op.v1)]).buffer(op.depth, cap_style="flat"))
-    return region.difference(unary_union(removed)) if removed else region
-
-
-def _opposite_name(part: Board, face: Face) -> str:
-    """The world name of the big face across the board from `face`."""
-    return part.face(part.scope.frame.direction_of(face.axis, -face.direction.sign)).world_name
-
-
 def _on(region: BaseGeometry, p: Point2) -> bool:
     """Whether the point lies on the face, give or take the tolerance (the
     add-in's `isPointOnFace`)."""
@@ -817,5 +631,7 @@ def _on(region: BaseGeometry, p: Point2) -> bool:
 
 
 def _rim(side: _Straight, center: Point2, radius: float) -> list[Point2]:
+    """Four points `radius` from `center`, along the edge and square to it:
+    where the ball's base must lie on the hatch."""
     return [_moved(center, direction, sign * radius) for direction in (side.along, side.outward) for sign in (-1, 1)]
 

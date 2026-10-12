@@ -67,11 +67,11 @@ def _holes(part: Board) -> dict[str | None, tuple[float, float]]:
 def test_four_catches_by_default_two_on_each_edge():
     _, panel, hatch = _floor()
     # holders 8.4 outside the contour (left edge y = 200, right edge y = 600)
-    assert _holes(panel) == {"holder_hatch_1": (410, 191.6), "holder_hatch_2": (590, 191.6),
-                             "holder_hatch_3": (410, 608.4), "holder_hatch_4": (590, 608.4)}
+    assert _holes(panel) == {"catch_hatch_1": (410, 191.6), "catch_hatch_2": (590, 191.6),
+                             "catch_hatch_3": (410, 608.4), "catch_hatch_4": (590, 608.4)}
     # balls 9.4 inside it, in the hatch
-    assert _holes(hatch) == {"ball_panel_1": (410, 209.4), "ball_panel_2": (590, 209.4),
-                             "ball_panel_3": (410, 590.6), "ball_panel_4": (590, 590.6)}
+    assert _holes(hatch) == {"catch_panel_1": (410, 209.4), "catch_panel_2": (590, 209.4),
+                             "catch_panel_3": (410, 590.6), "catch_panel_4": (590, 590.6)}
     # Ø2 x 4 pilot holes from the underside, the faces that are not shown
     for part in (panel, hatch):
         holes = [op for op in part.ops if isinstance(op, Hole)]
@@ -98,10 +98,10 @@ def test_end_offset_and_the_other_pair_of_edges():
     registry.reset()
     # on the front edge (x = 350, straight from y 220 to 580) and the back edge
     _, panel, hatch = _floor(edge="front")
-    assert _holes(panel) == {"holder_hatch_1": (341.6, 260), "holder_hatch_2": (341.6, 540),
-                             "holder_hatch_3": (658.4, 260), "holder_hatch_4": (658.4, 540)}
-    assert _holes(hatch) == {"ball_panel_1": (359.4, 260), "ball_panel_2": (359.4, 540),
-                             "ball_panel_3": (640.6, 260), "ball_panel_4": (640.6, 540)}
+    assert _holes(panel) == {"catch_hatch_1": (341.6, 260), "catch_hatch_2": (341.6, 540),
+                             "catch_hatch_3": (658.4, 260), "catch_hatch_4": (658.4, 540)}
+    assert _holes(hatch) == {"catch_panel_1": (359.4, 260), "catch_panel_2": (359.4, 540),
+                             "catch_panel_3": (640.6, 260), "catch_panel_4": (640.6, 540)}
 
 
 def test_the_hatch_fills_the_opening_with_the_slot_the_catch_takes():
@@ -146,16 +146,16 @@ def test_points_go_square_onto_the_nearest_straight_edge():
         points = BallCatch(at=[hatch.bottom.front(100)])        # the hatch's middle, 103 from the front edge
         f.mount(catch, opening=opening, hatch=hatch)
         f.mount(points, opening=opening, hatch=hatch)
-    assert _holes(panel) == {"holder_hatch_1": (450, 191.6), "holder_hatch_2": (500, 191.6),
-                             "holder_hatch_3": (341.6, 400)}
-    assert _holes(hatch) == {"ball_panel_1": (450, 209.4), "ball_panel_2": (500, 209.4),
-                             "ball_panel_3": (359.4, 400)}
+    assert _holes(panel) == {"catch_hatch_1": (450, 191.6), "catch_hatch_2": (500, 191.6),
+                             "catch_hatch_3": (341.6, 400)}
+    assert _holes(hatch) == {"catch_panel_1": (450, 209.4), "catch_panel_2": (500, 209.4),
+                             "catch_panel_3": (359.4, 400)}
     # a second mount on the same hatch numbers on, in an item of its own
     assert [(item["name"], [b["name"] for b in item["bodies"]]) for item in f.hardware] == [
         ("hatch_catches", ["catch_1", "catch_2"]), ("hatch_catches_2", ["catch_3"])]
 
 
-def _mount_error(catch: BallCatch, **options: object) -> str:
+def _mount_error(catch: BallCatch, **options: Any) -> str:
     with pytest.raises(LangError) as error:
         with module("floor", BOX) as f:
             panel = board("panel", ply15).on(f.bottom).show(f.top)
@@ -168,8 +168,10 @@ def _mount_error(catch: BallCatch, **options: object) -> str:
 
 
 def test_validation_of_spacing():
-    # End Offset below half the holder's width
-    assert "end must be at least 14 mm" in _mount_error(BallCatch(end=10))
+    # End Offset below half the holder's width, refused where the catch is made when an edge gets two
+    with pytest.raises(LangError, match="end must be at least 14 mm"):
+        BallCatch(end=10)
+    BallCatch(count=2, end=10)                                            # one per edge: centred, end unused
     # 8 catches 40 from the ends of a 260 mm edge need 80 + 7 * 28 = 276
     assert ("the opening's left edge is 260 mm long; 8 catches 40 mm from its ends need 276 mm"
             in _mount_error(BallCatch(count=16)))
@@ -220,14 +222,14 @@ def test_validation_of_the_hatch_and_the_slot():
                    "needs 2.5 mm to 3.5 mm"),
             (small, "there is no hatch under the ball of catch 1"),
             (high, "floor.high is not flush with floor.panel on the bottom face"),
-            (thin, "the pilot depth (4 mm) must be less than the hatch's thickness (4 mm)"),
+            (thin, "the pilot depth (4 mm) must be less than floor.thin's thickness (4 mm)"),
             (panel, "the hatch must be a board of its own"),
         ]:
             with pytest.raises(LangError) as error:
                 f.mount(catch, opening=panel.opening, edge=panel.opening.left, hatch=hatch)
             assert message in str(error.value)
         hatch = catch.hatch("hatch", panel.opening)
-        with pytest.raises(LangError, match=r"the pilot depth \(15 mm\) must be less than the panel's thickness"):
+        with pytest.raises(LangError, match=r"the pilot depth \(15 mm\) must be less than floor.panel's thickness"):
             f.mount(BallCatch(pilot=(2, 15)), opening=panel.opening, edge=panel.opening.left, hatch=hatch)
         # a through hole under the rim of ball 1's base (10 across, at x 410)
         hatch.hole(d=4, depth=through, at=hatch.top.left(Pos("y", 209.4)).front(Pos("x", 415)))
@@ -272,17 +274,15 @@ def test_an_edge_without_one_opposite():
 
 
 def test_mount_and_constructor_options():
-    for catch, options, message in [
-        (BallCatch(), {"edge": None}, "mount() needs edge="),
-        (BallCatch(), {"side": 1}, "mount() takes opening=, hatch=, edge= and face="),
-    ]:
-        with pytest.raises(LangError) as error:
-            with module("floor", BOX) as f:
-                panel = board("panel", ply15).on(f.bottom)
-                panel.cut(rect(width=400, depth=300).rounded(20), at=panel.top.center, name="opening")
-                hatch = catch.hatch("hatch", panel.opening)
-                f.mount(catch, opening=panel.opening, hatch=hatch, **options)
-        assert message in str(error.value)
+    catch = BallCatch()
+    with pytest.raises(LangError, match=r"mount\(\) needs edge="):
+        with module("floor", BOX) as f:
+            panel = board("panel", ply15).on(f.bottom)
+            panel.cut(rect(width=400, depth=300).rounded(20), at=panel.top.center, name="opening")
+            hatch = catch.hatch("hatch", panel.opening)
+            f.mount(catch, opening=panel.opening, hatch=hatch)
+    with pytest.raises(TypeError, match="side"):          # mount's own keywords, typed
+        f.mount(catch, opening=panel.opening, hatch=hatch, edge=panel.opening.left, side=1)  # type: ignore[call-arg]
     registry.reset()
     with module("floor", BOX) as f:
         panel = board("panel", ply15).on(f.bottom)
@@ -293,8 +293,8 @@ def test_mount_and_constructor_options():
         (lambda: BallCatch(gap=4), "the slot must be 2.5 to 3.5 mm wide, not 4"),
         (lambda: BallCatch(count=0), "count must be at least 1"),
         (lambda: BallCatch(end=-1), "end must not be negative"),
-        (lambda: BallCatch(pilot=(0, 4)), "the pilot diameter must be greater than zero"),
-        (lambda: BallCatch(pilot=(2, 0)), "the pilot depth must be greater than zero"),
+        (lambda: BallCatch(pilot=(0, 4)), "pilot= needs a diameter and a depth greater than zero, not 0 x 4"),
+        (lambda: BallCatch(pilot=(2, 0)), "pilot= needs a diameter and a depth greater than zero, not 2 x 0"),
         (lambda: BallCatch(count=2, at=[]), "give count= or at=, not both"),
         (lambda: BallCatch(at=[]), "at= is empty"),
         (lambda: BallCatch("GN 451"), "BallCatch(): expected 'GN 450', not 'GN 451'"),     # type: ignore[arg-type]
@@ -319,7 +319,7 @@ def test_a_cabinet_and_a_module_in_the_vans_terms_give_the_same_catches():
     _, panel, hatch = _floor(edge="right", front=True)
     cabinet = (panel.to_layout()["ops"], hatch.to_layout()["ops"], build_layout()["modules"][0]["hardware"])
     assert van == cabinet
-    assert _holes(panel)["holder_hatch_1"] == (410, 191.6)          # the edge at y = 200 first
+    assert _holes(panel)["catch_hatch_1"] == (410, 191.6)          # the edge at y = 200 first
 
 
 def test_a_hatch_in_an_upright_panel():
@@ -337,8 +337,8 @@ def test_a_hatch_in_an_upright_panel():
     assert b.lo["y"] == 0 and b.hi["y"] == 15
     # the opening: x 150 to 450 (width), z 150 to 550 (height); the bottom
     # edge's straight part runs from x 165 to 435 (270)
-    assert _holes(back) == {"holder_hatch_1": (205, 141.6), "holder_hatch_2": (395, 141.6),
-                            "holder_hatch_3": (205, 558.4), "holder_hatch_4": (395, 558.4)}
+    assert _holes(back) == {"catch_hatch_1": (205, 141.6), "catch_hatch_2": (395, 141.6),
+                            "catch_hatch_3": (205, 558.4), "catch_hatch_4": (395, 558.4)}
     assert {op.face for op in back.ops if isinstance(op, Hole)} == {"right"}
     assert hatch.box().lo["y"] == 0 and hatch.box().hi["y"] == 15
     (item,) = cab.hardware
@@ -450,3 +450,40 @@ def test_the_example_builds(tmp_path: Path):
         holder, webs, jaw, ball = body["boxes"]
         assert all(box["max"][2] == 45 and box["min"][2] < 45 for box in (holder, ball))
         assert jaw["max"][2] == 44 and (webs["min"][2], webs["max"][2]) == (45, 56)
+
+
+# -- the review's fixes (findings 25, 31) --------------------------------------------------------------------
+
+def test_a_holder_pilot_over_a_hole_made_before_is_refused():
+    """`Board.hole_fits` for the pilot holes: a 4 mm hole in the panel's
+    underside overlapping where the holder of catch 2 is screwed, its
+    centre 2.5 mm off along the edge, refused before anything is drilled."""
+    with module("floor", BOX) as f:
+        panel = board("panel", ply15).on(f.bottom).show(f.top)
+        panel.cut(rect(width=400, depth=300).rounded(20), at=panel.top.center, name="opening")
+        catch = BallCatch()
+        hatch = catch.hatch("hatch", panel.opening)
+        panel.hole(d=4, depth=5, at=panel.bottom.front(Pos("x", 592.5)).left(Pos("y", 191.6)))
+        with pytest.raises(LangError, match="the holder of catch 2 does not fit"):
+            f.mount(catch, opening=panel.opening, edge=panel.opening.left, hatch=hatch)
+    assert len(_holes(panel)) == 1 and _holes(hatch) == {} and f.hardware == []
+
+
+def test_the_exact_inset_lives_with_the_cutouts():
+    """The hatch's outline is `lang.core.cutouts.inset` of the opening:
+    lines moved square to themselves, arcs about their centres, a circle a
+    circle; it was ball_catches' own."""
+    from lang.core.cutouts import inset
+    from shapely.geometry import Polygon
+    opening = rect(width=400, depth=300).rounded(20).polygons()[0]
+    hatch = inset(opening, 3)
+    assert isinstance(hatch, Polygon)
+    curves = fit(list(orient(hatch, 1.0).exterior.coords)[:-1])
+    assert sorted(round(c.radius, 9) for c in curves if isinstance(c, Arc2)) == [17] * 4
+    assert hatch.bounds == pytest.approx((3, 3, 297, 397))                     # the shape from 0 to 300 x 400
+    ring = circle(100).polygons()[0]
+    assert inset(ring, 10).area == pytest.approx(math.pi * 40 ** 2, rel=1e-3)
+    assert inset(ring, 60).is_empty
+    square = rect(width=100, depth=100).polygons()[0]
+    assert inset(square, 10).bounds == pytest.approx((10, 10, 90, 90))            # sharp corners stay sharp
+    assert inset(square, 10).area == pytest.approx(80 * 80)
