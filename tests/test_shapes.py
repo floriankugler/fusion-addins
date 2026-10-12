@@ -89,6 +89,19 @@ def test_an_edge_too_short_for_its_arcs_is_an_error():
     rect(depth=80, width=60).clip(back=5, right=5).rounded(8)
 
 
+def test_a_sharp_corner_with_long_edges_is_rounded():
+    """Found by fuzzing: a corner sharper than 28 degrees could not be
+    rounded however long its edges, and the error blamed an edge too short.
+    The fillet's centre lies r / cos(turn / 2) from the corner; the check
+    against far-off centres divided by the sine."""
+    tip = math.radians(20)
+    shape = polygon([(0, 0), (300, 0), (0, 300 * math.tan(tip))]).rounded(2)
+    # the 20 degree tip loses r^2 (cot(tip/2) - (pi - tip)/2)
+    lost = 4 * (1 / math.tan(tip / 2) - (math.pi - tip) / 2)
+    others = 4 * (1 - math.pi / 4) + 4 * (1 / math.tan((math.pi / 2 - tip) / 2) - (math.pi / 2 + tip) / 2)
+    assert shape.area == pytest.approx(300 * 300 * math.tan(tip) / 2 - lost - others, abs=0.01)
+
+
 def test_a_rounded_slot_cuts_and_pockets():
     with module("m", Box.from_size(width=400, depth=300, height=100)) as m:
         with board("panel", ply15).on(m.bottom).show(m.top) as panel:

@@ -27,14 +27,14 @@ the add-in.
 from __future__ import annotations
 
 import math
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
-from shapely.geometry import LineString, Polygon
+from shapely.geometry import LineString, Point, Polygon
 from shapely.geometry.base import BaseGeometry
 from shapely.geometry.polygon import orient
-from shapely.ops import unary_union
+from shapely.ops import nearest_points, unary_union
 
 from lib import cutout_patterns as data
 
@@ -59,6 +59,12 @@ _MIN_CORNER = math.radians(2.0)
 #: up to half a percent of the radius outside it (`_snap_tolerance`).
 _SNAP = 0.05
 _EPS = 1e-9
+#: How near (mm) a vertex of a piece rounded as a cutter would must lie to an
+#: arc of the piece, and that arc's point nearest it to the arc's circle, to
+#: be put back onto the circle: the two offsets blur the arc by less.
+_ON_ARC = 0.01
+#: Pieces of an offset with less area (mm2) than this are slivers, not pieces.
+_SLIVER = 1e-6
 #: How close (mm) a corner must lie to a point that names it.
 _AT = 1e-6
 
@@ -418,11 +424,13 @@ def _turn(s1: _Seg, s2: _Seg, p: Point2) -> float:
     return turn
 
 
-def _fillet_ring(ring: Sequence[Point2], r: float, at: Sequence[Point2] | None = None) -> list[Point2] | None:
+def _fillet_ring(ring: Sequence[Point2], r: float, at: Sequence[Point2] | None = None,
+                 areas: list[float] | None = None) -> list[Point2] | None:
     """The ring with every corner filleted with radius `r`, convex and
     concave alike (the material lies to the left), or only the corners at
     the points `at`; None when a fillet does not fit between its
-    neighbours."""
+    neighbours. Each fillet's area, as between two lines, is added to
+    `areas`."""
     segs = _segments(ring)
     if segs is None:
         return list(ring)
@@ -446,9 +454,13 @@ def _fillet_ring(ring: Sequence[Point2], r: float, at: Sequence[Point2] | None =
         if not centres:
             return None
         centre = min(centres, key=lambda c: math.dist(c, p))
-        if math.dist(centre, p) > 4 * r / max(math.sin(abs(turn) / 2), 1e-3):
+        # Between two lines the centre lies r / cos(turn / 2) from the
+        # corner; one much farther off is a wrong crossing of arcs.
+        if math.dist(centre, p) > 4 * r / max(math.cos(abs(turn) / 2), 1e-3):
             return None
         fillets.append((centre, s1.foot(centre), s2.foot(centre), turn > 0))
+        if areas is not None:
+            areas.append(r * r * (math.tan(abs(turn) / 2) - abs(turn) / 2))
     if at is not None and all(f is None for f in fillets):
         return list(ring)            # no corner of this ring is named: as it was
     # each segment must keep a part between the fillets at its ends
@@ -497,15 +509,62 @@ def fillet(piece: Polygon, r: float) -> list[Polygon]:
         return []
     piece = orient(piece, 1.0)
     out = filleted(piece, r)
-    if out is not None:
+    if out is not None and _cut_by(out, r):
         return [out]
     # A fillet does not fit between its neighbours (a short piece of edge
-    # between two corners): round the outside corners as a cutter would,
+    # between two corners), or the piece has a part narrower than the
+    # cutter, which the fillets of its corners leave: round the outside
+    # corners as a cutter would, part it at narrow necks,
     # leave the inside ones, and put the arcs the piece had back onto their
-    # circles, which the two offsets blur.
+    # circles, which the two offsets blur. The new arcs are the cutter's
+    # path around the corners of the inset, r from them; their vertices
+    # stay as they are, also where they run close to an arc of the piece.
     targets = _arc_targets(piece, 0.0)
-    opened = piece.buffer(-r, join_style="round", quad_segs=16).buffer(r, join_style="round", quad_segs=16)
-    return [_onto_circles(p, targets) for p in polygons_of(opened) if p.area > 1e-6]
+    inner = piece.buffer(-r, join_style="round", quad_segs=16)
+    opened = inner.buffer(r, join_style="round", quad_segs=16)
+    # (an arc of the piece as round as the cutter shrinks to a point of
+    # the inset: the cutter's path there is that arc, which goes back)
+    centres = [c for c in _sharp_vertices(inner, 2 * math.pi / 64 + _MIN_CORNER)
+               if not any(abs(t[1] - r) <= _SNAP and math.dist(t[0], c) <= _SNAP for t in targets)]
+
+    boundary = piece.boundary
+
+    def not_on_an_arc(q: Point2) -> bool:
+        """Whether a vertex stays as it is: on a new arc, or not on an arc
+        of the piece (a line's vertex near the end of an arc, say)."""
+        if any(abs(math.dist(q, c) - r) <= 1e-6 for c in centres):
+            return True
+        if boundary.distance(Point(q)) > _ON_ARC:
+            return True
+        near = nearest_points(boundary, Point(q))[0]
+        return not any(abs(math.dist((near.x, near.y), t[0]) - t[1]) <= _ON_ARC for t in targets)
+    return [_onto_circles(p, targets, keep=not_on_an_arc) for p in polygons_of(opened) if p.area > 1e-6]
+
+
+def _sharp_vertices(g: BaseGeometry, turn: float) -> list[Point2]:
+    """The vertices of every ring of `g` that turn by more than `turn`
+    (radians), either way: the corners of an inset made with round joins
+    of 16 segments a quarter (5.6 degrees a step), not its round joins."""
+    out: list[Point2] = []
+    for poly in polygons_of(g):
+        for ring in [poly.exterior, *poly.interiors]:
+            pts = _ring_points(ring.coords)
+            n = len(pts)
+            for k in range(n):
+                a, p, b = pts[k - 1], pts[k], pts[(k + 1) % n]
+                ax, ay, bx, by = p[0] - a[0], p[1] - a[1], b[0] - p[0], b[1] - p[1]
+                if abs(math.atan2(ax * by - ay * bx, ax * bx + ay * by)) > turn:
+                    out.append(p)
+    return out
+
+
+def _cut_by(piece: Polygon, r: float) -> bool:
+    """Whether a cutter of radius `r` reaches all of the piece: nothing is
+    left of it but slivers where the cutter's polygon and the arcs' differ
+    (a hundredth of r^2), not a part narrower than the cutter."""
+    reached = piece.buffer(-0.99 * r, quad_segs=64).buffer(0.99 * r, quad_segs=64)
+    return len(polygons_of(reached)) <= 1 and all(g.area <= 0.01 * r * r + 1e-3
+                                                   for g in polygons_of(piece.difference(reached)))
 
 
 def filleted(piece: Polygon, r: float, at: Sequence[Point2] | None = None) -> Polygon | None:
@@ -516,14 +575,24 @@ def filleted(piece: Polygon, r: float, at: Sequence[Point2] | None = None) -> Po
     may use up the edge between them, so a 12 wide rectangle rounded with
     6 gets round ends."""
     piece = orient(piece, 1.0)
-    exterior = _fillet_ring(_ring_points(piece.exterior.coords), r, at)
-    holes = [_fillet_ring(_ring_points(h.coords), r, at) for h in piece.interiors]
-    if exterior is None or any(h is None for h in holes):
+    areas: list[float] = []
+    exterior = _fillet_ring(_ring_points(piece.exterior.coords), r, at, areas)
+    holes = [_fillet_ring(_ring_points(h.coords), r, at, areas) for h in piece.interiors]
+    if not _rings_left(exterior, holes):
         return None
     out = Polygon(exterior, [h for h in holes if h is not None])
-    if out.is_valid and abs(out.area - piece.area) < 0.5 * piece.area + 1:
+    # A sanity check against fillets gone wrong: the area changes by what
+    # the fillets take or add, which for the sharp tips of a sliver can be
+    # more than half of it.
+    if out.is_valid and abs(out.area - piece.area) < max(0.5 * piece.area, 2 * sum(areas)) + 1:
         return out
     return None
+
+
+def _rings_left(exterior: list[Point2] | None, holes: Sequence[list[Point2] | None]) -> bool:
+    """Whether every ring was rounded or cut off and kept three vertices: a
+    spike running out and back along one line can lose all but two."""
+    return exterior is not None and len(exterior) >= 3 and all(h is not None and len(h) >= 3 for h in holes)
 
 
 def _named(p: Point2, at: Sequence[Point2]) -> bool:
@@ -597,7 +666,7 @@ def chamfered(piece: Polygon, d: float, at: Sequence[Point2]) -> Polygon | None:
     piece = orient(piece, 1.0)
     exterior = _chamfer_ring(_ring_points(piece.exterior.coords), d, at)
     holes = [_chamfer_ring(_ring_points(h.coords), d, at) for h in piece.interiors]
-    if exterior is None or any(h is None for h in holes):
+    if not _rings_left(exterior, holes):
         return None
     out = Polygon(exterior, [h for h in holes if h is not None])
     return out if out.is_valid and out.area > 0 else None
@@ -624,7 +693,10 @@ def grown(g: BaseGeometry, d: float) -> BaseGeometry:
                 continue
         buffered = poly.buffer(d, join_style="mitre", mitre_limit=100.0)
         targets = _arc_targets(poly, d)
-        out += [_onto_circles(p, targets) for p in polygons_of(buffered)]
+        # An inward offset that all but closes a shape (a slot by half its
+        # width) leaves slivers without area; snapped, they would have too
+        # few vertices for a ring.
+        out += [_onto_circles(p, targets) for p in polygons_of(buffered) if p.area > _SLIVER]
     return unary_union(out) if out else Polygon()
 
 
@@ -660,10 +732,12 @@ def _circle(c: Point2, r: float) -> Polygon:
                     for i in range(n)])
 
 
-def _onto_circles(poly: Polygon, targets: list[_Target]) -> Polygon:
+def _onto_circles(poly: Polygon, targets: list[_Target], keep: Callable[[Point2], bool] | None = None) -> Polygon:
     if not targets:
         return poly
-    rings = [_snap_ring(_ring_points(r.coords), targets) for r in [poly.exterior] + list(poly.interiors)]
+    rings = [_snap_ring(_ring_points(r.coords), targets, keep) for r in [poly.exterior] + list(poly.interiors)]
+    if any(len(r) < 3 for r in rings):
+        return poly
     out = Polygon(rings[0], rings[1:])
     # The snapped shape must be the same shape, only truer to its circles.
     limit = 2 * max(_snap_tolerance(t[1]) for t in targets)
@@ -691,11 +765,13 @@ def _target_of(p: Point2, targets: list[_Target]) -> int | None:
     return None if best is None else best[1]
 
 
-def _snap_ring(points: list[Point2], targets: list[_Target]) -> list[Point2]:
+def _snap_ring(points: list[Point2], targets: list[_Target],
+               keep: Callable[[Point2], bool] | None = None) -> list[Point2]:
     """Moves the vertices lying on (near) a target circle onto it, and
-    redraws each run of them as an arc with evenly spaced vertices."""
+    redraws each run of them as an arc with evenly spaced vertices; not
+    those `keep` names."""
     n = len(points)
-    owner = [_target_of(p, targets) for p in points]
+    owner = [None if keep is not None and keep(p) else _target_of(p, targets) for p in points]
     if all(o is None for o in owner):
         return points
     first = owner[0]

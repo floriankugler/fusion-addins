@@ -238,6 +238,18 @@ def test_an_edge_along_a_face_is_not_a_corner():
         side.fillet(side.front.inner, 5)
 
 
+def test_the_sharp_tip_of_a_tapered_board_is_rounded():
+    """Found by fuzzing: a corner sharper than 28 degrees could not be
+    rounded, whatever the radius (see test_shapes, a sharp corner with long
+    edges)."""
+    tip = math.radians(20)
+    with module("m", BOX) as m:
+        wedge = board("wedge", ply15, polygon([(0, 0), (300, 0), (0, 300 * math.tan(tip))])).on(m.bottom)
+        wedge.fillet(wedge.top.outline, 3)
+    from lang.core.corners import find
+    assert find(wedge.outline) == []
+
+
 def test_a_corner_that_is_gone_is_an_error():
     m, panel = _panel()
     with m:
@@ -315,3 +327,21 @@ def test_what_fillet_does_not_take():
             with pytest.raises(LangError, match=message):
                 panel.fillet(what, 5)  # type: ignore[arg-type]
     assert all(isinstance(op, Cut) or op.kind == "pocket" for op in panel.ops)
+
+
+def test_corners_of_a_hair_thin_hole_are_refused_not_a_crash():
+    """Found by fuzzing: an outline with a hole 2e-38 thin (a boolean of
+    shapes meeting along a line can leave one). Cutting off the hole's
+    corners used up its edges and left a ring of two points, and shapely
+    raised a ValueError."""
+    from shapely.geometry import Polygon
+    from lang.core.cutouts import chamfered, corner_points, filleted
+    outline = Polygon([(103.75, -196.5), (71.25, -196.5), (71.25, 35.5), (103.75, 35.5)],
+                      [[(71.25, 2.1163343496927108e-38), (12.5, -9.476569618361552e-59),
+                        (71.25, -9.476569618361552e-59)]])
+    hole = Polygon([(103.75, -196.5), (71.25, -196.5), (71.25, 2.1163343496927108e-38), (12.5, -9.476569618361552e-59),
+                    (71.25, -9.476569618361552e-59), (71.25, 35.5), (103.75, 35.5)])
+    for shape in (outline, hole):
+        corners = [p for p, _ in corner_points(shape)]
+        chamfered(shape, 6, corners)                       # refused or cut off, not a crash
+        filleted(shape, 6)

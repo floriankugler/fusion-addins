@@ -651,8 +651,8 @@ class Board:
             raise LangError("the cut removes the whole board.", self.path)
         if len(cut.polygons()) > len(self.outline.polygons()):
             raise LangError(f"the cut{f' {name}' if name else ''} splits the board in pieces.", self.path)
+        self._record(Cut(placed, name, chamfer), name)       # may refuse it; then the outline stays
         self.outline = cut
-        self._record(Cut(placed, name, chamfer), name)
 
     def _cut_region(self, region: Board | Box, name: str | None, chamfer: float) -> Self:
         b = self.box()
@@ -975,9 +975,6 @@ class Board:
         result = cutout_geometry.openings(cut_region, frame, pattern, radius, self.path)
         if not result.pieces:
             raise LangError(f"cutout(): every piece is too small for radius={radius:g}.", self.path)
-        if result.dropped:
-            self.notes.append(f"{self.path}: cutout {name!r} left out {result.dropped} piece(s) too small for "
-                              f"the {radius:g} mm corner radius.")
         opening = result.geometry
         shape = Shape(opening)
         if thru:
@@ -988,6 +985,9 @@ class Board:
         if chamfer > 0:
             self._record(Chamfer(name, float(chamfer), face.world_name), None)
         self._cutouts.append((name, opening))
+        if result.dropped:
+            self.notes.append(f"{self.path}: cutout {name!r} left out {result.dropped} piece(s) too small for "
+                              f"the {radius:g} mm corner radius.")
         return self
 
     def _cutout_face(self, what: Face | Shape | None, at: Anchor | Edge | None) -> tuple[Face, BaseGeometry | None]:
