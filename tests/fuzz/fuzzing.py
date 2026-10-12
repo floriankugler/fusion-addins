@@ -675,32 +675,60 @@ def _reference(poly: Polygon, cut: Callable[[float], float],
 
 def offset_problems(recipe: Recipe) -> list[str]:
     """What is wrong with `cutouts.grown` of the recipe's shape before its
-    offset (the offset itself is `recipe.grow`): pieces that are invalid,
-    an outward offset that does not hold the shape grown with round corners
-    or reaches past the one grown with mitred corners, an inward one that
-    reaches past the round one (each give or take the polygon's sagitta,
-    as its arcs go onto their true circles)."""
+    offset (the offset itself is `recipe.grow`), as any offset promises it:
+    valid pieces; grown, it holds the shape and no point of its boundary
+    comes nearer the shape than the offset; shrunk, it lies in the shape and
+    every point of its boundary keeps the offset from the shape's boundary
+    (each give or take the shape's polygons' sagitta, which lie inside
+    their arcs). Its corners, mitred or where arcs run on, are free; they
+    keep the distance too, as in Fusion (checked 2026-10-12)."""
     d = recipe.grow
     if d is None:
         return []
     shape = Recipe(recipe.base, recipe.steps).geometry()
-    if shape.is_empty:
+    if shape.is_empty or shape.area <= 1e-9:
+        return []
+    if any(degenerate(r) for r in rings_of(shape)):
+        # A hairline spike or sliver (a shape added and taken away again)
+        # grows into a piece of its own: open, see `degenerate`.
         return []
     got = cutouts.grown(shape, d)
-    problems: list[str] = []
     if not got.is_valid:
-        problems.append("the offset is not a valid shape")
-        return problems
-    slack = 2.5 * recipe.sagitta + 1e-6
-    small, large = (shape.buffer(d - slack * (1 if d > 0 else -1), quad_segs=64),
-                    shape.buffer(d + slack, join_style="mitre", mitre_limit=100.0))
-    tol = 1e-6 * max(1.0, shape.length)
+        return ["the offset is not a valid shape"]
+    if got.is_empty:
+        return [] if d < 0 else ["the offset is empty"]
+    # (the offset's arcs are the true ones, the shape's polygons lie inside
+    # them by their sagitta: so much area along the outline may differ; and
+    # a hundredth of the offset, as `cutouts.grown` checks itself)
+    slack = 2.5 * recipe.sagitta + 0.01 * abs(d) + 0.05
+    area_slack = (2.5 * recipe.sagitta + 1e-4) * shape.length + 1e-6
+    points = np.array([q for ring in rings_of(got) for q in _dense(ring)])
+    problems: list[str] = []
+    # Measured from the shape its lines and arcs stand for: where two arcs
+    # meet at a shallow angle, the polygon's corner lies far off theirs.
+    shape = unary_union([cutouts._true_shape(p) for p in polygons_of(shape)])  # pyright: ignore[reportPrivateUsage]
     if d > 0:
-        if small.difference(got).area > tol:
-            problems.append(f"the offset misses {small.difference(got).area:.3g} mm2 of the round offset")
-        if got.difference(large).area > tol:
-            problems.append(f"the offset reaches {got.difference(large).area:.3g} mm2 past the mitred offset")
-    elif got.difference(shape.buffer(d + slack, quad_segs=64)).area > tol:
-        problems.append(f"the inset reaches {got.difference(shape.buffer(d + slack, quad_segs=64)).area:.3g} mm2 "
-                        "past the round inset")
+        if shape.difference(got).area > area_slack:
+            problems.append(f"the offset leaves {shape.difference(got).area:.3g} mm2 of the shape out")
+        shapely.prepare(shape)
+        near = float(np.min(shapely.distance(shapely.points(points), shape)))
+        if near < d - slack:
+            problems.append(f"the offset's boundary comes {near:.4g} near the shape (offset {d:g})")
+    else:
+        if got.difference(shape).area > area_slack:
+            problems.append(f"the inset reaches {got.difference(shape).area:.3g} mm2 out of the shape")
+        boundary = shape.boundary
+        shapely.prepare(boundary)
+        near = float(np.min(shapely.distance(shapely.points(points), boundary)))
+        if near < -d - slack:
+            problems.append(f"the inset's boundary comes {near:.4g} near the shape's (inset {-d:g})")
     return problems
+
+
+def _dense(ring: Sequence[Point2], step: float = 1.0) -> list[Point2]:
+    """Points along the ring, at its vertices and at most `step` apart."""
+    out: list[Point2] = []
+    for a, b in zip(ring, [*ring[1:], ring[0]]):
+        n = max(2, math.ceil(math.dist(a, b) / step))
+        out += [(a[0] + (b[0] - a[0]) * k / n, a[1] + (b[1] - a[1]) * k / n) for k in range(n)]
+    return out

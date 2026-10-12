@@ -344,24 +344,25 @@ def test_a_channel_narrower_than_the_cutter_is_not_cut_out():
 
 
 def test_a_line_meeting_a_large_arc_keeps_its_place_where_a_piece_is_rounded_as_a_router_would():
-    """Found by fuzzing: a turned pocket near a corner rounded 203. Where a
-    piece was rounded as a router would, the vertex where the edge kept
-    around the pocket meets the corner's 183 mm arc lay within the snap
-    tolerance of that arc's circle and went onto it, turning the edge 0.4
-    toward the pocket: less than around= of material was left."""
+    """Found by fuzzing: a turned pocket at a corner rounded 203. Where a
+    piece was rounded as a router would, a vertex of the edge kept around
+    the pocket, near the corner's 183 mm arc, lay within the snap tolerance
+    of that arc's circle and went onto it, turning the edge toward the
+    pocket: less than around= of material was left."""
     from shapely import affinity
     from shapely.geometry import box as shapely_box
     from lang.core.shapes import Shape
     with module("m", Box.from_size(width=465, depth=2088.5397851525, height=100)) as m:
         panel = board("panel", material("birch", t=24), Shape(box(0, 0, 2088.5397851525, 465)).rounded(202.89706660649423))
         panel.on(m.bottom)
-        pocket = affinity.rotate(shapely_box(40 - 41.25, 448.5 - 15.920963284673281, 40 + 41.25, 448.5 + 15.920963284673281),
-                                 129.79625025384797, origin=(40, 448.5))
+        pocket = affinity.rotate(shapely_box(85 - 41.25, 428.5 - 15.92, 85 + 41.25, 428.5 + 15.92), 30, origin=(85, 428.5))
         panel.add_pocket(panel.big_faces()[0], Shape(pocket), 5.5)
         panel.cutout(around=28, radius=4, depth=8)
     op = panel.op("cutout").op
     assert isinstance(op, Pocket)
     assert op.shape.geometry.distance(pocket) >= 28 - 1e-3
+
+
 def test_arcs_that_touch_in_the_example_meet_without_a_flat():
     """Found compiling fuzz boards in Fusion: where a corner's fillet,
     rounded as a router would, touches the material kept around a slot,
@@ -386,3 +387,149 @@ def test_arcs_that_touch_in_the_example_meet_without_a_flat():
     assert flats == []
 
 
+def test_an_offset_runs_its_arcs_on_to_meet_at_a_corner_as_fusion_does():
+    """Checked in Fusion (sketch offset, as cutouts_native makes it): where
+    an offset extends a corner with an arc, the arc runs on along its
+    circle to meet the line or arc beside it. A circle cut by a line,
+    grown 10, gets its corners where the line moved 10 meets the circle of
+    60; a lens, where its two circles grown 10 cross. `grown` mitred the
+    tangents, up to a millimetre off."""
+    d_shape = cutouts.circle_geometry((0, 0), 50).intersection(box(-60, -60, 20, 60))
+    grown_d = cutouts.grown(d_shape, 10)
+    assert isinstance(grown_d, Polygon)
+    for corner in ((30, 51.9615), (30, -51.9615)):
+        assert min(math.dist(corner, p) for p in grown_d.exterior.coords) < 1e-3
+    lens = cutouts.circle_geometry((180, 0), math.sqrt(1300)).intersection(
+        cutouts.circle_geometry((220, 0), math.sqrt(1300)))
+    grown_lens = cutouts.grown(lens, 10)
+    assert isinstance(grown_lens, Polygon)
+    for tip in ((200, 41.4863), (200, -41.4863)):
+        assert min(math.dist(tip, p) for p in grown_lens.exterior.coords) < 1e-3
+
+
+def _rounded_rect(cx: float, cy: float, w: float, h: float, r: float, angle: float) -> Polygon:
+    from shapely import affinity
+    turned = affinity.rotate(box(cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2), angle, origin=(cx, cy))
+    assert isinstance(turned, Polygon)
+    out = cutouts.filleted(turned, r)
+    assert out is not None
+    return out
+
+
+def test_an_inset_leaves_out_the_short_edge_it_turns_over():
+    """Found by fuzzing: a strip 1.9 wide cut across a rounded board leaves a
+    1.2 long edge where it leaves the board; inset 24, that edge turned over
+    and the inset cut a corner of 0.7 nearer the outline than 24."""
+    from shapely import affinity
+    strip = affinity.rotate(box(8.39 - 0.95, -33 - 123.25, 8.39 + 0.95, -33 + 123.25), 49.394, origin=(8.39, -33))
+    shape = _rounded_rect(2.5, -117, 146.5, 362.5, 71.785, 45).difference(strip)
+    inset = cutouts.grown(shape, -24)
+    assert inset.difference(shape).area < 1e-3
+    assert min(shape.boundary.distance(Point(p)) for g in [inset] for poly in getattr(g, "geoms", [g])
+               for p in poly.exterior.coords) > 24 - 0.05
+
+
+def test_a_mitred_inset_that_crosses_itself_is_made_valid_inside_the_shape():
+    """Found by fuzzing: where the exact offset does not hold (here several
+    curves vanish), `grown` falls back on shapely's mitred inset, which
+    crossed itself; it was returned invalid, and made valid as it was, it
+    kept a loop 85 mm2 outside the shape."""
+    from shapely import affinity
+    plank = affinity.rotate(box(150 - 169.5, 6 - 60.25, 150 + 169.5, 6 + 60.25), 113.87076114073832, origin=(150, 6))
+    shape = Point(200, 199).buffer(4, quad_segs=16).union(plank) \
+        .union(_rounded_rect(20, -8, 76.5, 186.33816842793146, 17.234659367932753, 0.99999)) \
+        .difference(cutouts.circle_geometry((-200, -181.5), 150))
+    inset = cutouts.grown(shape, -14)
+    assert inset.is_valid and inset.difference(shape).area < 1e-3
+
+
+def test_an_offset_does_not_turn_an_edge_onto_an_arc_beside_it():
+    """Found by fuzzing: grown 12, the mitred corner where a long edge met
+    an arc of 51 lay within the snap tolerance of the arc's offset circle
+    and was moved onto it, turning the edge: material within 12 of the
+    shape was left out of the offset."""
+    from shapely import affinity
+    plank = affinity.rotate(box(11 - 22, -144.05 - 136, 11 + 22, -144.05 + 136), 45, origin=(11, -144.05))
+    shape = plank.intersection(_rounded_rect(22, -63, 181, 255, 50.76781764318775, 45))
+    grown = cutouts.grown(shape, 12)
+    assert shape.buffer(12 - 1e-3, quad_segs=64).difference(grown).area < 0.05
+
+
+def test_an_offset_closing_a_hole_leaves_no_speck_of_it():
+    """Found by fuzzing: a ring around a hole of 0.5 (16 segments a
+    quarter), grown by 0.5, kept a hole 0.6 um across, which no drawing
+    can make."""
+    from shapely.geometry import Point as P
+    ring = P(0, 0).buffer(1, quad_segs=64).difference(P(0, 0).buffer(0.5, quad_segs=16))
+    grown = cutouts.grown(ring, 0.5)
+    assert isinstance(grown, Polygon) and len(grown.interiors) == 0
+    assert grown.area == pytest.approx(math.pi * 1.5 ** 2, rel=1e-3)
+
+
+def test_an_inset_of_a_notched_outline_keeps_the_border():
+    """Found by fuzzing: a tapered board with a turned notch in its edge,
+    inset by a border of 33.5; offset curve by curve, the notch's short
+    edges vanished in the wrong order and the inset came 0.4 near the
+    outline. Outlines of lines only are offset mitred, exactly."""
+    outline = Polygon([(448.0, 0.0), (114.581188, 0.0), (138.717251, 24.136062), (122.100241, 40.753072),
+                       (87.402372, 6.055203), (93.457575, 0.0), (0.0, 0.0), (0.0, 435.960215),
+                       (2.560516, 435.960215), (2.560516, 471.246822), (448.0, 79.273343)])
+    inset = cutouts.grown(outline, -33.53137272894515)
+    from lang.core.geometry import polygons_of
+    assert min(outline.boundary.distance(Point(q)) for g in polygons_of(inset) for q in g.exterior.coords) \
+        > 33.53137272894515 - 1e-6
+
+
+def _keeps(offset: object, shape: object, d: float) -> float:
+    """How near the offset's boundary comes to the shape, sampled every mm."""
+    from lang.core.geometry import polygons_of
+    near = math.inf
+    for poly in polygons_of(offset):  # pyright: ignore[reportArgumentType]
+        for ring in [poly.exterior, *poly.interiors]:
+            pts = list(ring.coords)
+            for a, b in zip(pts, pts[1:]):
+                n = max(2, math.ceil(math.dist(a, b)))
+                for k in range(n):
+                    q = Point(a[0] + (b[0] - a[0]) * k / n, a[1] + (b[1] - a[1]) * k / n)
+                    near = min(near, shape.distance(q))  # pyright: ignore[reportAttributeAccessIssue]
+    return near
+
+
+def test_an_offset_leaves_out_the_slivers_a_boolean_leaves():
+    """Found by fuzzing: a square turned 45 degrees, cut away by a band
+    exactly as wide, left a hairline of 7e-18 mm2 along its edge; grown by
+    1, it became a piece of 3.8 mm2 that was never there."""
+    from shapely import affinity
+    from shapely.geometry import box as shapely_box
+    from lang.core.cutouts import grown
+    from lang.core.geometry import polygons_of
+    diamond = affinity.rotate(shapely_box(-0.5, 25.5, 0.5, 26.5), 45, origin=(0, 26))
+    band = affinity.rotate(shapely_box(-43.5, 25.5, 43.5, 26.5), 45, origin=(0, 26))
+    shape = shapely_box(-0.5, -0.5, 0.5, 0.5).union(diamond.difference(band))
+    assert len(polygons_of(shape)) == 2                         # the square and a hairline
+    out = grown(shape, 1.0)
+    assert isinstance(out, Polygon) and out.area == pytest.approx(9)
+
+
+def test_a_mitred_outward_offset_that_crosses_itself_keeps_its_distance():
+    """Found by fuzzing: a board with a slot 13 wide, grown 12 (the slot
+    closes); shapely's mitred offset crossed itself, and made valid it
+    left a hole whose edge came 1 near the board."""
+    from shapely import affinity
+    plank = affinity.rotate(box(58.5 - 156, -195 - 146.5, 58.5 + 156, -195 + 146.5), 45, origin=(58.5, -195))
+    shape = plank.difference(_rounded_rect(-24, -129.39168986042338, 167, 13, 5.1121214425749875, 167.74464669019994)) \
+        .difference(Point(-199.5, 84).buffer(87.56326547666144, quad_segs=8)) \
+        .intersection(_rounded_rect(57, -199, 175, 152, 38.96699518115837, 45))
+    assert _keeps(cutouts.grown(shape, 12), shape, 12) > 12 - 0.06
+
+
+def test_an_offset_whose_edge_passes_near_between_its_ends_is_refused():
+    """Found by fuzzing: grown 21.5, a corner where the offset curves did
+    not meet was joined by dropping a curve, and the edge that left passed
+    0.8 nearer the board than 21.5 between its ends, where the check, which
+    looked at ends and middles only, did not see it (Fusion bridges such a
+    corner with a line). Now the offset is checked along its edges and the
+    mitred one taken instead."""
+    shape = _rounded_rect(0, 76, 73.34223977009138, 300.3733725850022, 7.334223977009138, 120.45463784150706) \
+        .difference(_rounded_rect(59.5, 188.5, 399, 183, 60.32945596815371, 45))
+    assert _keeps(cutouts.grown(shape, 21.52965333733873), shape, 21.53) > 21.52965333733873 - 0.25

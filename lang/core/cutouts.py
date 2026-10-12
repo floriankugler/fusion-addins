@@ -31,6 +31,7 @@ from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
+import shapely
 from shapely.geometry import LineString, Point, Polygon
 from shapely.geometry.base import BaseGeometry
 from shapely.geometry.polygon import orient
@@ -65,6 +66,9 @@ _EPS = 1e-9
 _ON_ARC = 0.01
 #: Pieces of an offset with less area (mm2) than this are slivers, not pieces.
 _SLIVER = 1e-6
+#: Holes of an offset narrower than this (mm: twice their area over their
+#: length) are specks a mitred offset leaves where a hole closes.
+_SPECK = 1e-3
 #: How close (mm) a corner must lie to a point that names it.
 _AT = 1e-6
 
@@ -676,14 +680,23 @@ def chamfered(piece: Polygon, d: float, at: Sequence[Point2]) -> Polygon | None:
 
 def grown(g: BaseGeometry, d: float) -> BaseGeometry:
     """`g` grown by `d` (shrunk for a negative `d`) as Fusion offsets a
-    sketch loop: lines move out and meet where they did, so corners stay
-    sharp (the cutout's fillets round them), and arcs of `g` become arcs of
-    the offset on their exact circles: a circle stays a circle, a slot's
-    round ends stay round."""
+    sketch loop: every line and arc moves out, an arc on its circle, and
+    neighbours meet where the moved curves cross, so corners stay sharp
+    (the cutout's fillets round them) and where a corner has an arc the
+    arc runs on along its circle to meet the line or arc beside it (checked
+    in Fusion, 2026-10-12): a circle stays a circle, a slot's round ends
+    stay round. Exact, worked out on the lines and arcs the polygons stand
+    for (`lang.emit.arcs.fit`); where that does not hold (a curve vanishes,
+    pieces merge or part), a mitred offset with its arcs put back onto
+    their circles, which is up to a few tenths of a millimetre off at such
+    corners. Slivers in `g` (a hairline a boolean leaves where edges
+    coincide) are left out: grown, they would be pieces of their own."""
     if abs(d) < _EPS:
         return g
     out: list[BaseGeometry] = []
     for poly in polygons_of(g):
+        if poly.area <= _SLIVER:
+            continue
         if len(poly.interiors) == 0:
             curves = fit(_ring_points(poly.exterior.coords))
             if len(curves) == 1 and isinstance(curves[0], Circle2):
@@ -692,12 +705,40 @@ def grown(g: BaseGeometry, d: float) -> BaseGeometry:
                     out.append(_circle(c, radius + d))
                 continue
         buffered = poly.buffer(d, join_style="mitre", mitre_limit=100.0)
+        if not buffered.is_valid:
+            # A mitred offset can cross itself; made valid, an inset keeps
+            # the loops it should have dropped, which lie outside the shape
+            # shrunk with round corners, as no inset may, and an outward
+            # offset may lose parts of the shape grown with round corners,
+            # which every outward offset holds.
+            buffered = shapely.make_valid(buffered)
+            rounded = poly.buffer(d, quad_segs=64)
+            buffered = buffered.intersection(rounded) if d < 0 else unary_union([buffered, rounded])
+        buffered = _without_specks(buffered)
+        exact = _offset_exactly(poly, d, buffered)
+        if exact is not None:
+            out.append(exact)
+            continue
         targets = _arc_targets(poly, d)
+        on_arc = _on_an_arc_of(poly, abs(d))
         # An inward offset that all but closes a shape (a slot by half its
         # width) leaves slivers without area; snapped, they would have too
         # few vertices for a ring.
-        out += [_onto_circles(p, targets) for p in polygons_of(buffered) if p.area > _SLIVER]
+        out += [_onto_circles(p, targets, keep=lambda q: not on_arc(q))
+                for p in polygons_of(buffered) if p.area > _SLIVER]
     return unary_union(out) if out else Polygon()
+
+
+def _without_specks(g: BaseGeometry) -> BaseGeometry:
+    """`g` without holes narrower than `_SPECK` [found by fuzzing: a hole
+    as wide as an outward offset left one of 0.6 um]."""
+    out: list[Polygon] = []
+    changed = False
+    for p in polygons_of(g):
+        holes = [h for h in p.interiors if 2 * Polygon(h).area / max(h.length, 1e-12) >= _SPECK]
+        changed = changed or len(holes) < len(p.interiors)
+        out.append(Polygon(p.exterior, holes) if len(holes) < len(p.interiors) else p)
+    return unary_union(out) if changed else g
 
 
 #: A circle an offset's vertices are put back onto: centre, radius, and the
@@ -724,6 +765,197 @@ def _arc_targets(poly: Polygon, d: float) -> list[_Target]:
                 if radius > _EPS:
                     targets.append((c, radius, a0, sweep, ccw))
     return targets
+
+
+def _chord_errors(poly: Polygon) -> list[tuple[Point2, float, float]]:
+    """The circles the arcs of `poly` lie on, each with how far the
+    polygon's chords of it lie inside it at most (their sagitta)."""
+    out: list[tuple[Point2, float, float]] = []
+    for ring in [poly.exterior, *poly.interiors]:
+        pts = _ring_points(ring.coords)
+        for curve in fit(pts):
+            if not isinstance(curve, (Arc2, Circle2)):
+                continue
+            c, r = curve.center, curve.radius
+            on = [abs(math.dist(q, c) - r) <= 1e-6 * max(1.0, r) for q in pts]
+            sag = max([r - math.sqrt(max(r * r - math.dist(a, b) ** 2 / 4, 0.0))
+                       for (a, oa), (b, ob) in zip(zip(pts, on), zip([*pts[1:], pts[0]], [*on[1:], on[0]]))
+                       if oa and ob and math.dist(a, b) < r], default=0.0)
+            out.append((c, r, sag))
+    return out
+
+
+def _on_an_arc_of(poly: Polygon, d: float) -> Callable[[Point2], bool]:
+    """Whether a vertex of an offset of `poly` by `d` stands for a point of
+    one of its arcs: the polygon's point nearest it lies on that arc's
+    circle, give or take the chords' sagitta. A line's vertex near the end
+    of an arc is not, though it may lie within the snap tolerance of the
+    offset circle (it would turn the line onto it)."""
+    boundary = poly.boundary
+    circles = _chord_errors(poly)
+
+    def on_arc(q: Point2) -> bool:
+        if not circles:
+            return False
+        near = nearest_points(boundary, Point(q))[0]
+        point = (near.x, near.y)
+        return any(abs(math.dist(point, c) - r) <= sag + 1e-6 for c, r, sag in circles)
+    return on_arc
+
+
+def _offset_exactly(poly: Polygon, d: float, reference: BaseGeometry) -> Polygon | None:
+    """`poly` grown by `d` curve by curve, as Fusion offsets a sketch loop:
+    each line and arc of each ring moved `d` away from the material (an arc
+    on its circle), neighbours meeting where the moved curves cross. None
+    when that does not make a shape like `reference` (the mitred offset):
+    a curve vanished, or the offset merges or parts what it grows."""
+    if len(polygons_of(reference)) != 1:
+        return None
+    ref = polygons_of(reference)[0]
+    if len(ref.interiors) != len(poly.interiors):
+        return None
+    poly = orient(poly, 1.0)          # the material left of every ring
+    fitted = [fit(_ring_points(ring.coords)) for ring in [poly.exterior, *poly.interiors]]
+    if not any(isinstance(c, (Arc2, Circle2)) for curves in fitted for c in curves):
+        return None                   # lines only: the mitred offset is exact
+    rings: list[list[Point2]] = []
+    for ring, curves in zip([poly.exterior, *poly.interiors], fitted):
+        if len(curves) == 1 and isinstance(curves[0], Circle2):
+            whole = curves[0]
+            outward = Polygon(ring).exterior.is_ccw
+            radius = whole.radius + d if outward else whole.radius - d
+            if radius <= _EPS:
+                return None
+            rings.append([(float(x), float(y)) for x, y in list(_circle(whole.center, radius).exterior.coords)[:-1]])
+            continue
+        ring_points = _offset_ring(curves, d)
+        if ring_points is None:
+            return None
+        rings.append(ring_points)
+    if any(len(r) < 3 for r in rings):
+        return None
+    out = Polygon(rings[0], rings[1:])
+    # Its corners may lie far from the mitred offset's (where two arcs meet
+    # at a sharp tip, a good part of the offset), its area hardly.
+    if not out.is_valid or out.is_empty or abs(out.area - ref.area) > 0.05 * ref.area + 1.0:
+        return None
+    return out if _keeps_its_distance(poly, out, d) else None
+
+
+def _true_shape(poly: Polygon) -> Polygon:
+    """The shape the polygon's lines and arcs stand for, its arcs drawn
+    finely: where two arcs meet at a shallow angle, the polygon's corner
+    lies its chords' sagitta over the angle's sine off theirs."""
+    step = math.radians(0.2)
+    rings: list[list[Point2]] = []
+    for ring in [poly.exterior, *poly.interiors]:
+        points: list[Point2] = []
+        for curve in fit(_ring_points(ring.coords)):
+            if isinstance(curve, Line2):
+                points.append(curve.a)
+            elif isinstance(curve, Circle2):
+                n = math.ceil(2 * math.pi / step)
+                points += [(curve.center[0] + curve.radius * math.cos(2 * math.pi * k / n),
+                            curve.center[1] + curve.radius * math.sin(2 * math.pi * k / n)) for k in range(n)]
+            else:
+                (ax, ay), (mx, my), (bx, by) = curve.a, curve.mid, curve.b
+                ccw = (mx - ax) * (by - my) - (my - ay) * (bx - mx) > 0
+                sweep = _sweep(curve.center, curve.a, curve.mid, ccw) + _sweep(curve.center, curve.mid, curve.b, ccw)
+                n = max(2, math.ceil(sweep / step))
+                a0 = _angle(curve.center, curve.a)
+                sign = 1.0 if ccw else -1.0
+                points += [(curve.center[0] + curve.radius * math.cos(a0 + sign * sweep * k / n),
+                            curve.center[1] + curve.radius * math.sin(a0 + sign * sweep * k / n)) for k in range(n)]
+        rings.append(_deduplicated(points))
+    out = Polygon(rings[0], rings[1:]) if all(len(r) >= 3 for r in rings) else poly
+    return out if out.is_valid else poly
+
+
+def _keeps_its_distance(poly: Polygon, out: Polygon, d: float) -> bool:
+    """Whether the offset `out` of `poly` by `d` keeps its distance: grown,
+    it holds the shape, shrunk, it lies in it, and its boundary (points
+    along every edge) lies at least |d| from the shape (grown) or from its
+    boundary (shrunk), give or take a little, as Fusion's sketch
+    offset does, also at corners where an arc runs on along its circle
+    (checked in Fusion, 2026-10-12). A curve dropped wrongly comes nearer."""
+    true = _true_shape(poly)
+    outside = true.difference(out) if d > 0 else out.difference(true)
+    if outside.area > 1e-4 * poly.length + 1e-6:
+        return False                  # grown, it must hold the shape; shrunk, lie in it
+    target = true if d > 0 else true.boundary
+    # (the polygon's chords lie inside its arcs, the offset's on the true circles)
+    tolerance = 0.01 * abs(d) + 0.05 + max([sag for _, _, sag in _chord_errors(poly)], default=0.0)
+    for ring in [out.exterior, *out.interiors]:
+        pts = _ring_points(ring.coords)
+        for a, b in zip(pts, [*pts[1:], pts[0]]):
+            # along each edge, a point every |d| / 4 at least: a long edge
+            # may pass nearer between its ends
+            n = max(2, math.ceil(math.dist(a, b) / max(abs(d) / 4, 0.1)))
+            for k in range(n):
+                q = (a[0] + (b[0] - a[0]) * k / n, a[1] + (b[1] - a[1]) * k / n)
+                if target.distance(Point(q)) < abs(d) - tolerance:
+                    return False
+    return True
+
+
+def _offset_ring(curves: Sequence[Curve2], d: float) -> list[Point2] | None:
+    """A ring of lines and arcs (the material on its left) with each curve
+    moved `d` to its right, neighbours meeting where the moved curves
+    cross, as points. A curve the offset turns over (a short edge between
+    two corners an inset closes) is left out and its neighbours meet
+    instead, as a sketch offset trims it away, and so is the shorter of two
+    neighbours that do not meet. None when that leaves too little."""
+    pairs = [(c, _inset_curve(c, -d)) for c in curves]
+    while len(pairs) >= 2:
+        n = len(pairs)
+        joints = [_inset_joint(pairs[k][1], pairs[(k + 1) % n][1]) for k in range(n)]
+        apart = next((k for k in range(n) if joints[k] is None), None)
+        if apart is not None:
+            # Neighbours that do not meet (the sides of a slot the offset
+            # closes, parallel once its end is gone): the shorter goes.
+            k, m = apart, (apart + 1) % n
+            del pairs[k if _length(pairs[k][0]) <= _length(pairs[m][0]) else m]
+            continue
+        turned = next((k for k in range(n) if _turned_over(pairs[k][0], pairs[k][1], joints[k - 1], joints[k])), None)
+        if turned is None:
+            points: list[Point2] = []
+            for k, (_, curve) in enumerate(pairs):
+                start, end = joints[k - 1], joints[k]
+                assert start is not None and end is not None
+                points.append(start)
+                if isinstance(curve, Arc2):
+                    points += _arc_between(curve, start, end)
+            return _deduplicated(points)
+        del pairs[turned]
+    return None
+
+
+def _length(curve: Curve2) -> float:
+    if isinstance(curve, Line2):
+        return math.dist(curve.a, curve.b)
+    if isinstance(curve, Arc2):
+        (ax, ay), (mx, my), (bx, by) = curve.a, curve.mid, curve.b
+        ccw = (mx - ax) * (by - my) - (my - ay) * (bx - mx) > 0
+        return _sweep(curve.center, curve.a, curve.b, ccw) * curve.radius
+    return 2 * math.pi * curve.radius
+
+
+def _turned_over(original: Curve2, moved: Curve2, start: Point2 | None, end: Point2 | None) -> bool:
+    """Whether the moved curve, from `start` to `end`, runs against the
+    original: a line backwards, an arc the other way round (its ends passed
+    each other)."""
+    assert start is not None and end is not None
+    if isinstance(original, Line2):
+        (ax, ay), (bx, by) = original.a, original.b
+        return (end[0] - start[0]) * (bx - ax) + (end[1] - start[1]) * (by - ay) <= 0
+    assert isinstance(original, Arc2) and isinstance(moved, (Arc2, Line2))
+    if isinstance(moved, Line2):
+        return True                    # the arc shrank to its centre
+    (ax, ay), (mx, my), (bx, by) = original.a, original.mid, original.b
+    ccw = (mx - ax) * (by - my) - (my - ay) * (bx - mx) > 0
+    before = _sweep(original.center, original.a, original.b, ccw)
+    after = _sweep(moved.center, start, end, ccw)
+    return after > before + math.pi / 2
 
 
 def _circle(c: Point2, r: float) -> Polygon:
