@@ -14,8 +14,8 @@ Cabineos. Built on its own, the base stands across the vehicle behind
 the cab and opens toward the rear."""
 from lang import *
 
-ply18 = material("birch", t=18, sheet=(2500, 1250))
-ply12 = material("birch", t=12, sheet=(2500, 1250))
+from stock import ply12, ply18
+
 CLEARANCE = 1.5  # around the rear panel
 
 
@@ -34,7 +34,7 @@ def seat_base(name: str, box: Box, front: Side | None = None) -> Scope:
 
         cover = board("cover", ply12).on(cab.front)
         rear = (board("rear", ply12).on(cab.back)
-                .between(left.gap(CLEARANCE), right.gap(CLEARANCE), bottom.gap(CLEARANCE), top.gap(CLEARANCE)))
+                .between(left, right, bottom, top).inset(CLEARANCE))
         # two brackets per side, 50 from the ends; pilot holes for the bent
         # frame parts at the sides' front edges, Euro screws on the rear
         # panel's System 32 line

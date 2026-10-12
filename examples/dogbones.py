@@ -18,7 +18,8 @@ the cross boards, the left rail with corner dog bones (the default), the
 right one with hidden ones, which the cross boards cover."""
 from lang import *
 
-ply15 = material("birch", t=15, sheet=(2500, 1250))
+from stock import ply15
+
 
 with module("panels", Box.from_size(width=600, depth=400, height=200)) as m:
     with board("panel", ply15).on(m.bottom).show(m.top) as panel:

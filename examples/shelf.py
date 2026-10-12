@@ -6,7 +6,8 @@ between them. The top is flush with the sides, so its mortises run out of
 their top edge and its tenons lie open: they are screwed from above."""
 from lang import *
 
-ply18 = material("birch", t=18, sheet=(2500, 1250))
+from stock import ply18
+
 
 # a cabinet opening toward the front: its left and right are a cabinetmaker's
 box = Box.from_size(width=600, depth=250, height=900)

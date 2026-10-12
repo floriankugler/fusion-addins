@@ -10,7 +10,8 @@ under the floor as boxes, between the battens. Both rims are chamfered on
 top, and the hatch has a finger hole to lift it by."""
 from lang import *
 
-ply15 = material("birch", t=15, sheet=(2500, 1250))
+from stock import ply15
+
 
 catch = BallCatch()     # GN 450: 4 catches 40 mm from the ends of the straight edges, pilot holes 2 x 4
 

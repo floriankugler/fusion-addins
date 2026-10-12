@@ -11,7 +11,7 @@ here. Built on its own, the cabinet stands against the driver's wall and
 opens toward the aisle, like the drawer cabinet."""
 from lang import *
 
-from drawer_cabinet import ply9, ply12, ply15
+from stock import ply9, ply12, ply15
 
 REVEAL = 2.0  # around each inset front
 
@@ -62,8 +62,8 @@ def drawer(name: str, bay: Box, slide: DrawerSlide, latch: DoorLatch, catch: Boa
         box_top = catch.bottom.gap(latch.reach)
         box = slide.drawer_box(bay, front=face.back, side_thickness=ply12.t,
                                height=(box_top - bay.bottom) - slide.side_lift)
-        l = board("left", ply12).on(box.left).between(box.front, box.back, box.bottom, box.top)
-        r = board("right", ply12).on(box.right).between(box.front, box.back, box.bottom, box.top)
+        l = board("left", ply12).on(box.left).between(box)
+        r = board("right", ply12).on(box.right).between(box)
         f = board("front", ply12).on(box.front).between(l, r, box.bottom, box.top)
         k = board("back", ply12).on(box.back).between(l, r, box.bottom, box.top)
         floor = board("floor", ply9).on(box.bottom + slide.recess).between(l, r, f, k)

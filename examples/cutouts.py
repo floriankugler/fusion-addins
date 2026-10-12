@@ -7,7 +7,8 @@ keep a strip where the shelf meets them. Every cutout is cut from the
 inner face, which carries the chamfer."""
 from lang import *
 
-ply15 = material("birch", t=15, sheet=(2500, 1250))
+from stock import ply15
+
 
 # a cabinet opening toward the front: its left and right are a cabinetmaker's
 box = Box.from_size(width=600, depth=400, height=700)

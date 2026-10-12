@@ -10,7 +10,6 @@ with a clearance of 0.5, the front's and the back's run out of their ends
 into the sides.
 """
 import math
-import runpy
 from pathlib import Path
 from typing import Any
 
@@ -22,9 +21,8 @@ from lang.core.layout import build_layout
 from lang.core.ops import Cut, Pocket
 from lang.core.scope import registry
 from lang.emit.plan import PocketStep, plan_layout
-from helpers import has_material, overlap, part_meshes, ply12, ply9, state
+from helpers import EXAMPLES, has_material, overlap, part_meshes, ply12, ply9, run_example, state
 
-EXAMPLES = Path(__file__).resolve().parent.parent / "examples"
 O = 6 / (2 * math.sqrt(2))          # a corner relief's centre, along each edge from the corner
 R = 3.05                            # its radius: the 6 mm tool plus 0.1, halved
 
@@ -360,7 +358,7 @@ def _cabinet(tmp_path: Path, fingers: int, dogbones: str | None = None) -> None:
         source = source.replace("clearance=(0.5, 0.5))", f"clearance=(0.5, 0.5), dogbones={dogbones!r})")
     build = tmp_path / "cabinet.py"
     build.write_text(source)
-    runpy.run_path(str(build), run_name="__build__")
+    run_example(build)
 
 
 @pytest.mark.parametrize("fingers, dogbones", [(7, None), (9, "corner"), (11, "corner")])
@@ -392,7 +390,7 @@ def test_hidden_dog_bones_where_the_floor_lies_across_the_end_of_a_finger(tmp_pa
 
 
 def test_the_drawer_cabinets_grooves():
-    runpy.run_path(str(EXAMPLES / "drawer_cabinet.py"), run_name="__build__")
+    run_example(EXAMPLES / "drawer_cabinet.py")
     parts = {p.path: p for p in registry.roots[0].all_parts()}
     l, f, k, floor = (parts[f"drawercab.drawer1.{n}"] for n in ("left", "front", "back", "floor"))
     # into all four, 5 deep: the sides' inner faces at x 36 and 564, the

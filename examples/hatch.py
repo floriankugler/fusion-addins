@@ -10,8 +10,8 @@ top and shelf are joined to the sides with Cabineos, the back to all four
 with Dominos."""
 from lang import *
 
-ply18 = material("birch", t=18, sheet=(2500, 1250))
-ply9 = material("birch", t=9, sheet=(2500, 1250))
+from stock import ply9, ply18
+
 GAP = 1.5   # between the hatch and its neighbours, at each side
 
 

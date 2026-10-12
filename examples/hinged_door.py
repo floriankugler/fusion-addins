@@ -11,9 +11,8 @@ boxes. `carcass=right` hangs it on the other side. Built on its own, it
 hangs on the driver's wall and opens toward the aisle."""
 from lang import *
 
-ply15 = material("birch", t=15, sheet=(2500, 1250))
-ply12 = material("birch", t=12, sheet=(2500, 1250))
-ply9 = material("birch", t=9, sheet=(2500, 1250))
+from stock import ply9, ply12, ply15
+
 GAP = 3  # around the door
 
 

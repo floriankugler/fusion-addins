@@ -1,7 +1,6 @@
 """Face cutouts (`Board.cutout`, `lang.core.cutouts`), as the cutouts_native
 add-in makes them: full, cross and triangles."""
 import math
-from pathlib import Path
 
 import pytest
 from shapely.geometry import Point, Polygon, box
@@ -15,7 +14,7 @@ from lang.emit.arcs import Arc2, Line2, fit
 from lang.emit.plan import Arc, ChamferStep, Line, PocketStep, ShapeContour, pieces, plan_layout
 from lang.preview.mesh import mesh_part
 from lib import cutout_patterns as data
-from helpers import ply15
+from helpers import EXAMPLES, ply15, run_example
 
 CAB = Box.from_size(width=600, depth=500, height=720)
 
@@ -241,6 +240,5 @@ def test_rings_keep_sharp_corners_that_the_fillets_round():
 
 
 def test_the_example_s_loops_are_continuous():
-    import runpy
-    runpy.run_path(str(Path(__file__).parents[1] / "examples" / "cutouts.py"))
+    run_example(EXAMPLES / "cutouts.py", run_name="__main__")
     _loops_are_continuous()

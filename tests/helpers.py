@@ -2,7 +2,10 @@
 helpers that look at outlines, meshes and hardware bodies."""
 from __future__ import annotations
 
+import runpy
+import sys
 import warnings
+from pathlib import Path
 from typing import Any
 
 import trimesh
@@ -12,6 +15,9 @@ from lang import Board, Box, Scope, board, check, material, module, no_interfere
 from lang.core.layout import build_layout
 from lang.core.layout_types import HardwareBodyLayout
 from lang.preview.mesh import mesh_part
+
+#: The example build files, which import their stock and each other from their folder.
+EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
 
 ply9 = material("birch", t=9)
 ply12 = material("birch", t=12)
@@ -68,3 +74,21 @@ def bounds(body: HardwareBodyLayout) -> tuple[list[float], list[float]]:
     """A hardware body's bounding box, (min, max)."""
     boxes = body["boxes"]
     return ([min(b["min"][i] for b in boxes) for i in range(3)], [max(b["max"][i] for b in boxes) for i in range(3)])
+
+
+def run_example(path: Path, run_name: str = "__build__") -> None:
+    """Runs a build file in this process, its registry kept for the test,
+    with the examples' folder on the import path as `lang.build` puts the
+    build file's folder there (a copy in a temporary folder still finds
+    `stock` and `drawer_cabinet`)."""
+    folders = [str(EXAMPLES)] + ([str(path.parent)] if path.parent != EXAMPLES else [])
+    before = set(sys.modules)
+    sys.path[:0] = folders
+    try:
+        runpy.run_path(str(path), run_name=run_name)
+    finally:
+        del sys.path[:len(folders)]
+        for name in set(sys.modules) - before:       # imported afresh by the next test
+            file = getattr(sys.modules[name], "__file__", None)
+            if file and any(Path(file).resolve().is_relative_to(f) for f in folders):
+                del sys.modules[name]

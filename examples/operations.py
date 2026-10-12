@@ -9,7 +9,8 @@ No two chamfers share an edge: Fusion cannot chamfer an edge twice, and
 an edge that one chamfer consumed no longer exists for the next."""
 from lang import *
 
-ply15 = material("birch", t=15, sheet=(2500, 1250))
+from stock import ply15
+
 
 with module("ops", Box.from_size(width=400, depth=300, height=100)) as m:
     with board("panel", ply15).on(m.bottom).show(m.top) as panel:

@@ -1,7 +1,6 @@
 """Dog bones (`lang.core.dogbones`): the add-in's relief geometry, finding
 inside corners, `board.dogbones()` and the half lap's dog bones."""
 import json
-import runpy
 import math
 from pathlib import Path
 
@@ -17,11 +16,10 @@ from lang.core.ops import Cut, Pocket
 from lang.core.part import DogBoneTarget
 from lang.core.scope import registry
 from lang.emit.plan import Arc, plan_layout
-from helpers import has_material, ply15
+from helpers import EXAMPLES, has_material, ply15, run_example
 
 R = 3.05                            # a square corner's relief: the 6 mm tool plus 0.1, halved
 O = 3 / math.sqrt(2)                # its centre, along each edge from the corner
-EXAMPLES = Path(__file__).resolve().parent.parent / "examples"
 
 
 def _panel() -> tuple[Scope, Board]:
@@ -408,7 +406,7 @@ def test_the_drawer_boxes_relieve_only_their_cut_outs():
     """The floor's grooves come relieved from the groove joint where they
     stop (in the sides) and run out of the front and back, so dog bones
     are left for the slide's cut-outs only."""
-    runpy.run_path(str(EXAMPLES / "drawer_cabinet.py"), run_name="__build__")
+    run_example(EXAMPLES / "drawer_cabinet.py")
     boxes = [p for root in registry.roots for p in root.all_parts()
              if ".drawer" in p.path and p.name in ("left", "right", "front", "back")]
     for p in boxes:

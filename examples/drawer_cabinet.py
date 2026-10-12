@@ -8,9 +8,8 @@ own, it stands in a box of its own; van.py imports `drawer_cabinet` and
 places it in the master's kitchen box."""
 from lang import *
 
-ply15 = material("birch", t=15, sheet=(2500, 1250))
-ply12 = material("birch", t=12, sheet=(2500, 1250))
-ply9 = material("birch", t=9, sheet=(2500, 1250))
+from stock import ply9, ply12, ply15
+
 GAP = 3  # between fronts
 
 
@@ -75,12 +74,11 @@ def drawer(name: str, bay: Box, panel: Box, slide: DrawerSlide) -> Scope:
     face covering `panel`, its share of the cabinet front, less half a gap
     on every side. The slide sizes the box behind the face."""
     with scope(name, bay) as d:
-        face = (board("face", ply15).on(bay.front)
-                .between(panel.left, panel.right, panel.bottom, panel.top).inset(GAP / 2))
+        face = board("face", ply15).on(bay.front).between(panel).inset(GAP / 2)
         box = slide.drawer_box(bay, front=face.back, side_thickness=ply12.t, height=bay.height - 30)
 
-        l = board("left", ply12).on(box.left).between(box.front, box.back, box.bottom, box.top)
-        r = board("right", ply12).on(box.right).between(box.front, box.back, box.bottom, box.top)
+        l = board("left", ply12).on(box.left).between(box)
+        r = board("right", ply12).on(box.right).between(box)
         f = board("front", ply12).on(box.front).between(l, r, box.bottom, box.top)
         k = board("back", ply12).on(box.back).between(l, r, box.bottom, box.top)
         # Box joints at the four corners: the sides run the full length and

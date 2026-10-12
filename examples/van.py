@@ -10,10 +10,14 @@ kitchen's place all come from the master.
 """
 from lang import *
 
-from drawer_cabinet import drawer_cabinet, ply12, ply15
+from stock import ply12, ply15
+from drawer_cabinet import drawer_cabinet
 
 # The master's axes are the world axes; this is the van's choice of front,
-# left (the driver's side) and top. Set it before reading the master.
+# left (the driver's side) and top. It is the language's default frame, so
+# the call only states it; a van whose master runs the other way would set
+# its own here, before reading the master (every build starts from the
+# default, and world_frame() reads the one in use).
 set_frame(Frame(front="-x", left="-y", top="+z"))
 
 # The master index: names as they are in Fusion.
