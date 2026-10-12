@@ -637,7 +637,13 @@ proposed]
   the split lies in the middle of the height both share at each crossing
   (`at=` a position instead), and `clearance=` widens each notch per side
   (default 0). Each notch is a through cut named `lap_<other board>`, so
-  the emitter needs nothing new. `Board.join(*partners, using=joint)`
+  the emitter needs nothing new. Its two inside corners at the floor get
+  dog bones as part of the notch's cut [implemented 2026-10-12, see "Dog
+  bones" below]: `dogbones="corner"` (default, as on tenons), `"hidden"`
+  (centred on the floor, touching the notch's side, bulging past the
+  floor into the half of the crossing that stays this board's, where the
+  other board covers it on both faces; the notch must be wider than the
+  relief) or None; `tool=6`, `relief=0.1`. `Board.join(*partners, using=joint)`
   hands the board and the boards named to the joint object (the `Joint`
   protocol in `part.py`), as `Scope.mount` does with hardware, so core
   knows no joint types. The join happens when it is called: the boards it
@@ -729,7 +735,9 @@ proposed]
   wider: `"corner"` (default, on the bisector, through the corner) or
   `"hidden"` (into the tenon's root and past the mortise's ends, covered
   by the shoulder); none where a mortise breaks out of its board or a
-  tenon is flush with its board's end. Reliefs and mortises are round
+  tenon is flush with its board's end (the reliefs' geometry is the
+  shared one of "Dog bones" below since 2026-10-12, the layout unchanged
+  to the bit). Reliefs and mortises are round
   through cuts and pockets, so the tenon joint needs no new operation; a
   through cut that would split a board in pieces is now an error.
   Florian's choices 2026-10-11: corner dog bones by default; screws and
@@ -810,6 +818,78 @@ proposed]
   notch-wall grooves cannot be milled from the inner face with a round
   cutter; the add-in models all of them as cuts from the end planes. Not
   yet verified in Fusion against the add-in.
+- **Dog bones** (`lang/core/dogbones.py`) [decided by Florian 2026-10-12,
+  implemented 2026-10-12]: a router leaves its radius in every inside
+  corner, so a part with square corners does not go in; a dog bone takes
+  the corner out. Two ways, as Florian decided:
+  - per board: `side.dogbones(tool=6, relief=0.1)` relieves every inside
+    corner of the board, `at=` only some: the corners of named operations
+    (`side.toekick`, or the name as a string, which may name an operation
+    a later join makes), of a big face (`side.inner`: what that face
+    shows, through cuts and its own pockets, as when the add-in is given a
+    face) or of the outline's outer boundary (`side.outer.outline`), one
+    or a list. It is resolved when the board is finished (`Board.finish`,
+    called by `to_layout`), not when called, so it also covers the corners
+    that joints and operations written after it make; it is the one
+    operation that ignores the order on the page. Reliefs go in as
+    operations named after the operation the corner belongs to (the last
+    whose contour runs through it), `toekick_dogbones`, or `dogbones` for
+    the outline's own corners: a through cut where the corner is one of
+    the outline (cuts, notches, laps, tenon roots), else a pocket from the
+    face the corner is seen from, as deep as what lies beside it (the
+    pocket's depth; through for a through pocket); a corner on a pocket's
+    floor (a pocket inside a pocket) is cut from the face to the deeper
+    one's depth, the shallower's material above it being gone already.
+  - per joint: joints that cut inside corners relieve them themselves,
+    with `dogbones=`, `tool=` and `relief=`: tenons (corner or hidden, see
+    above), half laps (corner, hidden or None). Box joints keep the
+    cutter's fillets and hide their own reliefs (see above).
+  The geometry is dog_bones_native's (read from its code): from the
+  corner along the bisector of its two edges, the centre `(tool / 2) /
+  sin(angle)` out, `angle` the angle between the edges (not half of it:
+  at 90 degrees half a tool, at 60 or 120 degrees 1.155 times that), the
+  radius that plus `relief / 2`, so the circle reaches `relief / 2` past
+  the corner at any angle; the add-in's Offset is `relief`. The relief
+  takes only its own corner's material, as the add-in's in-face profile
+  does: where its circle reaches material that is not on the corner's
+  level and connected to the corner (a shallower pocket beside a deeper
+  one, a web across a narrow opening), that is left out of the shape;
+  elsewhere the shape is the whole circle, whose part in the opening cuts
+  nothing. The tenons, the half laps and `dogbones()` share the helpers
+  (`corner_relief`, `hidden_relief`), so the tenons' layout stayed the
+  same to the bit.
+  An inside corner [decided while implementing] is a vertex between two
+  straight edges of the material, seen from either big face on every
+  level (the face, each pocket's floor), where the boundary turns away
+  from the material by more than an arc's segment does (`arcs.MAX_STEP`,
+  11.5 degrees). Straight means a line as the emitter draws it
+  (`arcs.fit`): circles, slots' round ends, rounded corners, kept
+  fillets, other reliefs and holes are arcs, and a junction of a line and
+  an arc is no corner either, as the add-in only takes corners between
+  linear edges. So a corner relieved before (a joint's own dog bones, a
+  hole over it) gets none, `dogbones()` on a tenoned, lapped or
+  box-jointed board adds nothing at the joint, and a square box joint
+  (`tool=0`) gets them in its notches and gaps. A floor's corner next to
+  a higher island is not an inside corner (its wall goes up). Holes count
+  as round regions; V-grooves, chamfers and operations on narrow faces do
+  not count. A corner through the board is relieved once, from the face
+  on which it starts deepest. A relief that splits the board is an error
+  (`_cut_through`); a relief at a sharp cutout corner (`radius=0`) leaves
+  the opening out of its shape, so the cutout's check for operations in
+  its openings passes.
+  Deviations from the add-in: vertices turning less than 11.5 degrees are
+  not corners (the add-in would put a circle of 5 tools and more on a 170
+  degree corner); a chamfer on the contour does not stop a relief (the
+  add-in finds no corner on a chamfered face, as no edge at the vertex is
+  square to it), the relief cuts through the chamfer, and a chamfer along
+  a named operation does not follow the relief's arc. `examples/
+  dogbones.py`: a panel with every kind of corner (notch, acute V notch,
+  a window with obtuse corners, through pocket, dado with one corner under
+  a hole, a well in a recess, a pocket from below, round shapes without),
+  a shelf relieving only its notch, and a lapped frame with corner and
+  hidden dog bones. The van's floor battens get corner dog bones by the
+  half lap's default. Not yet verified in Fusion against the add-in; the
+  comparison script is queued.
 - Hardware carries its own rules. A drawer slide determines the drawer box width,
   length, position and floor recess, so those numbers never appear in cabinet
   code. [decided; first hardware implemented 2026-10-11]
@@ -1792,8 +1872,10 @@ Still to do (listed by Florian 2026-10-11, roughly in his order of weight):
 - **Joints**: ~~box joints~~ (done 2026-10-12, see "Box joints" under
   Joints and hardware; the Fusion comparison is pending), the drawer floor's groove as a join,
   screws through a drawer face into the box front (two boards face to
-  face, which contacts do not cover yet), dog bones on any inside corner
-  (dog_bones_native).
+  face, which contacts do not cover yet), ~~dog bones on any inside
+  corner~~ (done 2026-10-12, `board.dogbones()` and half laps'
+  `dogbones=`, see "Dog bones" under Joints and hardware; the Fusion
+  comparison with dog_bones_native is pending).
 - Arcs from the snapshot's contours (open question 16). (The preview's
   other chamfers are done, 2026-10-11.)
 

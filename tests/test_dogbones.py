@@ -1,6 +1,7 @@
 """Dog bones (`lang.core.dogbones`): the add-in's relief geometry, finding
 inside corners, `board.dogbones()` and the half lap's dog bones."""
 import json
+import runpy
 import math
 from pathlib import Path
 
@@ -251,6 +252,22 @@ def test_a_relief_takes_only_its_own_corners_material():
     assert relief.shape.geometry.contains(Point(140.3, 139.5))              # but the web at the corner goes
 
 
+def test_a_sharp_cutout_gets_dog_bones_in_its_corners():
+    m, panel = _panel()
+    with m:
+        panel.dogbones()
+        panel.cutout(panel.top, radius=0)
+    build_layout()
+    (relief,) = _dogbones(panel)
+    assert relief.name == "cutout_dogbones" and isinstance(relief, Cut)
+    # each relief without the part in the opening: the cutout's check for
+    # operations in its opening passes
+    lobe = corner_relief((0.0, 0.0), (1.0, 0.0), (0.0, 1.0), 6.0, 0.1).geometry.difference(
+        shapely_box(0, 0, 100, 100)).area
+    assert relief.shape.area == pytest.approx(4 * lobe)
+    assert _has(panel, (20 - 0.03, 20 - 0.03), (19, 19)) == [False, True]
+
+
 def test_dogbones_errors():
     m, panel = _panel()
     with m:
@@ -345,3 +362,48 @@ def test_the_example_builds_with_every_kind_of_corner(tmp_path: Path):
                                     "dado_dogbones", "recess_dogbones", "well_dogbones", "below_dogbones"])
     assert [op.get("name") for op in parts["panels.shelf"]["ops"]] == ["cable", "window", "cable_dogbones"]
     json.dumps(layout)
+
+
+# -- box joints ---------------------------------------------------------------------------------------
+
+def _box_jointed(joint: object) -> tuple[Board, Board]:
+    """test_box_joints' corner: a (15 thick, y 0..15) met by b (12 thick,
+    x 0..12), b growing the fingers, both asking for dog bones first."""
+    with module("pair", Box.from_size(width=200, depth=200, height=150)) as m:
+        a = board("a", ply15).on(m.left).between(Pos("x", 0), m.back, m.bottom, m.top)
+        b = board("b", material("birch", t=12)).on(Pos("x", 0), toward=m.back).between(a, m.right)
+        a.dogbones()
+        b.dogbones()
+        b.join(a, using=joint)  # type: ignore[arg-type]
+    build_layout()
+    return a, b
+
+
+def test_a_box_joint_keeps_its_fillets_and_gets_no_dog_bones():
+    for clearance in ((0.0, 0.0), (0.2, 0.5)):
+        registry.reset()
+        a, b = _box_jointed(box_joint(5, margin=5, tool=6, clearance=clearance))
+        assert _dogbones(a) == [] and _dogbones(b) == []
+
+
+def test_a_square_box_joint_gets_them():
+    a, b = _box_jointed(box_joint(5, margin=5, tool=0))
+    # two notches in a and three gaps in b (the outer two open at the board's
+    # sides, with one inside corner each), each corner one relief
+    assert sorted(op.name or "" for op in _dogbones(a)) == ["notch_b_1_dogbones", "notch_b_2_dogbones"]
+    assert sorted(op.name or "" for op in _dogbones(b)) == ["gap_a_1_dogbones", "gap_a_2_dogbones", "gap_a_3_dogbones"]
+    assert sum(op.shape.area for op in _dogbones(a)) == pytest.approx(4 * _single())
+    assert sum(op.shape.area for op in _dogbones(b)) == pytest.approx(4 * _single())
+
+
+def test_the_drawer_boxes_relieve_only_their_grooves_and_cut_outs():
+    runpy.run_path(str(EXAMPLES / "drawer_cabinet.py"), run_name="__build__")
+    boxes = [p for root in registry.roots for p in root.all_parts()
+             if ".drawer" in p.path and p.name in ("left", "right", "front", "back")]
+    for p in boxes:
+        p.dogbones()
+    assert build_layout()["problems"] == []
+    made = {p.path.split(".")[-1]: sorted(op.name or "" for op in _dogbones(p)) for p in boxes}
+    assert made == {"left": ["floor_groove_dogbones"], "right": ["floor_groove_dogbones"],
+                    "front": ["coupling_left_dogbones", "coupling_right_dogbones"],
+                    "back": ["hook_left_dogbones", "hook_right_dogbones"]}

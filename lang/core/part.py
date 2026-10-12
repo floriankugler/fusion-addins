@@ -1471,6 +1471,8 @@ class Board:
                 for _, opening in self._cutouts:
                     # A cutout's sharp corner: its opening is empty already.
                     shape = shape.difference(Shape(opening))
+                if shape.area <= 1e-9:
+                    continue
                 name = self.unique_op_name(relief.name)
                 if relief.face is None:
                     self.add_cut(shape, name=name)
