@@ -2194,6 +2194,41 @@ sheet-first form, the drawer box recipe in the builds (later the catalog),
 clearances as tuples, and the Cabineo's threaded-insert collar reaching
 past a 15 mm board's face by 1.35 mm, as in the add-in.
 
+Status 2026-10-12, fuzzing: `tests/fuzz` fuzzes the language with
+Hypothesis (how: AGENTS.md "Fuzz Tests"), so far the 2D kernels (arc
+recovery, fillets, chamfers, offsets) and cutouts on random boards; joints
+and hardware are next. Fixed, each with a regression test: arcs meeting
+through one chord or reaching for the first vertex of another arc, and a
+vertex moved past the next one (`arcs._snap`); corners sharper than 28
+degrees and slivers losing half their area refused by `filleted`; rings
+of a collapsed inset or of a hair-thin hole crashing shapely (`grown`,
+`chamfered`); the cutouts' rounding as a router would pulling vertices of
+new arcs and lines onto large arcs beside them (less than `around=` kept,
+corners a cutter cannot reach) and keeping channels narrower than the
+cutter; a refused cut changing the outline; a refused cutout leaving its
+note; the preview failing on edges shorter than a micrometre. The cutouts
+example's openings changed by under 0.5 mm2 each, toward the true tangent
+fillets; no other example changed. In Fusion (the same day): its sketch
+offset meets the offset circles where an offset extends a corner with an
+arc, as `fit` draws it, so `grown` (layout, preview), which mitres the
+tangents, is up to a millimetre off there and can also tilt a line by its
+snap tolerance: to be fixed. A board whose cut circle touches its edge at
+a point builds; a cutout with no border and sharp corners, its openings
+touching the outline, does not (Fusion: profile not valid). A batch of 40
+fuzz boards compiled with no difference to the preview but these:
+operations on material a rounded corner or taper took away are accepted
+(Fusion finds no target body or face), a through pocket may split a board
+(only through cuts are checked), rim chamfers fail along the short flats
+where tangent arcs drawn from polygons meet (up to 0.5 mm, 30 in the
+cutouts example, an extra face each), and large rim chamfers (2 mm and
+more) leave up to 0.3 % less material in Fusion than in the preview. The
+emitter's through pockets cut by distance now (Fusion's through-all
+extent failed or stopped short with other components in the document) and
+it drops its temporary faces when a step fails; all eleven examples
+compile as before, every body one solid within 0.03 % of the preview.
+Open, for Florian: geometry that touches itself at a point, has hairline
+spikes or sub-micrometre edges: refuse, clean or tolerate.
+
 1. `core`: the position algebra, box, board with `on`, `between` and `center`,
    scopes and paths, and layout JSON output with world transforms. With unit
    tests. [done]
