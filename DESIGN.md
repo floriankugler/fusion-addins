@@ -937,6 +937,55 @@ proposed]
   face (Everlock 60, Pull Lock 50.9, LL-66 24.6), which a drawer box
   behind a latched face stays clear of. `examples/door_latch.py`: an inset door with two pull
   locks and two latched drawers.
+- **Sliding brackets** (`lang/hardware/sliding_brackets.py`) [decided by
+  Florian and implemented 2026-10-12; no add-in yet, the data is in
+  `lib/sliding_brackets.py` for one]: Häfele Pacofix PF / PF-L, the same
+  part as Keku AS (Häfele: it "clicks with all Keku plastic fittings";
+  Keku lists the AS parts under Häfele's numbers), holding a removable
+  panel on frame boards standing square to it: `cab.mount(SlidingBracket(),
+  panel=cover, frame=[left, right])`, like the hinges. The frame part goes
+  on each frame board's inner face (toward the panel's middle, or the face
+  named, `frame=[wall.left]`), the panel part on the panel's back face
+  (toward the frame boards), its tongue on the frame board's face under
+  the frame part's hook; the panel comes off square to itself. Per bracket
+  two holes 32 apart in each board: the frame board's 37 behind the
+  panel's back face, the panel's 15 out from the frame board's face. The
+  gap is read from the model, never given: the frame holes depend on the
+  panel's back face only, so a gap moves them toward the frame board's
+  edge (37 - gap, up to 29, where the frame part's plate begins), and a
+  panel set in between the frame boards gets them 37 in front of it, its
+  edge up to 3 mm short of the frame board's face with the panel part's
+  plate hanging over. `count=` brackets (2) per frame board, the outer
+  ones `end=` (50) from the ends of the stretch panel and board share, or
+  `at=` positions along the edge, the same on every frame board;
+  numbered from the bottom or from the panel's own left. Holes per part,
+  because Euro screws usually go only into the frame board's System 32
+  line: `frame_hole=` and `panel_hole=` each `"pilot"` (Ø2 x 6, the
+  default, for chipboard screws), `"euro"` (Ø5 x 11, a 6.3 x 13.5 Euro
+  screw through the 4 mm plate; the frame part for Euro screws is
+  262.50.377) or (diameter, depth). Refused before anything is drilled: a
+  frame board parallel to the panel, a gap over 29, a frame board ending
+  before the plate does (45 behind the panel), a panel more than 3 mm
+  short of the frame board's face, plates off their boards or over
+  pockets (a hole under a plate is fine), brackets closer than a plate's
+  48, holes off their face or in another hole, holes as deep as the board
+  is thick, `end` under 24. Keku's largest spacing (600) and Häfele's "no
+  hanging loads" (a ceiling panel) are notes in the layout's problems;
+  Keku's minimum of four per panel is left to the build (two frame boards
+  with two each). Each latched pair is one body of four boxes
+  (`BRACKET_SHAPES`: frame plate, hook, panel plate, tongue), `left_1`...
+  under `<panel>_brackets`. Measured on Häfele's CAD models (glTF) of the
+  panel part 262.50.359 and the frame part 262.50.368, fitted together
+  latched: the tongue's tip against the frame part's plate, the hook's
+  tapered sides 0.1 to 0.2 mm clear of the tongue's tapered channel, the
+  lip's back flank on the tongue's ramp; that confirms the 37 of Häfele's
+  mounting drawing and the 15 (the tongue's side lies on the frame
+  board's face). `examples/removable_panels.py`: a seat base with a cover
+  3 mm in front of its sides, on Euro screws in the sides, and a rear
+  panel set in between them. Left out for now: snapping the frame holes
+  to an existing System 32 row, the bent PF-L-R frame part, Häfele's 1.5
+  mm spacer plate under the panel part (the frame holes then 38.5), the
+  hang-in fittings for panels parallel to the frame (SF/EH).
 - Open from these [2026-10-12]: the hatch hinge's probe points miss a
   shelf 64 to 82 below the top, which the hardware boxes now catch
   through `no_interference`; the small `_world_box` helpers each hardware
@@ -947,10 +996,11 @@ proposed]
   inner face before; corrected in the add-in too, whose sketch now
   dimensions the pair from the door's projected front edge).
 - Not covered by an add-in today, as far as seen: a groove for drawer floors
-  (done with `side.cut(floor.box().grown(...))`), and the drawer-box
+  (done with `side.cut(floor.box().grown(...))`), the drawer-box
   dimensions per slide model (box width, length, recess, the coupling and
   hook cut-outs and the hook holes, in `lang/hardware/slides.py` for both
-  families). [open]
+  families), and the sliding brackets (`lib/sliding_brackets.py` is ready
+  for an add-in). [open]
 
 ### Runs: tubes, ducts and keep-outs
 
@@ -1685,7 +1735,8 @@ Still to do (listed by Florian 2026-10-11, roughly in his order of weight):
   under Primitives). Left out for now: Rhombuses, tabs, patterns at an
   angle to the board's edges.
 - ~~**Hardware** beyond the slides~~: done 2026-10-12 (concealed
-  hinges, hatch hinges, ball catches, door latches; see "Joints and
+  hinges, hatch hinges, ball catches, door latches, and sliding brackets
+  for removable panels, which have no add-in yet; see "Joints and
   hardware"). Open: whatever else the van needs.
 - ~~**Complete the slides**~~: done 2026-10-12 (Blum drawer-box
   machining; runners as boxes for every model and length).

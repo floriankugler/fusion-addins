@@ -5,7 +5,8 @@ hands it the scope.
 
 So far: drawer slides (`slides`), concealed hinges (`hinges`), lift-up
 hatch hinges (`hatch_hinges`), ball catches for inspection hatches
-(`ball_catches`) and door latches (`latches`). Each places its bought part
+(`ball_catches`), door latches (`latches`) and sliding brackets for
+removable panels (`sliding_brackets`). Each places its bought part
 as boxes (`scope.place_hardware`) from one table of sizes measured from
 the makers' CAD models and drawings, kept apart from the drilling data
 in `lib/`."""
