@@ -154,6 +154,84 @@ def _onto_line(circle: tuple[Point2, float], p: Point2, q: Point2, near: Point2)
     return min(points, key=lambda x: math.dist(x, near))
 
 
+def _keeps_its_way(piece: _Piece, points: Sequence[Point2], at: Callable[[int], Point2]) -> bool:
+    """Whether the arc drawn through its ends and middle turns its circle's
+    way, no farther than the vertices it stands for and a step at each end.
+
+    A vertex moves only where every arc it ends or starts keeps its way:
+    where a small circle touches a large one from inside, the bump its
+    coarser polygon pokes out of the large one has its ends on the point
+    they touch at, or past it, and the arc would vanish or run the long
+    way round."""
+    assert piece.circle is not None
+    n = len(points)
+    center = piece.circle[0]
+    span = sum(abs(_turn(center, points[k % n], points[(k + 1) % n])) for k in range(piece.i, piece.j))
+    a, mid, b = at(piece.i), at((piece.i + piece.j) // 2), at(piece.j)
+    sweep = 0.0
+    for p, q in ((a, mid), (mid, b)):
+        t = _turn(center, p, q)
+        sweep += (t if piece.ccw else -t) % (2 * math.pi)
+    return 0 < sweep <= span + 2 * MAX_STEP
+
+
+def _sagitta(piece: _Piece, at: Callable[[int], Point2]) -> float:
+    """How far the chords of an arc's polygon lie inside its circle: the
+    sagitta of its longest step."""
+    assert piece.circle is not None
+    center, r = piece.circle
+    step = max(abs(_turn(center, at(k), at(k + 1))) for k in range(piece.i, piece.j))
+    return r * (1 - math.cos(step / 2))
+
+
+#: The widest gap (mm) between two curves that touch: the arcs a boolean or
+#: an offset leaves touching meet within a thousandth of a millimetre.
+_TOUCHING = 0.002
+
+
+def _touching_circles(a: tuple[Point2, float], b: tuple[Point2, float], on_a: bool) -> Point2 | None:
+    """Where two circles touch, outside or inside each other, give or take
+    `_TOUCHING`: on the line through their centres, on circle `a` when
+    `on_a` (the finer arc's: the other one then reaches it), else on `b`;
+    None when they do not touch."""
+    (ca, ra), (cb, rb) = a, b
+    d = math.dist(ca, cb)
+    if d < 1e-12:
+        return None
+    ux, uy = (cb[0] - ca[0]) / d, (cb[1] - ca[1]) / d
+    if abs(d - (ra + rb)) <= _TOUCHING:                 # outside each other
+        sa, sb = ra, d - rb
+    elif d < 10 * _TOUCHING:
+        return None                                     # (nearly) one circle: they share an arc, not a point
+    elif ra >= rb and abs(ra - rb - d) <= _TOUCHING:    # b inside a: beyond b, seen from a's centre
+        sa, sb = ra, d + rb
+    elif rb > ra and abs(rb - ra - d) <= _TOUCHING:     # a inside b: beyond a, seen from b's centre
+        sa, sb = -ra, d - rb
+    else:
+        return None
+    s = sa if on_a else sb
+    return (ca[0] + ux * s, ca[1] + uy * s)
+
+
+def _touching_line(circle: tuple[Point2, float], p: Point2, q: Point2) -> Point2 | None:
+    """Where the line through `p` and `q` touches the circle, give or take
+    `_TOUCHING`: the circle's point nearest the line, so the arc stays on
+    its circle and the line takes up what gap there is; None when it does
+    not touch."""
+    (cx, cy), r = circle
+    dx, dy = q[0] - p[0], q[1] - p[1]
+    length = math.hypot(dx, dy)
+    if length == 0:
+        return None
+    dx, dy = dx / length, dy / length
+    t = (cx - p[0]) * dx + (cy - p[1]) * dy
+    foot = (p[0] + dx * t, p[1] + dy * t)
+    h = math.dist(foot, (cx, cy))
+    if abs(h - r) > _TOUCHING or h < 1e-12:
+        return None
+    return (cx + (foot[0] - cx) * r / h, cy + (foot[1] - cy) * r / h)
+
+
 def _short_of(target: Point2 | None, x: Point2, other: Point2) -> Point2 | None:
     """`target`, a point on the line from the vertex `x` to `other`, when it
     lies short of `other`: a vertex moved past the line's other end would
@@ -207,11 +285,13 @@ def _chord_of(piece: _Piece, on_arc: Point2, x: Point2, outward: int) -> bool:
     """Whether the segment from the arc's end `on_arc` to `x` is a piece of
     one of its chords: a boolean with another shape cut the circle's
     polygon there, so `x` lies on the polygon, not on the circle.
-    `outward` is +1 past the arc's end, -1 before its start."""
+    `outward` is +1 past the arc's end, -1 before its start. A chord lies
+    inside its circle; a line the arc runs into tangentially lies outside,
+    as near as a chord close to the arc's end."""
     assert piece.circle is not None
     center, radius = piece.circle
     sagitta = radius * (1 - math.cos(MAX_STEP / 2))
-    if abs(math.dist(x, center) - radius) > sagitta + TOLERANCE:
+    if not radius - sagitta - TOLERANCE <= math.dist(x, center) <= radius + TOLERANCE:
         return False
     step = _turn(center, on_arc, x) * outward
     return 0 < (step if piece.ccw else -step) <= MAX_STEP
@@ -259,12 +339,18 @@ def _snap(pieces: list[_Piece], points: Sequence[Point2], moved: dict[int, Point
         assert before_arc.circle is not None and after_arc.circle is not None
         a, b = at(chord.i), at(chord.j)
         target = _onto_circles(before_arc.circle, after_arc.circle, ((a[0] + b[0]) / 2, (a[1] + b[1]) / 2))
+        if target is None or _glancing(target, before_arc.circle, after_arc.circle):
+            target = _touching_circles(before_arc.circle, after_arc.circle,
+                                       _sagitta(before_arc, at) <= _sagitta(after_arc, at))
         reach = 2 * min(before_arc.circle[1], after_arc.circle[1]) * math.sin(MAX_STEP / 2)
-        if target is None or max(math.dist(target, a), math.dist(target, b)) > reach \
-                or _glancing(target, before_arc.circle, after_arc.circle):
+        if target is None or max(math.dist(target, a), math.dist(target, b)) > reach:
             continue
         moved[near] = target
         after_arc.i -= 1
+        if not (_keeps_its_way(before_arc, points, at) and _keeps_its_way(after_arc, points, at)):
+            del moved[near]
+            after_arc.i += 1
+            continue
         absorbed.append(chord)
     # The arc a vertex begins or ends without a chord between: a vertex an
     # arc reaches for that begins another arc goes where the two circles
@@ -275,46 +361,56 @@ def _snap(pieces: list[_Piece], points: Sequence[Point2], moved: dict[int, Point
         x = at(m)
         end, start = ends.get(m), starts.get(m)
         circles: tuple[tuple[Point2, float], tuple[Point2, float]] | None = None
+        pair: tuple[_Piece, _Piece] | None = None
         if end is not None and start is not None:
             assert end[0].circle is not None and start[0].circle is not None
             circles = (end[0].circle, start[0].circle)
+            pair = (end[0], start[0])
         elif end is not None and m in starting:
             beyond = starting[m].circle
             assert end[0].circle is not None and beyond is not None
             circles = (end[0].circle, beyond)
+            pair = (end[0], starting[m])
         elif start is not None and m in ending:
             beyond = ending[m].circle
             assert start[0].circle is not None and beyond is not None
             circles = (beyond, start[0].circle)
-        if circles is not None:
-            target = _onto_circles(circles[0], circles[1], x)
-        elif end is not None:
-            assert end[0].circle is not None
-            target = _short_of(_onto_line(end[0].circle, x, at(m + 1), x), x, at(m + 1))
-        else:
-            assert start is not None and start[0].circle is not None
-            target = _short_of(_onto_line(start[0].circle, at(m - 1), x, x), x, at(m - 1))
+            pair = (ending[m], start[0])
         arc = (end or start)
         assert arc is not None and arc[0].circle is not None
-        reach = 2 * arc[0].circle[1] * math.sin(MAX_STEP / 2)
-        if target is None or math.dist(target, x) > reach:
-            continue
+        following = at(m + 1) if end is not None else at(m - 1)
         # Where the arc meets the line or the other arc at a glancing angle
         # (a fillet touching them), the crossing found is ill-conditioned
-        # and may lie far along the curves; the vertex stays.
+        # and may lie far along the curves: where they touch, the junction
+        # goes to the point they touch at; else the vertex stays.
         if circles is not None:
-            glancing = _glancing(target, circles[0], circles[1])
+            assert pair is not None
+            target = _onto_circles(circles[0], circles[1], x)
+            if target is None or _glancing(target, circles[0], circles[1]):
+                target = _touching_circles(circles[0], circles[1], _sagitta(pair[0], at) <= _sagitta(pair[1], at))
         else:
-            following = at(m + 1) if end is not None else at(m - 1)
-            glancing = _glancing(target, arc[0].circle, None, following)
-        if glancing:
+            line = (x, following) if end is not None else (following, x)
+            target = _short_of(_onto_line(arc[0].circle, line[0], line[1], x), x, following)
+            if target is None or _glancing(target, arc[0].circle, None, following):
+                target = _short_of(_touching_line(arc[0].circle, x, following), x, following)
+        reach = 2 * arc[0].circle[1] * math.sin(MAX_STEP / 2)
+        if target is None or math.dist(target, x) > reach:
             continue
         moved[m] = target
         if end is not None:
             end[0].j += 1
-            absorbed.append(end[1])
         if start is not None:
             start[0].i -= 1
+        if not all(_keeps_its_way(piece, points, at) for piece in (pair or (arc[0],))):
+            del moved[m]
+            if end is not None:
+                end[0].j -= 1
+            if start is not None:
+                start[0].i += 1
+            continue
+        if end is not None:
+            absorbed.append(end[1])
+        if start is not None:
             absorbed.append(start[1])
     return [p for p in pieces if not any(p is a for a in absorbed)]
 

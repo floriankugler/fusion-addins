@@ -340,11 +340,31 @@ def ends(c: Curve2) -> tuple[Point2, Point2] | None:
     return None if isinstance(c, Circle2) else (c.a, c.b)
 
 
-def on_known(center: Point2, radius: float, circles: Sequence[Circle], tol: float = 1e-6, slack: float = 0.0) -> bool:
-    """Whether the circle is one of `circles`; its radius within `slack`, its
-    centre within a hundredth of that (two circles of a short coarse slot,
-    offset, blur into one)."""
-    return any(math.dist(center, c) <= tol + 0.01 * slack and abs(radius - r) <= tol + slack for c, r in circles)
+#: How far (mm) an arc may stray from the circle it lies on: where curves
+#: that touch meet, the coarser arc reaches the finer one's point, which lies
+#: up to `arcs._TOUCHING` off its own circle.
+ON_CIRCLE = 3e-3
+
+
+def _points_of(c: Curve2) -> list[Point2]:
+    if isinstance(c, Circle2):
+        return [(c.center[0] + c.radius * math.cos(a), c.center[1] + c.radius * math.sin(a))
+                for a in (0.0, 2.0, 4.0)]
+    assert isinstance(c, Arc2)
+    sweep, ccw = arc_sweep(c)
+    a0 = math.atan2(c.a[1] - c.center[1], c.a[0] - c.center[0])
+    s = 1.0 if ccw else -1.0
+    return [(c.center[0] + c.radius * math.cos(a0 + s * sweep * k / 6),
+             c.center[1] + c.radius * math.sin(a0 + s * sweep * k / 6)) for k in range(7)]
+
+
+def on_known(curve: Curve2, circles: Sequence[Circle], slack: float = 0.0) -> bool:
+    """Whether the arc or circle lies on one of `circles`: its points within
+    `ON_CIRCLE` and `slack` of it (an offset of a coarse polygon's arc lies
+    on a circle up to half a percent of the offset off the true one). Its
+    centre is no measure: a short arc's is ill-conditioned."""
+    points = _points_of(curve)
+    return any(all(abs(math.dist(p, c) - r) <= ON_CIRCLE + slack for p in points) for c, r in circles)
 
 
 def fit_problems(ring: Sequence[Point2], circles: Sequence[Circle] | None, slack: float = 0.0) -> list[str]:
@@ -366,8 +386,7 @@ def fit_problems(ring: Sequence[Point2], circles: Sequence[Circle] | None, slack
         e, f = ends(c), ends(curves[(k + 1) % len(curves)])
         if e is not None and f is not None and e[1] != f[0]:
             problems.append(f"curve {k} ends at {e[1]}, the next starts at {f[0]}")
-        if circles is not None and isinstance(c, (Arc2, Circle2)) and not on_known(c.center, c.radius, circles,
-                                                                                    1e-6, slack):
+        if circles is not None and isinstance(c, (Arc2, Circle2)) and not on_known(c, circles, slack):
             problems.append(f"curve {k} is an arc about {c.center} with radius {c.radius}, on none of the "
                             "shape's circles")
     drawn = sample(curves)
@@ -411,13 +430,14 @@ def degenerate(ring: Sequence[Point2]) -> bool:
 
 def _covered(p: Point2, center: Point2, radius: float, curves: Sequence[Curve2]) -> bool:
     for c in curves:
-        if not isinstance(c, (Arc2, Circle2)) or math.dist(c.center, center) > 1e-6 or abs(c.radius - radius) > 1e-6:
+        if not isinstance(c, (Arc2, Circle2)) or not on_known(c, [(center, radius)]):
             continue
         if isinstance(c, Circle2):
             return True
         sweep, ccw = arc_sweep(c)
-        d = math.atan2(p[1] - center[1], p[0] - center[0]) - math.atan2(c.a[1] - center[1], c.a[0] - center[0])
-        if (d if ccw else -d) % (2 * math.pi) <= sweep + 1e-9:
+        o = c.center
+        d = math.atan2(p[1] - o[1], p[0] - o[0]) - math.atan2(c.a[1] - o[1], c.a[0] - o[0])
+        if (d if ccw else -d) % (2 * math.pi) <= sweep + 1e-6:
             return True
     return False
 
@@ -470,12 +490,12 @@ def recipe_problems(recipe: Recipe) -> list[str]:
     least, `arcs._GLANCING`): their crossing then lies up to 1 / sin(10)
     times as far from where their polygons cross.
 
-    Shapes offset by `grow` are not compared with the true shape: where an
-    arc meets a line or arc at a corner the offset extends, `grown` mitres
-    the tangents and `fit` meets the offset circles, which differ (up to a
-    millimetre for a lens grown by 26). Fusion's sketch offset meets the
-    offset circles, as `fit` does (checked in Fusion 2026-10-12); `grown`
-    is to follow, and then this comparison can include them."""
+    Shapes offset by `grow` are not compared with the true shape, a
+    finely drawn shape's mitred offset: where an arc meets a line or arc at
+    a corner the offset extends, Fusion's sketch offset, and `grown` since
+    2026-10-12, run the arc on along its circle to meet the other curve,
+    which differs from a mitre of the tangents (up to a millimetre for a
+    lens grown by 26). `offset_problems` checks those offsets."""
     circles, slack = recipe.circles(), recipe.slack
     rings = rings_of(recipe.geometry())
     problems = [p for ring in rings for p in fit_problems(ring, circles, slack)]
@@ -498,8 +518,11 @@ def recipe_problems(recipe: Recipe) -> list[str]:
         return problems
     largest = max([r for _, r in circles], default=0.0)
     # (twice that: below 10 degrees `fit` leaves the vertex where the
-    # polygons cross, which may lie a little farther off)
-    bound = 2 * (2 * recipe.sagitta + _sagitta(largest, math.pi / 2 / FINE)) / math.sin(math.radians(10)) + 1e-6
+    # polygons cross, which lies the chords' sagitta over the sine of the
+    # angle off: for a line glancing an arc at 1 degree, a tenth of a
+    # millimetre; so half a percent of the largest radius at least)
+    bound = max(2 * (2 * recipe.sagitta + _sagitta(largest, math.pi / 2 / FINE)) / math.sin(math.radians(10)),
+                0.005 * largest) + 1e-6
     off = max(_farthest([p for d in drawn for p in d], truth.boundary),
               _farthest([p for r in rings_of(truth) for p in r], MultiLineString([LinearRing(d) for d in drawn
                                                                                    if len(d) >= 3])))

@@ -362,3 +362,27 @@ def test_a_line_meeting_a_large_arc_keeps_its_place_where_a_piece_is_rounded_as_
     op = panel.op("cutout").op
     assert isinstance(op, Pocket)
     assert op.shape.geometry.distance(pocket) >= 28 - 1e-3
+def test_arcs_that_touch_in_the_example_meet_without_a_flat():
+    """Found compiling fuzz boards in Fusion: where a corner's fillet,
+    rounded as a router would, touches the material kept around a slot,
+    the two arcs met through a short flat (30 in this example, up to 0.8
+    long): an extra face each in Fusion, and rim chamfers failed along
+    them. Arcs that touch meet where they touch."""
+    run_example(EXAMPLES / "cutouts.py", run_name="__main__")
+    layout = build_layout()
+    flats: list[float] = []
+    for part in layout["modules"][0]["parts"]:
+        for op in part["ops"]:
+            if op["kind"] != "cut" and op["kind"] != "pocket":
+                continue
+            for ring in op["shape"]:
+                curves = fit(ring)
+                for k, c in enumerate(curves):
+                    a, b = curves[k - 1], curves[(k + 1) % len(curves)]
+                    if isinstance(c, Line2) and isinstance(a, Arc2) and isinstance(b, Arc2):
+                        d = math.dist(a.center, b.center)
+                        if min(abs(d - a.radius - b.radius), abs(d - abs(a.radius - b.radius))) < 0.05:
+                            flats.append(math.dist(c.a, c.b))
+    assert flats == []
+
+

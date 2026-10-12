@@ -176,9 +176,13 @@ def test_an_arc_reaching_for_the_start_of_another_arc_meets_it_where_the_circles
     for the first vertex of the fine one and moved it along the fine arc's
     first chord, off the fine circle, which then got a wrong centre."""
     from shapely.geometry.polygon import orient
-    from lang.core.cutouts import circle_geometry, grown
-    shape = grown(circle_geometry((-110, 92), 169.5).union(Point(73, 25).buffer(200, quad_segs=8)), -11)
-    assert isinstance(shape, Polygon)
+    from lang.core.cutouts import _arc_targets, _onto_circles, circle_geometry  # pyright: ignore[reportPrivateUsage]
+    # offset as `grown` did then: mitred, its arcs put back on their circles
+    united = circle_geometry((-110, 92), 169.5).union(Point(73, 25).buffer(200, quad_segs=8))
+    assert isinstance(united, Polygon)
+    buffered = united.buffer(-11, join_style="mitre", mitre_limit=100.0)
+    assert isinstance(buffered, Polygon)
+    shape = _onto_circles(buffered, _arc_targets(united, -11))
     ring = [(float(x), float(y)) for x, y in list(orient(shape, 1.0).exterior.coords)[:-1]]
     curves = _joined_and_simple(ring)
     arcs = [c for c in curves if isinstance(c, Arc2)]
@@ -209,3 +213,53 @@ def test_a_vertex_moved_onto_an_arc_stays_short_of_the_next_vertex():
     shape = orient(moved, 1.0)
     for ring in [shape.exterior, *shape.interiors]:
         _joined_and_simple([(float(x), float(y)) for x, y in list(ring.coords)[:-1]])
+
+
+@pytest.mark.parametrize("quad", [16, 32])
+def test_a_bump_where_a_small_circle_touches_a_large_one_from_inside_keeps_its_arc(quad: int):
+    """Found by fuzzing: a circle of 0.5 touching one of 1 from inside pokes
+    out of its coarser polygon in a tiny bump. Drawn with 16 segments a
+    quarter, both its junctions went to the point the circles touch at, the
+    bump's arc vanished and the drawn ring crossed itself; with 32, the
+    point lay inside the bump's run, and its arc went the long way round."""
+    from shapely.geometry import LineString
+    from shapely.geometry.polygon import orient
+    from shapely.ops import unary_union
+    shape = unary_union([box(-0.5, -0.5, 0.5, 0.5), LineString([(0, 0), (0.5, 0)]).buffer(1, quad_segs=8),
+                         Point(1, 0).buffer(0.5, quad_segs=quad)])
+    assert isinstance(shape, Polygon)
+    ring = [(float(x), float(y)) for x, y in list(orient(shape, 1.0).exterior.coords)[:-1]]
+    _joined_and_simple(ring)
+
+
+def test_a_rounded_corner_touching_a_large_circle_from_inside_does_not_close_into_a_circle():
+    """Found by fuzzing: a rounded rectangle's corner of 0.5 touches a
+    circle of 2 from inside, its bump starting on the point they touch at;
+    its end went there too, and the arc came out a whole circle."""
+    from shapely.geometry import LineString
+    from shapely.geometry.polygon import orient
+    from shapely.ops import unary_union
+    from lang.core.cutouts import filleted
+    rounded = filleted(box(-1, -2, 1, 2), 0.5)
+    assert rounded is not None
+    shape = unary_union([box(-0.5, -0.5, 0.5, 0.5), LineString([(0, 0), (0.5, 0)]).buffer(2, quad_segs=8), rounded])
+    assert isinstance(shape, Polygon)
+    ring = [(float(x), float(y)) for x, y in list(orient(shape, 1.0).exterior.coords)[:-1]]
+    assert all(c.a != c.b for c in _joined_and_simple(ring) if isinstance(c, Arc2))
+
+
+def test_a_line_running_into_an_arc_tangentially_is_no_chord_of_it():
+    """Found by fuzzing: a notch cut 4 short of where a rounded rectangle's
+    side runs into its corner arc left a piece of the side that lies as
+    near the circle as a chord does; it was taken for one, and the arc ran
+    on along its circle to the notch, bending the side 0.16 off. A chord
+    lies inside its circle, a line touching it outside."""
+    from shapely.geometry.polygon import orient
+    from lang.core.cutouts import filleted
+    rounded = filleted(box(0, 0, 200, 100), 50)
+    assert rounded is not None
+    notched = rounded.difference(box(145, 99, 146, 101))
+    assert isinstance(notched, Polygon)
+    shape = orient(notched, 1.0)
+    curves = _joined_and_simple([(float(x), float(y)) for x, y in list(shape.exterior.coords)[:-1]])
+    assert Line2((150, 100), (146, 100)) in curves
