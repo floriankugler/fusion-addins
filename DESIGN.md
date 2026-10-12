@@ -1159,7 +1159,12 @@ below is proposed]
   of them, and a stale design builds when a page shows it. The folder is
   rescanned on every change, so new build files appear without a restart.
   A build goes to a scratch directory and moves in when it went through,
-  so a failed one shows its log and leaves the last good scene. The hash
+  so a failed one shows its log and leaves the last good scene. The log
+  holds the error and the lines of the build files it passed through
+  (`examples/van.py:39: bottom.join(...)`), not runpy's or the language's
+  frames; a Python error raised inside the language also names where
+  (`raised in lang/core/shapes.py:243`), and `python -m lang.build
+  --traceback` prints the whole stack [2026-10-12]. The hash
   carries the design (`#design=van&eye=…`); each design keeps its own
   camera, hidden parts, selection and section while the page is open,
   one shown for the first time is fitted. Given a single build file the
