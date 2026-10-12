@@ -128,13 +128,15 @@ def test_side_grooves_stop_inside_and_front_grooves_run_out():
         p["floor"].join(p["l"], p["r"], p["f"], p["k"], using=groove(5, clearance=(0.5, 0.5), dogbones=None))
     l, f = p["l"], p["f"]
     # from the face the floor meets, 5 + 0.5 deep; past the floor's corners
-    # by 0.5 and 0.5 above it, its underside on the groove's lower wall
+    # by 0.5, and 0.25 below and above it: the floor stays where it was
+    # placed, the height clearance split evenly (Florian, 2026-10-12)
     side = _groove(l)
     assert side.name == "groove_floor" and side.face == l.inner.world_name and side.depth == 5.5
-    assert side.shape.bounds == pytest.approx((6.5, 10, 193.5, 19.5))     # l's (x, z): inside its 0..200
+    assert side.shape.bounds == pytest.approx((6.5, 9.75, 193.5, 19.25))  # l's (x, z): inside its 0..200
     front = _groove(f)
     assert front.face == f.inner.world_name and front.depth == 5.5
-    assert front.shape.bounds == pytest.approx((6.5, 10, 293.5, 19.5))    # f's (y, z): past its 12..288
+    assert front.shape.bounds == pytest.approx((6.5, 9.75, 293.5, 19.25))  # f's (y, z): past its 12..288
+    assert p["floor"].box().lo["z"] == 10
     assert _problems() == []
 
 
@@ -145,16 +147,15 @@ def test_without_clearance_the_grooves_are_what_the_floor_takes():
     assert _groove(p["r"]).depth == 5 and _groove(p["r"]).shape.bounds == pytest.approx((7, 10, 193, 19))
 
 
-def test_the_stopped_ends_get_corner_dog_bones_as_part_of_the_groove():
+def test_the_stopped_ends_get_hidden_dog_bones_as_part_of_the_groove():
+    """The default (Florian, 2026-10-12): each relief centred on the
+    groove's end, touching its edge, bulging past the end only."""
     m, p = _box()
     with m:
         p["floor"].join(p["l"], p["r"], p["f"], p["k"], using=groove(5, clearance=(0.5, 0.5)))
     shape = _groove(p["l"]).shape
-    # a relief in each of the four corners, on the bisector, reaching just
-    # past the corner and a little past the groove's ends and edges
-    bulge = R - O
-    assert shape.bounds == pytest.approx((6.5 - bulge, 10 - bulge, 193.5 + bulge, 19.5 + bulge))
-    assert shape.geometry.contains(Point(6.5 - 0.03, 10 - 0.03))          # past the corner, by relief / 2
+    assert shape.bounds == pytest.approx((6.5 - R, 9.75, 193.5 + R, 19.25))
+    assert shape.geometry.contains(Point(6.5 - R + 0.01, 9.75 + R))       # centred on the end, R from the edge
     # the front's runs out of it at both ends: no corners, no reliefs
     assert _groove(p["f"]).shape.area == pytest.approx(287 * 9.5)
     # board.dogbones() finds nothing more there: the reliefs are arcs
@@ -164,13 +165,16 @@ def test_the_stopped_ends_get_corner_dog_bones_as_part_of_the_groove():
     assert not [op for part in p.values() for op in part.ops if (getattr(op, "name", "") or "").endswith("dogbones")]
 
 
-def test_hidden_dog_bones_bulge_past_the_end_only():
+def test_corner_dog_bones_bulge_past_the_ends_and_edges():
     m, p = _box()
     with m:
-        p["floor"].join(p["l"], p["r"], p["f"], p["k"], using=groove(5, clearance=(0.5, 0.5), dogbones="hidden"))
+        p["floor"].join(p["l"], p["r"], p["f"], p["k"], using=groove(5, clearance=(0.5, 0.5), dogbones="corner"))
     shape = _groove(p["l"]).shape
-    assert shape.bounds == pytest.approx((6.5 - R, 10, 193.5 + R, 19.5))
-
+    # a relief in each of the four corners, on the bisector, reaching just
+    # past the corner and a little past the groove's ends and edges
+    bulge = R - O
+    assert shape.bounds == pytest.approx((6.5 - bulge, 9.75 - bulge, 193.5 + bulge, 19.25 + bulge))
+    assert shape.geometry.contains(Point(6.5 - 0.03, 9.75 - 0.03))        # past the corner, by relief / 2
 
 
 def test_hidden_dog_bones_must_stay_inside_the_board():
@@ -179,8 +183,9 @@ def test_hidden_dog_bones_must_stay_inside_the_board():
     m, p = _box()
     with m:
         with pytest.raises(LangError, match=r"hidden dog bones would break out of box\.(left|right) past the end"):
-            p["floor"].join(p["l"], p["r"], p["f"], p["k"], using=groove(9, clearance=(0.5, 0), dogbones="hidden"))
-        p["floor"].join(p["l"], p["r"], p["f"], p["k"], using=groove(9, clearance=(0.5, 0)))
+            p["floor"].join(p["l"], p["r"], p["f"], p["k"], using=groove(9, clearance=(0.5, 0)))
+        p["floor"].join(p["l"], p["r"], p["f"], p["k"], using=groove(9, clearance=(0.5, 0), dogbones="corner"))
+
 
 def test_board_dogbones_relieve_a_groove_joined_without_them():
     m, p = _box()
@@ -195,8 +200,8 @@ def test_board_dogbones_relieve_a_groove_joined_without_them():
 
 
 def test_a_standing_panel_gets_half_the_height_clearance_either_side():
-    """A back set into grooves in the sides, the bottom and the top: it
-    does not lie flat, so its groove is centred on it."""
+    """A back set into grooves in the sides, the bottom and the top: its
+    groove is centred on it, as every panel's is."""
     with module("box", Box.from_size(width=300, depth=200, height=400)) as m:
         l = board("left", ply12).on(m.left)
         r = board("right", ply12).on(m.right)
@@ -204,9 +209,9 @@ def test_a_standing_panel_gets_half_the_height_clearance_either_side():
         top = board("top", ply12).on(m.top).between(l, r)
         back = board("back", ply9).on(Pos("x", 180), toward=m.front).between(l, r, bottom, top)
         back.join(l, r, bottom, top, using=groove(6, clearance=(0, 1)))
-    # the back at x 171..180, in l's (x, z) frame
-    bulge = R - O                                              # l goes on past both ends: reliefs
-    assert _groove(l).shape.bounds == pytest.approx((170.5 - bulge, 6 - bulge, 180.5 + bulge, 394 + bulge))
+    # the back at x 171..180, in l's (x, z) frame; l goes on past both
+    # ends, so they get (hidden) reliefs
+    assert _groove(l).shape.bounds == pytest.approx((170.5, 6 - R, 180.5, 394 + R))
     x0, _, x1, _ = _groove(bottom).shape.bounds                 # the bottom's (x, y)
     assert (x0, x1) == pytest.approx((170.5, 180.5))
     assert back.outline.bounds == pytest.approx((6, 6, 294, 394))
@@ -227,7 +232,6 @@ def test_a_groove_running_out_where_no_board_covers_it_is_noted():
     assert _has(p["floor"], (7.1, 7.1), (199.9, 7.1)) == [False, True]
 
 
-
 def test_dados_for_shelves_from_the_side():
     """Two shelves the full depth of a side, joined from the side: one
     groove each, running out at the side's front and back, where they
@@ -245,6 +249,7 @@ def test_dados_for_shelves_from_the_side():
         "unit.side: the groove for unit.low runs out of it at its front end, where it shows unless something "
         "covers it.")
 
+
 def test_a_groove_through_the_board_is_an_error():
     m, p = _box()
     with m, pytest.raises(LangError, match=r"box.floor: groove: a groove 12 deep, 0 beyond the panel's edge, would go "
@@ -261,8 +266,7 @@ def test_the_panel_may_be_joined_from_a_board():
         p["l"].join(p["floor"], using=groove(5))
         p["r"].join(p["floor"], using=groove(5))                 # the opposite edge: no corner in common
     assert p["floor"].outline.bounds == pytest.approx((12, 7, 188, 293))
-    bulge = R - O
-    assert _groove(p["l"]).shape.bounds == pytest.approx((12 - bulge, 10 - bulge, 188 + bulge, 19 + bulge))
+    assert _groove(p["l"]).shape.bounds == pytest.approx((12 - R, 10, 188 + R, 19))
 
 
 def test_boards_at_a_corner_go_into_one_join():
@@ -335,23 +339,44 @@ def test_without_the_grooves_the_floor_would_overlap():
     assert _overlap(meshes["box.floor"], meshes["box.front"]) == pytest.approx(276 * 5 * 9, rel=1e-3)
 
 
-@pytest.mark.parametrize("fingers", [7, 9, 11])
-def test_in_the_drawer_cabinet_nothing_overlaps_and_nothing_shows(tmp_path: Path, fingers: int):
+def _cabinet(tmp_path: Path, fingers: int, dogbones: str | None = None) -> None:
+    """The drawer cabinet example with `fingers` in its box joints and, if
+    given, `dogbones=` for its floors' grooves."""
+    source = (EXAMPLES / "drawer_cabinet.py").read_text()
+    source = source.replace("box_joint(7, margin=2", f"box_joint({fingers}, margin=2")
+    if dogbones is not None:
+        source = source.replace("clearance=(0.5, 0.5))", f"clearance=(0.5, 0.5), dogbones={dogbones!r})")
+    build = tmp_path / "cabinet.py"
+    build.write_text(source)
+    runpy.run_path(str(build), run_name="__build__")
+
+
+@pytest.mark.parametrize("fingers, dogbones", [(7, None), (9, "corner"), (11, "corner")])
+def test_in_the_drawer_cabinet_nothing_overlaps_and_nothing_shows(tmp_path: Path, fingers: int,
+                                                                   dogbones: str | None):
     """The example's drawer boxes, box-jointed with 7 fingers and, so that
     the floor lies near and across the end of a finger, with 9 and 11: the
     grooves take the fillets the joint's cutter keeps at the fingers'
     roots, so the floor overlaps none of the four boards, and nothing runs
     out where it would show."""
-    source = (EXAMPLES / "drawer_cabinet.py").read_text()
-    build = tmp_path / "cabinet.py"
-    build.write_text(source.replace("box_joint(7, margin=2", f"box_joint({fingers}, margin=2"))
-    runpy.run_path(str(build), run_name="__build__")
+    _cabinet(tmp_path, fingers, dogbones)
     assert _problems() == []
     meshes = _meshes()
     for i in (1, 2, 3):
         base = f"drawercab.drawer{i}"
         for name in ("left", "right", "front", "back"):
             assert _overlap(meshes[f"{base}.floor"], meshes[f"{base}.{name}"]) < 1e-6, (base, name)
+
+
+def test_hidden_dog_bones_where_the_floor_lies_across_the_end_of_a_finger(tmp_path: Path):
+    """With 9 fingers the second drawer's floor lies across the lower end
+    of a front finger: the front's groove stops inside the finger, and a
+    hidden dog bone at its upper corner would reach down past the finger's
+    end into the joint's gap. The default refuses it; corner dog bones fit
+    (see above)."""
+    with pytest.raises(LangError, match=r"drawercab\.drawer2\.front: groove: hidden dog bones would break out of "
+                                        r"drawercab\.drawer2\.front"):
+        _cabinet(tmp_path, 9)
 
 
 def test_the_drawer_cabinets_grooves():
@@ -361,14 +386,16 @@ def test_the_drawer_cabinets_grooves():
     # into all four, 5 deep: the sides' inner faces at x 36 and 564, the
     # front's and back's at y 473 and 57
     assert floor.outline.bounds == pytest.approx((31, 52, 569, 478))
-    # the sides' grooves stop inside their lowest finger, short of their ends at y 45 and 485
-    bulge = R - O
-    assert _groove(l).shape.bounds == pytest.approx((51.5 - bulge, 143 - bulge, 478.5 + bulge, 152.5 + bulge))
+    # the sides' grooves stop inside their lowest finger, short of their
+    # ends at y 45 and 485, their hidden dog bones too; 0.25 below and above
+    # the floor at z 143..152
+    assert _groove(l).shape.bounds == pytest.approx((51.5 - R, 142.75, 478.5 + R, 152.25))
     # the front's runs past its ends into the joints' gaps, the corner of the
     # floor going into the sides there
-    assert _groove(f).shape.bounds == pytest.approx((30.5, 143, 569.5, 152.5))
+    assert _groove(f).shape.bounds == pytest.approx((30.5, 142.75, 569.5, 152.25))
     assert f.box().lo["x"] == 36 and f.box().hi["x"] == 564
-    # the slide's cut-outs reach up to the floor's underside, the groove's lower wall
+    # the slide's cut-outs reach up to the floor's underside, 0.25 above the
+    # groove's lower wall
     cuts = {op.name: op.shape.bounds for op in (*f.ops, *k.ops) if isinstance(op, Cut) and op.name
             and op.name.startswith(("coupling", "hook"))}
-    assert {b[3] for b in cuts.values()} == {143.0}
+    assert {b[3] for b in cuts.values()} == {143.0} and floor.bottom.value == 143
