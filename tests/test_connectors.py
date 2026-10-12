@@ -251,6 +251,29 @@ def test_cabineo_defaults_to_the_hidden_face_and_its_variants():
     assert isinstance(collar, Pocket) and collar.depth == 0.8 and round(collar.shape.width, 1) == 12.7
 
 
+def test_the_face_named_as_inner_outer_or_a_direction():
+    """face= as a string ("inner"/"outer") or a direction, not only a box
+    side; the bottom shows its underside, so its access face is its top."""
+    cab, p = carcass()
+    down, up = world_frame().direction("bottom"), world_frame().direction("top")
+    with cab:
+        p["bottom"].join(p["left"], using=cabineo(count=1, face="outer"))
+        p["bottom"].join(p["right"], using=cabineo(count=1, face=down))
+        p["top"].join(p["left"], using=clamex("P-14", count=1, face=up))
+        p["top"].join(p["right"], using=domino("4x20", count=1, face="inner", fence=5))
+        with pytest.raises(LangError, match=r"^cab\.left: clamex with cab\.bottom: face=front is not a big face of "
+                                            r"cab\.bottom"):
+            p["left"].join(p["bottom"], using=clamex(count=1, face=world_frame().direction("front")))
+    assert {op.face for op in _ops(p["bottom"], "cabineo_")} == {"bottom"}
+    assert [op.face for op in _ops(p["top"], "clamex_left_")] == ["top"]
+    (mark,) = [op for op in p["top"].ops if isinstance(op, VGroove)]
+    assert mark.face == "bottom"                            # the top's inner face carries the mark
+    (slot,) = _pockets(p["right"], "domino_top_")
+    assert (round(slot.shape.bounds[1], 6), round(slot.shape.bounds[3], 6)) == (708, 712)   # 5 above the inner face
+    with pytest.raises(LangError, match="cabineo\\(face=\\): expected 'inner' or 'outer', not 'side'"):
+        cabineo(count=1, face="side")  # type: ignore[arg-type]
+
+
 def test_cabineo_needs_a_board_thicker_than_its_pocket():
     cab, p = carcass()
     with cab:

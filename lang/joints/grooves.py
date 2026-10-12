@@ -12,12 +12,14 @@ meets, named `groove_<panel>`. The panel's box stays where it was placed
 boards at a corner of the panel go into one join, so that the corner goes
 into both, and a later join at a corner an earlier one moved is an error.
 
-`clearance=(depth, height)`: the groove's bottom lies `depth` beyond the
-panel's edge and its ends as far beyond the panel's corners; it is `height`
-wider than the panel is thick, half of it on either side of the panel, a
-floor lying flat included (Florian, 2026-10-12): the floor stays where it
-was placed, which is what a drawer slide measures its cut-outs and hook
-holes from, and its groove reaches half the clearance below it.
+`clearance=(depth, height)`, in that order (Florian kept the pair): the
+groove's bottom lies `depth` beyond the panel's edge and its ends as far
+beyond the panel's corners; it is `height` wider than the panel is thick,
+the play in total as with the other joints, half of it on either side of
+the panel, a floor lying flat included (Florian, 2026-10-12): the floor
+stays where it was placed, which is what a drawer slide measures its
+cut-outs and hook holes from, and its groove reaches half the clearance
+below it.
 
 A groove is as long as the panel needs: it stops inside its board where the
 board goes on past the panel's corner, and runs out of it where the board
@@ -44,7 +46,10 @@ error); `"corner"` puts them on the bisector, as on tenons and half laps,
 bulging a little past the groove's edges too, where at a corner of the
 panel the end of the board the corner goes into covers them; None leaves
 them. For a `tool=` mm cutter, `relief=` wider (`lang.core.dogbones`). They
-are part of the groove's pocket.
+are part of the groove's pocket. The tool is only for the reliefs, so it is
+checked against the groove's width only where a relief goes: a tool wider
+than the groove is an error there, and passes where the groove runs out at
+both ends or with `dogbones=None`.
 """
 from __future__ import annotations
 
@@ -364,11 +369,13 @@ def groove(depth: float, *, clearance: tuple[float, float] = (0.0, 0.0), chamfer
            dogbones: DogBones | None = "hidden", tool: float = 6.0, relief: float = 0.1) -> Groove:
     """A groove `depth` deep for each board named (or, written from a board,
     for each panel named), `clearance=(depth, height)` the room beyond the
-    panel's edges and around it (half the height on either side),
-    `chamfer` along both edges at the panel's corners between two grooves
-    (None or 0 for none), dog bones for a `tool` mm cutter, `relief`
-    wider, where a groove stops inside its board: past the groove's end
-    (`"hidden"`), on the corners (`"corner"`), or None."""
+    panel's edges (depth, beyond each edge and end) and around it (height,
+    in total, half on either side), `chamfer` along both edges at the
+    panel's corners between two grooves (None or 0 for none), dog bones for
+    a `tool` mm cutter, `relief` wider, where a groove stops inside its
+    board: past the groove's end (`"hidden"`), on the corners
+    (`"corner"`), or None. The tool is checked against the groove's width
+    only where a relief goes, as it cuts nothing else."""
     if depth <= 0:
         raise LangError(f"groove: depth must be positive, got {depth:g}.")
     if min(clearance) < 0:

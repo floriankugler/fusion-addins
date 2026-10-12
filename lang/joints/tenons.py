@@ -61,6 +61,7 @@ class Tenons(ContactJoint):
     even: bool
     at: tuple[Pos, ...] | None
     remaining: float
+    #: The mortise's play (along the joint, across it), each in total: half on each side.
     clearance: tuple[float, float]
     extra_depth: float
     tool: float

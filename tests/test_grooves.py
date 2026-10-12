@@ -313,6 +313,16 @@ def test_the_tool_must_fit_the_groove():
         p["floor"].join(p["l"], using=groove(5, tool=10, dogbones=None))
 
 
+def test_the_tool_is_checked_only_where_a_relief_goes():
+    """A dado running out of the side at both ends has no corner to relieve:
+    its tool, which cuts only the reliefs, may be wider than the groove."""
+    with module("unit", Box.from_size(width=300, depth=200, height=400)) as m:
+        side = board("side", ply12).on(m.left)
+        shelf = board("shelf", ply12).on(Pos("z", 100), toward=m.top).between(side, m.right)
+        side.join(shelf, using=groove(4, tool=20))
+    assert _groove(side).shape.bounds == (0, 100, 200, 112)
+
+
 # -- assembled ----------------------------------------------------------------------------------------
 
 def test_the_floor_fills_its_grooves_and_overlaps_no_board():

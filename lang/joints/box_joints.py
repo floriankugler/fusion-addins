@@ -11,10 +11,10 @@ may make the call. `fingers` is the number of fingers along the joint, the
 other board's and this one's together, odd so that both outer ones belong
 to the notched board; all are as wide as the notches, (length - 2 *
 margin) / fingers, and a plain `margin` at both ends of the joint widens
-the outer two. `clearance=(along, across)`: every notch and gap is
-`along` wider (half of it per side), and their bottoms lie `across`
-deeper than the other board is thick, so the fingers' tips sit flush and
-the gap is at their roots.
+the outer two. `clearance=(along, across)`, each the play in total as
+with tenons and half laps: every notch and gap is `along` wider, half of
+it on each side, and their bottoms lie `across` deeper than the other
+board is thick, all of it at the fingers' roots, so their tips sit flush.
 
 A cutter of `tool` diameter leaves its radius in every inside corner. The
 joint keeps those fillets and hides everything else, as the add-in does
@@ -82,7 +82,7 @@ class BoxJoint(ContactJoint):
     fingers: int
     margin: float
     tool: float
-    #: (along the joint, across it)
+    #: (along the joint, across it), each in total: half of along on each side, across all at the roots.
     clearance: tuple[float, float]
     label: ClassVar[str] = "box_joint"
 
@@ -325,7 +325,9 @@ def box_joint(fingers: int = 5, *, margin: float = 0.0, tool: float = 6.0,
               clearance: tuple[float, float] = (0.0, 0.0)) -> BoxJoint:
     """A box joint with `fingers` fingers along the joint (odd, at least
     3), a plain `margin` at both ends, reliefs for a `tool` mm cutter (0
-    for a square joint) and `clearance` (along the joint, across it)."""
+    for a square joint) and `clearance=(along, across)`: the notches and
+    gaps that much wider along the joint, half on each side, and that much
+    deeper than the other board is thick."""
     if fingers < 3:
         raise LangError(f"box_joint: at least 3 fingers, got {fingers}.")
     if fingers % 2 == 0:
