@@ -69,10 +69,8 @@ def drawer(name: str, bay: Box, slide: DrawerSlide, latch: DoorLatch, catch: Boa
         r = board("right", ply12).on(box.right).between(box.front, box.back, box.bottom, box.top)
         f = board("front", ply12).on(box.front).between(l, r, box.bottom, box.top)
         k = board("back", ply12).on(box.back).between(l, r, box.bottom, box.top)
-        floor = board("floor", ply9).on(box.bottom + slide.recess).between(l.into(5), r.into(5), f, k)
-        room = floor.box().grown(top=0.5, left=0.5, right=0.5)
-        for side in (l, r):
-            side.cut(room, name="floor_groove")
+        floor = board("floor", ply9).on(box.bottom + slide.recess).between(l, r, f, k)
+        floor.join(l, r, f, k, using=groove(5, clearance=(0.5, 0.5)))
         slide.machine_box(sides=(l, r), front=f, back=k, floor=floor)
     return d
 

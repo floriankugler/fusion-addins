@@ -411,7 +411,10 @@ def test_a_square_box_joint_gets_them():
     assert sum(op.shape.area for op in _dogbones(b)) == pytest.approx(4 * _single())
 
 
-def test_the_drawer_boxes_relieve_only_their_grooves_and_cut_outs():
+def test_the_drawer_boxes_relieve_only_their_cut_outs():
+    """The floor's grooves come relieved from the groove joint where they
+    stop (in the sides) and run out of the front and back, so dog bones
+    are left for the slide's cut-outs only."""
     runpy.run_path(str(EXAMPLES / "drawer_cabinet.py"), run_name="__build__")
     boxes = [p for root in registry.roots for p in root.all_parts()
              if ".drawer" in p.path and p.name in ("left", "right", "front", "back")]
@@ -419,6 +422,6 @@ def test_the_drawer_boxes_relieve_only_their_grooves_and_cut_outs():
         p.dogbones()
     assert build_layout()["problems"] == []
     made = {p.path.split(".")[-1]: sorted(op.name or "" for op in _dogbones(p)) for p in boxes}
-    assert made == {"left": ["floor_groove_dogbones"], "right": ["floor_groove_dogbones"],
+    assert made == {"left": [], "right": [],
                     "front": ["coupling_left_dogbones", "coupling_right_dogbones"],
                     "back": ["hook_left_dogbones", "hook_right_dogbones"]}

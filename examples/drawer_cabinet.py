@@ -3,8 +3,9 @@ pockets and holes, drawer slides as the first hardware, and connectors in
 the carcass. The slide dictates the drawer box and pre-drills the carcass
 sides; the bottom and top are joined to the sides with Cabineos, the back
 to all four with Dominos. The drawer boxes are box-jointed at their
-corners. Built on its own, it stands in a box of its own; van.py imports
-`drawer_cabinet` and places it in the master's kitchen box."""
+corners, their floors set into grooves in all four boards. Built on its
+own, it stands in a box of its own; van.py imports `drawer_cabinet` and
+places it in the master's kitchen box."""
 from lang import *
 from lang.hardware.slides import DrawerSlide
 from lib.drawer_slides import DYNAPRO_40
@@ -90,16 +91,13 @@ def drawer(name: str, bay: Box, panel: Box, slide: DrawerSlide) -> Scope:
         # front's and back's lower ends, which they run along.
         for end in (f, k):
             end.join(l, r, using=box_joint(7, margin=2, clearance=(0.1, 0.1)))
-        # the floor reaches 5 mm into the sides
-        floor = (board("floor", ply9)
-                 .on(box.bottom + slide.recess)
-                 .between(l.into(5), r.into(5), f, k))
-        # the grooves: what the floor occupies in each side, with 0.5 mm of
-        # room above the floor and beyond its edges; they stop at the front
-        # and back, inside the sides' lowest finger
-        room = floor.box().grown(top=0.5, left=0.5, right=0.5)
-        for side in (l, r):
-            side.cut(room, name="floor_groove")
+        # The floor goes 5 mm into all four, with 0.5 mm of room beyond its
+        # edges and above it, its corners chamfered (3 mm by default). It
+        # lies in the sides' lowest finger, so their grooves stop inside
+        # them and those in the front and back run out into the joints'
+        # gaps.
+        floor = board("floor", ply9).on(box.bottom + slide.recess).between(l, r, f, k)
+        floor.join(l, r, f, k, using=groove(5, clearance=(0.5, 0.5)))
         slide.machine_box(sides=(l, r), front=f, back=k, floor=floor)   # cut-outs and hook holes
     return d
 

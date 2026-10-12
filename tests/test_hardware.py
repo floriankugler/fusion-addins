@@ -78,9 +78,10 @@ def test_slide_machines_the_drawer_box():
 
 
 def _drawer(slide: DrawerSlide, machine: bool = True) -> tuple[Scope, dict[str, Board]]:
-    """A drawer in a 600 x 500 x 300 cabinet in the van's terms, built as
-    the example builds one: 12 mm sides, front and back, a 9 mm floor in
-    grooves, the runners mounted from the face's back."""
+    """A drawer in a 600 x 500 x 300 cabinet in the van's terms, built
+    much as the example builds one: 12 mm sides, front and back, a 9 mm
+    floor in grooves in the sides, the runners mounted from the face's
+    back."""
     with module("cab", Box.from_size(width=600, depth=500, height=300)) as cab:
         left = board("left", ply15).on(cab.left)
         right = board("right", ply15).on(cab.right)
@@ -92,9 +93,8 @@ def _drawer(slide: DrawerSlide, machine: bool = True) -> tuple[Scope, dict[str, 
             r = board("right", ply12).on(box.right).between(box.front, box.back, box.bottom, box.top)
             f = board("front", ply12).on(box.front).between(l, r, box.bottom, box.top)
             k = board("back", ply12).on(box.back).between(l, r, box.bottom, box.top)
-            floor = board("floor", ply9).on(box.bottom + slide.recess).between(l.into(5), r.into(5), f, k)
-            for side in (l, r):
-                side.cut(floor.box().grown(top=0.5, left=0.5, right=0.5), name="floor_groove")
+            floor = board("floor", ply9).on(box.bottom + slide.recess).between(l, r, f, k)
+            floor.join(l, r, using=groove(5, clearance=(0.5, 0.5)))
             if machine:
                 slide.machine_box(sides=(l, r), front=f, back=k, floor=floor)
         d.mount(slide, sides=(left, right), front=face.back)
