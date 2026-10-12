@@ -63,9 +63,9 @@ from shapely.geometry import box as shapely_box
 from ..core.contact import Contact
 from ..core.directions import Axis
 from ..core.errors import LangError
-from ..core.part import Board, Face
+from ..core.part import Face
 from ..core.shapes import Shape, circle
-from .common import EPS, Point2, face_toward, join_contacts, touching
+from .common import EPS, ContactJoint, Point2, face_toward, union_all
 
 #: How far notches and gaps reach past the end they open toward, so they open cleanly, mm.
 _PAST = 1.0
@@ -78,7 +78,7 @@ _FAR = 1e9
 
 
 @dataclass(frozen=True)
-class BoxJoint:
+class BoxJoint(ContactJoint):
     fingers: int
     margin: float
     tool: float
@@ -89,12 +89,6 @@ class BoxJoint:
     @property
     def radius(self) -> float:
         return self.tool / 2
-
-    def join(self, part: Board, /, partners: list[Board]) -> None:
-        join_contacts(self, part, partners)
-
-    def contacts_with(self, part: Board, other: Board) -> list[Contact]:
-        return touching(part, other)
 
     def stations(self, c: Contact) -> list[float]:
         """The ends of the fingers along the contact, from its start: the
@@ -153,10 +147,10 @@ class BoxJoint:
             shape = _slot(seat, z0, z1, r, cut if i == 1 else None, cut if i == len(gaps) else None)
             b.add_cut(corner.on_b(shape), name=b.unique_op_name(f"gap_{a.name}_{i}"))
         if r > 0:
-            grooves = _union([corner.on_tips(_lens(corner.tb, z, r)) for z in sides])
+            grooves = union_all([corner.on_tips(_lens(corner.tb, z, r)) for z in sides])
             b.add_edge_pocket(c.end, grooves, seat - r, name=b.unique_op_name(f"finger_{a.name}_grooves"),
                               offset=corner.tips_offset)
-            reliefs = _union([circle(2 * r, corner.point_b(seat - r, z), _QUARTER) for z in sides])
+            reliefs = union_all([circle(2 * r, corner.point_b(seat - r, z), _QUARTER) for z in sides])
             b.add_pocket(corner.b_inner, reliefs, r, name=b.unique_op_name(f"finger_{a.name}_reliefs"))
 
         # The notched board: the notches, the grooves along their walls
@@ -164,11 +158,11 @@ class BoxJoint:
         for i, (z0, z1) in enumerate(notches, 1):
             a.add_cut(corner.on_a(_slot(bottom, z0, z1, r)), name=a.unique_op_name(f"notch_{b.name}_{i}"))
         if r > 0:
-            grooves = _union([corner.on_a_end(_lens(corner.ta, z, r, opens)) for z0, z1 in notches
+            grooves = union_all([corner.on_a_end(_lens(corner.ta, z, r, opens)) for z0, z1 in notches
                               for z, opens in ((z0, 1), (z1, -1))])
             a.add_edge_pocket(corner.a_end, grooves, bottom, name=a.unique_op_name(f"notch_{b.name}_grooves"),
                               offset=corner.a_end_offset)
-            reliefs = _union([circle(2 * r, corner.point_a(bottom - r, z), _QUARTER) for z0, z1 in notches
+            reliefs = union_all([circle(2 * r, corner.point_a(bottom - r, z), _QUARTER) for z0, z1 in notches
                               for z in (z0, z1)])
             a.add_pocket(c.face, reliefs, r, name=a.unique_op_name(f"notch_{b.name}_reliefs"))
 
@@ -329,13 +323,6 @@ def _lens(surface: float, q: float, r: float, opens: int = 0) -> list[Point2]:
     upper = [(surface - r, q + r)] if opens > 0 else _arc((surface - r, q + r), r, 0, -90)
     lower = [(surface - r, q - r)] if opens < 0 else _arc((surface - r, q - r), r, 90, 0)
     return [(surface, q - r), (surface, q + r)] + upper + [(surface - r, q)] + lower
-
-
-def _union(shapes: list[Shape]) -> Shape:
-    result = shapes[0]
-    for shape in shapes[1:]:
-        result = result.union(shape)
-    return result
 
 
 def box_joint(fingers: int = 5, *, margin: float = 0.0, tool: float = 6.0,

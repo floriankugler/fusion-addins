@@ -33,17 +33,17 @@ from ..core.contact import Contact
 from ..core.errors import LangError
 from ..core.part import Board, Face
 from ..core.refs import PosLike, through
-from .common import (EPS, ContactGeometry, Spacing, TenonPlacement, TenonSource, face_toward, join_contacts,
+from .common import (EPS, ContactGeometry, SpacedJoint, Spacing, TenonPlacement, TenonSource, face_toward,
                      make_spacing, opposite_face, placement_of)
 from .tenons import Tenons
 
 #: How far beyond the tenon board's face the other board is probed for
 #: material, to tell an open tenon from a closed one, mm.
-_PROBE = 1.0
+_OPEN_PROBE = 1.0
 
 
 @dataclass(frozen=True)
-class Screws:
+class Screws(SpacedJoint):
     d: float
     spacing: Spacing
     tenons: TenonSource | None = None
@@ -56,13 +56,10 @@ class Screws:
         """The countersink as a chamfer on the hole's edge."""
         return (data.countersink_diameter(self.d) - self.d) / 2 if self.countersink else 0.0
 
-    def join(self, part: Board, /, partners: list[Board]) -> None:
-        join_contacts(self, part, partners)
-
     def contacts_with(self, part: Board, other: Board) -> list[Contact]:
         if self.tenons is not None:
             return [p.contact for p in self.tenons.placements(part, other)]
-        return self.spacing.contacts_with(part, other)
+        return super().contacts_with(part, other)
 
     def stations(self, c: Contact) -> list[float]:
         if self.tenons is not None:
@@ -73,7 +70,7 @@ class Screws:
         if self.spacing.gaps is not None and self.offset is not None:
             p = placement_of(self.spacing.gaps, c)
             return sorted(x for lo, hi in p.tenons() for x in (lo - self.offset, hi + self.offset))
-        return self.spacing.stations(self.label, c)
+        return super().stations(c)
 
     def check(self, c: Contact, stations: list[float]) -> None:
         e, f = c.edge_on, c.face_on
@@ -116,7 +113,7 @@ class Screws:
         g = ContactGeometry(c)
         b, t = e.box(), c.across
         open_sides = [sign for sign, value in ((-1, b.lo[t]), (1, b.hi[t]))
-                      if not f.outline.geometry.contains(Point(g.on_face(p.centres[0], value + sign * _PROBE)))]
+                      if not f.outline.geometry.contains(Point(g.on_face(p.centres[0], value + sign * _OPEN_PROBE)))]
         if not open_sides:
             raise LangError(f"screws: the tenons in {f.path} are closed in on both sides; a screw through a tenon "
                             f"needs its mortise to run out of {f.path}'s edge, so that the tenon's face lies open.",

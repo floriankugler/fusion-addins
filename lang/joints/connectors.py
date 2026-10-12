@@ -45,8 +45,8 @@ from ..core.errors import LangError, one_of
 from ..core.part import Board, Face
 from ..core.refs import DepthSpec, PosLike, through, to
 from ..core.shapes import circle, slot_shape
-from .common import (EPS, ContactGeometry, FaceChoice, Spacing, big_face, face_choice, hidden_face, join_contacts,
-                     check_gaps, make_spacing, opposite_face, start_index)
+from .common import (EPS, ContactGeometry, FaceChoice, SpacedJoint, Spacing, big_face, check_gaps, face_choice,
+                     hidden_face, make_spacing, opposite_face, start_index)
 from .tenons import Tenons
 
 DominoSize = Literal["4x20", "5x30", "6x40", "8x36", "8x40", "8x50", "8x80", "8x100", "10x50", "10x80",
@@ -68,7 +68,7 @@ _INSERT_KEYS: dict[str, str] = {"M6 x 12.3": "8 M6 x 12.3", "M6 x 15.3": "8 M6 x
 # -- Domino ------------------------------------------------------------------------------------------
 
 @dataclass(frozen=True)
-class Domino:
+class Domino(SpacedJoint):
     size: data.DominoSize
     spacing: Spacing
     fence: float | None = None
@@ -92,15 +92,6 @@ class Domino:
         """Along the contact: the Domino's width plus the offset; the loose
         slots are `loose` longer."""
         return self.size.width + self.length_offset
-
-    def join(self, part: Board, /, partners: list[Board]) -> None:
-        join_contacts(self, part, partners)
-
-    def contacts_with(self, part: Board, other: Board) -> list[Contact]:
-        return self.spacing.contacts_with(part, other)
-
-    def stations(self, c: Contact) -> list[float]:
-        return self.spacing.stations(self.label, c)
 
     def _reference(self, e: Board) -> Face:
         """The face the machine's fence rests on, which carries the marks."""
@@ -209,22 +200,13 @@ def domino(size: DominoSize, *, count: int | None = None, at: Sequence[PosLike] 
 # -- Clamex P ------------------------------------------------------------------------------------------
 
 @dataclass(frozen=True)
-class Clamex:
+class Clamex(SpacedJoint):
     model: data.ClamexModel
     spacing: Spacing
     face: FaceChoice = None
     guide_d: float = data.CLAMEX_GUIDE_DIAMETER
     through: bool = False
     label: ClassVar[str] = "clamex"
-
-    def join(self, part: Board, /, partners: list[Board]) -> None:
-        join_contacts(self, part, partners)
-
-    def contacts_with(self, part: Board, other: Board) -> list[Contact]:
-        return self.spacing.contacts_with(part, other)
-
-    def stations(self, c: Contact) -> list[float]:
-        return self.spacing.stations(self.label, c)
 
     def check(self, c: Contact, stations: list[float]) -> None:
         f = c.face_on
@@ -271,7 +253,7 @@ def clamex(model: ClamexModel = "P-10", *, count: int | None = None, at: Sequenc
 # -- Cabineo ---------------------------------------------------------------------------------------------
 
 @dataclass(frozen=True)
-class Cabineo:
+class Cabineo(SpacedJoint):
     model: CabineoModel
     guide: data.GuideHole
     spacing: Spacing
@@ -285,15 +267,6 @@ class Cabineo:
     @property
     def access_depth(self) -> float:
         return data.CABINEO_FLUSH_ACCESS_DEPTH if self.surface == "flush" else data.CABINEO_ACCESS_DEPTH
-
-    def join(self, part: Board, /, partners: list[Board]) -> None:
-        join_contacts(self, part, partners)
-
-    def contacts_with(self, part: Board, other: Board) -> list[Contact]:
-        return self.spacing.contacts_with(part, other)
-
-    def stations(self, c: Contact) -> list[float]:
-        return self.spacing.stations(self.label, c)
 
     def check(self, c: Contact, stations: list[float]) -> None:
         e, f = c.edge_on, c.face_on

@@ -32,13 +32,10 @@ from ..core.errors import LangError, one_of
 from ..core.part import Board
 from ..core.refs import PosLike, Side, as_pos
 from ..core.shapes import Shape, box_shape
+from .common import PROBE, Point2
 
 #: How far a notch reaches past the board's edge, so it opens cleanly.
 _PAST = 1.0
-#: How far from a corner the probes for material lie, mm.
-_PROBE = 0.01
-
-Point2 = tuple[float, float]
 
 
 @dataclass(frozen=True)
@@ -126,9 +123,9 @@ class HalfLap:
         up = at(0.0, float(opens))                       # along the notch's sides, toward its opening
         for edge, inward in ((box.lo[w], 1.0), (box.hi[w], -1.0)):
             corner = at(edge, split)
-            around = [at(edge - inward * _PROBE, split + opens * _PROBE),    # beside the notch
-                      at(edge - inward * _PROBE, split - opens * _PROBE),    # beside and below its floor
-                      at(edge + inward * _PROBE, split - opens * _PROBE)]    # below its floor
+            around = [at(edge - inward * PROBE, split + opens * PROBE),    # beside the notch
+                      at(edge - inward * PROBE, split - opens * PROBE),    # beside and below its floor
+                      at(edge + inward * PROBE, split - opens * PROBE)]    # below its floor
             if not all(material.contains(Point(p)) for p in around):
                 continue                                 # not an inside corner of the material
             floor = at(inward, 0.0)                      # along the floor, into the notch
@@ -136,7 +133,7 @@ class HalfLap:
                 notch = notch.union(corner_relief(corner, floor, up, self.tool, self.relief))
                 continue
             relief = hidden_relief(corner, floor, self.tool, self.relief)
-            if not material.contains(Point(at(edge + inward * r, split - opens * (r + _PROBE)))):
+            if not material.contains(Point(at(edge + inward * r, split - opens * (r + PROBE)))):
                 raise LangError(f"half_lap: hidden dog bones would break out of the board below the notch for "
                                 f"{other.path}; use corner dog bones or a smaller tool.", part.path)
             notch = notch.union(relief)

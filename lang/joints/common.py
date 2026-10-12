@@ -2,9 +2,10 @@
 contacts with the boards a join names, from either board, the geometry of
 a contact, stations along it, and the choice of a big face.
 
-`join_contacts` drives a `ContactJoint`: it finds every contact, asks the
-joint for its stations along each, lets it check them all and only then
-machine them, so a failed join changes no board.
+`join_contacts` drives a `ContactJoint` (the base class of the joints made
+per contact; `SpacedJoint` for those at the stations of a `Spacing`): it
+finds every contact, asks the joint for its stations along each, lets it
+check them all and only then machine them.
 
 A tenon joint records what it made along each contact (`TenonPlacement`),
 so that connectors and screws joined afterwards can sit in the gaps
@@ -12,7 +13,7 @@ between the tenons (`gaps=`) along the contact as it was before.
 """
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import ClassVar, Protocol
 
@@ -23,11 +24,14 @@ from ..core.directions import Axis, Direction, InnerOuter
 from ..core.errors import LangError, one_of
 from ..core.part import Board, Face
 from ..core.refs import Pos, PosLike, Side, as_pos
+from ..core.shapes import Shape
 
 #: A big face named for a joint: a box side or direction it faces, or
 #: inner/outer; None for the joint's default.
 FaceChoice = Side | Direction | InnerOuter | None
 EPS = 1e-6
+#: How far from a corner the probes for material lie, mm.
+PROBE = 0.01
 Point2 = tuple[float, float]
 
 
@@ -228,40 +232,74 @@ def hidden_face(part: Board) -> Face:
 
 # -- joining ---------------------------------------------------------------------------------------
 
-class ContactJoint(Protocol):
-    """A joint made per contact: which contacts, where along them, a check,
-    the machining."""
+def find_contacts(label: str, part: Board, partners: list[Board],
+                  find: Callable[[Board, Board], list[Contact]] = touching) -> list[tuple[Board, list[Contact]]]:
+    """Each board named with its contacts with the receiver, as `find`
+    gives them; an error for a board that does not touch it."""
+    found: list[tuple[Board, list[Contact]]] = []
+    for other in partners:
+        here = find(part, other)
+        if not here:
+            raise LangError(f"{label}: {other.path} does not touch this board with an end or edge on a face.",
+                            part.path)
+        found.append((other, here))
+    return found
+
+
+class ContactJoint:
+    """A joint made per contact: which contacts (where the boards touch,
+    unless a joint says otherwise), where along them, a check, the
+    machining. `join` finds every contact, asks for the stations along
+    each, checks them all and only then machines them."""
     label: ClassVar[str]
+
+    def join(self, part: Board, /, partners: list[Board]) -> None:
+        join_contacts(self, part, partners)
 
     def contacts_with(self, part: Board, other: Board) -> list[Contact]:
         """The contacts to join along; empty when the boards do not touch."""
-        ...
+        return touching(part, other)
 
     def stations(self, c: Contact) -> list[float]:
         """The positions along the contact, ascending."""
-        ...
+        raise NotImplementedError
 
-    def check(self, c: Contact, stations: list[float]) -> None: ...
+    def check(self, c: Contact, stations: list[float]) -> None:
+        raise NotImplementedError
 
-    def place(self, c: Contact, stations: list[float]) -> None: ...
+    def place(self, c: Contact, stations: list[float]) -> None:
+        raise NotImplementedError
+
+
+class SpacedJoint(ContactJoint):
+    """A joint at the stations its `Spacing` gives: the connectors and
+    screws."""
+    spacing: Spacing
+
+    def contacts_with(self, part: Board, other: Board) -> list[Contact]:
+        return self.spacing.contacts_with(part, other)
+
+    def stations(self, c: Contact) -> list[float]:
+        return self.spacing.stations(self.label, c)
 
 
 def join_contacts(joint: ContactJoint, part: Board, partners: list[Board]) -> None:
     """Finds the contacts with the boards named, either one edge-on, checks
     every one, then machines them."""
-    label = joint.label
-    found: list[Contact] = []
-    for other in partners:
-        here = joint.contacts_with(part, other)
-        if not here:
-            raise LangError(f"{label}: {other.path} does not touch this board with an end or edge on a face.",
-                            part.path)
-        found.extend(here)
+    found = [c for _, here in find_contacts(joint.label, part, partners, joint.contacts_with) for c in here]
     planned = [(c, joint.stations(c)) for c in found]
     for c, stations in planned:
         joint.check(c, stations)
     for c, stations in planned:
         joint.place(c, stations)
+
+
+def union_all(shapes: Sequence[Shape]) -> Shape:
+    """The union of one shape or more."""
+    result = shapes[0]
+    for shape in shapes[1:]:
+        result = result.union(shape)
+    return result
 
 
 def start_index(part: Board, axis: Axis, count: int) -> int:

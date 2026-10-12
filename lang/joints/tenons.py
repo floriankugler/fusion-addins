@@ -43,16 +43,15 @@ from ..core.errors import LangError, one_of
 from ..core.part import Board
 from ..core.refs import DepthSpec, Pos, PosLike, to
 from ..core.shapes import Shape, box_shape
-from .common import EPS, ContactGeometry, Point2, TenonPlacement, join_contacts, make_spacing, opposite_face, touching
+from .common import (EPS, PROBE, ContactGeometry, ContactJoint, Point2, Spacing, TenonPlacement, make_spacing,
+                     opposite_face, union_all)
 
 #: How far a tenon reaches back into its board, so it joins the outline cleanly, mm.
 _OVERLAP = 1.0
-#: How far outside a corner the probe for material lies, mm.
-_PROBE = 0.01
 
 
 @dataclass(frozen=True)
-class Tenons:
+class Tenons(ContactJoint):
     count: int | None
     width: float | None
     margin: float
@@ -72,12 +71,6 @@ class Tenons:
     def radius(self) -> float:
         """The reliefs' radius: the tool's plus half the relief."""
         return (self.tool + self.relief) / 2
-
-    def join(self, part: Board, /, partners: list[Board]) -> None:
-        join_contacts(self, part, partners)
-
-    def contacts_with(self, part: Board, other: Board) -> list[Contact]:
-        return touching(part, other)
 
     def placements(self, part: Board, other: Board) -> list[TenonPlacement]:
         """What these tenons made between the two boards."""
@@ -100,7 +93,7 @@ class Tenons:
     def stations(self, c: Contact) -> list[float]:
         """The tenons' centres along the contact."""
         if self.at is not None:
-            return make_spacing(self.label, None, 0.0, self.at).stations(self.label, c)
+            return Spacing(None, 0.0, self.at).stations(self.label, c)
         assert self.count is not None
         if self.count == 1:
             return [(c.lo + c.hi) / 2]
@@ -109,8 +102,7 @@ class Tenons:
             raise LangError(f"tenons: margin={self.margin:g} leaves no room for {self.count} tenons "
                             f"{w:g} wide on the {c.length:g} mm contact with {c.face_on.path}.",
                             c.edge_on.path)
-        spacing = make_spacing(self.label, self.count, self.margin + w / 2, None)
-        return spacing.stations(self.label, c)
+        return Spacing(self.count, self.margin + w / 2, None).stations(self.label, c)
 
     def check(self, c: Contact, stations: list[float]) -> None:
         e, f = c.edge_on, c.face_on
@@ -152,13 +144,13 @@ class Tenons:
             lo, hi = s - w / 2, s + w / 2
             e.add_to_outline(_box(g.on_board(lo, _OVERLAP), g.on_board(hi, -length)))
             reliefs = [self._root_relief(g, x, side) for x, side in ((lo, -1.0), (hi, 1.0))
-                       if e_outline.geometry.contains(_point(g.on_board(x + side * _PROBE, _PROBE)))]
+                       if e_outline.geometry.contains(_point(g.on_board(x + side * PROBE, PROBE)))]
             if reliefs:
-                e.add_cut(_union(reliefs), name=e.unique_op_name(f"tenon_{f.name}_{i}_relief"))
+                e.add_cut(union_all(reliefs), name=e.unique_op_name(f"tenon_{f.name}_{i}_relief"))
             corners = (lo - along_clear, across_lo - across_clear), (hi + along_clear, across_hi + across_clear)
             mortise = _box(g.on_face(*corners[0]), g.on_face(*corners[1]))
             for along, across, into_along, into_across in _corners(corners):
-                outside = g.on_face(along - into_along * _PROBE, across - into_across * _PROBE)
+                outside = g.on_face(along - into_along * PROBE, across - into_across * PROBE)
                 if f_outline.geometry.contains(_point(outside)):
                     mortise = mortise.union(self._mortise_relief(g, along, across, into_along, into_across))
             name = f.unique_op_name(f"mortise_{e.name}_{i}")
@@ -195,13 +187,6 @@ def _box(a: Point2, b: Point2) -> Shape:
     return box_shape(min(a[0], b[0]), min(a[1], b[1]), max(a[0], b[0]), max(a[1], b[1]))
 
 
-def _union(shapes: list[Shape]) -> Shape:
-    result = shapes[0]
-    for shape in shapes[1:]:
-        result = result.union(shape)
-    return result
-
-
 def _point(p: Point2) -> Point:
     return Point(*p)
 
@@ -226,19 +211,15 @@ def tenons(count: int | None = None, *, width: float | None = None, margin: floa
     (along the joint, across it). Dog bones for a `tool` mm cutter, `relief`
     wider, on the corners (`"corner"`) or under the shoulder (`"hidden"`)."""
     label = "tenons"
-    if at is not None:
-        if count is not None or even:
-            raise LangError("tenons: give at= or count=, not both.")
+    # one of count= and at=, a count of 1 or more, a list of positions
+    spacing = make_spacing(label, count, 0.0, at)
+    if spacing.count is None:
+        if even:
+            raise LangError("tenons: give at= or even=, not both.")
         if width is None:
             raise LangError("tenons: tenons at= positions need a width=.")
-        positions = make_spacing(label, None, 0.0, at).at
     else:
-        positions = None
-        if count is None:
-            raise LangError("tenons: give count= or at=.")
-        if count < 1:
-            raise LangError("tenons: count must be at least 1.")
-        if even and count < 2:
+        if even and spacing.count < 2:
             raise LangError("tenons: even= needs two tenons or more.")
         if even and width is not None:
             raise LangError("tenons: even= works the width out; give no width=.")
@@ -251,6 +232,6 @@ def tenons(count: int | None = None, *, width: float | None = None, margin: floa
     if tool <= 0:
         raise LangError("tenons: tool must be positive.")
     one_of(dogbones, DogBones, "tenons(dogbones=)")
-    return Tenons(count, None if width is None else float(width), float(margin), even, positions, float(remaining),
+    return Tenons(count, None if width is None else float(width), float(margin), even, spacing.at, float(remaining),
                   (float(clearance[0]), float(clearance[1])), float(extra_depth), float(tool), float(relief),
                   dogbones)

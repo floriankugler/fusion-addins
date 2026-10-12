@@ -64,10 +64,7 @@ from ..core.dogbones import DogBones, corner_relief, hidden_relief
 from ..core.errors import LangError, one_of
 from ..core.part import Board, Face
 from ..core.shapes import Shape, box_shape
-from .common import EPS, Point2, touching
-
-#: How far from a corner the probes for material lie, mm.
-_PROBE = 0.01
+from .common import EPS, PROBE, Point2, find_contacts
 
 
 @dataclass(frozen=True)
@@ -84,16 +81,10 @@ class Groove:
     def join(self, part: Board, /, partners: list[Board]) -> None:
         # Every panel is planned, and every check made, before any board
         # changes, so a failed join changes none.
-        found: list[Contact] = []
-        for other in partners:
-            here = touching(part, other)
-            if not here:
-                raise LangError(f"groove: {other.path} does not touch this board with an end or edge on a face.",
-                                part.path)
-            found.extend(here)
         panels: dict[int, list[Contact]] = {}
-        for c in found:
-            panels.setdefault(id(c.edge_on), []).append(c)
+        for _, found in find_contacts(self.label, part, partners):
+            for c in found:
+                panels.setdefault(id(c.edge_on), []).append(c)
         plans = [self._plan(contacts) for contacts in panels.values()]
         for plan in plans:
             plan.apply()
@@ -192,7 +183,7 @@ class Groove:
         reliefs: list[Shape] = []
         notes: list[str] = []
         for a, s_a, joined in ((a0, -1, ends[0][1]), (a1, 1, ends[1][1])):
-            beyond = material.contains(Point(frame.point(a + s_a * _PROBE, (w0 + w1) / 2)))
+            beyond = material.contains(Point(frame.point(a + s_a * PROBE, (w0 + w1) / 2)))
             if not beyond and not joined:
                 end_name = board.scope.frame.direction_of(c.axis, s_a).name
                 notes.append(f"{board.path}: the groove for {panel.path} runs out of it at its {end_name} end, "
@@ -200,9 +191,9 @@ class Groove:
             if self.dogbones is None:
                 continue
             for w, s_w in ((w0, -1), (w1, 1)):
-                around = [frame.point(a + s_a * _PROBE, w - s_w * _PROBE),     # past the end
-                          frame.point(a - s_a * _PROBE, w + s_w * _PROBE),     # past the edge
-                          frame.point(a + s_a * _PROBE, w + s_w * _PROBE)]     # past both
+                around = [frame.point(a + s_a * PROBE, w - s_w * PROBE),     # past the end
+                          frame.point(a - s_a * PROBE, w + s_w * PROBE),     # past the edge
+                          frame.point(a + s_a * PROBE, w + s_w * PROBE)]     # past both
                 if all(material.contains(Point(p)) for p in around):
                     reliefs.append(self._relief(frame, (a, w), s_a, s_w, w1 - w0, panel, board))
         for relief in reliefs:
@@ -227,7 +218,7 @@ class Groove:
                                 f"{width:g} mm groove for {panel.path}; use corner dog bones or a smaller tool.",
                                 board.path)
             a, w = corner
-            if not board.outline.geometry.contains(Point(frame.point(a + s_a * (r + _PROBE), w - s_w * r))):
+            if not board.outline.geometry.contains(Point(frame.point(a + s_a * (r + PROBE), w - s_w * r))):
                 raise LangError(f"groove: hidden dog bones would break out of {board.path} past the end of the "
                                 f"groove for {panel.path}; use corner dog bones or a smaller tool.", board.path)
             return hidden_relief(point, across, self.tool, self.relief)
