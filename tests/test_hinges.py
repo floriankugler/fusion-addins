@@ -214,7 +214,7 @@ def _box(b: Any) -> Box:
 
 @pytest.mark.parametrize("model", list(HINGE_SHAPES))
 def test_hinges_are_placed_as_boxes_from_the_door_and_the_side(model: HingeModel):
-    """Per hinge a body of the model's boxes (cup, arm, plate), each
+    """Per hinge a body of the model's boxes (cup, arm, clip, plate), each
     measured across from the side's face (y 15, toward +y), back from the
     door's back face (x 12, toward +x) and along the edge from the hinge's
     centre (z 61.5 and 638.5). The boxes join, so a hinge is one body, and
@@ -224,7 +224,7 @@ def test_hinges_are_placed_as_boxes_from_the_door_and_the_side(model: HingeModel
     assert item["path"] == "cab.door_hinges" and item["name"] == "door_hinges"
     assert [b["name"] for b in item["bodies"]] == ["hinge1", "hinge2"]
     shape = HINGE_SHAPES[model].boxes()
-    assert list(shape) == ["cup", "arm", "plate"]
+    assert list(shape) == ["cup", "arm", "clip", "plate"]
     for body, z in zip(item["bodies"], (61.5, 638.5)):
         assert body["boxes"] == [{"min": [12 + back[0], 15 + across[0], z + along[0]],
                                   "max": [12 + back[1], 15 + across[1], z + along[1]]}
@@ -273,7 +273,7 @@ def test_the_example_plans_its_hinge_holes_and_bodies(tmp_path: Path):
     assert predrill.points == [(435.0, 299.5, z) for z in (45.5, 77.5, 522.5, 554.5)]
     (hinges,) = plan.hardware
     assert hinges.path == "hingecab.door_hinges" and hinges.component == ("hingecab",)
-    assert [b.name for b in hinges.bodies] == ["hinge1", "hinge2"] and all(len(b.boxes) == 3 for b in hinges.bodies)
+    assert [b.name for b in hinges.bodies] == ["hinge1", "hinge2"] and all(len(b.boxes) == 4 for b in hinges.bodies)
 
 
 def test_preview_draws_each_hinge_as_one_body():

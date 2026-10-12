@@ -38,9 +38,9 @@ its 28 x 15 mm of panel beside the opening or a ball without its 14 x 15
 mm of hatch beside the slot, and pilot holes as deep as a board is thick.
 
 The catches are placed too, one body of boxes per catch standing out of
-the catch face (`CATCH_SHAPES`): the holder on the panel, the ball part on
-the hatch, and between them the latch across the slot. Placeholders, from
-the little the catalog data gives; nothing depends on them but the boxes.
+the catch face (`CATCH_SHAPES`, from Ganter's catalogue drawing): the
+holder on the panel, its jaw reaching over the slot, and the ball part on
+the hatch, in the jaw.
 
 Sources: Ganter GN 450-28-14 catalog drawing via `lib.ball_catches`
 (holder hole 8.4 mm out, ball hole 9.4 mm in, slot 2.5 to 3.5 mm, 15 mm
@@ -167,41 +167,39 @@ class _Plan:
 @dataclass(frozen=True)
 class PartBox:
     """One part of a catch as a box, mm: `width` along the edge, centred on
-    the catch; `depth` square to the edge, from the slot over the board the
-    part is screwed to; `height` out of the face it is screwed to."""
+    the catch; `across` square to the edge, from the opening's contour,
+    outward over the panel positive; `height` out of the catch face."""
     width: float
-    depth: float
+    across: tuple[float, float]
     height: float
 
 
 @dataclass(frozen=True)
 class CatchShape:
-    """A catch as three boxes standing out of the catch face, for the
-    layout's `hardware`: the space it takes, not its detail. The holder
-    sits on the panel from the opening's contour outward, the ball part on
-    the hatch from the hatch's edge inward, and the latch, where the ball
-    reaches into the holder, bridges the slot between them (as wide as the
-    slot), so a catch is one body."""
-    #: On the panel, from the opening's contour.
+    """A catch, closed, as three boxes standing out of the catch face, for
+    the layout's `hardware`: the space it takes, not its detail. The holder
+    sits on the panel beside the opening, its jaw reaches over the slot,
+    and the ball part sits on the hatch with its ball in the jaw, so the
+    boxes overlap and a catch is one body."""
+    #: On the panel, beside the opening.
     holder: PartBox
-    #: On the hatch, from the hatch's edge.
+    #: The holder's jaw, over the slot and the hatch's edge.
+    jaw: PartBox
+    #: On the hatch, its ball in the jaw.
     ball: PartBox
-    #: Across the slot: width along the edge and height.
-    latch: tuple[float, float]
 
 
-#: Per catch model. Placeholders until the catch is measured from a CAD
-#: model or a dimensioned drawing.
+#: Per catch model. GN 450-28-14 from Ganter's catalogue drawing
+#: (ganternorm.com, GN 450 sketch, 2026-10-12; no CAD download): the holder
+#: b = 28 wide and 16 deep, its screw 8.4 from its stop webs on the
+#: opening's edge, 16 high; the jaw between the stop ridges 18.5 wide,
+#: reaching 11 from the stop webs; the ball part d = 14 across its ball on
+#: a 13.5 high mount, its screw 9.4 inside the contour.
 CATCH_SHAPES: dict[str, CatchShape] = {
     "GN 450": CatchShape(
-        holder=PartBox(width=28.0,     # catalog drawing: b = 28, the holder's width along the contour
-                       depth=15.0,     # catalog drawing: 15 mm of mounting surface beside the slot
-                       height=14.0),   # rough: the data at hand gives no height
-        ball=PartBox(width=14.0,       # catalog drawing: d = 14, the ball part's width along the contour
-                     depth=15.0,       # catalog drawing: 15 mm of mounting surface beside the slot
-                     height=14.0),     # rough
-        latch=(14.0,                   # rough: the ball part's width
-               14.0),                  # rough
+        holder=PartBox(width=28.0, across=(0.0, 16.0), height=16.0),
+        jaw=PartBox(width=18.5, across=(-11.0, 0.0), height=16.0),
+        ball=PartBox(width=14.0, across=(-16.4, -2.4), height=13.5),
     ),
 }
 
@@ -594,17 +592,14 @@ class BallCatch:
         scope.place_hardware(name, bodies)
 
     def _catch_body(self, plan: _Plan, side: _Straight, c: _Catch, gap: float) -> list[BoxDict]:
-        """A catch as the boxes of its `CatchShape`: the holder on the
-        panel's catch face, the latch across the `gap` wide slot, the ball
-        part on the hatch's face. On an edge at an angle to the axes each
-        box is the axis-aligned box around it."""
+        """A catch as the boxes of its `CatchShape`: the holder and its jaw
+        on the panel's catch face, the ball part on the hatch's face, all
+        measured from the opening's contour. On an edge at an angle to the
+        axes each box is the axis-aligned box around it."""
         shape = self.shape
-        holder, ball = shape.holder, shape.ball
-        latch_width, latch_height = shape.latch
         # (width, from and to across the edge, outward from the contour; the face; height)
-        parts = [(holder.width, 0.0, holder.depth, plan.face, holder.height),
-                 (latch_width, -gap, 0.0, plan.face, latch_height),
-                 (ball.width, -(gap + ball.depth), -gap, plan.hatch_face, ball.height)]
+        parts = [(part.width, part.across[0], part.across[1], face, part.height)
+                 for part, face in ((shape.holder, plan.face), (shape.jaw, plan.face), (shape.ball, plan.hatch_face))]
         boxes: list[BoxDict] = []
         for width, across0, across1, face, height in parts:
             corners = [side.at(c.distance + s * width / 2, across) for s in (-1, 1) for across in (across0, across1)]

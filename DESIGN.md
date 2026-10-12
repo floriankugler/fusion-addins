@@ -618,6 +618,16 @@ proposed]
   2026-10-11] Boards in one plane overlap only where their material does,
   so a hatch with rounded corners in a rounded opening is not reported
   although its box reaches into the opening's corners. [2026-10-12]
+  Hardware is checked too [decided by Florian, implemented 2026-10-12]:
+  `no_interference` reports a hardware body whose boxes reach into a
+  part's material (`cab.drawer1.runners.left overlaps cab.drawer1.back`)
+  and two hardware bodies whose boxes overlap, of one item or of two; a
+  body is the union of its boxes, so its own boxes may overlap, and
+  touching never counts. A part's material is its outline minus its
+  pockets and its holes where they span the range in question along its
+  thickness, so a latch in its hole or a runner's coupling in the front
+  board's cut-out is not reported (holes and pockets in narrow faces are
+  not counted yet). The examples are clean.
 - The first joint is the **half lap** (`lang/joints/laps.py`) [decided and
   implemented 2026-10-11]: `long.join(battens, using=half_lap(toward=
   floor.top))` laps the board with each board named, all of which it must
@@ -821,7 +831,9 @@ proposed]
   `scope.mount(hardware, ...)`, which refuses what the add-in refuses
   before it drills anything, drills what the add-in drills, and places
   the bought part as boxes from one table per hardware, separate from the
-  drilling data (rough where marked, until measured). Each add-in now
+  drilling data, measured from the makers' CAD models and drawings
+  (2026-10-12). The preview shows or hides all hardware with one switch
+  (Display, key `w`, `preview.hardware(on)`). Each add-in now
   reads its dimensions from a Fusion-free `lib/` module the language
   reads too; their constants and dialog defaults were compared in Fusion
   against the old literals and are identical. Every placement is
@@ -842,9 +854,11 @@ proposed]
   `count=` spreads more evenly between). Refused as in the add-in:
   margins under 27 (its dialog's minimum), hinges 42 apart or closer,
   hole centres off their face. The hinge dictates no overlay or door size,
-  since the add-in knows none. Each hinge is a body of three boxes, cup,
-  arm and mounting plate (`HINGE_SHAPES`, rough), named `hinge1`... under
-  `<door>_hinges`. `examples/hinged_door.py`: a wall cabinet with an
+  since the add-in knows none. Each hinge is a body of four boxes, cup,
+  arm, clip and mounting plate (`HINGE_SHAPES`), measured on Häfele's CAD
+  models of the hinge 342.46.681 and the plates 342.20.800 (0 mm, 8.5
+  high) and 342.20.830 (3 mm; the +3 model is the hinge on it), named
+  `hinge1`... under `<door>_hinges`. `examples/hinged_door.py`: a wall cabinet with an
   overlay door.
 - **Hatch hinges** (`lang/hardware/hatch_hinges.py`):
   `HatchHinge(FREE_SPACE_1_11, opening=107, carcass_depth=12, pilot=(2,
@@ -886,8 +900,9 @@ proposed]
   [...])` takes points instead. Checked as in the add-in: the hatch under
   every ball, the slot within range, 14 mm to the end of a straight edge
   and 28 between catches, mounting surface for holder and ball part,
-  pilots shallower than the boards. One body per catch (holder, a latch
-  box across the slot, ball part; `CATCH_SHAPES`, rough).
+  pilots shallower than the boards. One body per catch (holder, its jaw
+  over the slot, ball part; `CATCH_SHAPES`, from Ganter's catalogue
+  drawing; Ganter offers CAD only on request).
   `examples/inspection_hatch.py`: a floor panel on battens with a rounded
   opening and its hatch.
 - **Door latches** (`lang/hardware/latches.py`): `DoorLatch(model,
@@ -907,17 +922,27 @@ proposed]
   One latch in the middle of the edge, more from `end=` from its ends.
   Refused like the add-in: a pre-drill not below the narrowest pilot
   spacing, an edge no longer than twice `end=`, a carcass board parallel
-  to the door, holes off their face. Each latch and its strike are boxes
-  (`LATCH_SHAPES`, rough); `latch.reach` is how far the part on the door
-  reaches from the carcass face, which a drawer box behind a latched face
-  stays clear of. `examples/door_latch.py`: an inset door with two pull
+  to the door, holes off their face. Each latch with its strike is one
+  body (they interlock when closed) of boxes (`LATCH_SHAPES`): Everlock
+  from the maker's installation drawing, the Pull Lock (Southco
+  M1-15-61) from its drawing J-M1-15-61, its parts in the door's holes
+  as squares inside them and those it references to the door's front
+  measured from it, the LL-66 from Sugatsune's CAD model; `latch.reach`
+  is how far the part behind the door's front reaches from the carcass
+  face (Everlock 60, Pull Lock 50.9, LL-66 24.6), which a drawer box
+  behind a latched face stays clear of. `examples/door_latch.py`: an inset door with two pull
   locks and two latched drawers.
-- Open from these [2026-10-12]: CAD files or drawings for the CLIP top
-  hinge and plate, GN 450 and the three latches, to replace the rough
-  boxes; whether a part overlapping hardware boxes should become a check
-  (`no_interference` looks at parts only; the hatch hinge's probe points
-  miss a shelf 64 to 82 below the top); the small `_world_box` helpers
-  each hardware module carries could move to one place.
+- Open from these [2026-10-12]: the drawings disagree with door_latch_native
+  in two places, both kept as the add-in drills for now. Southco puts the
+  Pull Lock's keeper screws 27 behind the door's front face (its lip 23,
+  the pawl to 33), the add-in 29 behind the door's inner face, which on a
+  counterbored 20 mm door is 49 from the front, past the pawl's reach;
+  the keeper's boxes follow the drilled screws, so the model shows the
+  gap. Everlock's drawing and drilling template take a 30 mm finger hole
+  (30 mm Forstner bit), the add-in 25. The hatch hinge's probe points miss
+  a shelf 64 to 82 below the top; the hardware boxes now catch it through
+  `no_interference`. The small `_world_box` helpers each hardware module
+  carries could move to one place.
 - Not covered by an add-in today, as far as seen: a groove for drawer floors
   (done with `side.cut(floor.box().grown(...))`), and the drawer-box
   dimensions per slide model (box width, length, recess, the coupling and
@@ -1635,7 +1660,8 @@ Still to do (listed by Florian 2026-10-11, roughly in his order of weight):
   angle to the board's edges.
 - ~~**Hardware** beyond the slides~~: done 2026-10-12 (concealed
   hinges, hatch hinges, ball catches, door latches; see "Joints and
-  hardware"). Open: measured shapes in place of the rough boxes, and
+  hardware"). Open: the Pull Lock keeper depth and the Everlock finger
+  hole, where the makers' drawings disagree with the add-in, and
   whatever else the van needs.
 - ~~**Complete the slides**~~: done 2026-10-12 (Blum drawer-box
   machining; runners as boxes for every model and length).

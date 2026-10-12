@@ -20,8 +20,8 @@ plates go.
   carcass board's face, 32 apart, 38.5 mm behind the door's inner face,
   `predrill=` wide and deep (1/8 inch by 3).
 - The hinges are placed as `<door>_hinges`, a body per hinge made of
-  three boxes, cup, arm and mounting plate (`HINGE_SHAPES`, rough sizes
-  until measured from a CAD model). Hinges are numbered by their place
+  four boxes, cup, arm, clip and mounting plate (`HINGE_SHAPES`, measured
+  from Häfele's CAD models). Hinges are numbered by their place
   along the edge, from the bottom, or for a flap from the door's own
   left, seen standing in front of it, so a cabinet and a module in the
   van's terms number them alike: bodies `hinge1`, `hinge2`, ...
@@ -73,51 +73,49 @@ HingeBox = tuple[Extent, Extent, Extent]
 
 @dataclass(frozen=True)
 class HingeShape:
-    """A closed hinge as three boxes in its own frame (see `HingeBox`), the
+    """A closed hinge as four boxes in its own frame (see `HingeBox`), the
     space it takes rather than its form. The boxes overlap where the pieces
-    join, so each hinge is one body. Nothing but `_place` reads them: the
-    table below can be replaced by numbers measured from a CAD model."""
+    join, so each hinge is one body. Nothing but `_place` reads them."""
     #: The cup: the hinge's door part, on the door's inner face over the
     #: door holes (its bosses in the holes are left out).
     cup: HingeBox
-    #: The arm, from the cup back onto the mounting plate.
+    #: The arm's front part, from the cup back to the mounting plate.
     arm: HingeBox
+    #: The arm's rear part with the clip, over the mounting plate.
+    clip: HingeBox
     #: The mounting plate on the carcass board's face, around its screws.
     plate: HingeBox
 
     def boxes(self) -> dict[str, HingeBox]:
-        return {"cup": self.cup, "arm": self.arm, "plate": self.plate}
+        return {"cup": self.cup, "arm": self.arm, "clip": self.clip, "plate": self.plate}
+
+    def raised(self, height: float) -> HingeShape:
+        """The hinge on a plate `height` higher: the plate that much taller,
+        the rest that much further from the carcass board."""
+        def up(box: HingeBox) -> HingeBox:
+            (a0, a1), back, along = box
+            return (a0 + height, a1 + height), back, along
+        (p0, p1), back, along = self.plate
+        return HingeShape(up(self.cup), up(self.arm), up(self.clip), ((p0, p1 + height), back, along))
 
 
-#: Per model. All of it rough: no drawing or CAD model of the hinge is in
-#: the repo. Where a number follows the drilling pattern (door holes 27 or
-#: 30 from the carcass face, 10 wide and 32 apart; plate screws 38.5 behind
-#: the door, 32 apart) it is marked so; the rest are guesses at a closed
-#: hinge's size. The +3 model's plate is 3 mm higher, which moves arm and
-#: cup 3 mm further from the carcass board, as its door holes are.
+#: Measured 2026-10-12 on Häfele's CAD models (glTF, closed) of the hinge
+#: 342.46.681 (Blum CLIP top 110 for thin doors) and the cruciform mounting
+#: plates 342.20.800 (0 mm) and 342.20.830 (3 mm): the hinge's door bosses
+#: sit 27 from the carcass face and 16 to either side of its centre, as the
+#: drilling data has them; the plate's screws on its centre line, 38.5
+#: behind the door. The 3 mm plate is the 0 mm one 3 mm taller, and the +3
+#: model is the hinge on it. The arm starts 2 mm inside the cup and the clip
+#: 2 mm inside the arm, where they join, so the boxes overlap.
+_CLIP_TOP_THIN = HingeShape(
+    cup=((0.0, 39.1), (0.0, 8.0), (-22.0, 22.0)),
+    arm=((1.9, 48.1), (6.0, 40.0), (-15.3, 15.3)),
+    clip=((3.2, 34.2), (38.0, 77.0), (-12.9, 12.9)),
+    plate=((0.0, 8.5), (17.5, 59.0), (-28.1, 28.1)),   # 41.5 deep, 56.2 long, centred on its screws
+)
 HINGE_SHAPES: dict[str, HingeShape] = {
-    "Blum CLIP top 110 Thin +0": HingeShape(
-        cup=((19.0, 35.0),        # rough, from the door holes: row 27 +- (5 radius + 3 wall)
-             (0.0, 12.0),         # rough, a guess at its height off the door
-             (-24.0, 24.0)),      # rough, from the door holes: 16 + 5 radius + 3 wall
-        arm=((6.0, 24.0),         # rough, a guess, reaching from the plate's top into the cup
-             (0.0, 48.0),         # rough, a guess, from the door to the plate's back end
-             (-8.0, 8.0)),        # rough, a guess at its width
-        plate=((0.0, 10.0),       # rough, a guess at the height of a +0 plate
-               (26.5, 50.5),      # rough, from the screw row: 38.5 +- 12
-               (-22.0, 22.0)),    # rough, from the screws: 16 + 6
-    ),
-    "Blum CLIP top 110 Thin +3": HingeShape(
-        cup=((22.0, 38.0),        # rough, from the door holes: row 30 +- (5 radius + 3 wall)
-             (0.0, 12.0),         # rough, a guess at its height off the door
-             (-24.0, 24.0)),      # rough, from the door holes: 16 + 5 radius + 3 wall
-        arm=((9.0, 27.0),         # rough, a guess: the +0 arm, 3 mm higher
-             (0.0, 48.0),         # rough, a guess, from the door to the plate's back end
-             (-8.0, 8.0)),        # rough, a guess at its width
-        plate=((0.0, 13.0),       # rough, a guess: the +0 plate, 3 mm higher
-               (26.5, 50.5),      # rough, from the screw row: 38.5 +- 12
-               (-22.0, 22.0)),    # rough, from the screws: 16 + 6
-    ),
+    "Blum CLIP top 110 Thin +0": _CLIP_TOP_THIN,
+    "Blum CLIP top 110 Thin +3": _CLIP_TOP_THIN.raised(3.0),
 }
 
 

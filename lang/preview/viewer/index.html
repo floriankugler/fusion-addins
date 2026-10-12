@@ -75,7 +75,10 @@
       <option value="ghost">ghosted</option>
     </select>
   </div>
-  <div class="row"><label><input type="checkbox" id="gridOn" checked> floor grid</label></div>
+  <div class="row">
+    <label><input type="checkbox" id="gridOn" checked> floor grid</label>
+    <label><input type="checkbox" id="hwOn" checked> hardware</label>
+  </div>
 
   <h2>Labels</h2>
   <div class="row">
@@ -111,6 +114,7 @@
     <div><span>show all</span><kbd>a</kbd></div>
     <div><span>display mode</span><kbd>e</kbd></div>
     <div><span>floor grid on / off</span><kbd>g</kbd></div>
+    <div><span>hardware on / off</span><kbd>w</kbd></div>
     <div><span>master boxes and contours</span><kbd>m</kbd></div>
     <div><span>part names</span><kbd>n</kbd></div>
     <div><span>face names (directions)</span><kbd>d</kbd></div>
@@ -174,6 +178,18 @@ function setGrid(on) {
 }
 setGrid(stored('grid', true));
 $('gridOn').onchange = (e) => setGrid(e.target.checked);
+
+// The bought parts (slide runners, hinges, catches, latches) on or off as a
+// whole, apart from hiding single parts.
+let hardwareOn = stored('hardware', true);
+$('hwOn').checked = hardwareOn;
+function setHardware(on) {
+  hardwareOn = on;
+  $('hwOn').checked = on;
+  store('hardware', on);
+  applyVisibility();
+}
+$('hwOn').onchange = (e) => setHardware(e.target.checked);
 scene.add(new THREE.AxesHelper(300));
 
 let root = null;
@@ -673,7 +689,8 @@ function tickLabels() {
 function applyAll() { applyVisibility(); applyMode(); applySection(); renderList(); showSelected(); }
 
 function applyVisibility() {
-  meshes((o) => { o.visible = !hidden.has(o.userData.path); });
+  const bought = hardwareOn ? null : new Set(hardwareBodies().map((h) => h.path));
+  meshes((o) => { o.visible = !hidden.has(o.userData.path) && !bought?.has(o.userData.path); });
   labelsDirty = true;
   applyCaps();
 }
@@ -1007,6 +1024,7 @@ window.addEventListener('keydown', (e) => {
     case 'a': showAll(); break;
     case 'e': setMode(modes[(modes.indexOf(mode) + 1) % modes.length]); break;
     case 'g': setGrid(!grid.visible); break;
+    case 'w': setHardware(!hardwareOn); break;
     case 'm': {
       const on = !(masterShow.boxes || masterShow.contours);
       masterShow.boxes = masterShow.contours = on;
@@ -1229,6 +1247,8 @@ window.preview = {
     applySection();
     draw();
   },
+  /** The hardware on or off: hardware(false); returns whether it shows. */
+  hardware: (on) => { if (on !== undefined) setHardware(on); draw(); return hardwareOn; },
   /** Part names and face names on or off: labels({names: true, faces: true}); returns both. */
   labels: (state) => { if (state) setLabels(state); draw(); return { ...labelShow }; },
   /** Every part and bought body: [{path, label}]. */

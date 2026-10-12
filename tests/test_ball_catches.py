@@ -18,7 +18,7 @@ left edge gets catches 40 and 220 from x 370, at x 410 and 590.
 """
 import math
 from pathlib import Path
-from typing import get_args
+from typing import Any, get_args
 
 import pytest
 from shapely.geometry.polygon import orient
@@ -40,8 +40,7 @@ BOX = Box.from_size(width=800, depth=1000, height=100)
 #: The placeholder boxes; the expectations below follow them, so measured
 #: numbers only change this table.
 SHAPE = CATCH_SHAPES["GN 450"]
-HOLDER, BALL = SHAPE.holder, SHAPE.ball
-LATCH_WIDTH, LATCH_HEIGHT = SHAPE.latch
+HOLDER, JAW, BALL = SHAPE.holder, SHAPE.jaw, SHAPE.ball
 
 
 @pytest.fixture(autouse=True)
@@ -353,36 +352,40 @@ def test_a_hatch_in_an_upright_panel():
     (item,) = cab.hardware
     for body in item["bodies"]:
         assert [b["min"][1] for b in body["boxes"]] == [15, 15, 15]
-        assert [b["max"][1] for b in body["boxes"]] == [15 + HOLDER.height, 15 + LATCH_HEIGHT, 15 + BALL.height]
+        assert [b["max"][1] for b in body["boxes"]] == [15 + HOLDER.height, 15 + JAW.height, 15 + BALL.height]
 
 
 def test_the_catches_are_placed_as_boxes():
     """Each catch is a body of boxes standing out of the catch face (z = 0
-    down): the holder on the panel from the contour outward, the latch
-    across the 3 mm slot, the ball part on the hatch from the hatch's edge
-    inward, each centred on the catch along the edge."""
+    down), measured from the opening's contour: the holder on the panel
+    outward, its jaw over the 3 mm slot and the hatch's edge, the ball part
+    on the hatch inward, each centred on the catch along the edge."""
     f, panel, hatch = _floor()
     (item,) = f.hardware
     assert item["path"] == "floor.hatch_catches" and item["kind"] == "hardware"
     bodies = {b["name"]: b["boxes"] for b in item["bodies"]}
     assert list(bodies) == ["catch_1", "catch_2", "catch_3", "catch_4"]
-    # catch 1 at x 410 on the left edge (y = 200, the panel at y < 200)
-    assert bodies["catch_1"] == [
-        {"min": [410 - HOLDER.width / 2, 200 - HOLDER.depth, -HOLDER.height], "max": [410 + HOLDER.width / 2, 200, 0]},
-        {"min": [410 - LATCH_WIDTH / 2, 200, -LATCH_HEIGHT], "max": [410 + LATCH_WIDTH / 2, 203, 0]},
-        {"min": [410 - BALL.width / 2, 203, -BALL.height], "max": [410 + BALL.width / 2, 203 + BALL.depth, 0]}]
+
+    def expected(x: float, contour: float, outward: int) -> list[dict[str, list[float]]]:
+        out: list[dict[str, list[float]]] = []
+        for part in (HOLDER, JAW, BALL):
+            y0, y1 = sorted(contour + outward * a for a in part.across)
+            out.append({"min": [x - part.width / 2, y0, -part.height], "max": [x + part.width / 2, y1, 0]})
+        return out
+    # catch 1 at x 410 on the left edge (y = 200, the panel at y < 200),
     # catch 4 at x 590 on the right edge (y = 600, the panel at y > 600)
-    assert bodies["catch_4"] == [
-        {"min": [590 - HOLDER.width / 2, 600, -HOLDER.height], "max": [590 + HOLDER.width / 2, 600 + HOLDER.depth, 0]},
-        {"min": [590 - LATCH_WIDTH / 2, 597, -LATCH_HEIGHT], "max": [590 + LATCH_WIDTH / 2, 600, 0]},
-        {"min": [590 - BALL.width / 2, 597 - BALL.depth, -BALL.height], "max": [590 + BALL.width / 2, 597, 0]}]
-    # under the boards, touching them; each body one piece, its boxes in a row across the edge
+    assert bodies["catch_1"] == expected(410, 200, -1)
+    assert bodies["catch_4"] == expected(590, 600, 1)
+    # under the boards, touching them; the holder and the ball part apart,
+    # the jaw overlapping both, so each body is one piece
     for boxes in bodies.values():
         for b in boxes:
             box = Box(dict(zip("xyz", b["min"])), dict(zip("xyz", b["max"])))  # type: ignore[arg-type]
             assert not any(box.overlaps(p.box()) for p in (panel, hatch))
-        ys = sorted((b["min"][1], b["max"][1]) for b in boxes)
-        assert ys[0][1] == ys[1][0] and ys[1][1] == ys[2][0]
+        holder, jaw, ball = (Box(dict(zip("xyz", b["min"])), dict(zip("xyz", b["max"]))) for b in boxes)  # type: ignore[arg-type]
+        assert jaw.overlaps(ball) and not holder.overlaps(ball)
+        assert holder.hi["y"] == jaw.lo["y"] or holder.lo["y"] == jaw.hi["y"]
+    assert no_interference(f) == []
     assert build_layout()["modules"][0]["hardware"] == [item]
 
 
@@ -400,8 +403,8 @@ def test_layout_and_emit_plan():
     (item,) = plan.hardware
     assert (item.path, item.component, item.name) == ("floor.hatch_catches", ("floor",), "hatch_catches")
     assert [b.name for b in item.bodies] == ["catch_1", "catch_2", "catch_3", "catch_4"]
-    assert item.bodies[0].boxes[0] == ((410 - HOLDER.width / 2, 200 - HOLDER.depth, -HOLDER.height),
-                                       (410 + HOLDER.width / 2, 200, 0))
+    assert item.bodies[0].boxes[0] == ((410 - HOLDER.width / 2, 200 - HOLDER.across[1], -HOLDER.height),
+                                       (410 + HOLDER.width / 2, 200 - HOLDER.across[0], 0))
     assert plan.problems == []
     # the emitter draws the hatch's corners as arcs of 17, like the opening's of 20
     hatch = next(p for p in plan.parts if p.path == "floor.hatch")
@@ -425,11 +428,14 @@ def test_preview_draws_the_catches():
     assert mesh.is_volume
     (item,) = build_layout()["modules"][0]["hardware"]
     boxes = item["bodies"][0]["boxes"]
-    assert mesh.bounds.round(6).tolist() == [[min(b["min"][i] for b in boxes) for i in range(3)],
+    assert mesh.bounds.round(4).tolist() == [[min(b["min"][i] for b in boxes) for i in range(3)],
                                              [max(b["max"][i] for b in boxes) for i in range(3)]]
-    # the union of its three boxes, which touch without overlapping
-    assert math.isclose(mesh.volume, HOLDER.width * HOLDER.depth * HOLDER.height + LATCH_WIDTH * 3 * LATCH_HEIGHT
-                        + BALL.width * BALL.depth * BALL.height)
+    # the union of its three boxes: the jaw overlaps the ball part
+    def volume(part: Any) -> float:
+        return part.width * (part.across[1] - part.across[0]) * part.height
+    shared = (min(JAW.width, BALL.width) * (min(JAW.across[1], BALL.across[1]) - max(JAW.across[0], BALL.across[0]))
+              * min(JAW.height, BALL.height))
+    assert math.isclose(mesh.volume, volume(HOLDER) + volume(JAW) + volume(BALL) - shared, rel_tol=1e-6)
     assert "floor.hatch" in scene.geometry and "floor.panel" in scene.geometry
 
 

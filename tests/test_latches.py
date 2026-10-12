@@ -12,11 +12,10 @@ from pathlib import Path
 from typing import get_args
 
 import pytest
-from shapely.geometry import Point
-from shapely.geometry import box as shapely_box
 
 from lang import *
 from lang.build import run_build
+from lang.core.checks import _box_hits  # type: ignore[reportPrivateUsage]
 from lang.core.directions import AXES
 from lang.core.layout import build_layout
 from lang.core.layout_types import HardwareLayout
@@ -146,9 +145,10 @@ def test_ll66_beside_the_cabinetmakers_right_and_left():
         assert _holes(side) == {"ll66_door_1a": (39, 350, PREDRILL, inward, 3, False),
                                 "ll66_door_1b": (39, 370, PREDRILL, inward, 3, False)}
         assert side.inner.world_name == inward and side.inner.value == side_face
-        latch, strike = cab.hardware[0]["bodies"]
-        assert (latch["name"], strike["name"]) == ("latch_1", "strike_1")
-        assert side_face in (strike["boxes"][0]["min"][1], strike["boxes"][0]["max"][1])   # against the side
+        (latch,) = cab.hardware[0]["bodies"]
+        assert latch["name"] == "latch_1"
+        plate = latch["boxes"][-1]                                          # the counter plate, last
+        assert side_face in (plate["min"][1], plate["max"][1])             # against the side
         assert all(not _holes(p) for name, p in parts.items() if name not in ("door", which))
 
 
@@ -181,47 +181,42 @@ def test_a_module_in_the_vans_terms_and_a_cabinet_give_the_same_latches():
     swap = {"left": "right", "right": "left"}
     assert {swap.get(k, k): v for k, v in plain_world[0].items()} == cabinet_world[0]
     assert plain_world[1] == cabinet_world[1]
-    assert [b["name"] for b in cabinet_world[1][0]["bodies"]] == ["latch_1", "strike_1", "latch_2", "strike_2"]
+    assert [b["name"] for b in cabinet_world[1][0]["bodies"]] == ["latch_1", "latch_2"]
 
 
 def test_the_latch_and_its_strike_as_boxes():
-    """Closed, from `LATCH_SHAPES`: the Pull Lock's body behind the door's
-    inner face (x 15), its core through the door's hole and its knob on the
-    front, the strike under the top (z 705) behind the door."""
+    """Closed, from `LATCH_SHAPES`, one body: the Pull Lock's parts measured
+    from the door's front face (x 0; the door is 15 thick, its inner face at
+    x 15), the bezel proud of it, the housing through the door's hole; the
+    keeper under the top (z 705) behind the door."""
     cab, parts = _inset_door(DoorLatch("Pull Lock 44"))
     (item,) = cab.hardware
     assert item["path"] == "cab.latches"
-    bodies = {b["name"]: b["boxes"] for b in item["bodies"]}
+    (body,) = item["bodies"]
+    assert body["name"] == "latch_1"
+    boxes = body["boxes"]
     shape = LATCH_SHAPES["Pull Lock 44"]
-    (a0, a1), (b0, b1), (c0, c1) = shape.body
-    assert bodies["latch_1"][0] == {"min": [15 + c0, 300 + a0, 705 - b1], "max": [15 + c1, 300 + a1, 705 - b0]}
-    (a0, a1), (b0, b1), (c0, c1) = shape.strike
-    assert bodies["strike_1"] == [{"min": [15 + c0, 300 + a0, 705 - b1], "max": [15 + c1, 300 + a1, 705 - b0]}]
-    assert bodies["latch_1"][1]["min"][0] == 0 and bodies["latch_1"][1]["max"][0] == 15      # through the door
-    assert bodies["latch_1"][2]["max"][0] == 0                                                 # on its front
-    assert DoorLatch("Pull Lock 44").reach == 58 == shape.reach
-    # nothing overlaps a board's material, holes counted out
-    overlaps = {(body["name"], name) for body in item["bodies"] for b in body["boxes"]
-                for name, part in parts.items() if _overlaps(part, b["min"], b["max"])}
+    assert len(boxes) == len(shape.front) + len(shape.strike)
+    bezel, housing = boxes[0], boxes[1]
+    (a0, a1), (b0, b1), (c0, c1) = shape.front[0]
+    assert bezel == {"min": [c0, 300 + a0, 705 - b1], "max": [c1, 300 + a1, 705 - b0]}   # x = depth behind the front
+    assert bezel["max"][0] == 0 and housing["min"][0] == 0                                  # on and from the front
+    (a0, a1), (b0, b1), (c0, c1) = shape.strike[0]
+    assert boxes[len(shape.front)] == {"min": [15 + c0, 300 + a0, 705 - b1], "max": [15 + c1, 300 + a1, 705 - b0]}
+    assert DoorLatch("Pull Lock 44").reach == 50.9 == shape.reach       # the backing plate, not the bezel
+    assert DoorLatch("Everlock").reach == 60 and DoorLatch("LL-66").reach == 24.6
+    # nothing overlaps a board's material, holes and the counterbore counted out
+    overlaps = {name for b in boxes for name, part in parts.items() if _overlaps(part, b["min"], b["max"])}
     assert overlaps == set()
-    # touching: the body on the door's inner face, the strike under the top
-    assert bodies["latch_1"][0]["min"][0] == parts["door"].box().hi["x"]
-    assert bodies["strike_1"][0]["max"][2] == parts["top"].box().lo["z"]
+    assert no_interference(cab) == []
+    # touching the top: the keeper's leg and lip lie on its underside
+    assert boxes[len(shape.front)]["max"][2] == parts["top"].box().lo["z"]
 
 
 def _overlaps(part: Board, lo: list[float], hi: list[float]) -> bool:
-    """Whether a world box takes some of the part's material: its outline
-    less its through holes, within its thickness."""
-    b = part.box()
-    k = {a: n for n, a in enumerate(AXES)}
-    if not all(lo[k[a]] < b.hi[a] - 1e-6 and b.lo[a] < hi[k[a]] - 1e-6 for a in AXES):
-        return False
-    u, v = part.u_axis, part.v_axis
-    material = part.outline.geometry.intersection(shapely_box(lo[k[u]], lo[k[v]], hi[k[u]], hi[k[v]]))
-    for op in part.ops:
-        if isinstance(op, Hole) and op.through:
-            material = material.difference(Point(op.u, op.v).buffer(op.d / 2))
-    return material.area > 1e-6
+    """Whether a world box takes some of the part's material, holes and
+    pockets counted out (the check `no_interference` makes)."""
+    return _box_hits(part, Box(dict(zip(AXES, lo)), dict(zip(AXES, hi))))  # type: ignore[arg-type]
 
 
 def test_refused_as_the_add_in_refuses():
@@ -303,12 +298,12 @@ def test_layout_plan_and_preview():
     top = next(p for p in plan.parts if p.path == "cab.top")
     (pilots,) = top.steps
     assert isinstance(pilots, HoleStep) and len(pilots.points) == 2 and (pilots.d, pilots.depth) == (PREDRILL, 3)
-    assert {b.name for b in plan.hardware[0].bodies} == {"latch_1", "strike_1"}
+    assert {b.name for b in plan.hardware[0].bodies} == {"latch_1"}
 
     from lang.preview.mesh import build_scene
     scene = build_scene(layout)
     names = {node.rsplit(".", 1)[1] for node in scene.graph.nodes_geometry if "latches" in node}
-    assert names == {"latch_1", "strike_1"}
+    assert names == {"latch_1"}
     door_mesh = scene.geometry["cab.door"]
     assert door_mesh.is_volume
 

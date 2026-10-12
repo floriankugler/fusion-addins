@@ -42,12 +42,12 @@ the same way, including a pilot-sized circle at each LL-66 station's
 centre). Pockets and holes made before are not taken into account.
 
 Mounted, a latch also places itself, closed, as boxes: the part on the
-door (`latch_1`, ...) and its strike on the carcass board (`strike_1`,
-...), one body each. Their sizes are one table, `LATCH_SHAPES`, separate
-from the drilling data; with no drawings of the latches in the repo most
-of its numbers are rough, marked as such. `reach` is how far the part on
-the door reaches from the carcass face, which a drawer box behind a
-latched face keeps clear of.
+door and its strike on the carcass board, which interlock when closed, as
+one body per latch (`latch_1`, ...). Their sizes are one table,
+`LATCH_SHAPES`, separate from the drilling data, measured from the
+makers' drawings and Sugatsune's CAD model. `reach` is how far the part
+behind the door's front reaches from the carcass face, which a drawer box
+behind a latched face keeps clear of.
 
 Operations are named by latch, the other board and the latch's number:
 `pull_lock_top_1` and `pull_lock_top_1_counterbore` in the door,
@@ -90,68 +90,66 @@ LatchBox = tuple[Extent, Extent, Extent]
 
 @dataclass(frozen=True)
 class LatchShape:
-    """A latch, closed, as boxes around one station (mm; `LatchBox`): the
-    part on the door, `body` on its inner face, `core` (along, below)
-    through its thickness and `knob` (along, below, how far it stands
-    proud) on its front, and its counterpart on the carcass board,
-    `strike` (the LL-66's counter plate) under the carcass face. Only these
-    numbers decide the boxes and `reach`."""
-    body: LatchBox
-    strike: LatchBox
-    core: tuple[Extent, Extent] | None = None
-    knob: tuple[Extent, Extent, float] | None = None
+    """A latch, closed, as boxes around one station (mm; `LatchBox`): `door`
+    boxes behind the door's inner face, `front` boxes measured from the
+    door's front face instead (behind it; negative: proud of it), for the
+    parts that rest on the front or are dimensioned from it, and `strike`
+    boxes, the counterpart on the carcass face. Only these numbers decide
+    the boxes and `reach`."""
+    door: tuple[LatchBox, ...]
+    strike: tuple[LatchBox, ...]
+    front: tuple[LatchBox, ...] = ()
 
     def latch_boxes(self, door_thickness: float) -> list[LatchBox]:
         """The part on the door as boxes, on a door `door_thickness` thick."""
-        boxes = [self.body]
-        if self.core is not None:
-            boxes.append((self.core[0], self.core[1], (-door_thickness, 0.0)))
-        if self.knob is not None:
-            along, below, proud = self.knob
-            boxes.append((along, below, (-door_thickness - proud, -door_thickness)))
-        return boxes
+        return list(self.door) + [(along, below, (d0 - door_thickness, d1 - door_thickness))
+                                  for along, below, (d0, d1) in self.front]
 
     @property
     def reach(self) -> float:
-        """How far below the carcass face the part on the door reaches."""
-        return max(below[1] for _, below, _ in self.latch_boxes(0.0))
+        """How far below the carcass face the part on the door reaches,
+        leaving out what stands proud of the door's front."""
+        inside = list(self.door) + [box for box in self.front if box[2][1] > 0]
+        return max(below[1] for _, below, _ in inside)
 
 
-#: Per latch, closed. There are no drawings of the latches in the repo
-#: (2026-10-12), so most numbers are rough: boxes around the drilling
-#: pattern of `lib.door_latches`, a body about 4 around its screws' centres
-#: (heads some 8 across), a strike plate 6 around its screws and 3 thick,
-#: and the body reaching up to the strike and back to its front edge. To be
-#: replaced by measured numbers when drawings or CAD files come.
+#: Per latch, closed (measured 2026-10-12). Everlock: from the maker's
+#: installation drawing (everlock.de, "Einbausituation"; body 40 wide, 32
+#: deep, 60 above the carcass face; mounting wings 52 between their screw
+#: columns; strike under the body, its screws 25 behind the door). Pull
+#: Lock 44: Southco M1-15-61 drawing J-M1-15-61 (bezel 44 across and 2.5
+#: proud, housing 38 across and 21 deep, backing plate 45.5 across and 10
+#: behind the front, pawl to 33 behind the front, keeper an L of 1.7 mm
+#: steel with its lip 23 behind the front and its screws 27 behind it); the
+#: parts in the door's holes are squares inside them, so that no box reaches
+#: into the door. LL-66: Sugatsune's CAD model LL-66_0.step (base 66 x 18.5
+#: x 8.5, mechanism, counter plate 30 x 10.6 x 17), measured in its frame of
+#: a door and a carcass board.
 LATCH_SHAPES: dict[str, LatchShape] = {
     "Everlock": LatchShape(
-        body=((-30.0, 30.0),      # rough: the screws 26 to either side, + 4
-              (3.0, 46.0),        # rough: from the strike down to 4 beyond the far screw row (42)
-              (0.0, 19.0)),       # rough: back to the strike's front edge
-        strike=((-20.0, 20.0),    # rough: its screws 14 to either side, + 6
-                (0.0, 3.0),       # rough: a 3 mm plate
-                (19.0, 31.0)),    # rough: its screws 25 behind the door, +- 6
+        door=(((-20.0, 20.0), (10.0, 60.0), (0.0, 32.0)),       # body
+              ((-32.0, 32.0), (16.6, 50.7), (0.0, 3.0)),        # mounting wings
+              ((-6.0, 6.0), (0.0, 10.0), (17.0, 27.0))),        # bolt, rough width
+        strike=(((-20.0, 20.0), (0.0, 9.0), (9.0, 34.0)),),
+        front=(((-18.0, 18.0), (12.0, 48.0), (-2.7, 0.0)),),    # bezel on the front
     ),
     "Pull Lock 44": LatchShape(
-        body=((-24.0, 24.0),      # rough: the rear housing, as wide as the 48 mm counterbore
-              (3.0, 58.0),        # rough: from the strike down to the counterbore's far edge (34 + 24)
-              (0.0, 23.0)),       # rough: back to the strike's front edge
-        strike=((-15.5, 15.5),    # rough: its screws 9.5 to either side, + 6
-                (0.0, 3.0),       # rough: a 3 mm plate
-                (23.0, 35.0)),    # rough: its screws 29 behind the door, +- 6
-        core=((-13.4, 13.4),      # a square inside the 38.1 mm hole, 34 below (drilling data)
-              (20.6, 47.4)),
-        knob=((-22.0, 22.0),      # rough: the "44" read as the knob's diameter, centred on the hole
-              (12.0, 56.0),
-              8.0),               # rough: how far it stands proud of the door's front
+        door=(),
+        # The keeper by its screws, the drilled pair (29 behind the door's
+        # inner face, the add-in's number): its leg on the carcass face 7 in
+        # front of the screws to 9.2 behind them, its lip 7 to 4 in front of
+        # them. Southco puts the screws 27 behind the door's front face.
+        strike=(((-14.0, 14.0), (0.0, 1.7), (22.0, 38.2)),      # leg, rough width
+                ((-14.0, 14.0), (0.0, 13.8), (22.0, 25.0))),    # lip
+        front=(((-22.0, 22.0), (12.0, 56.0), (-2.5, 0.0)),      # bezel, 34 below the carcass face
+               ((-13.4, 13.4), (20.6, 47.4), (0.0, 21.0)),      # housing, a square in the 38.1 hole
+               ((-16.9, 16.9), (17.1, 50.9), (10.0, 11.1)),     # backing plate, a square in the 48 counterbore
+               ((-8.0, 8.0), (8.3, 24.2), (21.0, 33.0))),       # pawl, rough width
     ),
     "LL-66": LatchShape(
-        body=((-33.0, 33.0),      # rough: 66 long, read from the name (the holes 56 apart leave 5 each end)
-              (3.5, 23.5),        # its top 3.5 below the carcass face (datasheet, as the add-in has it), 20 high rough
-              (0.0, 18.0)),       # rough: back to the counter plate's front edge
-        strike=((-16.0, 16.0),    # rough: its screws 10 to either side, + 6
-                (0.0, 3.0),       # rough: a 3 mm plate
-                (18.0, 30.0)),    # rough: its screws 24 behind the door, +- 6
+        door=(((-33.0, 33.0), (2.6, 21.1), (0.0, 8.5)),         # base
+              ((-24.5, 24.5), (3.0, 24.6), (1.5, 24.4))),       # mechanism
+        strike=(((-15.0, 15.0), (0.0, 10.6), (13.8, 30.7)),),   # counter plate
     ),
 }
 
@@ -243,8 +241,9 @@ class DoorLatch:
     @property
     def reach(self) -> float:
         """How far from the carcass face the latch takes room on the door,
-        mm (its boxes' far end, `LATCH_SHAPES`: Everlock 46, Pull Lock 58,
-        LL-66 23.5): a drawer box behind a latched face stays that far
+        mm (its boxes' far end behind the door's front, `LATCH_SHAPES`:
+        Everlock 60, Pull Lock 50.9, LL-66 24.6): a drawer box behind a
+        latched face stays that far
         from the board the latch catches on, e.g. its top at
         `shelf.bottom.gap(latch.reach)`."""
         return self.shape.reach
@@ -360,12 +359,10 @@ class DoorLatch:
         return [where.on_door(s, 0.0, self.pattern.station_inset) for s in where.stations]
 
     def _place(self, scope: Scope, where: _Where) -> None:
-        """The latches, closed, and their strikes as boxes, one body each."""
-        latch, strike = self.shape.latch_boxes(where.door.thickness), self.shape.strike
-        bodies: list[HardwareBodyLayout] = []
-        for i, s in enumerate(where.stations, 1):
-            bodies.append(HardwareBodyLayout(name=f"latch_{i}", boxes=[where.world_box(s, b) for b in latch]))
-            bodies.append(HardwareBodyLayout(name=f"strike_{i}", boxes=[where.world_box(s, strike)]))
+        """The latches, closed, as boxes: each latch and its strike one body."""
+        boxes = self.shape.latch_boxes(where.door.thickness) + list(self.shape.strike)
+        bodies = [HardwareBodyLayout(name=f"latch_{i}", boxes=[where.world_box(s, b) for b in boxes])
+                  for i, s in enumerate(where.stations, 1)]
         name, n = "latches", 2
         while (name in scope.parts or name in scope.children
                or any(item["name"] == name for item in scope.hardware)):
