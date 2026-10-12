@@ -912,30 +912,45 @@ proposed]
   `side.join(low, high, using=groove(4))` cuts dados for two shelves); the
   boards at a corner of the panel go into one join, so that the corner
   goes into both, and a later join at a corner an earlier one moved is an
-  error. Settings [chosen while implementing, for Florian to confirm]:
+  error. Settings:
   - `clearance=(depth, height)`, (0, 0) by default [Florian: 0 unless
     given; he usually gives 0.5, as the drawer cabinet does]: the groove's
     bottom lies `depth` beyond the panel's edge, and its ends as far beyond
-    the panel's corners; it is `height` wider than the panel is thick, all
-    of it above a panel lying flat, whose underside stays on the groove's
-    lower wall, which the slide's cut-outs and hook holes are measured
-    from; half on either side of a panel that stands (a back in grooves).
-  - `chamfer=3` [Florian: 3 to 4, so the floor goes in easily]: the
-    panel's corners between two grooved edges are cut off at 45 degrees, 3
-    along each edge, by the helper `chamfer()` cuts a corner of the
-    outline off with (`lang/core/corners.py`), once the panel has grown:
-    `floor.chamfer(floor.front.left, 3)` names the corner of the placement
-    box, which the grown floor no longer has. At most twice the depth, or
-    the chamfer would reach past the boards' faces and show; None or 0 for
-    square corners. Corners next to an edge that goes into no groove stay
-    square.
+    the panel's corners; it is `height` wider than the panel is thick, half
+    of it on either side of every panel, a floor lying flat included
+    [decided by Florian 2026-10-12, replacing all of it above a lying
+    floor]. The floor stays where it was placed, so the slide's cut-outs
+    and hook holes, measured from its underside, stay where they were; the
+    groove reaches half the clearance below it. In the drawer cabinet
+    (0.5) that leaves a 0.25 mm slit under the floor along the boards'
+    inner faces, seen only from below the drawer, and a 0.25 mm step at
+    the top of each cut-out's sides, on the inner face, where the groove's
+    lower wall (0.25 below the floor) meets the cut-out's top (at the
+    floor's underside); the floor rests on the runners' drawer members, at
+    the height the slide gives, rather than on the grooves' lower walls.
+  - `chamfer=3` [decided by Florian 2026-10-12: 3 mm, so the floor goes
+    in easily]: the panel's corners between two grooved edges are cut off
+    at 45 degrees, 3 along each edge, by the helper `chamfer()` cuts a
+    corner of the outline off with (`lang/core/corners.py`), once the
+    panel has grown: `floor.chamfer(floor.front.left, 3)` names the corner
+    of the placement box, which the grown floor no longer has. At most
+    twice the depth, or the chamfer would reach past the boards' faces and
+    show; None or 0 for square corners. Corners next to an edge that goes
+    into no groove stay square.
   - Dog bones where a groove stops inside its board, as part of its
-    pocket: `dogbones="corner"` (the default, as on tenons and half laps),
-    `"hidden"` (centred on the groove's end, bulging past the end only; an
-    error where that would break out of the board) or None; `tool=6`,
+    pocket: `dogbones="hidden"` [decided by Florian 2026-10-12: the
+    default, replacing "corner"] centres them on the groove's end, touching
+    its edges and bulging past the end only, and is an error where that
+    would break out of the board (they reach `tool / 2 + relief / 2` past
+    the end); `"corner"` (as on tenons and half laps) or None; `tool=6`,
     `relief=0.1`, a tool wider than the groove being an error. A corner
     relief bulges 0.93 past the groove's edges as well, which at a corner
-    of the panel the end of the board the corner goes into covers.
+    of the panel the end of the board the corner goes into covers. The
+    examples build with the default; the drawer cabinet with 9 or 11
+    fingers does not, where a floor lies across the lower end of a front
+    finger: the front's groove stops inside the finger, and a hidden dog
+    bone at its upper corner would reach down past the finger's end into
+    the joint's gap (corner dog bones fit there).
     `board.dogbones()` adds nothing more there, since the reliefs are
     arcs, and relieves a groove joined with `dogbones=None` like any
     pocket.
@@ -967,9 +982,13 @@ proposed]
   on, and looking past the boxes would report every box joint, whose
   fingers clear each other only through their grooves in narrow faces,
   which it does not count yet. Not checked: a panel's edge running past
-  the end of its board; holes drilled later into a groove, such as Blum's
-  rear hook hole (6 x 10, 11 above the floor's underside) in a back the
-  floor goes into (the examples use Grass, whose hook holes lie above it).
+  the end of its board. A drawer slide's rear hook holes are checked
+  against the floor by `slide.machine_box` [decided by Florian
+  2026-10-12, see the slides below]: with Blum (a 6 x 10 hole 11 above
+  the floor's underside) the floor does not go into the back, so its
+  groove join names the sides and the front only,
+  `floor.join(l, r, f, using=groove(...))`; Grass's holes (15 and 47
+  above) clear a floor up to 14 thick.
 - **Dog bones** (`lang/core/dogbones.py`) [decided by Florian 2026-10-12,
   implemented 2026-10-12]: a router leaves its radius in every inside
   corner, so a part with square corners does not go in; a dog bone takes
@@ -1079,7 +1098,13 @@ proposed]
   from its inner face, as a hole is drilled from the face its `at=` names,
   so the back board needs nothing from its rear face (its box joint's
   reliefs are in the inner face too); fixed-depth holes stay in the rear
-  face, where the hook sits. Cut-outs are named
+  face, where the hook sits. A hook hole that would run into the floor,
+  where the floor goes into the back board, or into the groove it lies in
+  there (its clearance included), is an error naming the back board and
+  the hole, and nothing is cut [decided by Florian 2026-10-12]: with Blum
+  the floor does not go into the back (its groove join names the sides
+  and the front only), as its 6 mm hole 11 above the floor's underside
+  meets any floor of 8 mm and more there. Cut-outs are named
   `coupling_left`, `hook_right` and so on. Blum's TIP-ON BLUMOTION
   variant (a 125 mm back cut-out) is not covered.
   `drawer.mount(slide, sides=(left, right), front=face.back)` pre-drills the
