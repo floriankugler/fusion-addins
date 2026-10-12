@@ -710,7 +710,10 @@ proposed]
   It holds both parts, the two faces, the axis along the line where they
   meet and the rectangle: along that axis where the edge-on board's end has
   material and the other board's outline covers it, across it the edge-on
-  board's thickness. Exact for outlines (a toe kick notch in the side
+  board's thickness as far as the other board covers it (`across_lo`,
+  `across_hi`); a connector stays where the edge-on board's thickness puts
+  it and is an error where it would reach past the other board's edge
+  [2026-10-12]. Exact for outlines (a toe kick notch in the side
   shortens the bottom's contact); pockets do not count; an end interrupted
   by a notch gives one contact per piece. Joint layouts take a contact plus
   settings and return operations for both parts. [implemented 2026-10-11]
@@ -739,8 +742,10 @@ proposed]
   cross. Its own notches open toward `toward`, the other boards' the
   opposite way;
   the split lies in the middle of the height both share at each crossing
-  (`at=` a position instead), and `clearance=` widens each notch per side
-  (default 0). Each notch is a through cut named `lap_<other board>`, so
+  (`split=` a position instead), and `clearance=` is the play in each
+  notch in total, half on each side (default 0), as with tenons and box
+  joints [2026-10-12; it was per side, and the split was `at=`]; the
+  settings after `toward` are keyword-only. Each notch is a through cut named `lap_<other board>`, so
   the emitter needs nothing new. Its two inside corners at the floor get
   dog bones as part of the notch's cut [implemented 2026-10-12, see "Dog
   bones" below]: `dogbones="corner"` (default, as on tenons [decided by
@@ -784,8 +789,13 @@ proposed]
   `back.join(left, right, bottom, top, using=domino("4x20", count=2))`,
   `top.join(right, using=clamex("P-14", at=[...]))`. Along each contact the connectors sit at `count=` stations, the outer ones `end=`
   from the contact's ends (37 for Dominos, the machine's stop latches; 60
-  for the others, the add-in's default), or at the positions `at=`. Every
-  operation is on a big face:
+  for the others, the add-in's default), or at the positions `at=` (a
+  list, also for one). `end=` given with `at=`, `gaps=` or `count=1`, which
+  would ignore it, is an error, as is tenons' `margin=` with `at=` or
+  `count=1`. What each connector makes must lie within its contact, along
+  it and across it (Clamex guide holes, a Cabineo pocket, every Domino slot
+  at its own length) [2026-10-12; Clamex and Cabineo could drill past the
+  board's end before]. Every operation is on a big face:
   - `domino(size, ...)`: a slot in the face-on board, centred on the
     edge-on board's thickness or `fence=` from its reference face (the show
     face unless `face=`), half the Domino's length plus 0.5 deep or
@@ -817,7 +827,11 @@ proposed]
   flip. The dimensions come from `lib/connector_data.py`, plain data shared
   with the connectors_native add-in (and through `lib/domino.py` with
   tenons_native). Operations are named `cabineo_left_1a` (kind, other
-  board, station, letter). Round access pockets are hole features; the
+  board, station, letter), the stations numbered across all contacts of a
+  pair (`domino_divider_1` to `_4` along a notched end); a second join of
+  a pair with the same kind of joint is an error naming both boards, and
+  every joint error is reported on the board whose `join()` was called,
+  naming the other (`cab.back: cabineo with cab.left: ...`) [2026-10-12]. Round access pockets are hole features; the
   slots' round ends come out as true arcs (see "Arcs" under Backend).
   Verified in Fusion 2026-10-11 against connectors_native on the same board
   pair (Cabineo 8 x 3, Domino 4x20 x 3 with marks, Clamex P-10 x 2): the
@@ -839,7 +853,9 @@ proposed]
   gaps, or `at=` centres. Dog bones for a `tool=6` cutter, `relief=0.1`
   wider: `"corner"` (default, on the bisector, through the corner) or
   `"hidden"` (into the tenon's root and past the mortise's ends, covered
-  by the shoulder); none where a mortise breaks out of its board or a
+  by the shoulder) or None [2026-10-12]; a hidden relief is `tool +
+  relief` across, which the mortise across the joint and the tenon's
+  length must allow; none where a mortise breaks out of its board or a
   tenon is flush with its board's end (the reliefs' geometry is the
   shared one of "Dog bones" below since 2026-10-12, the layout unchanged
   to the bit). Reliefs and mortises are round
@@ -1063,8 +1079,8 @@ proposed]
     floor (a pocket inside a pocket) is cut from the face to the deeper
     one's depth, the shallower's material above it being gone already.
   - per joint: joints that cut inside corners relieve them themselves,
-    with `dogbones=`, `tool=` and `relief=`: tenons (corner or hidden, see
-    above), half laps (corner, hidden or None). Box joints keep the
+    with `dogbones=`, `tool=` and `relief=`: tenons (corner, hidden or
+    None, see above), half laps (corner, hidden or None). Box joints keep the
     cutter's fillets and hide their own reliefs (see above).
   The geometry is dog_bones_native's (read from its code): from the
   corner along the bisector of its two edges, the centre `(tool / 2) /
@@ -1118,9 +1134,9 @@ proposed]
 - Hardware carries its own rules. A drawer slide determines the drawer box width,
   length, position and floor recess, so those numbers never appear in cabinet
   code. [decided; first hardware implemented 2026-10-11]
-  `lang/hardware/slides.py`: `DrawerSlide(model, nl)` with the models of
-  `lib/drawer_slides.py` (Movento 760H and 766H, Dynapro 40 and 50/70 kg,
-  every nominal length). `slide.drawer_box(bay, front=face.back,
+  `lang/hardware/slides.py`: `DrawerSlide(model, nl)`, the model by name
+  (`"Dynapro 40"`, `"Dynapro 50/70"`, `"Movento 760H"`, `"Movento 766H"`,
+  every nominal length) or a `lib.drawer_slides` model for one of its own. `slide.drawer_box(bay, front=face.back,
   side_thickness=, height=)` is the drawer box: the sides' inner faces 21 mm
   from the carcass sides (inner width LW - 42 in both catalogs, sides up to
   16 mm), NL - 10 long, with the bottom panel's underside above the bay
@@ -1154,13 +1170,19 @@ proposed]
   the floor does not go into the back (its groove join names the sides
   and the front only), as its 6 mm hole 11 above the floor's underside
   meets any floor of 8 mm and more there. Cut-outs are named
-  `coupling_left`, `hook_right` and so on. Blum's TIP-ON BLUMOTION
+  `coupling_left`, `hook_right` and so on, the hook holes `hook_left_a`... Blum's TIP-ON BLUMOTION
   variant (a 125 mm back cut-out) is not covered.
   `drawer.mount(slide, sides=(left, right), front=face.back)` pre-drills the
   carcass sides: a row 38 mm above the bay bottom at the hole positions the
-  add-in uses, measured from the runner's front. Hardware mounts through
-  `Scope.mount(hardware, **options)`, which hands the scope to the hardware
-  object, so core knows nothing about slides.
+  add-in uses, measured from the runner's front, into each side's face
+  toward the bay's middle (a partition between two bays takes a drawer on
+  either face), holes `slide_<drawer>_a`...; a drawer runs on one pair, a
+  second mount is an error. Hardware mounts through `Scope.mount(hardware,
+  ...)`, typed by the hardware's own `mount(self, scope, /, *, ...)`
+  (`Mountable`, a ParamSpec), so the type checker checks the keywords and
+  core knows nothing about slides. Like the other hardware the slide plans
+  every hole and checks them all before it drills one [2026-10-12; it used
+  to drill one side before checking the other].
   The runner pair is placed too, as boxes [decided 2026-10-12, replacing
   the STEP and glTF files of one variant]: the layout has a `hardware` list
   per module, each item with bodies made of boxes in world coordinates,
@@ -1195,7 +1217,10 @@ proposed]
   parallel, each with its add-in as the reference] follows the slide's
   pattern: a hardware object with the add-in's settings, mounted with
   `scope.mount(hardware, ...)`, which refuses what the add-in refuses
-  before it drills anything, drills what the add-in drills, and places
+  before it drills anything (every hole checked with `Board.hole_fits`: on
+  its face and clear of what was made before, and pilots short of the far
+  face; `lang/hardware/common.py` holds what the hardware shares), drills
+  what the add-in drills, and places
   the bought part as boxes from one table per hardware, separate from the
   drilling data, measured from the makers' CAD models and drawings
   (2026-10-12). The preview shows or hides all hardware with one switch
@@ -1206,9 +1231,10 @@ proposed]
   physical (numbered from the bottom or from the part's own left), so a
   module in the van's terms and a cabinet with `front=` come out alike.
 - **Concealed hinges** (`lang/hardware/hinges.py`):
-  `ConcealedHinge(model, margin=60, count=2, predrill=(3.175, 3))` with
+  `ConcealedHinge(model, count=2, end=60, pilot=(3.175, 3))` with
   the models of `lib/concealed_hinges.py` (Blum CLIP top 110 for thin
-  doors, +0 and +3). `cab.mount(hinge, door=door, carcass=left)` hinges a
+  doors, +0 and +3). `cab.mount(hinge, door=door, carcass=left)` (`carcass=`
+  a board, or the face the plates go on, `wall.left`) hinges a
   door on a carcass board standing square to it (a side, a partition or,
   for a flap, the top or bottom) and drills what concealed_hinge_native
   drills: per hinge two 10 x 5 holes in the door's inner face, 32 apart
@@ -1216,20 +1242,21 @@ proposed]
   board's face toward the door's middle, whatever the overlay or gap; and
   two pre-drill holes for the mounting plate's screws in that face, 32
   apart, 38.5 mm behind the door's inner face. The hinges' centres lie
-  `margin` from the ends of the door's edge (the add-in makes two;
+  `end` from the ends of the door's edge (the add-in makes two;
   `count=` spreads more evenly between). Refused as in the add-in:
-  margins under 27 (its dialog's minimum), hinges 42 apart or closer,
-  hole centres off their face. The hinge dictates no overlay or door size,
+  `end` under 27 (its dialog's minimum), hinges 42 apart or closer,
+  holes that do not fit on their face. The hinge dictates no overlay or door size,
   since the add-in knows none. Each hinge is a body of four boxes, cup,
   arm, clip and mounting plate (`HINGE_SHAPES`), measured on Häfele's CAD
   models of the hinge 342.46.681 and the plates 342.20.800 (0 mm, 8.5
   high) and 342.20.830 (3 mm; the +3 model is the hinge on it), named
-  `hinge1`... under `<door>_hinges`. `examples/hinged_door.py`: a wall cabinet with an
+  `hinge_1`... under `<door>_hinges`. `examples/hinged_door.py`: a wall cabinet with an
   overlay door.
 - **Hatch hinges** (`lang/hardware/hatch_hinges.py`):
-  `HatchHinge(FREE_SPACE_1_11, opening=107, carcass_depth=12, pilot=(2,
-  4))` with the specs of `lib/hatch_hinges.py` (Häfele Free space 1.11;
-  the `HingeSpec` record takes more). `cab.mount(hinge, hatch=hatch,
+  `HatchHinge("Free space 1.11", opening=107, carcass_depth=12, pilot=(2,
+  4))` with the specs of `lib/hatch_hinges.py` (or a `lib.hatch_hinges`
+  `HingeSpec`, which takes more), placed as `<hatch>_hinges`, holes
+  `hinge_<hatch>_a`... and `hinge_<side>_a`.... `cab.mount(hinge, hatch=hatch,
   sides=(left, right), top=top)` drills what hatch_hinge drills, from the
   underside of the carcass top (`top=` the board or the height of its
   underside): into each side panel's inner face three 5 mm holes 37
@@ -1255,7 +1282,8 @@ proposed]
   hatch, the opening shrunk by the slot (`catch.gap`, 3 mm, within 2.5 to
   3.5), offset exactly on its lines and arcs, flush with the panel.
   `scope.mount(catch, opening=panel.opening, edge=panel.opening.left,
-  hatch=hatch)` drills per catch a pilot hole for the holder's screw into
+  hatch=hatch)` (the hatch's outline is `lang.core.cutouts.inset`; holes
+  `catch_<hatch>_<n>` and `catch_<panel>_<n>`) drills per catch a pilot hole for the holder's screw into
   the panel, 8.4 mm outside the opening's contour, and one for the ball's
   screw into the hatch, 9.4 mm inside it, Ø2 x 4 by default, from the
   face that is not the show face unless `face=` names one. `count=` (4)
@@ -1272,7 +1300,7 @@ proposed]
   `examples/inspection_hatch.py`: a floor panel on battens with a rounded
   opening and its hatch.
 - **Door latches** (`lang/hardware/latches.py`): `DoorLatch(model,
-  count=1, end=100, predrill=(3.175, 3))` with door_latch_native's
+  count=1, end=100, pilot=(3.175, 3))`, placed as `<door>_latches`, with door_latch_native's
   latches `"Everlock"`, `"Pull Lock 44"` and `"LL-66"` (Sugatsune),
   `cab.mount(latch, door=door, carcass=top)`. The body goes on the door's
   inner face, the strike on the carcass face (the carcass board's big
@@ -1287,9 +1315,9 @@ proposed]
   29 behind the door's front face, where the lock sits; LL-66 two pilots
   28 to either side at 10, counter plate 10 at 24.
   One latch in the middle of the edge, more from `end=` from its ends.
-  Refused like the add-in: a pre-drill not below the narrowest pilot
+  Refused like the add-in: a pilot not below the narrowest pilot
   spacing, an edge no longer than twice `end=`, a carcass board parallel
-  to the door, holes off their face. Each latch with its strike is one
+  to the door, holes that do not fit on their face. Each latch with its strike is one
   body (they interlock when closed) of boxes (`LATCH_SHAPES`): Everlock
   from the maker's installation drawing, without the aluminium inset
   (which needs a 30 mm hole; the 25 mm hole is for the lock without it,
@@ -1362,8 +1390,10 @@ proposed]
   frame boards with two each); Häfele rules out hanging loads, such as a
   panel hung overhead, and gives 20 kg per pair vertically, 30 kg lying
   horizontally. Each latched pair is one body of four boxes
-  (`BRACKET_SHAPES`: frame plate, hook, panel plate, tongue), `left_1`...
-  under `<panel>_brackets`. Articles, for chipboard / Euro screws: panel
+  (`BRACKET_SHAPES`: frame plate, hook, panel plate, tongue), `bracket_1`...
+  under `<panel>_brackets`, numbered on through the frame boards in the
+  order `frame=` names them; holes `bracket_<other>_<n>a/b` with the same
+  numbers. Articles, for chipboard / Euro screws: panel
   part PF 262.50.359 / .358, frame part PF-L-R 262.50.390 / .391, PF-L
   262.50.368 / .377; sets 262.50.380 (PF with PF-L-R) and 262.50.313
   (PF with PF-L). Measured on Häfele's CAD models (glTF) of 262.50.359,
@@ -1387,9 +1417,9 @@ proposed]
   Euro holes in the sides.
 - Open from these [2026-10-12]: the hatch hinge's probe points miss a
   shelf 64 to 82 below the top, which the hardware boxes now catch
-  through `no_interference`; the small `_world_box` helpers each hardware
-  module carries could move to one place. Decided by Florian: the hinge's
-  end margin is at least 27 (the add-in's dialog), the Everlock hole stays
+  through `no_interference`; the helpers the hardware shares are in
+  `lang/hardware/common.py` now (2026-10-12). Decided by Florian: the hinge's
+  `end=` is at least 27 (the add-in's dialog), the Everlock hole stays
   25, the Pull Lock keeper's screws go 29 behind the door's front face, as
   the lock's drawing has them (door_latch_native measured them from the
   inner face before; corrected in the add-in too, whose sketch now
@@ -1599,11 +1629,17 @@ below is proposed]
 - Click-to-path in the viewer is the Copy Path helper outside Fusion.
 - Camera and visibility from code [implemented 2026-10-11]: the page
   exposes `window.preview` (`look`, `view`, `camera`, `fit`, `isolate`,
-  `show`, `hide`, `select`, `section`, `parts`, `ops`, `loaded`), so a
+  `show`, `hide`, `select`, `section`, `labels`, `hardware`, `parts`,
+  `ops`, `loaded`, `open`, `designs`, `design`, `version`), so a
   tool driving the browser frames a part, a scope or a named operation
   from a named direction in one call instead of steering the mouse
   (AGENTS.md has the details). The camera is kept in the URL hash, so a
-  link or a reload shows the same view.
+  link or a reload shows the same view. The viewer reads layout version 3
+  only and says so in the status line for another (`LAYOUT_VERSION` in
+  `lang/preview/viewer/state.js`, kept equal to `layout_types.py`); its
+  bookkeeping (`state.js`, `scene-utils.js`) has node tests
+  (`lang/preview/viewer/tests/`, run by `tests/test_viewer_js.py`), and a
+  rebuild frees the old scene's GPU resources [2026-10-12].
 - One preview for a folder [implemented 2026-10-12]: `python -m lang.preview
   examples` serves every build file in the folder, each built into
   `out/<name>/`, and the page switches between them with a dropdown (keys
@@ -1631,7 +1667,10 @@ below is proposed]
   server builds it into `--out` on every save, as before.
 - SpaceMouse: the viewer talks to 3DxWare's navigation server
   (`lang/preview/viewer/spacemouse.js`), which works in Chrome and in the
-  Claude app's browser pane, not in Safari. The page connects in Safari too,
+  Claude app's browser pane, not in Safari. It reconnects after a
+  connection that was up drops (3 s, doubling up to a minute),
+  `spaceMouse.stop()` ends it, and the driver's front view looks from the
+  layout's `front`. The page connects in Safari too,
   but the driver does not route the puck to the navigation server while
   Safari is frontmost and zooms the page instead (checked 2026-10-11). A
   workaround through 3DxWare's legacy client framework, taking over the
@@ -1640,7 +1679,9 @@ below is proposed]
 
 ## Examples
 
-These show the intended feel. None of the functions exist.
+Written on 2026-10-09 to show the intended feel, before any of it existed;
+brought in line with the code on 2026-10-12. The build files in
+`examples/` are the reference: the tests build every one of them.
 
 ### Board with operations
 
@@ -1682,13 +1723,13 @@ shelf = (board("shelf", ply15)
 
 ### Drawer cabinet
 
-The construction assumed here (inset fronts, box-jointed drawer boxes, grooved
-floor) was not confirmed by Florian.
+As `examples/drawer_cabinet.py` builds it, shortened (the example also
+gives the lowest drawer a height of its own and comments every step):
 
 ```python
-ply15 = material("birch", t=15)
-ply12 = material("birch", t=12)
-ply9 = material("birch", t=9)
+from lang import *
+from stock import ply9, ply12, ply15       # examples/stock.py: the birch sheets
+
 GAP = 3  # between fronts
 
 
@@ -1696,45 +1737,52 @@ def drawer_cabinet(name, box, n, slide, front=None):
     with module(name, box, front=front) as cab:          # written in its own frame
         left   = board("left", ply15).on(cab.left)
         right  = board("right", ply15).on(cab.right)
-        bottom = board("bottom", ply15).on(cab.bottom).between(left, right)
+        for side in (left, right):
+            side.cut(rect(depth=60, height=100), at=side.outer.bottom.front, name="toekick")
+        bottom = board("bottom", ply15).on(left.toekick.top, toward=cab.top).between(left, right)
         top    = board("top", ply15).on(cab.top).between(left, right)
         back   = board("back", ply9).on(cab.back).between(left, right, bottom, top)
 
+        bottom.join(left, right, using=cabineo(count=3))
+        top.join(left, right, using=cabineo(count=3))
         back.join(left, right, bottom, top, using=domino("4x20", count=2))
-        bottom.join(left, right, using=tenons(count=3))
-        top.join(left, right, using=tenons(count=3))
 
-        for i, bay in enumerate(cab.interior.split("height", n), 1):
-            d = drawer(f"drawer{i}", bay, slide)
-            d.mount(slide, sides=(left, right))        # Drawer Slides add-in
-            d.face.latch(right, "pull_lock_44")        # Door Latch add-in
+        opening = cab.interior.with_sides(bottom=bottom.top)
+        fronts = opening.shrunk(left=GAP / 2, right=GAP / 2, top=GAP / 2, bottom=GAP / 2)
+        for i, (bay, panel) in enumerate(zip(opening.split("height", n), fronts.split("height", n)), 1):
+            d = drawer(f"drawer{i}", bay, panel, slide)
+            d.mount(slide, sides=(left, right), front=d.face.back)   # pre-drills the carcass
 
-        cab.export("top", top.top)                     # for whatever stands on it
-        cab.check(no_interference, fits_sheet)
+        cab.export("worktop", top.top)                 # for whatever stands on it
+        check(no_interference, fits_sheet)
     return cab
 
 
-def drawer(name, bay, slide):
-    with scope(name) as d:
-        board("face", ply15).on(bay.front).inset(GAP / 2)   # registers as d.face
-        box = slide.box_space(bay, behind=d.face, height=bay.height - 30)
+def drawer(name, bay, panel, slide):
+    with scope(name, bay) as d:
+        face = board("face", ply15).on(bay.front).between(panel).inset(GAP / 2)
+        box = slide.drawer_box(bay, front=face.back, side_thickness=ply12.t, height=bay.height - 30)
 
-        l = board("left", ply12).on(box.left)
-        r = board("right", ply12).on(box.right)
-        f = board("front", ply12).on(box.front).between(l, r)
-        k = board("back", ply12).on(box.back).between(l, r)
+        l = board("left", ply12).on(box.left).between(box)
+        r = board("right", ply12).on(box.right).between(box)
+        f = board("front", ply12).on(box.front).between(l, r, box.bottom, box.top)
+        k = board("back", ply12).on(box.back).between(l, r, box.bottom, box.top)
+        for end in (f, k):
+            end.join(l, r, using=box_joint(7, margin=2, clearance=(0.1, 0.1)))
         floor = board("floor", ply9).on(box.bottom + slide.recess).between(l, r, f, k)
-        f.join(l, r, using=box_joint())
-        k.join(l, r, using=box_joint())
-        floor.join(l, r, f, k, using=groove(depth=5))
-        d.face.join(f, using=screws(count=4))
+        floor.join(l, r, f, k, using=groove(5, clearance=(0.5, 0.5)))
+        slide.machine_box(sides=(l, r), front=f, back=k, floor=floor)   # cut-outs and hook holes
     return d
+
+
+box = Box.from_size(width=500, depth=600, height=720)
+drawer_cabinet("drawercab", box, 3, DrawerSlide("Dynapro 40", nl=450), front=box.right)
 ```
 
 (Joinery rules, which would have made every `join` above disappear, were
 dropped on 2026-10-11; joins name their partners.) Things to notice: no
-board has a dimension, no line names an edge, and the slide decides the
-drawer box.
+board has a size of its own (the toe kick notch is the one number on a
+board), no joint names an edge, and the slide decides the drawer box.
 
 ### Master index and floor battens
 
@@ -2113,6 +2161,31 @@ it, by halves, leaving a loop it cannot chamfer sharp with a problem
 noted; `arcs.fit` starts a ring where no arc runs through it, and leaves a
 junction where curves meet at a glancing angle instead of moving it to an
 ill-conditioned crossing. The preview shows every kind of chamfer now (see "Preview backend"). 144 tests.
+
+Status 2026-10-12, review: a code and API review of the whole language
+(66 findings) was worked through, every fix with tests (445 tests before,
+578 pytest and 31 node tests after) and every example's geometry
+unchanged. Core: the face a part limit means, limits that limit nothing,
+depths past the board and through a narrow face, `to()` on another part,
+directions equal across frames, a failed join restoring every board,
+problems listed once, layout version 3, `Face`/`Edge`/`Anchor`/`Operation`
+in `faces.py`. API: typed `mount` keywords through a ParamSpec, `depth=`
+required, `fillet(radius=)`, `clip(top=, back=)`, `between(box)`,
+`world_frame()`, hardware exported from `lang` with model names, `pilot=`
+and `end=` everywhere, `half_lap(split=)` with total clearance. Joints and
+hardware share their machinery (`lang/joints/common.py`,
+`lang/hardware/common.py`, `lib/stations.py`, `Board.hole_fits`); the
+preview's mesher reads the layout through the plan, the emitter carries
+on past refused features, the viewer frees its GPU memory and no longer
+hangs `loaded()`. Compiled in Fusion the same day: all eleven examples,
+no problems, every body one solid, volumes within 0.03 % of the preview.
+Left for Florian to decide (kept as they were): `Material.t` next to
+`Board.thickness`; `Board.center(pos)` next to `Box.center(name)`;
+`dogbones()` acting when the board is finished; a `cabinet()` constructor
+or a required `front=`; a sheet-first material form; a helper for the
+drawer box recipe; a named tuple for clearances; whether the Cabineo's
+threaded-insert collar may reach past a 15 mm board's face (it does, by
+1.35 mm, as in the add-in).
 
 1. `core`: the position algebra, box, board with `on`, `between` and `center`,
    scopes and paths, and layout JSON output with world transforms. With unit
