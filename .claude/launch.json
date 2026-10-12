@@ -4,50 +4,8 @@
     {
       "name": "preview",
       "runtimeExecutable": ".venv/bin/python",
-      "runtimeArgs": ["-m", "lang.preview", "examples/drawer_cabinet.py", "--out", "out", "--port", "8765"],
+      "runtimeArgs": ["-m", "lang.preview", "examples", "--out", "out", "--port", "8765"],
       "port": 8765
-    },
-    {
-      "name": "preview-van",
-      "runtimeExecutable": ".venv/bin/python",
-      "runtimeArgs": ["-m", "lang.preview", "examples/van.py", "--out", "out/van", "--port", "8766"],
-      "port": 8766
-    },
-    {
-      "name": "preview-shelf",
-      "runtimeExecutable": ".venv/bin/python",
-      "runtimeArgs": ["-m", "lang.preview", "examples/shelf.py", "--out", "out/shelf", "--port", "8767"],
-      "port": 8767
-    },
-    {
-      "name": "preview-cutouts",
-      "runtimeExecutable": ".venv/bin/python",
-      "runtimeArgs": ["-m", "lang.preview", "examples/cutouts.py", "--out", "out/cutouts", "--port", "8768"],
-      "port": 8768
-    },
-    {
-      "name": "preview-hinged-door",
-      "runtimeExecutable": ".venv/bin/python",
-      "runtimeArgs": ["-m", "lang.preview", "examples/hinged_door.py", "--out", "out/hinged_door", "--port", "8769"],
-      "port": 8769
-    },
-    {
-      "name": "preview-hatch",
-      "runtimeExecutable": ".venv/bin/python",
-      "runtimeArgs": ["-m", "lang.preview", "examples/hatch.py", "--out", "out/hatch", "--port", "8770"],
-      "port": 8770
-    },
-    {
-      "name": "preview-inspection-hatch",
-      "runtimeExecutable": ".venv/bin/python",
-      "runtimeArgs": ["-m", "lang.preview", "examples/inspection_hatch.py", "--out", "out/inspection_hatch", "--port", "8771"],
-      "port": 8771
-    },
-    {
-      "name": "preview-door-latch",
-      "runtimeExecutable": ".venv/bin/python",
-      "runtimeArgs": ["-m", "lang.preview", "examples/door_latch.py", "--out", "out/door_latch", "--port", "8772"],
-      "port": 8772
     }
   ]
 }

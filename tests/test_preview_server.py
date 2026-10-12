@@ -1,0 +1,134 @@
+"""The preview server's bookkeeping (`lang.preview.__main__`): which files
+of a folder are build files, which designs a change makes stale, which
+ones it builds, and a build that fails keeping the last good one."""
+from pathlib import Path
+
+from lang.preview.__main__ import Designs, rebuild, scan
+
+EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
+
+CABINET = '''from lang import *
+
+def cabinet(name: str) -> None:
+    with module(name, Box.from_size(width=300, depth=200, height=400)) as m:
+        board("left", material("birch", t=15)).on(m.left)
+
+if __name__ == "__build__":   # run as the build file, not imported
+    cabinet("cabinet")
+'''
+
+
+def write(folder: Path, name: str, text: str) -> Path:
+    path = folder / name
+    path.write_text(text)
+    return path
+
+
+def folder_of_files(tmp_path: Path) -> Path:
+    write(tmp_path, "cabinet.py", CABINET)
+    write(tmp_path, "van.py", "from lang import *\nfrom cabinet import cabinet\nfrom parts import ply\n\ncabinet('kitchen')\n")
+    write(tmp_path, "parts.py", "from lang import *\n\nply = material('birch', t=15)\n")
+    write(tmp_path, "shelf.py", "from lang import *\nfrom lang.core import scope\n\nwith module(\n")    # mid-edit
+    write(tmp_path, "notes.py", "print('no lang here')\n")
+    write(tmp_path, "__init__.py", "from lang import *\n")
+    write(tmp_path, "_scratch.py", "from lang import *\n")
+    write(tmp_path, "van_snapshot.json", "{}\n")
+    return tmp_path
+
+
+def stale(designs: Designs) -> set[str]:
+    return {name for name, design in designs.designs.items() if design.stale}
+
+
+def fresh(designs: Designs) -> None:
+    for design in designs.designs.values():
+        design.stale = False
+
+
+def test_build_files_import_lang_and_libraries_are_not_listed(tmp_path: Path):
+    files, imported = scan(folder_of_files(tmp_path))
+    # parts.py is imported and builds nothing of its own; cabinet.py is
+    # imported too but keeps a build of its own; shelf.py does not parse.
+    assert [path.name for path in files] == ["cabinet.py", "shelf.py", "van.py"]
+    assert imported == {"cabinet", "parts"}
+
+
+def test_the_examples_are_build_files():
+    files, _ = scan(EXAMPLES)
+    names = {path.stem for path in files}
+    assert {"drawer_cabinet", "van", "shelf", "cutouts"} <= names
+
+
+def test_a_save_makes_its_own_design_stale_and_a_shared_module_all(tmp_path: Path):
+    folder = folder_of_files(tmp_path)
+    designs = Designs(folder, tmp_path / "out")
+    assert set(designs.designs) == {"cabinet", "shelf", "van"}
+    fresh(designs)
+    designs.changed({folder / "shelf.py"})
+    assert stale(designs) == {"shelf"}
+    for shared in (folder / "cabinet.py", folder / "parts.py", folder / "van_snapshot.json",
+                   Path(__file__).resolve().parents[1] / "lang" / "build.py"):
+        fresh(designs)
+        designs.changed({shared})
+        assert stale(designs) == {"cabinet", "shelf", "van"}, shared
+
+
+def test_new_build_files_show_up_and_deleted_ones_go(tmp_path: Path):
+    folder = folder_of_files(tmp_path)
+    designs = Designs(folder, tmp_path / "out")
+    fresh(designs)
+    door = write(folder, "door.py", "from lang import *\n")
+    designs.changed({door})
+    assert list(designs.designs) == ["cabinet", "door", "shelf", "van"]
+    assert stale(designs) == {"door"}
+    assert designs.designs["door"].out == tmp_path / "out" / "door"
+    door.unlink()
+    designs.changed({door})
+    assert list(designs.designs) == ["cabinet", "shelf", "van"]
+
+
+def test_what_counts_as_a_change(tmp_path: Path):
+    folder = folder_of_files(tmp_path)
+    designs = Designs(folder, folder / "out")
+    assert designs.counts(folder / "van.py")
+    assert designs.counts(folder / "van_snapshot.json")
+    assert not designs.counts(folder / "__pycache__" / "cabinet.cpython-313.pyc")
+    assert not designs.counts(folder / "out" / "van" / "layout.json")
+
+
+def test_only_the_designs_pages_show_are_built(tmp_path: Path):
+    designs = Designs(folder_of_files(tmp_path), tmp_path / "out")
+    assert designs.next_build() is None                  # no page open
+    state = designs.status("van", page="a")
+    assert state["designs"] == ["cabinet", "shelf", "van"]
+    assert state["design"] == {"name": "van", "url": "out/van/", "version": None, "builds": 0, "state": "building"}
+    assert designs.next_build() is designs.designs["van"]
+    designs.status("cabinet", page="a")                  # the page switched
+    assert designs.next_build() is designs.designs["cabinet"]
+    designs.designs["cabinet"].stale = False
+    assert designs.next_build() is None
+    assert designs.status("gone", page="a")["design"] is None
+
+
+def test_a_single_build_file_builds_without_a_page(tmp_path: Path):
+    path = write(tmp_path, "cabinet.py", CABINET)
+    designs = Designs(path, tmp_path / "out")
+    assert designs.next_build() is designs.designs["cabinet"]
+    assert designs.designs["cabinet"].url == "out/"
+    designs.designs["cabinet"].stale = False
+    designs.changed({tmp_path / "other.py"})
+    assert stale(designs) == {"cabinet"}
+
+
+def test_a_failed_build_keeps_the_last_good_one(tmp_path: Path):
+    path = write(tmp_path, "cabinet.py", CABINET)
+    out = tmp_path / "out"
+    assert rebuild(path, out)
+    version = (out / "version.txt").read_text()
+    assert {p.name for p in out.iterdir()} == {"build.log", "layout.json", "scene.glb", "version.txt"}
+    assert "1 parts" in (out / "build.log").read_text()
+    path.write_text(CABINET + "    undefined_name()\n")
+    assert not rebuild(path, out)
+    assert (out / "version.txt").read_text() == version
+    assert "NameError" in (out / "build.log").read_text()
+    assert not (out / ".build").exists()

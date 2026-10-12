@@ -124,10 +124,10 @@ python3 -m venv .venv && .venv/bin/pip install shapely trimesh manifold3d scipy 
 .venv/bin/python -m pytest tests                                  # unit tests
 .venv/bin/pyright                                                 # strict type check of lang, tests and examples
 .venv/bin/python -m lang.build examples/drawer_cabinet.py --out out  # layout.json + scene.glb
-.venv/bin/python -m lang.preview examples/drawer_cabinet.py       # live preview at http://127.0.0.1:8765
+.venv/bin/python -m lang.preview examples                        # live preview at http://127.0.0.1:8765
 ```
 
-The preview rebuilds on every save of the build file or the `lang` package and reloads the scene with the camera kept. Click a part for its path; click a name in the list to hide it; `f` fits the view. The page lists its other keys: hide, isolate, display modes and a section plane with capped cut faces.
+The preview serves every build file in the folder (or a single one: `lang.preview examples/van.py`); a dropdown in the page, or the keys `,` and `.`, switches between them. It rebuilds the design shown on every save of a build file, the `lang` package or `lib`, and reloads the scene with the camera kept; the others build when they are shown. Click a part for its path; click a name in the list to hide it; `f` fits the view. The page lists its other keys: hide, isolate, display modes and a section plane with capped cut faces.
 
 A 3Dconnexion SpaceMouse works in the preview when 3DxWare is installed: the page talks to the driver's navigation server (`3DxNLServer`, on `127.51.68.120:8181`) with its own small client in `lang/preview/viewer/spacemouse.js`, so no 3Dconnexion script is bundled. The driver reads the camera and model extents from the page and writes the camera back, exactly as it does for Fusion, and the page's settings profile in 3DxWare is named "Layout preview". The device drives the page while the pointer is over the view.
 

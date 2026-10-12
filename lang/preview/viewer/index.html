@@ -13,7 +13,7 @@
     border-left: 1px solid #ddd; overflow: auto; padding: 12px 14px; box-sizing: border-box; }
   h1 { font-size: 14px; margin: 0 0 8px; }
   h2 { font-size: 12px; margin: 14px 0 6px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
-  #status { color: var(--muted); margin-bottom: 10px; white-space: pre-wrap; }
+  #status { color: var(--muted); margin-bottom: 10px; white-space: pre-wrap; max-height: 16em; overflow: auto; }
   #status.error { color: var(--accent); }
   #selected { font-family: ui-monospace, Menlo, monospace; font-size: 12px; margin: 8px 0 12px;
     padding: 8px; background: #f7f5f0; border-radius: 4px; min-height: 2.6em; white-space: pre-wrap; }
@@ -61,6 +61,7 @@
 <div id="view"></div>
 <div id="side">
   <h1>Layout preview</h1>
+  <div class="row"><label for="design">design</label><select id="design" style="flex:1;min-width:0"></select></div>
   <div id="status">loading…</div>
   <div id="selected">click a part for its path</div>
 
@@ -108,6 +109,7 @@
 
   <h2>Keys</h2>
   <div class="keys">
+    <div><span>previous / next design</span><kbd>,</kbd> <kbd>.</kbd></div>
     <div><span>fit view</span><kbd>f</kbd></div>
     <div><span>hide / show selected</span><kbd>h</kbd></div>
     <div><span>isolate selected / show all</span><kbd>i</kbd></div>
@@ -299,74 +301,93 @@ function stencilGroup(geometry, order) {
   return group;
 }
 
+// Loads the shown design's layout and scene at `version`. Its first scene
+// gets the camera the design had when the page last showed it, or the URL
+// hash's, or is fitted. A load overtaken by a newer version or another
+// design is dropped.
 const loader = new GLTFLoader();
-async function load(first) {
+async function load() {
+  const want = { design, version }, url = designUrl;
+  const current = () => design === want.design && version === want.version;
   const status = $('status');
+  let next, gltf;
   try {
-    const res = await fetch('out/layout.json', { cache: 'no-store' });
-    layout = await res.json();
-  } catch (e) { status.textContent = 'no layout yet'; status.className = 'error'; return; }
+    next = await (await fetch(url + 'layout.json', { cache: 'no-store' })).json();
+  } catch (e) { if (current()) { status.textContent = 'no layout yet'; status.className = 'error'; } return; }
   try {
-    const log = await (await fetch('out/build.log', { cache: 'no-store' })).text();
-    status.textContent = log.trim() || 'ok';
-    status.className = log.includes('error:') ? 'error' : '';
-  } catch (e) {}
-  loader.load('out/scene.glb?v=' + Date.now(), (gltf) => {
-    if (root) scene.remove(root);
-    root = gltf.scene;
-    // GLTFLoader strips dots and slashes from node names; map them back to paths.
-    const sanitized = (p) => p.replace(/\s/g, '_').replace(/[\[\]\.:\/]/g, '');
-    const pathOf = {}, materialOf = {};
-    for (const mod of layout.modules) for (const part of mod.parts) {
-      pathOf[sanitized(part.path)] = part.path; materialOf[part.path] = part.material;
-    }
-    for (const { path } of hardwareBodies()) pathOf[sanitized(path)] = path;
-    meshes((obj) => {
-      obj.userData.path = pathOf[obj.name] || obj.name;
-      obj.geometry.deleteAttribute('normal');
-      obj.geometry = obj.geometry.toNonIndexed();
-      obj.geometry.computeVertexNormals();
-      obj.material = new THREE.MeshStandardMaterial({
-        color: colorFor(materialOf[obj.userData.path] || ''), roughness: 0.85, metalness: 0.0,
-        flatShading: true, side: THREE.DoubleSide });
-      obj.userData.baseColor = obj.material.color.clone();
-      const edges = new THREE.EdgesGeometry(obj.geometry, 20);
-      const front = new THREE.LineSegments(edges, edgeFront);
-      const through = new THREE.LineSegments(edges, edgeThrough);
-      front.userData.role = 'front'; through.userData.role = 'through';
-      through.renderOrder = 1;
-      obj.add(front, through);
-    });
-    // section caps: stencil pass as children of the mesh (same transform), cap plane in world space
-    caps.clear();
-    let order = 10;
-    meshes((obj) => {
-      const stencil = stencilGroup(obj.geometry, order);
-      obj.add(stencil);
-      const cap = new THREE.Mesh(new THREE.PlaneGeometry(20000, 20000), capMaterial(obj.userData.baseColor));
-      cap.renderOrder = order + 1;
-      cap.onAfterRender = () => renderer.clearStencil();
-      cap.userData.owner = obj;
-      obj.userData.stencil = stencil;
-      caps.add(cap);
-      // black border of the cut face, computed from the plane/triangle intersections
-      const outline = new LineSegments2(new LineSegmentsGeometry(), outlineMaterial);
-      outline.renderOrder = order + 1;
-      outline.userData.owner = obj;
-      outline.userData.isOutline = true;
-      obj.userData.outline = outline;
-      caps.add(outline);
-      order += 2;
-    });
-    scene.add(root);
-    buildMaster();
-    buildLabels();
-    bounds = new THREE.Box3().setFromObject(root);
-    if (first && !applyHash()) fit();
-    applyAll();
-    loadedVersion = version;
-    for (const resolve of waiting.splice(0)) resolve(version);
-  }, undefined, (err) => { status.textContent = 'scene failed to load: ' + err; status.className = 'error'; });
+    gltf = await loader.loadAsync(url + 'scene.glb?v=' + Date.now());
+  } catch (err) { if (current()) { status.textContent = 'scene failed to load: ' + err; status.className = 'error'; } return; }
+  if (!current()) return;
+  layout = next;
+  const first = !root;
+  if (root) scene.remove(root);
+  root = gltf.scene;
+  // GLTFLoader strips dots and slashes from node names; map them back to paths.
+  const sanitized = (p) => p.replace(/\s/g, '_').replace(/[\[\]\.:\/]/g, '');
+  const pathOf = {}, materialOf = {};
+  for (const mod of layout.modules) for (const part of mod.parts) {
+    pathOf[sanitized(part.path)] = part.path; materialOf[part.path] = part.material;
+  }
+  for (const { path } of hardwareBodies()) pathOf[sanitized(path)] = path;
+  meshes((obj) => {
+    obj.userData.path = pathOf[obj.name] || obj.name;
+    obj.geometry.deleteAttribute('normal');
+    obj.geometry = obj.geometry.toNonIndexed();
+    obj.geometry.computeVertexNormals();
+    obj.material = new THREE.MeshStandardMaterial({
+      color: colorFor(materialOf[obj.userData.path] || ''), roughness: 0.85, metalness: 0.0,
+      flatShading: true, side: THREE.DoubleSide });
+    obj.userData.baseColor = obj.material.color.clone();
+    const edges = new THREE.EdgesGeometry(obj.geometry, 20);
+    const front = new THREE.LineSegments(edges, edgeFront);
+    const through = new THREE.LineSegments(edges, edgeThrough);
+    front.userData.role = 'front'; through.userData.role = 'through';
+    through.renderOrder = 1;
+    obj.add(front, through);
+  });
+  // section caps: stencil pass as children of the mesh (same transform), cap plane in world space
+  caps.clear();
+  let order = 10;
+  meshes((obj) => {
+    const stencil = stencilGroup(obj.geometry, order);
+    obj.add(stencil);
+    const cap = new THREE.Mesh(new THREE.PlaneGeometry(20000, 20000), capMaterial(obj.userData.baseColor));
+    cap.renderOrder = order + 1;
+    cap.onAfterRender = () => renderer.clearStencil();
+    cap.userData.owner = obj;
+    obj.userData.stencil = stencil;
+    caps.add(cap);
+    // black border of the cut face, computed from the plane/triangle intersections
+    const outline = new LineSegments2(new LineSegmentsGeometry(), outlineMaterial);
+    outline.renderOrder = order + 1;
+    outline.userData.owner = obj;
+    outline.userData.isOutline = true;
+    obj.userData.outline = outline;
+    caps.add(outline);
+    order += 2;
+  });
+  scene.add(root);
+  buildMaster();
+  buildLabels();
+  bounds = new THREE.Box3().setFromObject(root);
+  if (first) { const camera = views.get(design)?.camera; if (camera) setCamera(camera); else fit(); }
+  applyAll();
+  loadedVersion = version;
+  for (const resolve of waiting.splice(0)) resolve(version);
+}
+
+// Takes the shown design off the page, for the next one to load.
+function clearScene() {
+  if (root) scene.remove(root);
+  root = null;
+  layout = null;
+  bounds = null;
+  caps.clear();
+  buildMaster();
+  buildLabels();
+  renderList();
+  showSelected();
+  $('problems').textContent = '';
 }
 
 // -- the master ------------------------------------------------------------
@@ -1018,6 +1039,8 @@ window.addEventListener('keydown', (e) => {
   if (typesText(e.target) || e.metaKey || e.ctrlKey || e.altKey) return;
   const step = e.shiftKey ? 0.1 : 0.01;
   switch (e.key) {
+    case ',': stepDesign(-1); break;
+    case '.': stepDesign(1); break;
     case 'f': fit(); break;
     case 'h': if (selectedPath) toggle(selectedPath); showSelected(); break;
     case 'i': if (selectedPath) isolate(selectedPath); break;
@@ -1051,9 +1074,9 @@ window.addEventListener('keydown', (e) => {
 // summed ('top front left'), 'iso' for the default oblique view, or a vector
 // from the target toward the eye. `at` is a point [x, y, z] in mm, a part
 // or scope path ('unit.left', 'unit'), a named operation of a part
-// ('unit.top#screw_left_1'), or a list of paths. The camera is mirrored in
-// the URL hash (#eye=x,y,z&target=x,y,z&fov=n), so a link or a reload
-// shows the same view.
+// ('unit.top#screw_left_1'), or a list of paths. The design and the camera
+// are mirrored in the URL hash (#design=van&eye=x,y,z&target=x,y,z&fov=n),
+// so a link or a reload shows the same view.
 
 let loadedVersion = null;
 const waiting = [];
@@ -1190,24 +1213,40 @@ function cameraState() {
   return { eye: r(camera.position), target: r(controls.target), fov: camera.fov };
 }
 
+// The design shown, and the camera once its scene is in.
 function writeHash() {
-  const s = cameraState();
-  history.replaceState(null, '', `#eye=${s.eye.join(',')}&target=${s.target.join(',')}&fov=${s.fov}`);
+  if (design === null) return;
+  let hash = 'design=' + encodeURIComponent(design);
+  if (root) {
+    const s = cameraState();
+    hash += `&eye=${s.eye.join(',')}&target=${s.target.join(',')}&fov=${s.fov}`;
+  }
+  history.replaceState(null, '', '#' + hash);
 }
 
-// The camera from the URL hash; false when it names none.
-function applyHash() {
+// The design and camera the URL hash names, each null when it names none.
+function readHash() {
   const params = new URLSearchParams(location.hash.slice(1));
   const vec = (key) => params.get(key)?.split(',').map(Number);
   const eye = vec('eye'), target = vec('target');
-  if (!eye || !target || eye.length !== 3 || target.length !== 3 || [...eye, ...target].some(isNaN)) return false;
-  const fov = params.has('fov') ? Number(params.get('fov')) : undefined;
-  setCamera({ eye, target, fov: Number.isFinite(fov) ? fov : undefined });
-  return true;
+  let camera = null;
+  if (eye && target && eye.length === 3 && target.length === 3 && ![...eye, ...target].some(isNaN)) {
+    const fov = params.has('fov') ? Number(params.get('fov')) : undefined;
+    camera = { eye, target, fov: Number.isFinite(fov) ? fov : undefined };
+  }
+  return { design: params.get('design'), camera };
 }
 
 controls.addEventListener('end', writeHash);
-window.addEventListener('hashchange', () => { if (root) applyHash(); });
+window.addEventListener('hashchange', () => {
+  const hash = readHash();
+  if (hash.design !== null && hash.design !== design) {
+    if (hash.camera) views.set(hash.design, { ...views.get(hash.design), camera: hash.camera });
+    openDesign(hash.design);
+  } else if (hash.camera && root) {
+    setCamera(hash.camera);
+  }
+});
 
 function pathsOf(names) {
   const list = Array.isArray(names) ? names : [names];
@@ -1261,19 +1300,138 @@ window.preview = {
     }); },
   /** The layout version on screen. */
   get version() { return loadedVersion; },
-  /** Resolves with the version once a scene is loaded, or a newer one than `after`. */
+  /** Resolves with the version once the shown design's scene is loaded, or a newer one than `after`. */
   loaded: (after) => (loadedVersion !== null && loadedVersion !== after
     ? Promise.resolve(loadedVersion) : new Promise((resolve) => waiting.push(resolve))),
+  /** The designs the server serves, by name (the build files' names). */
+  designs: () => [...designs],
+  /** The design shown. */
+  get design() { return design; },
+  /** Shows a design; resolves with its version once its latest build is on screen, rejects with the
+   *  build's log when that build failed (the last good scene stays). */
+  open: async (name) => {
+    await listed;
+    if (!designs.includes(name)) throw new Error(`no design ${JSON.stringify(name)}; there are ${designs.join(', ')}`);
+    openDesign(name);
+    return new Promise((resolve, reject) => settling.push({ resolve, reject }));
+  },
 };
+
+// -- designs: the build files the server serves, one shown at a time -----------
+//
+// The server lists the build files in its folder (just the one, given a
+// file) and builds the design a page asks about when it changed. Each
+// design keeps its own view while the page is open: the camera, hidden
+// parts, the selection and the section. One shown for the first time is
+// fitted; the display settings above are shared.
+
+let design = null;              // the name of the design shown
+let designs = [];               // the names of all, as the server lists them
+let designUrl = null;           // where the shown design's files are, e.g. 'out/van/'
+let shownBuild = null;          // the build count and state the status line shows
+let buildLog = '';
+const views = new Map();        // design name -> {camera, hidden, selected, section}
+const settling = [];            // preview.open() calls, settled once their design is up to date
+let isListed;
+const listed = new Promise((resolve) => { isListed = resolve; });
+
+// At first the design the URL hash names, or the one shown last; the server
+// says whether it still exists.
+const fromHash = readHash();
+let wanted = fromHash.design ?? stored('design', null);
+if (wanted !== null && fromHash.camera) views.set(wanted, { camera: fromHash.camera });
+
+function setDesigns(names) {
+  if (names.join('\n') !== designs.join('\n')) {
+    designs = names;
+    $('design').replaceChildren(...names.map((name) => new Option(name, name)));
+  }
+  if ($('design').value !== (design ?? '')) $('design').value = design ?? '';
+  isListed();
+}
+
+function openDesign(name) {
+  if (name === design) { poll(); return; }
+  if (design !== null && root) {
+    views.set(design, { camera: cameraState(), hidden: [...hidden], selected: selectedPath, section: { ...section } });
+  }
+  for (const { reject } of settling.splice(0)) reject(new Error(`switched to ${name}`));
+  design = name;
+  wanted = null;
+  store('design', name);
+  version = loadedVersion = designUrl = shownBuild = null;
+  const view = views.get(name);
+  hidden.clear();
+  for (const path of view?.hidden ?? []) hidden.add(path);
+  selectedPath = view?.selected ?? null;
+  Object.assign(section, { on: false, axis: 'z', pos: 0.5, flip: false }, view?.section);
+  clearScene();
+  applySection();
+  $('design').value = name;
+  $('status').textContent = 'loading…';
+  $('status').className = '';
+  document.title = `${name} · Layout preview`;
+  writeHash();
+  poll();
+}
+
+function stepDesign(step) {
+  if (!designs.length) return;
+  const i = Math.max(0, designs.indexOf(design));
+  openDesign(designs[(i + step + designs.length) % designs.length]);
+}
+
+$('design').onchange = (e) => openDesign(e.target.value);
+
+// The shown design's state from the server: the status line shows its
+// latest build's log, the scene follows its version.
+async function update(d) {
+  designUrl = d.url;
+  const status = $('status');
+  if (shownBuild?.builds !== d.builds || shownBuild?.state !== d.state) {
+    shownBuild = { builds: d.builds, state: d.state };
+    let text = `building ${d.name}…`;
+    if (d.builds > 0) {
+      try { text = (await (await fetch(d.url + 'build.log', { cache: 'no-store' })).text()).trim() || 'ok'; }
+      catch (e) {}
+    }
+    if (design !== d.name) return;
+    buildLog = text;
+    status.textContent = text;
+    status.className = d.state === 'failed' ? 'error' : '';
+  }
+  if (d.version && d.version !== version) {
+    version = d.version;
+    await load();
+  }
+  if (d.state !== 'building' && design === d.name && loadedVersion === d.version) {
+    for (const { resolve, reject } of settling.splice(0)) {
+      if (d.state === 'ok') resolve(loadedVersion); else reject(new Error(buildLog));
+    }
+  }
+}
 
 // -- reload loop ---------------------------------------------------------------
 
+// The server builds what the open pages show; it tells them apart by an id.
+const pageId = Math.random().toString(36).slice(2, 10);
+let pollTimer = null;
 async function poll() {
+  clearTimeout(pollTimer);
+  const asked = design ?? wanted ?? '';
   try {
-    const v = await (await fetch('out/version.txt', { cache: 'no-store' })).text();
-    if (v !== version) { const first = version === null; version = v; await load(first); }
+    const query = `design=${encodeURIComponent(asked)}&page=${pageId}`;
+    const s = await (await fetch('status.json?' + query, { cache: 'no-store' })).json();
+    setDesigns(s.designs);
+    if (asked === (design ?? wanted ?? '')) {      // else the page switched meanwhile
+      if (s.design && s.design.name === design) await update(s.design);
+      else if (s.design) openDesign(s.design.name);           // the one wanted at the start
+      else if (s.designs.length) openDesign(s.designs[0]);    // none wanted, or it is gone
+      else { $('status').textContent = `no build files in ${s.folder}`; $('status').className = 'error'; }
+    }
   } catch (e) {}
-  setTimeout(poll, 700);
+  clearTimeout(pollTimer);
+  pollTimer = setTimeout(poll, 700);
 }
 poll();
 

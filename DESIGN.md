@@ -1147,6 +1147,23 @@ below is proposed]
   from a named direction in one call instead of steering the mouse
   (AGENTS.md has the details). The camera is kept in the URL hash, so a
   link or a reload shows the same view.
+- One preview for a folder [implemented 2026-10-12]: `python -m lang.preview
+  examples` serves every build file in the folder, each built into
+  `out/<name>/`, and the page switches between them with a dropdown (keys
+  `,` and `.`; `preview.open(name)` from code). A build file is a `.py`
+  file that imports `lang`; one the others import is a library and not
+  listed unless it keeps a build of its own under `if __name__ ==
+  "__build__":`. Only the designs that open pages show are built: a save
+  of a build file nothing imports marks that design stale, any other
+  change (`lang`, `lib`, a shared module or a snapshot in the folder) all
+  of them, and a stale design builds when a page shows it. The folder is
+  rescanned on every change, so new build files appear without a restart.
+  A build goes to a scratch directory and moves in when it went through,
+  so a failed one shows its log and leaves the last good scene. The hash
+  carries the design (`#design=van&eye=…`); each design keeps its own
+  camera, hidden parts, selection and section while the page is open,
+  one shown for the first time is fitted. Given a single build file the
+  server builds it into `--out` on every save, as before.
 - SpaceMouse: the viewer talks to 3DxWare's navigation server
   (`lang/preview/viewer/spacemouse.js`), which works in Chrome and in the
   Claude app's browser pane, not in Safari. The page connects in Safari too,
