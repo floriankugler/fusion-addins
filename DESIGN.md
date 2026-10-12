@@ -436,7 +436,13 @@ proposed]
   `examples/operations.py` rounds a corner of a board lying flat, one of
   a standing board and the corners of a notch, and cuts a corner off. The
   emit plan has them as true arcs, tangent to their edges (tested); not
-  compiled in Fusion yet.
+  compiled in Fusion yet. Kept as chosen [decided by Florian 2026-10-12]:
+  a chamfer on an edge through the board changes the outline instead of
+  making a Fusion chamfer; a fillet or chamfer cutting into an earlier
+  operation at its corner is an error; corners are not named by a point
+  (`panel.top.front(60).left(40)`) until a build needs it, so the corners
+  a joint adds to the outline (tenon shoulders) are reached only through
+  the whole outline.
 - **Polygons** [proposed]: clip a rectangle's corner; trim by reference planes with
   `between`; walk an outline step by step; a raw point list as escape hatch.
 
