@@ -7,33 +7,36 @@ the concealed_hinge_native add-in drills from the two edges it is given:
 the door's hinged edge, the edge of its inner face (the big face toward
 the carcass board) next to that board, and the carcass board's edge, the
 front edge of its face toward the door's middle, where the mounting
-plates go.
+plates go, or of the face given (`carcass=wall.left`, for a partition
+the door's middle lies within).
 
 - `count=` hinges (2; the add-in always makes two), the outer ones'
-  centres `margin=` from the ends of the door's hinged edge (60), the rest
-  evenly between.
+  centres `end=` from the ends of the door's hinged edge (60), the rest
+  evenly between (`lib.stations`).
 - Per hinge two holes in the door's inner face, 10 mm wide and 5 deep and
   32 apart along the edge, in a row 27 mm (+0 model) or 30 mm (+3) from
   the carcass board's face toward the door's middle, whatever the door's
   overlay or gap.
 - Per hinge two pre-drill holes for the mounting plate's screws in the
   carcass board's face, 32 apart, 38.5 mm behind the door's inner face,
-  `predrill=` wide and deep (1/8 inch by 3).
+  `pilot=` wide and deep (1/8 inch by 3).
 - The hinges are placed as `<door>_hinges`, a body per hinge made of
   four boxes, cup, arm, clip and mounting plate (`HINGE_SHAPES`, measured
   from Häfele's CAD models). Hinges are numbered by their place
   along the edge, from the bottom, or for a flap from the door's own
   left, seen standing in front of it, so a cabinet and a module in the
-  van's terms number them alike: bodies `hinge1`, `hinge2`, ...
+  van's terms number them alike: bodies `hinge_1`, `hinge_2`, ...
 
-Refused as the add-in refuses: an end margin under 27 mm (its dialog's
+Refused as the add-in refuses: an end distance under 27 mm (its dialog's
 smallest), hinges 42 mm apart or closer (their hole pairs would meet), a
-door and carcass board that are one board, and holes whose centres miss
-their face. The add-in's edges are boards here, so the door and the
-carcass board must stand square to each other: the hinged edge then runs
-along the carcass board's face. The hinge dictates nothing about the
-door's overlay or gap that the add-in knows (its plausibility check of
-the overlay is switched off), so there is no door-sizing method.
+door and carcass board that are one board, and holes that do not fit on
+their face (`Board.hole_fits`: off the board, over its edge, or in a hole
+or pocket made before), or as deep as the board is thick. The add-in's
+edges are boards here, so the door and the carcass board must stand
+square to each other: the hinged edge then runs along the carcass board's
+face. The hinge dictates nothing about the door's overlay or gap that the
+add-in knows (its plausibility check of the overlay is switched off), so
+there is no door-sizing method.
 
 Drilling dimensions from `lib/concealed_hinges.py`, the add-in's, which
 it reads too. Operations are named by the other board and the hinge,
@@ -42,26 +45,25 @@ suffix where two doors of one name share a partition).
 """
 from __future__ import annotations
 
+import string
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
-from shapely.geometry import Point
-
 from lib import concealed_hinges as data
+from lib.stations import stations as spread
 
-from ..core import directions
-from ..core.box import Box
-from ..core.directions import AXES, Axis
+from ..core.directions import AXES, Axis, world_frame
 from ..core.errors import LangError, one_of
-from ..core.layout_types import BoxDict, HardwareBodyLayout
-from ..core.part import Board, Face
+from ..core.faces import Face
+from ..core.layout_types import HardwareBodyLayout
+from ..core.part import Board
 from ..core.refs import Pos
+from .common import TOLERANCE, Point2, along, check_hole, check_pilot_depth, middle, mm, numbering, uv, world_box
 
 if TYPE_CHECKING:
     from ..core.scope import Scope
 
 HingeModel = Literal["Blum CLIP top 110 Thin +0", "Blum CLIP top 110 Thin +3"]
-EPS = 1e-6
 
 #: Two ends of a box along one axis, mm.
 Extent = tuple[float, float]
@@ -113,9 +115,12 @@ _CLIP_TOP_THIN = HingeShape(
     clip=((3.2, 34.2), (38.0, 77.0), (-12.9, 12.9)),
     plate=((0.0, 8.5), (17.5, 59.0), (-28.1, 28.1)),   # 41.5 deep, 56.2 long, centred on its screws
 )
+#: Per model: the hinge on the plate as much higher as the model's door
+#: row lies further from the carcass board (`lib.concealed_hinges`: 3 mm
+#: for the +3).
 HINGE_SHAPES: dict[str, HingeShape] = {
-    "Blum CLIP top 110 Thin +0": _CLIP_TOP_THIN,
-    "Blum CLIP top 110 Thin +3": _CLIP_TOP_THIN.raised(3.0),
+    model.name: _CLIP_TOP_THIN.raised(model.door_row - data.CLIP_TOP_THIN_0.door_row)
+    for model in data.HINGE_MODELS.values()
 }
 
 
@@ -136,28 +141,35 @@ class _Meeting:
     order: int
 
 
-class ConcealedHinge:
-    """A concealed hinge model with the add-in's settings: `margin` from each
-    end of the door's hinged edge to the nearest hinge's centre, `count`
-    hinges per door, `predrill` as (diameter, depth) of the carcass holes,
-    mm."""
+@dataclass(frozen=True)
+class _Hole:
+    board: Board
+    face: Face
+    point: Point2
+    name: str
 
-    def __init__(self, model: HingeModel = "Blum CLIP top 110 Thin +0", *, margin: float = data.DEFAULT_END_MARGIN,
-                 count: int = 2,
-                 predrill: tuple[float, float] = (data.DEFAULT_PREDRILL_DIAMETER, data.DEFAULT_PREDRILL_DEPTH)):
+
+class ConcealedHinge:
+    """A concealed hinge model with the add-in's settings: `count` hinges
+    per door, the outer ones' centres `end` from the ends of the door's
+    hinged edge, `pilot` as (diameter, depth) of the carcass holes, mm."""
+
+    def __init__(self, model: HingeModel = "Blum CLIP top 110 Thin +0", *, count: int = 2,
+                 end: float = data.DEFAULT_END_MARGIN,
+                 pilot: tuple[float, float] = (data.DEFAULT_PREDRILL_DIAMETER, data.DEFAULT_PREDRILL_DEPTH)):
         self.model = data.HINGE_MODELS[one_of(model, HingeModel, "ConcealedHinge()")]
-        if margin < data.MIN_END_MARGIN:
-            raise LangError(f"{self.name}: the end margin must be at least {data.MIN_END_MARGIN:g} mm, "
-                            f"not {margin:g}.")
+        if end < data.MIN_END_MARGIN:
+            raise LangError(f"{self.name}: end= must be at least {mm(data.MIN_END_MARGIN)}, not {mm(end)}.")
         if count < 2:
             raise LangError(f"{self.name}: a door takes at least two hinges, not {count}.")
-        for what, value in zip(("diameter", "depth"), predrill):
+        for what, value in zip(("diameter", "depth"), pilot):
             if value < data.MIN_PREDRILL:
-                raise LangError(f"{self.name}: the pre-drill {what} must be at least {data.MIN_PREDRILL:g} mm, "
-                                f"not {value:g}.")
-        self.margin = float(margin)
+                raise LangError(f"{self.name}: the pilot {what} must be at least {mm(data.MIN_PREDRILL)}, "
+                                f"not {mm(value)}.")
         self.count = count
-        self.predrill = predrill
+        #: From each end of the door's hinged edge to the nearest hinge's centre.
+        self.end = float(end)
+        self.pilot = (float(pilot[0]), float(pilot[1]))
 
     @property
     def name(self) -> str:
@@ -173,147 +185,119 @@ class ConcealedHinge:
         """The carcass holes' row behind the door's inner face, mm."""
         return data.CARCASS_ROW_INSET
 
-    def stations(self, door: Board, carcass: Board) -> list[Pos]:
+    def stations(self, door: Board, carcass: Board | Face) -> list[Pos]:
         """The hinges' centres along the door's hinged edge, in the order
         they are numbered."""
         return self._stations(self._meeting(door, carcass), door)
 
-    def mount(self, scope: Scope, /, **options: object) -> None:
+    def mount(self, scope: Scope, /, *, door: Board, carcass: Board | Face) -> None:
         """`cab.mount(hinge, door=door, carcass=left)`: drills the door and
-        the carcass board for the hinges and places them in `scope`."""
-        unknown = set(options) - {"door", "carcass"}
-        if unknown or "door" not in options or "carcass" not in options:
-            raise LangError(f"{self.name}: mount() takes door= and carcass=, got {sorted(options)}.", scope.path)
-        door, carcass = options["door"], options["carcass"]
-        if not isinstance(door, Board) or not isinstance(carcass, Board):
-            raise LangError(f"{self.name}: door= and carcass= take boards.", scope.path)
-        self._hinge(scope, door, carcass)
+        the carcass board for the hinges and places them in `scope`.
+        `carcass=` is the board, the plates going on its big face toward
+        the door's middle, or that face itself (`wall.left`). Nothing is
+        drilled unless every hole fits."""
+        m = self._meeting(door, carcass)
+        stations = self._stations(m, door)
+        door_holes, carcass_holes = self._holes(m, stations)
+        taken = [hole.name for hole in door_holes if door.has_operation(hole.name)]
+        if taken:
+            raise LangError(f"{self.name}: {door.path} is hinged on {m.carcass_face.part.path} already ({taken[0]}).",
+                            door.path)
+        diameter, depth = self.pilot
+        check_pilot_depth(self.name, door, data.DOOR_CUP_DEPTH, "door hole")
+        check_pilot_depth(self.name, m.carcass_face.part, depth, "pilot")
+        for holes, d, what in ((door_holes, data.DOOR_CUP_DIAMETER, "door hole"),
+                               (carcass_holes, diameter, "pilot hole")):
+            for hole in holes:
+                check_hole(self.name, hole.board, hole.face, hole.point, d, what)
+        for hole in door_holes:
+            door.add_hole(hole.face, hole.point, data.DOOR_CUP_DIAMETER, data.DOOR_CUP_DEPTH, name=hole.name)
+        for hole in carcass_holes:       # doors of one name in different scopes may share a partition
+            hole.board.add_hole(hole.face, hole.point, diameter, depth, name=hole.board.unique_op_name(hole.name))
+        self._place(scope, door, m, stations)
 
     # -- geometry ------------------------------------------------------------------------------
 
-    def _meeting(self, door: Board, carcass: Board) -> _Meeting:
-        if door is carcass:
+    def _meeting(self, door: Board, carcass: Board | Face) -> _Meeting:
+        board = carcass.part if isinstance(carcass, Face) else carcass
+        if door is board:
             raise LangError(f"{self.name}: the door and the carcass board must be two different boards.", door.path)
-        across, back = carcass.t_axis, door.t_axis
+        across, back = board.t_axis, door.t_axis
         if across == back:
-            raise LangError(f"{self.name}: {door.path} and {carcass.path} lie in parallel planes; a door is hinged "
+            raise LangError(f"{self.name}: {door.path} and {board.path} lie in parallel planes; a door is hinged "
                             "on a carcass board standing square to it.", door.path)
-        along: Axis = next(a for a in AXES if a != across and a != back)
-        db, cb = door.box(), carcass.box()
-        toward_door = _sign(_middle(db, across) - _middle(cb, across))
-        toward_carcass = _sign(_middle(cb, back) - _middle(db, back))
-        if toward_door == 0:
-            raise LangError(f"{self.name}: {door.path} is centred on {carcass.path}'s thickness, so neither of "
-                            f"its faces is the one toward the door.", door.path)
-        if toward_carcass == 0:
-            raise LangError(f"{self.name}: {door.path} is centred on {carcass.path}'s depth; a door stands in "
+        edge: Axis = next(a for a in AXES if a != across and a != back)
+        db, cb = door.box(), board.box()
+        door_middle = middle(db, across)
+        if isinstance(carcass, Face):
+            if not carcass.is_big:
+                raise LangError(f"{self.name}: {carcass!r} is a narrow face; name the big face of the carcass "
+                                "board the mounting plates go on.", door.path)
+            if (door_middle - carcass.value) * carcass.direction.sign < -board.thickness - TOLERANCE:
+                raise LangError(f"{self.name}: {door.path} lies behind {board.path}'s {carcass.name} face, on the "
+                                "far side of the board; the mounting plates go on the face toward the door.",
+                                door.path)
+            carcass_face = carcass
+        else:
+            if cb.lo[across] - TOLERANCE <= door_middle <= cb.hi[across] + TOLERANCE:
+                a, b = (board.face(board.scope.frame.direction_of(across, sign)).name for sign in (-1, 1))
+                raise LangError(f"{self.name}: the middle of {door.path} lies within {board.path}'s thickness; "
+                                f"name the face the mounting plates go on, carcass={board.name}.{a} or "
+                                f"{board.name}.{b}.", door.path)
+            carcass_face = board.face(board.scope.frame.direction_of(across, 1 if door_middle > cb.hi[across] else -1))
+        toward_carcass = middle(cb, back) - middle(db, back)
+        if abs(toward_carcass) < TOLERANCE:
+            raise LangError(f"{self.name}: {door.path} is centred on {board.path}'s depth; a door stands in "
                             "front of the board it is hinged on.", door.path)
-        door_face = door.face(door.scope.frame.direction_of(back, toward_carcass))
-        carcass_face = carcass.face(carcass.scope.frame.direction_of(across, toward_door))
-        return _Meeting(door_face, carcass_face, along, (db.lo[along], db.hi[along]),
-                        _order(along, back, toward_carcass))
+        sign = 1 if toward_carcass > 0 else -1
+        door_face = door.face(door.scope.frame.direction_of(back, sign))
+        return _Meeting(door_face, carcass_face, edge, (db.lo[edge], db.hi[edge]),
+                        numbering(world_frame().direction_of(back, sign), edge))
 
     def _stations(self, m: _Meeting, door: Board) -> list[Pos]:
-        """The add-in measures the margin along the door's edge (its sketch
+        """The add-in measures `end` along the door's edge (its sketch
         dimensions run from the door edge's ends), so the carcass board's
         extent does not matter."""
         lo, hi = m.ends
         length = hi - lo
-        if length <= 2 * self.margin + EPS:
-            raise LangError(f"{self.name}: the door's hinged edge ({length:g} mm) is too short for an end margin "
-                            f"of {self.margin:g}.", door.path)
-        pitch = (length - 2 * self.margin) / (self.count - 1)
-        if pitch <= 2 * data.HINGE_HALF_EXTENT + EPS:
-            raise LangError(f"{self.name}: the door's hinged edge ({length:g} mm) is too short for {self.count} "
-                            f"hinges more than {2 * data.HINGE_HALF_EXTENT:g} mm apart at an end margin of "
-                            f"{self.margin:g}.", door.path)
-        values = [lo + self.margin + i * pitch for i in range(self.count)]
+        if length <= 2 * self.end + TOLERANCE:
+            raise LangError(f"{self.name}: the door's hinged edge ({mm(length)}) is too short for hinges "
+                            f"{mm(self.end)} from its ends.", door.path)
+        values = [lo + s for s in spread(length, self.count, self.end)]
+        if values[1] - values[0] <= 2 * data.HINGE_HALF_EXTENT + TOLERANCE:
+            raise LangError(f"{self.name}: the door's hinged edge ({mm(length)}) is too short for {self.count} "
+                            f"hinges more than {mm(2 * data.HINGE_HALF_EXTENT)} apart, {mm(self.end)} from its "
+                            "ends.", door.path)
         return [Pos(m.along, v) for v in (values if m.order > 0 else values[::-1])]
 
-    # -- mounting ------------------------------------------------------------------------------
-
-    def _hinge(self, scope: Scope, door: Board, carcass: Board) -> None:
-        """Works out every hole and checks them all before it drills one,
-        so a refused mount changes nothing."""
-        m = self._meeting(door, carcass)
-        stations = self._stations(m, door)
+    def _holes(self, m: _Meeting, stations: list[Pos]) -> tuple[list[_Hole], list[_Hole]]:
+        """The door holes and the carcass holes, numbered by hinge and
+        lettered a, b in the order the hinges are numbered."""
         c, d = m.carcass_face, m.door_face
+        door, carcass = d.part, c.part
         door_row = c.value + c.direction.sign * self.door_row          # across, toward the door's middle
         carcass_row = d.value + d.direction.sign * self.carcass_row    # back, into the carcass
         half = data.HOLE_PAIR_SPACING / 2
-        door_holes: list[tuple[str, tuple[float, float]]] = []
-        carcass_holes: list[tuple[str, tuple[float, float]]] = []
+        door_holes: list[_Hole] = []
+        carcass_holes: list[_Hole] = []
         for i, station in enumerate(stations, 1):
-            for letter, offset in (("a", -half * m.order), ("b", half * m.order)):
-                along = station.value + offset
-                in_door = {c.axis: door_row, m.along: along}
-                in_carcass = {d.axis: carcass_row, m.along: along}
-                door_holes.append((f"hinge_{carcass.name}_{i}{letter}", (in_door[door.u_axis], in_door[door.v_axis])))
-                carcass_holes.append((f"hinge_{door.name}_{i}{letter}",
-                                      (in_carcass[carcass.u_axis], in_carcass[carcass.v_axis])))
-        for board, face, holes, what in ((door, d, door_holes, "door"), (carcass, c, carcass_holes, "carcass")):
-            outline = board.outline.geometry
-            if any(outline.distance(Point(point)) > EPS for _, point in holes):
-                raise LangError(f"{self.name}: the {what} holes do not fit on {board.path}'s {face.name} face.",
-                                board.path)
-        taken = [hole for hole, _ in door_holes if door.has_operation(hole)]
-        if taken:
-            raise LangError(f"{self.name}: {door.path} is hinged on {carcass.path} already ({taken[0]}).", door.path)
-        diameter, depth = self.predrill
-        for hole, point in door_holes:
-            door.add_hole(d, point, data.DOOR_CUP_DIAMETER, data.DOOR_CUP_DEPTH, name=hole)
-        for hole, point in carcass_holes:       # doors of one name in different scopes may share a partition
-            carcass.add_hole(c, point, diameter, depth, name=carcass.unique_op_name(hole))
-        self._place(scope, door, m, stations)
+            for letter, offset in zip(string.ascii_lowercase, (-half * m.order, half * m.order)):
+                at = station.value + offset
+                door_holes.append(_Hole(door, d, uv(door, {c.axis: door_row, m.along: at}),
+                                        f"hinge_{carcass.name}_{i}{letter}"))
+                carcass_holes.append(_Hole(carcass, c, uv(carcass, {d.axis: carcass_row, m.along: at}),
+                                           f"hinge_{door.name}_{i}{letter}"))
+        return door_holes, carcass_holes
 
     def _place(self, scope: Scope, door: Board, m: _Meeting, stations: list[Pos]) -> None:
         """Records the hinges as `<door>_hinges`, a body per hinge
-        (`hinge1`, `hinge2`, ... in the order they are numbered), each made
-        of the model's `HINGE_SHAPES` boxes, measured from the carcass
+        (`hinge_1`, `hinge_2`, ... in the order they are numbered), each
+        made of the model's `HINGE_SHAPES` boxes, measured from the carcass
         board's face, the door's inner face and the hinge's centre."""
-        name, n = f"{door.name}_hinges", 2
-        while any(item["name"] == name for item in scope.hardware):     # doors of one name in child scopes
-            name, n = f"{door.name}_hinges_{n}", n + 1
         c, d = m.carcass_face, m.door_face
         bodies: list[HardwareBodyLayout] = []
         for i, station in enumerate(stations, 1):
-            starts: tuple[tuple[Axis, int, float], ...] = (
-                (c.axis, c.direction.sign, c.value), (d.axis, d.direction.sign, d.value), (m.along, 1, station.value))
-            boxes = [_world_box(starts, box) for box in HINGE_SHAPES[self.name].boxes().values()]
-            bodies.append(HardwareBodyLayout(name=f"hinge{i}", boxes=boxes))
-        scope.place_hardware(name, bodies)
-
-
-def _middle(box: Box, axis: Axis) -> float:
-    return (box.lo[axis] + box.hi[axis]) / 2
-
-
-def _sign(value: float) -> int:
-    return 0 if abs(value) < EPS else (1 if value > 0 else -1)
-
-
-def _order(along: Axis, back: Axis, toward_carcass: int) -> int:
-    """Which way hinges are numbered along the edge: from the bottom; along
-    a level edge from the door's own left, seen standing in front of it
-    (its right is back x up, as for a drawer's runners); for a lid, whose
-    front faces up, toward the world's positive axis."""
-    up = directions.frame.direction("top")
-    if along == up.axis:
-        return up.sign
-    if back == up.axis:
-        return 1
-    b = [0, 0, 0]
-    b[AXES.index(back)] = toward_carcass
-    u = up.vector
-    right = (b[1] * u[2] - b[2] * u[1], b[2] * u[0] - b[0] * u[2], b[0] * u[1] - b[1] * u[0])
-    return right[AXES.index(along)]
-
-
-def _world_box(starts: tuple[tuple[Axis, int, float], ...], box: HingeBox) -> BoxDict:
-    """A hinge box in world coordinates: each of its extents measured along
-    an axis, in a direction, from a world position."""
-    lo, hi = [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]
-    for (axis, sign, start), (a, b) in zip(starts, box):
-        i = AXES.index(axis)
-        lo[i], hi[i] = sorted((start + sign * a, start + sign * b))
-    return {"min": lo, "max": hi}
+            starts = ((c.direction, c.value), (d.direction, d.value), (along(m.along), station.value))
+            boxes = [world_box(starts, box) for box in HINGE_SHAPES[self.name].boxes().values()]
+            bodies.append(HardwareBodyLayout(name=f"hinge_{i}", boxes=boxes))
+        scope.place_hardware(scope.unique_hardware_name(f"{door.name}_hinges"), bodies)

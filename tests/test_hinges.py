@@ -108,7 +108,7 @@ def test_an_inset_door():
 
 def test_count_spreads_hinges_evenly_between_the_margins():
     """The add-in makes two; more go evenly between the outer two."""
-    _, door, side, _ = _overlay(ConcealedHinge(margin=100, count=3))
+    _, door, side, _ = _overlay(ConcealedHinge(end=100, count=3))
     stations = [100 + 1.5, 350.0, 698.5 - 100]
     assert sorted({v for *_, v, _, _ in _holes(door)}) == sorted(s + d for s in stations for d in (-16, 16))
     assert [name for name, *_ in _holes(side)] == [f"hinge_door_{i}{c}" for i in (1, 2, 3) for c in "ab"]
@@ -171,7 +171,7 @@ def test_a_cabinet_and_a_module_in_the_vans_terms_hinge_a_door_alike():
     and hinge bodies, numbered from the bottom in both."""
     plain, cabinet = _result(front=False), _result(front=True)
     assert plain == cabinet
-    assert [b["name"] for b in plain[3][0]["bodies"]] == ["hinge1", "hinge2"]
+    assert [b["name"] for b in plain[3][0]["bodies"]] == ["hinge_1", "hinge_2"]
 
 
 def test_hinges_on_the_cabinetmakers_left_or_right():
@@ -213,7 +213,7 @@ def test_hinges_are_placed_as_boxes_from_the_door_and_the_side(model: HingeModel
     cab, door, side, _ = _overlay(ConcealedHinge(model))
     (item,) = cab.hardware
     assert item["path"] == "cab.door_hinges" and item["name"] == "door_hinges"
-    assert [b["name"] for b in item["bodies"]] == ["hinge1", "hinge2"]
+    assert [b["name"] for b in item["bodies"]] == ["hinge_1", "hinge_2"]
     shape = HINGE_SHAPES[model].boxes()
     assert list(shape) == ["cup", "arm", "clip", "plate"]
     for body, z in zip(item["bodies"], (61.5, 638.5)):
@@ -264,7 +264,7 @@ def test_the_example_plans_its_hinge_holes_and_bodies(tmp_path: Path):
     assert predrill.points == [(435.0, 299.5, z) for z in (45.5, 77.5, 522.5, 554.5)]
     (hinges,) = plan.hardware
     assert hinges.path == "hingecab.door_hinges" and hinges.component == ("hingecab",)
-    assert [b.name for b in hinges.bodies] == ["hinge1", "hinge2"] and all(len(b.boxes) == 4 for b in hinges.bodies)
+    assert [b.name for b in hinges.bodies] == ["hinge_1", "hinge_2"] and all(len(b.boxes) == 4 for b in hinges.bodies)
 
 
 def test_preview_draws_each_hinge_as_one_body():
@@ -282,9 +282,9 @@ def test_preview_draws_each_hinge_as_one_body():
             mesh = scene.geometry[geometry].copy()
             mesh.apply_transform(transform)
             meshes[node.rsplit(".", 1)[1]] = mesh
-    assert set(meshes) == {"hinge1", "hinge2"}
-    assert meshes["hinge1"].is_volume and meshes["hinge1"].body_count == 1
-    assert meshes["hinge1"].bounds.round(3).tolist() == bounds
+    assert set(meshes) == {"hinge_1", "hinge_2"}
+    assert meshes["hinge_1"].is_volume and meshes["hinge_1"].body_count == 1
+    assert meshes["hinge_1"].bounds.round(3).tolist() == bounds
 
 
 # -- what it refuses ------------------------------------------------------------------------------
@@ -297,10 +297,10 @@ def test_the_model_names_are_the_add_ins():
 
 @pytest.mark.parametrize("make, message", [
     (lambda: ConcealedHinge("Blum CLIP top 110 Thin +6"), "ConcealedHinge(): expected 'Blum CLIP top 110 Thin +0'"),  # type: ignore[arg-type]
-    (lambda: ConcealedHinge(margin=26.9), "the end margin must be at least 27 mm, not 26.9."),
+    (lambda: ConcealedHinge(end=26.9), "end= must be at least 27 mm, not 26.9 mm."),
     (lambda: ConcealedHinge(count=1), "a door takes at least two hinges, not 1."),
-    (lambda: ConcealedHinge(predrill=(0.0, 3.0)), "the pre-drill diameter must be at least 0.1 mm"),
-    (lambda: ConcealedHinge(predrill=(3.0, 0.05)), "the pre-drill depth must be at least 0.1 mm"),
+    (lambda: ConcealedHinge(pilot=(0.0, 3.0)), "the pilot diameter must be at least 0.1 mm"),
+    (lambda: ConcealedHinge(pilot=(3.0, 0.05)), "the pilot depth must be at least 0.1 mm"),
 ])
 def test_settings_the_add_ins_dialog_refuses(make: Any, message: str):
     with pytest.raises(LangError) as error:
@@ -312,12 +312,18 @@ def test_settings_the_add_ins_dialog_refuses(make: Any, message: str):
 #: module `cab` (BOX in the van's terms, its left side 15 thick behind a
 #: 12 mm door), and the reason it gives.
 REFUSED: list[tuple[str, str]] = [
-    # the door's edge must leave room for the margins, then for two hinges more than 42 apart
-    ("short door", "the door's hinged edge (120 mm) is too short for an end margin of 60."),
+    # the door's edge must leave room for end=, then for two hinges more than 42 apart
+    ("short door", "the door's hinged edge (120 mm) is too short for hinges 60 mm from its ends."),
     ("door for one hinge", "too short for 2 hinges more than 42 mm apart"),
     # the door holes must land on the door, the carcass holes on the carcass board
-    ("narrow door", "the door holes do not fit on cab.door's back face."),
-    ("shallow carcass", "the carcass holes do not fit on cab.strip's left face."),
+    ("narrow door", "the door hole (10 mm) does not fit on cab.door's back face"),
+    ("shallow carcass", "the pilot hole (3.2 mm) does not fit on cab.strip's left face"),
+    # a cup's rim off the door: its centre 27 from the side's face, on a door 31 wide
+    ("cup rim off the door", "the door hole (10 mm) does not fit on cab.door's back face"),
+    # a cup over a hole drilled before, its centre clear of it
+    ("cup over a hole", "the door hole (10 mm) does not fit on cab.door's back face"),
+    # the carcass pilots as deep as the side is thick
+    ("deep pilots", "the pilot depth (15 mm) must be less than cab.left's thickness (15 mm)."),
     # two boards, standing square to each other
     ("one board", "two different boards"),
     ("parallel boards", "lie in parallel planes"),
@@ -326,6 +332,7 @@ REFUSED: list[tuple[str, str]] = [
 
 @pytest.mark.parametrize("case, message", REFUSED)
 def test_mounting_refuses_what_the_add_in_refuses(case: str, message: str):
+    hinge = ConcealedHinge()
     with module("cab", BOX) as cab:
         behind = cab.front.into(12)
         left = board("left", ply15).on(cab.left).between(behind)
@@ -336,6 +343,16 @@ def test_mounting_refuses_what_the_add_in_refuses(case: str, message: str):
             door = board("door", ply12).on(cab.front).between(cab.bottom, cab.bottom + 162)
         elif case == "narrow door":
             door = board("door", ply12).on(cab.front).between(cab.left, cab.left + 40)
+        elif case == "cup rim off the door":
+            door = board("door", ply12).on(cab.front).between(cab.left, cab.left + 46)
+        elif case == "cup over a hole":
+            door = board("door", ply12).on(cab.front)
+            # the lowest cup at y 42, z 44 (60 - 16): a 6 mm hole 6 below its
+            # centre, under its rim
+            door.hole(d=6, depth=3, at=door.back.left(Pos("y", 42)).bottom(Pos("z", 38)))
+        elif case == "deep pilots":
+            door = board("door", ply12).on(cab.front)
+            hinge = ConcealedHinge(pilot=(3, 15))
         elif case == "shallow carcass":
             door = board("door", ply12).on(cab.front)
             carcass = board("strip", ply15).on(cab.right).between(behind, behind + 30)
@@ -344,23 +361,77 @@ def test_mounting_refuses_what_the_add_in_refuses(case: str, message: str):
         else:
             door = board("door", ply12).on(cab.front)
             carcass = board("back", ply9).on(cab.back)
+        before = [op for op in door.ops + carcass.ops if isinstance(op, Hole)]
         with pytest.raises(LangError) as error:
-            cab.mount(ConcealedHinge(), door=door, carcass=carcass)
+            cab.mount(hinge, door=door, carcass=carcass)
     assert message in str(error.value)
-    assert not any(isinstance(op, Hole) for op in door.ops + carcass.ops)
+    assert [op for op in door.ops + carcass.ops if isinstance(op, Hole)] == before
 
 
 def test_mount_takes_a_door_and_a_carcass_board_once():
+    """The keywords are `mount`'s own (typed: a misspelt or missing one is
+    a TypeError, and pyright reports it, see typing_checks.py); hinging a
+    door on the same board twice is refused."""
     hinge = ConcealedHinge()
     with module("cab", BOX) as cab:
         left = board("left", ply15).on(cab.left).between(cab.front.into(12))
         door = board("door", ply12).on(cab.front)
-        with pytest.raises(LangError, match="takes door= and carcass="):
-            cab.mount(hinge, door=door)
-        with pytest.raises(LangError, match="takes door= and carcass="):
-            cab.mount(hinge, door=door, carcass=left, side=left)
+        with pytest.raises(TypeError, match="carcass"):
+            cab.mount(hinge, door=door)  # type: ignore[call-arg]
+        with pytest.raises(TypeError, match="side"):
+            cab.mount(hinge, door=door, carcass=left, side=left)  # type: ignore[call-arg]
         cab.mount(hinge, door=door, carcass=left)
         before = (list(door.ops), list(left.ops))
         with pytest.raises(LangError, match="cab.door is hinged on cab.left already"):
             cab.mount(hinge, door=door, carcass=left)
         assert (door.ops, left.ops) == before                   # a refused mount changes nothing
+
+
+# -- the vocabulary of the review (findings 26, 31, 44) -----------------------------------------------------
+
+def test_carcass_takes_a_face_like_the_latches():
+    """`carcass=` takes the face the mounting plates go on, as a latch's
+    does: needed where the door's middle lies within the carcass board's
+    thickness, such as a door centred on a partition."""
+    with module("cab", BOX, front=BOX.front) as cab:
+        behind = cab.front.into(12)
+        wall = board("wall", ply15).center(cab.center("width")).between(behind)
+        door = board("door", ply12).on(cab.front).between(cab.center("width") - 100, cab.center("width") + 100)
+        with pytest.raises(LangError, match=r"the middle of cab\.door lies within cab\.wall's thickness; name the "
+                                            r"face the mounting plates go on, carcass=wall\.right or wall\.left"):
+            cab.mount(ConcealedHinge(), door=door, carcass=wall)
+        with pytest.raises(LangError, match="narrow face"):
+            cab.mount(ConcealedHinge(), door=door, carcass=wall.front)
+        cab.mount(ConcealedHinge(), door=door, carcass=wall.left)
+    # the wall's left face (+y in a cabinet facing -x) at y 257.5, the door row 27 from it
+    assert {(h[1], h[2]) for h in _holes(wall)} == {("right", 50.5)}
+    assert {h[2] for h in _holes(door)} == {257.5 + 27}
+    registry.reset()
+    with module("cab", BOX) as cab:
+        left = board("left", ply15).on(cab.left).between(cab.front.into(12))
+        door = board("door", ply12).on(cab.front)
+        with pytest.raises(LangError, match=r"cab\.door lies behind cab\.left's left face"):
+            cab.mount(ConcealedHinge(), door=door, carcass=left.left)      # the outer face, away from the door
+        cab.mount(ConcealedHinge(), door=door, carcass=left.right)
+    assert {(h[1], h[2]) for h in _holes(left)} == {("right", 50.5)}      # as with carcass=left
+
+
+def test_settings_are_spelt_as_elsewhere():
+    """`end=` as for connectors, latches, catches and brackets (it was
+    `margin=`), `pilot=` for the pre-drill (it was `predrill=`), `count`
+    keyword-only."""
+    hinge = ConcealedHinge(count=3, end=80, pilot=(3, 4))
+    assert (hinge.count, hinge.end, hinge.pilot) == (3, 80.0, (3.0, 4.0))
+    with pytest.raises(TypeError):
+        ConcealedHinge(margin=60)  # type: ignore[call-arg]
+    with pytest.raises(TypeError):
+        ConcealedHinge(predrill=(3, 3))  # type: ignore[call-arg]
+
+
+def test_the_plus_3_hinge_stands_on_the_plate_the_lib_says():
+    """The +3 model's boxes are the +0 model's raised by the difference of
+    their door rows in lib.concealed_hinges (3), not a number of its own."""
+    raised = concealed_hinges.CLIP_TOP_THIN_3.door_row - concealed_hinges.CLIP_TOP_THIN_0.door_row
+    assert raised == 3
+    assert HINGE_SHAPES["Blum CLIP top 110 Thin +3"] == HINGE_SHAPES["Blum CLIP top 110 Thin +0"].raised(raised)
+    assert HINGE_SHAPES["Blum CLIP top 110 Thin +3"].plate[0] == (0.0, 11.5)
