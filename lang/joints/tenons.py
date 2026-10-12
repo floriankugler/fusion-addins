@@ -14,7 +14,8 @@ A router leaves its radius in every inside corner, so both boards get
 dog-bone reliefs for a `tool=` mm cutter, `relief=` wider than the tool:
 `dogbones="corner"` puts each on the corner's bisector, through the corner;
 `"hidden"` puts them into the tenon's root and past the mortise's ends,
-where the shoulder covers them once assembled. A mortise corner where the
+where the shoulder covers them once assembled; None leaves the corners
+square (`board.dogbones()` can relieve them later). A mortise corner where the
 mortise breaks out of its board needs none, nor does a tenon flush with the
 end of its board. The reliefs' geometry is `lang.core.dogbones`, shared
 with half laps and `board.dogbones()`.
@@ -22,6 +23,8 @@ with half laps and `board.dogbones()`.
 Along each contact: `count=` tenons `width=` wide, the outer ones `margin=`
 from the contact's ends (a single one centred), `even=True` for tenons as
 wide as the gaps between them, or tenons centred at the positions `at=`.
+`clearance=(along, across)` is the mortise's play in total, half of it on
+each side.
 
 As the tenons_native add-in makes them, defaults included. Its screws and
 connectors in the gaps between the tenons are joins of their own, which
@@ -62,7 +65,7 @@ class Tenons(ContactJoint):
     extra_depth: float
     tool: float
     relief: float
-    dogbones: DogBones
+    dogbones: DogBones | None
     #: What the joint made, per contact, for the joints that sit in its gaps;
     #: only joins that succeeded.
     made: list[TenonPlacement] = field(default_factory=list[TenonPlacement], compare=False, repr=False)
@@ -156,12 +159,13 @@ class Tenons(ContactJoint):
             lo, hi = s - w / 2, s + w / 2
             e.add_to_outline(_box(g.on_board(lo, _OVERLAP), g.on_board(hi, -length)))
             reliefs = [self._root_relief(g, x, side) for x, side in ((lo, -1.0), (hi, 1.0))
-                       if e_outline.geometry.contains(_point(g.on_board(x + side * PROBE, PROBE)))]
+                       if self.dogbones is not None
+                       and e_outline.geometry.contains(_point(g.on_board(x + side * PROBE, PROBE)))]
             if reliefs:
                 e.add_cut(union_all(reliefs), name=naming(e, f"tenon_{f.name}_{n}_relief"))
             corners = (lo - along_clear, across_lo - across_clear), (hi + along_clear, across_hi + across_clear)
             mortise = _box(g.on_face(*corners[0]), g.on_face(*corners[1]))
-            for along, across, into_along, into_across in _corners(corners):
+            for along, across, into_along, into_across in _corners(corners) if self.dogbones is not None else []:
                 outside = g.on_face(along - into_along * PROBE, across - into_across * PROBE)
                 if f_outline.geometry.contains(_point(outside)):
                     mortise = mortise.union(self._mortise_relief(g, along, across, into_along, into_across))
@@ -210,20 +214,26 @@ def _corners(corners: tuple[tuple[float, float], tuple[float, float]]
     return [(a0, c0, 1.0, 1.0), (a1, c0, -1.0, 1.0), (a1, c1, -1.0, -1.0), (a0, c1, 1.0, -1.0)]
 
 
-def tenons(count: int | None = None, *, width: float | None = None, margin: float = 30.0, even: bool = False,
+def tenons(count: int | None = None, *, width: float | None = None, margin: float | None = None, even: bool = False,
            at: Sequence[PosLike] | None = None, remaining: float = 0.0, clearance: tuple[float, float] = (0.1, 0.1),
            extra_depth: float = 0.5, tool: float = 6.0, relief: float = 0.1,
-           dogbones: DogBones = "corner") -> Tenons:
+           dogbones: DogBones | None = "corner") -> Tenons:
     """Integral tenons: `count` of them `width` wide with the outer ones
-    `margin` from the contact's ends, or `even=True` for tenons as wide as
-    the gaps between them, or `at=` positions for their centres. Through
-    the other board, or `remaining` short of its far face, the mortise then
-    `extra_depth` deeper than the tenon. `clearance` is the mortise's play
-    (along the joint, across it). Dog bones for a `tool` mm cutter, `relief`
-    wider, on the corners (`"corner"`) or under the shoulder (`"hidden"`)."""
+    `margin` from the contact's ends (30 by default, with two or more), or
+    `even=True` for tenons as wide as the gaps between them, or `at=`
+    positions for their centres. Through the other board, or `remaining`
+    short of its far face, the mortise then `extra_depth` deeper than the
+    tenon. `clearance=(along, across)` is the mortise's play along the
+    joint and across it, each in total, half of it on each side. Dog bones
+    for a `tool` mm cutter, `relief` wider, on the corners (`"corner"`),
+    under the shoulder (`"hidden"`), or None for square corners."""
     label = "tenons"
     # one of count= and at=, a count of 1 or more, a list of positions
-    spacing = make_spacing(label, count, 0.0, at)
+    spacing = make_spacing(label, count, at)
+    if margin is not None and (spacing.count is None or (spacing.count == 1 and not even)):
+        raise LangError("tenons: margin= spaces two tenons or more from the contact's ends; with "
+                        f"{'at=' if spacing.count is None else 'count=1, which centres the one,'} it has nothing to "
+                        "do, leave it out.")
     if spacing.count is None:
         if even:
             raise LangError("tenons: give at= or even=, not both.")
@@ -238,11 +248,13 @@ def tenons(count: int | None = None, *, width: float | None = None, margin: floa
             raise LangError("tenons: give width=, or even=True.")
     if width is not None and width <= 0:
         raise LangError("tenons: width must be positive.")
-    if margin < 0 or remaining < 0 or extra_depth < 0 or min(clearance) < 0 or relief < 0:
+    spaced = 30.0 if margin is None else float(margin)
+    if spaced < 0 or remaining < 0 or extra_depth < 0 or min(clearance) < 0 or relief < 0:
         raise LangError("tenons: margin, remaining, extra_depth, clearance and relief must not be negative.")
     if tool <= 0:
         raise LangError("tenons: tool must be positive.")
-    one_of(dogbones, DogBones, "tenons(dogbones=)")
-    return Tenons(count, None if width is None else float(width), float(margin), even, spacing.at, float(remaining),
+    if dogbones is not None:
+        one_of(dogbones, DogBones, "tenons(dogbones=)")
+    return Tenons(count, None if width is None else float(width), spaced, even, spacing.at, float(remaining),
                   (float(clearance[0]), float(clearance[1])), float(extra_depth), float(tool), float(relief),
                   dogbones)

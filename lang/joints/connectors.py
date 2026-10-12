@@ -153,7 +153,7 @@ class Domino(SpacedJoint):
 
 
 def domino(size: DominoSize, *, count: int | None = None, at: Sequence[PosLike] | None = None,
-           end: float = data.DOMINO_STOP_LATCH, fence: float | None = None, face: FaceChoice = None,
+           end: float | None = None, fence: float | None = None, face: FaceChoice = None,
            remaining: float | None = None, loose: float = 0.0, length_offset: float = 0.0,
            height_offset: float = 0.0, marks: DominoMarks | None = "all",
            mark_depth: float = data.DOMINO_MARK_DEPTH, mark_length: float = data.DOMINO_MARK_LENGTH) -> Domino:
@@ -161,8 +161,9 @@ def domino(size: DominoSize, *, count: int | None = None, at: Sequence[PosLike] 
     in the face of the board that is met, half the Domino's length plus 0.5
     deep, or as deep as leaves `remaining` of that board, and a mark on the
     edge-on board for the Domino machine. `end` is the distance of the
-    outer Dominos from the contact's ends, 37 by default (the machine's
-    stop latches; 20 with the additional stop). The slots are centred on
+    outer Dominos from the contact's ends with `count=` 2 or more, 37 by
+    default (the machine's stop latches; 20 with the additional stop). The
+    slots are centred on
     the edge-on board's thickness, or `fence` from its reference face (the
     show face, or `face=`), the face the machine's fence rests on.
 
@@ -178,7 +179,7 @@ def domino(size: DominoSize, *, count: int | None = None, at: Sequence[PosLike] 
     face = face_choice("domino", face)
     if marks is not None:
         one_of(marks, DominoMarks, "domino(marks=)")
-    spacing = make_spacing("domino", count, end, at)
+    spacing = make_spacing("domino", count, at, end=end, default_end=data.DOMINO_STOP_LATCH)
     if spec.thickness + height_offset <= 0:
         raise LangError("domino: height_offset leaves no slot.")
     if spec.width + length_offset - (spec.thickness + height_offset) <= EPS:
@@ -240,20 +241,21 @@ class Clamex(SpacedJoint):
 
 
 def clamex(model: ClamexModel = "P-10", *, count: int | None = None, at: Sequence[PosLike] | None = None,
-           gaps: Tenons | None = None, end: float = data.DEFAULT_END_OFFSET, face: FaceChoice = None,
+           gaps: Tenons | None = None, end: float | None = None, face: FaceChoice = None,
            guide_d: float = data.CLAMEX_GUIDE_DIAMETER, through: bool = False) -> Clamex:
     """Lamello Clamex P (`"P-10"` or `"P-14"`): per station an access slot
     (P-10) or hole (P-14) in this board's access face, half its thickness
     deep, and two guide holes in the other board's face, 101 apart and
     centred on this board's thickness, `guide_d` wide and 8 deep or
     `through`. `end` is the distance of the outer connectors from the
-    contact's ends; with `gaps=` tenons joined before, one sits in the
-    middle of each gap between and beside them, which must be 120 long."""
+    contact's ends with `count=` 2 or more, 60 by default; with `gaps=`
+    tenons joined before, one sits in the middle of each gap between and
+    beside them, which must be 120 long."""
     if guide_d <= 0:
         raise LangError("clamex: guide_d must be positive.")
     face = face_choice("clamex", face)
-    return Clamex(data.CLAMEX_MODELS[one_of(model, ClamexModel, "clamex()")], make_spacing("clamex", count, end, at, gaps), face, float(guide_d),
-                  through)
+    spacing = make_spacing("clamex", count, at, gaps, end=end, default_end=data.DEFAULT_END_OFFSET)
+    return Clamex(data.CLAMEX_MODELS[one_of(model, ClamexModel, "clamex()")], spacing, face, float(guide_d), through)
 
 
 # -- Cabineo ---------------------------------------------------------------------------------------------
@@ -341,7 +343,7 @@ class Cabineo(SpacedJoint):
 
 
 def cabineo(model: CabineoModel = "8", *, count: int | None = None, at: Sequence[PosLike] | None = None,
-            gaps: Tenons | None = None, end: float = data.DEFAULT_END_OFFSET, face: FaceChoice = None,
+            gaps: Tenons | None = None, end: float | None = None, face: FaceChoice = None,
             insert: CabineoInsert | None = None,
             surface: CabineoSurface | None = None,
             anti_break: tuple[float, float] = (data.CABINEO_ANTI_BREAK_DEPTH, data.CABINEO_ANTI_BREAK_DISTANCE),
@@ -356,9 +358,10 @@ def cabineo(model: CabineoModel = "8", *, count: int | None = None, at: Sequence
     default). `surface="flush"` sinks the connector 0.5 deeper under a
     0.8 deep relief; `"anti-break"` adds a relief `anti_break` = (depth,
     widening). `through` drills the screw hole through the other board.
-    `end` is the distance of the outer connectors from the contact's ends;
-    with `gaps=` tenons joined before, one sits in the middle of each gap
-    between and beside them, which must be 40 long."""
+    `end` is the distance of the outer connectors from the contact's ends
+    with `count=` 2 or more, 60 by default; with `gaps=` tenons joined
+    before, one sits in the middle of each gap between and beside them,
+    which must be 40 long."""
     one_of(model, CabineoModel, "cabineo()")
     face = face_choice("cabineo", face)
     if insert is not None:
@@ -374,5 +377,6 @@ def cabineo(model: CabineoModel = "8", *, count: int | None = None, at: Sequence
     depth, widening = anti_break
     if depth <= 0 or widening < 0:
         raise LangError("cabineo: anti_break needs a positive depth and a widening of at least 0.")
-    return Cabineo(model, data.CABINEO_GUIDE_HOLES[key], make_spacing("cabineo", count, end, at, gaps), face,
-                   surface, (float(depth), float(widening)), through)
+    spacing = make_spacing("cabineo", count, at, gaps, end=end, default_end=data.DEFAULT_END_OFFSET)
+    return Cabineo(model, data.CABINEO_GUIDE_HOLES[key], spacing, face, surface, (float(depth), float(widening)),
+                   through)

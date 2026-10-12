@@ -29,6 +29,15 @@ def joints() -> None:
         half_lap(m.top, at=m.bottom + 10)                                     # type: ignore  # split=, not at=
         half_lap(m.top, m.bottom + 10)                                        # type: ignore  # settings by keyword
     half_lap(top, clearance=0.2, dogbones=None)
+    tenons(2, width=50, dogbones=None)
+    tenons(2, 50)                                                             # type: ignore  # width= by keyword
+    domino("4x20", count=2, end=None)
+    domino("4x20", 2)                                                         # type: ignore  # count= by keyword
+    domino("4x20", at=Pos("x", 100))                                          # type: ignore  # at= takes a list
+    cabineo(at=[Pos("x", 100)], surface="flush")
+    screws(4, 3)                                                              # type: ignore  # count= by keyword
+    box_joint(5, 2)                                                           # type: ignore  # margin= by keyword
+    groove(5, (0.5, 0.5))                                                     # type: ignore  # clearance= by keyword
 
 
 def shapes() -> None:

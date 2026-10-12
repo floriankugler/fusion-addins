@@ -1,4 +1,5 @@
 """Contacts between boards that meet edge-on, and the connectors joining them."""
+from collections.abc import Callable
 from typing import get_args
 
 import pytest
@@ -310,6 +311,30 @@ def test_spacing_and_join_errors():
         cabineo()
     # a failed join leaves every board untouched
     assert state(*p.values()) == before
+
+
+@pytest.mark.parametrize("make, message", [
+    # a setting the joint would ignore
+    (lambda: domino("4x20", at=[Pos("x", 100)], end=20), "domino: end= spaces count= stations .* with at= it has"),
+    (lambda: cabineo(count=1, end=20), "cabineo: end= has nothing to do with count=1"),
+    (lambda: clamex(gaps=tenons(count=2, width=50), end=20), "clamex: end= .* with gaps= it has nothing to do"),
+    (lambda: screws(tenons=tenons(count=2, width=50), end=20), "screws: end= .* with tenons= it has nothing to do"),
+    # at= is a list, even of one
+    (lambda: cabineo(at=Pos("x", 100)),  # type: ignore
+     r"cabineo: at= takes a list of positions, at=\[\.\.\.\], even for one"),
+    (lambda: screws(at=[]), "screws: at= is empty"),
+])
+def test_spacing_settings_are_checked(make: Callable[[], object], message: str):
+    with pytest.raises(LangError, match=message):
+        make()
+
+
+def test_an_explicit_default_end_is_fine():
+    cab, p = carcass()
+    with cab:
+        p["bottom"].join(p["left"], using=cabineo(count=2, end=60))
+        p["top"].join(p["left"], using=domino("4x20", count=2, end=37))
+    assert [h.u for h in _holes(p["left"], "cabineo_bottom_")] == [60, 440]
 
 
 def test_errors_are_reported_on_the_board_whose_join_was_called():

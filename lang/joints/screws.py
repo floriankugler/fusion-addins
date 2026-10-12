@@ -122,10 +122,11 @@ class Screws(SpacedJoint):
 
 
 def screws(d: float = data.SCREW_DIAMETER, *, count: int | None = None, at: Sequence[PosLike] | None = None,
-           gaps: Tenons | None = None, tenons: Tenons | None = None, end: float = data.DEFAULT_END_OFFSET,
+           gaps: Tenons | None = None, tenons: Tenons | None = None, end: float | None = None,
            offset: float | None = None, countersink: bool = False) -> Screws:
     """Screws `d` thick: `count` of them with the outer ones `end` from the
-    contact's ends, or at the positions `at=`, through the board that is met
+    contact's ends (60 by default, with two or more), or at the positions
+    `at=`, through the board that is met
     into the other's end; or relative to tenons joined before, in their
     `gaps=` or through the `tenons=` themselves, one each or, with
     `offset=`, two per tenon that far from its edges (outside them in the
@@ -140,5 +141,11 @@ def screws(d: float = data.SCREW_DIAMETER, *, count: int | None = None, at: Sequ
             raise LangError("screws: offset= places screws beside or in tenons; give gaps= or tenons= too.")
         if offset <= 0:
             raise LangError("screws: offset must be positive.")
-    spacing = Spacing(None, 0.0, None) if tenons is not None else make_spacing("screws", count, end, at, gaps)
+    if tenons is not None:
+        if end is not None:
+            raise LangError("screws: end= spaces count= stations from the contact's ends; with tenons= it has "
+                            "nothing to do, leave it out.")
+        spacing = Spacing(None, 0.0, None)
+    else:
+        spacing = make_spacing("screws", count, at, gaps, end=end, default_end=data.DEFAULT_END_OFFSET)
     return Screws(float(d), spacing, tenons, None if offset is None else float(offset), countersink)

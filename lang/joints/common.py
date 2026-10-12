@@ -35,7 +35,7 @@ from ..core.contact import Contact, contacts
 from ..core.directions import Axis, Direction, InnerOuter
 from ..core.errors import LangError, one_of
 from ..core.part import Board, Face
-from ..core.refs import Pos, PosLike, Side, as_pos
+from ..core.refs import Affine, HasPosition, Pos, PosLike, Side, as_pos
 from ..core.shapes import Shape
 
 #: A big face named for a joint: a box side or direction it faces, or
@@ -243,19 +243,37 @@ def check_gaps(label: str, spacing: Spacing, c: Contact, minimum: float) -> None
                             f"{minimum:g} mm a {label} needs.")
 
 
-def make_spacing(label: str, count: int | None, end: float, at: Sequence[PosLike] | None,
-                 gaps: TenonSource | None = None) -> Spacing:
+def make_spacing(label: str, count: int | None, at: Sequence[PosLike] | None, gaps: TenonSource | None = None, *,
+                 end: float | None = None, default_end: float = 0.0) -> Spacing:
+    """A joint factory's `count=`, `at=` or `gaps=`, checked. `end=` (None
+    when not given: `default_end`) spaces `count=` stations, two or more;
+    given with anything else it would be ignored, an error."""
     if [count is not None, at is not None, gaps is not None].count(True) != 1:
         raise LangError(f"{label}: give one of count=, at= or gaps=." if gaps is not None
                         else f"{label}: give count= or at=.")
     if count is not None and count < 1:
         raise LangError(f"{label}: count must be at least 1.")
-    if end < 0:
-        raise LangError(f"{label}: end must not be negative.")
-    positions = tuple(as_pos(p, f"{label}(at=)") for p in at) if at is not None else None
-    if positions == ():
+    if end is not None:
+        if count is None:
+            raise LangError(f"{label}: end= spaces count= stations from the contact's ends; with "
+                            f"{'at=' if at is not None else 'gaps='} it has nothing to do, leave it out.")
+        if count == 1:
+            raise LangError(f"{label}: end= has nothing to do with count=1, which centres the one; leave it out.")
+        if end < 0:
+            raise LangError(f"{label}: end must not be negative.")
+    return Spacing(count, float(default_end if end is None else end), positions(label, at), gaps)
+
+
+def positions(label: str, at: Sequence[PosLike] | None) -> tuple[Pos, ...] | None:
+    """A joint factory's `at=`: a list of positions, not empty."""
+    if at is None:
+        return None
+    if isinstance(at, (Pos, Affine, HasPosition)):
+        raise LangError(f"{label}: at= takes a list of positions, at=[...], even for one.")
+    found = tuple(as_pos(p, f"{label}(at=)") for p in at)
+    if not found:
         raise LangError(f"{label}: at= is empty.")
-    return Spacing(count, float(end), positions, gaps)
+    return found
 
 
 # -- geometry of one contact ---------------------------------------------------------------------

@@ -108,6 +108,23 @@ def test_hidden_dog_bones_must_not_reach_past_the_tenons_end():
         shelf.join(left, using=tenons(count=1, width=50, remaining=8.9, dogbones="hidden"))    # 6.1 long: fits
 
 
+def test_tenons_without_dog_bones_leave_square_corners():
+    """dogbones=None, as half laps and grooves take it: square roots and
+    mortises, for board.dogbones() or another way of relieving them."""
+    u, left, _, shelf = _unit()
+    with u:
+        shelf.join(left, using=tenons(count=2, width=50, margin=10, dogbones=None))
+    assert _named(shelf, "tenon_") == [] and _named(left, "mortise_") == ["mortise_shelf_1", "mortise_shelf_2"]
+    mortise = left.op("mortise_shelf_1").op
+    assert isinstance(mortise, Cut) and mortise.shape.area == pytest.approx(50.1 * 18.1)
+    assert mortise.shape.bounds == pytest.approx((9.95, 399.95, 60.05, 418.05))     # the margin of 10 counts
+    left.dogbones()
+    shelf.dogbones()
+    build_layout()
+    assert [op.name for op in left.ops if isinstance(op, Cut)] == [
+        "mortise_shelf_1", "mortise_shelf_2", "mortise_shelf_1_dogbones", "mortise_shelf_2_dogbones"]
+
+
 def test_even_tenons_are_as_wide_as_the_gaps():
     u, left, _, shelf = _unit()
     with u:
@@ -215,7 +232,12 @@ def test_tenon_errors():
             left.join(shelf, using=tenons(count=1, width=50, remaining=15))
     assert state(left, right, shelf) == [(box(0, 0, 300, 800).wkt, []), (box(0, 0, 300, 800).wkt, []),
                                          (box(0, 15, 300, 585).wkt, [])]
-    for message, make in (("give width=, or even=True", lambda: tenons(count=2)),
+    for message, make in (("margin= spaces two tenons or more .* with at= it has nothing to do",
+                           lambda: tenons(width=50, at=[Pos("x", 50)], margin=10)),
+                          ("with count=1, which centres the one, it has nothing to do",
+                           lambda: tenons(count=1, width=50, margin=10)),
+                          ("at= takes a list of positions", lambda: tenons(width=50, at=Pos("x", 50))),  # type: ignore
+                          ("give width=, or even=True", lambda: tenons(count=2)),
                           ("works the width out", lambda: tenons(count=2, width=50, even=True)),
                           ("two tenons or more", lambda: tenons(count=1, even=True)),
                           ("need a width", lambda: tenons(at=[Pos("x", 1)])),
