@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+import shapely
 import trimesh
 from shapely.geometry import Polygon
 from shapely.geometry import box as shapely_box
@@ -50,8 +51,15 @@ _CONE_SECTIONS = 32
 Report = Callable[[str], None]
 
 
+#: Vertices closer than this (mm) are one: the emitter leaves out lines this
+#: short, and the triangulation would make faces without area of them.
+_SAME_POINT = 1e-6
+
+
 def _polygon(rings: Rings) -> Polygon:
-    return Polygon(rings[0], holes=rings[1:]) if len(rings) > 1 else Polygon(rings[0])
+    poly = Polygon(rings[0], holes=rings[1:]) if len(rings) > 1 else Polygon(rings[0])
+    out = shapely.remove_repeated_points(poly, _SAME_POINT)
+    return out if out.is_valid and not out.is_empty else poly
 
 
 def _extruded(rings: Rings, height: float) -> Any:

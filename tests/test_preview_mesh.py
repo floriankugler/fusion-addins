@@ -1,5 +1,6 @@
 """The preview's mesher and builds: version checks, failures reported
 rather than hidden, and the build process's housekeeping."""
+import math
 from pathlib import Path
 from typing import Any
 
@@ -90,3 +91,21 @@ def test_a_build_imports_its_folder_s_modules_afresh(tmp_path: Path):
     second = run_build(build, tmp_path / "out", scene=False)
     widths = [layout["modules"][0]["box"]["max"][1] for layout in (first, second)]  # type: ignore[index]
     assert widths == [300, 400]
+
+
+def test_an_edge_shorter_than_a_micrometre_does_not_break_the_mesh():
+    """Found by fuzzing: a notch centred a hair (1e-45) off the board's edge
+    left an edge that short in the outline; the triangulation made faces
+    without area of it, and the boolean refused the board as no volume."""
+    from shapely.geometry import Point
+    from lang.core.shapes import Shape
+    with module("m", Box.from_size(width=100, depth=243, height=116)) as m:
+        panel = board("panel", ply15).on(m.left)
+        panel.add_cut(Shape(Point(217.0, 1.401298464324817e-45).buffer(40.25, quad_segs=32)))
+        panel.hole(10, at=panel.outer.center, depth=5)
+    layout = build_layout()
+    (part,) = layout["modules"][0]["parts"]
+    assert min(math.dist(a, b) for ring in part["outline"] for a, b in zip(ring, ring[1:] + ring[:1])) < 1e-40
+    problems: list[str] = []
+    mesh = mesh_part(part, layout["frame"], problems.append)
+    assert problems == [] and mesh.is_watertight
