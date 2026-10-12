@@ -52,6 +52,8 @@ import math
 from dataclasses import dataclass
 from typing import Literal
 
+from . import stations as _stations
+
 # -- Everlock ----------------------------------------------------------------------
 
 #: The body's pilot holes: their columns' distance to either side of the station.
@@ -205,19 +207,18 @@ LATCHES: dict[str, Latch] = {latch.name: latch for latch in (EVERLOCK, PULL_LOCK
 
 def stations(length: float, count: int, end: float = END_OFFSET) -> list[float]:
     """The stations along an edge `length` long, from one of its ends: one
-    in the middle, or `count` from `end` to `length - end`, evenly spaced.
-    Raises ValueError where the add-in refuses: no latch, an end offset
-    that is not positive, or an edge no longer than twice the end offset."""
+    in the middle, or `count` from `end` to `length - end`, evenly spaced
+    (`lib.stations`). Raises ValueError where the add-in refuses: no latch,
+    an end offset that is not positive, or an edge no longer than twice the
+    end offset."""
     if count < 1:
         raise ValueError("There must be at least one latch.")
-    if count == 1:
-        return [length / 2]
-    if end <= 0:
-        raise ValueError("The end offset must be greater than zero.")
-    if length <= 2 * end:
-        raise ValueError(f"The edge ({length:g}) is too short for the end offset ({end:g}).")
-    spacing = (length - 2 * end) / (count - 1)
-    return [end + spacing * i for i in range(count)]
+    if count > 1:
+        if end <= 0:
+            raise ValueError("The end offset must be greater than zero.")
+        if length <= 2 * end:
+            raise ValueError(f"The edge ({length:g}) is too short for the end offset ({end:g}).")
+    return _stations.stations(length, count, end)
 
 
 def _self_check() -> None:

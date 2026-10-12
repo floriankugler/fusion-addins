@@ -24,6 +24,8 @@ imports: `python3 -m lib.connector_data` runs its self-checks.
 """
 from dataclasses import dataclass
 
+from . import stations as _stations
+
 
 # -- positions along the edge -------------------------------------------------------
 
@@ -35,13 +37,11 @@ DEFAULT_END_OFFSET = 60.0
 def stations(length: float, count: int, end_offset: float) -> list[float]:
     """Distances from the start of an edge `length` long: `count` stations,
     the first and last `end_offset` from the ends and the rest evenly
-    spaced between them. A single station is centred. Unit-free."""
+    spaced between them (`lib.stations`). A single station is centred.
+    Unit-free; the edge's length is not checked against the offset."""
     if count < 1:
         raise ValueError("At least one connector is needed.")
-    if count == 1:
-        return [length / 2]
-    spacing = (length - 2 * end_offset) / (count - 1)
-    return [end_offset + index * spacing for index in range(count)]
+    return _stations.stations(length, count, end_offset)
 
 
 # -- Domino --------------------------------------------------------------------------

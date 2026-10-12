@@ -329,3 +329,21 @@ def test_runners_are_named_by_the_drawers_own_sides_whatever_the_frame():
     assert plain["bodies"] == cabinet["bodies"]
     left = next(b for b in plain["bodies"] if b["name"] == "left")
     assert bounds(left)[1][1] == 585                       # the drawer's left is +y, facing +x
+
+
+def test_one_stations_rule_in_lib():
+    """`lib.stations` spreads stations for every add-in and the language;
+    the three callers in lib keep their own refusals (review finding 29)."""
+    from lib import connector_data, door_latches, sliding_brackets, stations
+    stations._self_check()  # type: ignore[reportPrivateUsage]
+    for length, count, end in ((566.0, 1, 80.0), (566.0, 3, 80.0), (597.0, 2, 60.0), (1000.0, 7, 33.3)):
+        expected = stations.stations(length, count, end)
+        assert connector_data.stations(length, count, end) == expected
+        assert door_latches.stations(length, count, end) == expected
+        assert sliding_brackets.stations(length, count, end) == expected
+    assert connector_data.stations(100, 2, 60) == [60, 40]           # no length check, as before
+    assert door_latches.stations(100, 1, 0) == sliding_brackets.stations(100, 1, 0) == [50]
+    for refused in (lambda: connector_data.stations(100, 0, 10), lambda: door_latches.stations(100, 2, 0),
+                    lambda: door_latches.stations(160, 2, 80), lambda: sliding_brackets.stations(100, 2, 50)):
+        with pytest.raises(ValueError):
+            refused()

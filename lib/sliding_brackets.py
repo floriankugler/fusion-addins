@@ -102,6 +102,8 @@ self-checks.
 """
 from dataclasses import dataclass, replace
 
+from . import stations as _stations
+
 
 @dataclass(frozen=True)
 class BracketSpec:
@@ -231,16 +233,13 @@ DEFAULT_END_OFFSET = 50.0
 def stations(length: float, count: int, end: float = DEFAULT_END_OFFSET) -> list[float]:
     """The brackets' centres along a stretch `length` long, from one of its
     ends: one in the middle, or `count` from `end` to `length - end`,
-    evenly spaced. Raises ValueError for no bracket or a stretch no longer
-    than twice `end`."""
+    evenly spaced (`lib.stations`). Raises ValueError for no bracket or a
+    stretch no longer than twice `end`."""
     if count < 1:
         raise ValueError("There must be at least one bracket.")
-    if count == 1:
-        return [length / 2]
-    if length <= 2 * end:
+    if count > 1 and length <= 2 * end:
         raise ValueError(f"The stretch ({length:g}) is too short for the end offset ({end:g}).")
-    spacing = (length - 2 * end) / (count - 1)
-    return [end + spacing * i for i in range(count)]
+    return _stations.stations(length, count, end)
 
 
 def _self_check() -> None:
