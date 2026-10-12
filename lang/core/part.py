@@ -3,9 +3,13 @@
 A board is created with its identity (`board(name, material)`), placed with
 order-free modifiers (`on`, `between`, `center`, `inset`, `grain`, `show`,
 `manual`) and machined with ordered operations (`cut`, `pocket`, `hole`,
-`chamfer`). Every modifier returns the board. Placement is resolved lazily
-the first time a face, the box or the layout is asked for; from then on the
-placement modifiers are frozen.
+`chamfer`, `fillet`). Every modifier returns the board. Placement is
+resolved lazily the first time a face, the box or the layout is asked for;
+from then on the placement modifiers are frozen.
+
+A fillet (`panel.fillet(panel.front.left, 20)`, see `corners.py`) rounds
+corners of the outline through the board, and a chamfer on an edge through
+the board cuts one off; like a cut, each changes the outline at once.
 
 A cutout (`side.cutout()`, see `cutouts.py`) opens up a face inside a
 border, keeping material around everything the board has so far; it is an
@@ -27,11 +31,12 @@ corner (see `Anchor`).
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from collections.abc import Sequence
 from typing import Any, Literal, Protocol, Self, Union, overload
 
-from shapely.geometry import LineString, Polygon
+from shapely.geometry import LineString, Point, Polygon
 from shapely.geometry import box as shapely_box
 from shapely.geometry.base import BaseGeometry
 from shapely.geometry.polygon import orient
@@ -39,6 +44,7 @@ from shapely.ops import unary_union
 
 from lib import cutout_patterns as cutout_data
 
+from . import corners as corner_geometry
 from . import cutouts as cutout_geometry
 from . import directions
 from . import dogbones as dogbone_geometry
@@ -59,6 +65,11 @@ Point2 = tuple[float, float]
 Limit = Union[Pos, Affine, HasPosition, "Board", "PartLimit", Contour, ContourLimit]
 #: What `dogbones(at=)` takes: a named operation itself (not its name), a big face, the outline.
 DogBoneTarget = Union["Operation", "Face", "Outline"]
+#: What `fillet()` rounds: the corner an edge through the board names, the
+#: corners a named through cut made, every corner of the outline.
+CornerTarget = Union["Edge", "Operation", "Outline"]
+#: What `chamfer()` takes: an edge, a face's outline, a named operation.
+ChamferTarget = Union["Edge", "Outline", "Operation", Op]
 
 
 class Face:
@@ -151,7 +162,8 @@ class Face:
 
     @property
     def outline(self) -> Outline:
-        """The face's outer contour, for `chamfer()`."""
+        """The face's outer contour, for `chamfer()`, `fillet()` and
+        `dogbones(at=)`."""
         return Outline(self)
 
     # -- arithmetic as a position ------------------------------------------------------
@@ -189,9 +201,10 @@ class Face:
 
 class Edge:
     """The edge where face `a` meets face `b`. For `chamfer()` it is that
-    edge; for `at=` it is the middle of that edge of face `a`, from which
-    an offset, `side.inner.front(37)`, or a corner, `side.outer.bottom.front`,
-    continues as an `Anchor`."""
+    edge, and where two narrow faces meet, a corner of the outline, which
+    `fillet()` rounds; for `at=` it is the middle of that edge of face `a`,
+    from which an offset, `side.inner.front(37)`, or a corner,
+    `side.outer.bottom.front`, continues as an `Anchor`."""
 
     def __init__(self, part: Board, a: Face, b: Face):
         if a.axis == b.axis:
@@ -201,6 +214,13 @@ class Edge:
     @property
     def name(self) -> str:
         return f"{self.a.name}.{self.b.name}"
+
+    @property
+    def through(self) -> bool:
+        """Whether the edge runs through the board, where two narrow faces
+        meet: a corner of the outline (`panel.front.left` on a board lying
+        flat)."""
+        return not (self.a.is_big or self.b.is_big)
 
     @property
     def world_name(self) -> str:
@@ -375,7 +395,9 @@ class Anchor:
 
 @dataclass(frozen=True)
 class Outline:
-    """A face's outer contour, as a `chamfer()` target."""
+    """A face's outer contour, as a `chamfer()` target; for `fillet()` the
+    corners of the outline's outer boundary, the same from either big
+    face."""
     face: Face
 
 
@@ -384,7 +406,8 @@ class Operation:
     `side.op("toekick")`. Its edges are positions named by direction, so
     `side.toekick.top` is the upper edge of the notch and
     `side.groove.floor` the bottom of the pocket; it is also what
-    `chamfer()` takes to chamfer the operation's contour."""
+    `chamfer()` takes to chamfer the operation's contour, and what
+    `fillet()` takes to round the corners a through cut made."""
 
     def __init__(self, part: Board, name: str, op: Op):
         self.part = part
@@ -1104,27 +1127,176 @@ class Board:
                                 point[0], point[1]), name)
         return self
 
-    def chamfer(self, what: Edge | Outline | Operation | Op, size: float) -> Self:
+    def chamfer(self, what: ChamferTarget | Sequence[ChamferTarget], size: float) -> Self:
         """A chamfer along an edge (`side.front.inner`), along a face's
         outline (`side.outer.outline`), or along a named operation of this
-        board (`side.toekick`)."""
+        board (`side.toekick`); or along each of a list of them.
+
+        An edge through the board, where two narrow faces meet
+        (`panel.front.left` on a board lying flat, `side.front.bottom` on
+        one standing), is a corner of the outline: the chamfer cuts it off,
+        `size` along both its edges, and changes the outline at once, as
+        `fillet()` rounds a corner (see there)."""
+        items: list[object] = list(what) if isinstance(what, (list, tuple)) else [what]
+        corners = [e for e in items if isinstance(e, Edge) and e.part is self and e.through]
+        if corners:
+            if size <= 0:
+                raise LangError(f"chamfer(): the size must be positive, got {size:g}.", self.path)
+            named = self._outline_corners(corners, "chamfer")
+            self._reshape(corner_geometry.clip_corners(self.outline, named, float(size), self.path),
+                          f"chamfer({size:g})")
+        for item in items:
+            if not any(item is e for e in corners):
+                self._chamfer_along(item, float(size))
+        return self
+
+    def _chamfer_along(self, what: object, size: float) -> None:
+        """A chamfer along an edge of a big face, a face's outline or an
+        operation's contour, recorded as an operation."""
         if isinstance(what, Operation):
             what = what.op
         if isinstance(what, Edge):
             if what.part is not self:
                 raise LangError(f"chamfer(): {what!r} is not an edge of this board.", self.path)
-            self._record(Chamfer(what.world_name, float(size), what.a.world_name), None)
+            self._record(Chamfer(what.world_name, size, what.a.world_name), None)
         elif isinstance(what, Outline):
             if what.face.part is not self:
                 raise LangError(f"chamfer(): {what.face!r} is not a face of this board.", self.path)
-            self._record(Chamfer("outline", float(size), what.face.world_name), None)
-        else:
+            self._record(Chamfer("outline", size, what.face.world_name), None)
+        elif isinstance(what, (Cut, Pocket, Hole, Chamfer, VGroove, EdgeOp)):
             name = next((n for n, op in self._named_ops.items() if op is what), None)
             if name is None:
                 raise LangError("chamfer(): the operation is not a named operation of this board.", self.path)
             face = self.show_face.world_name if isinstance(what, Cut) else what.face
-            self._record(Chamfer(name, float(size), face), None)
+            self._record(Chamfer(name, size, face), None)
+        else:
+            raise LangError(f"chamfer() takes edges, outlines and operations themselves, not {what!r}.", self.path)
+
+    def fillet(self, what: CornerTarget | Sequence[CornerTarget], r: float) -> Self:
+        """Rounds corners of the outline with radius `r`, through the
+        board: the corner where two narrow faces meet (`panel.front.left`
+        on a board lying flat, `side.front.bottom` on one standing), the
+        corners a named through cut made in the outline (`panel.notch`),
+        every corner of the outline's outer boundary (`panel.top.outline`),
+        or each of a list of them. A convex corner loses material, a
+        concave one gains it; the arcs are exact and tangent to the edges,
+        as `Shape.rounded()` makes them (see `lang.core.corners`).
+
+        It changes the outline at once, as a cut does, so everything after
+        it meets the rounded corners: contacts and the joints made on them,
+        the checks, dog bones. A corner must exist when it is named (a cut,
+        a joint, or an earlier fillet or chamfer may have taken it); a
+        radius too large for the edges next to a corner, or one taking
+        material where an operation made before it lies, is an error. The
+        edges along a big face (`panel.front.top`) are not rounded:
+        roundovers are not modeled; chamfer them."""
+        if r <= 0:
+            raise LangError(f"fillet(): the radius must be positive, got {r:g}.", self.path)
+        items: list[object] = list(what) if isinstance(what, (list, tuple)) else [what]
+        named = self._outline_corners(items, "fillet")
+        self._reshape(corner_geometry.round_corners(self.outline, named, float(r), self.path), f"fillet({r:g})")
         return self
+
+    def _outline_corners(self, items: Sequence[object], method: str) -> list[corner_geometry.Named]:
+        """The corners of the outline that `items` name for `method`
+        (`fillet` or `chamfer`): edges through the board, the corners of
+        named through cuts, every corner of the outline's outer boundary.
+        An error for anything else and for a corner the outline no longer
+        has."""
+        what = f"{method}()"
+        if not items:
+            raise LangError(f"{what}: name the corners, e.g. {method}({self.name}.{self._corner_example()}, ...).",
+                            self.path)
+        found = corner_geometry.find(self.outline)
+        u, v = self.u_axis, self.v_axis
+
+        def where(p: Point2) -> str:
+            return f"{u} {p[0]:g}, {v} {p[1]:g}"
+
+        named: list[corner_geometry.Named] = []
+        for item in items:
+            if isinstance(item, str):
+                raise LangError(f"{what} takes edges, operations and outlines themselves, not the name {item!r}: "
+                                f"write {self.name}.{self._corner_example()} or {self.name}.{item}.", self.path)
+            if isinstance(item, Edge):
+                named.append(self._edge_corner(item, found, method))
+            elif isinstance(item, Outline):
+                face = item.face
+                if face.part is not self:
+                    raise LangError(f"{what}: {face!r} is not a face of this board.", self.path)
+                if not face.is_big:
+                    raise LangError(f"{what}: {face!r} is a narrow face; name a big face's outline.", self.path)
+                corners = [p for p, outer in found if outer]
+                if not corners:
+                    raise LangError(f"{what}: the outline has no corners (it is round).", self.path)
+                named += [corner_geometry.Named(p, f"the outline's corner at {where(p)}") for p in corners]
+            elif isinstance(item, Operation):
+                if item.part is not self:
+                    raise LangError(f"{what}: {item!r} is not an operation of this board.", self.path)
+                op = item.op
+                if not isinstance(op, Cut):
+                    raise LangError(f"{what}: the {op.kind} {item.name!r} is not a through cut, so it made no corners "
+                                    "of the outline; give a pocket's shape round corners with rounded().", self.path)
+                contour = op.shape.geometry.boundary
+                corners = [p for p, _ in found if contour.distance(Point(p)) <= corner_geometry.ON_CONTOUR]
+                if not corners:
+                    raise LangError(f"{what}: the cut {item.name!r} left no corners in the outline (it is round, "
+                                    "or later cuts took them).", self.path)
+                named += [corner_geometry.Named(p, f"the corner of {item.name!r} at {where(p)}") for p in corners]
+            else:
+                raise LangError(f"{what} takes edges through the board, through cuts and outlines, not {item!r}.",
+                                self.path)
+        unique: list[corner_geometry.Named] = []
+        for c in named:
+            if not any(math.dist(c.point, d.point) <= 1e-6 for d in unique):
+                unique.append(c)
+        return unique
+
+    def _edge_corner(self, edge: Edge, found: list[tuple[Point2, bool]], method: str) -> corner_geometry.Named:
+        """The corner of the outline an edge through the board names: the
+        corner of the board's box where its two faces meet."""
+        what = f"{method}()"
+        if edge.part is not self:
+            raise LangError(f"{what}: {edge!r} is not an edge of this board.", self.path)
+        if not edge.through:
+            big = edge.a if edge.a.is_big else edge.b
+            raise LangError(
+                f"{what}: {edge.name} runs along the {big.name} face, not through the board. A fillet rounds a "
+                f"corner of the outline, where two narrow faces meet ({self._corner_example()}); roundovers along "
+                "a face are not modeled, chamfer() the edge instead.", self.path)
+        b = self.box()
+        coords = {f.axis: (b.hi[f.axis] if f.direction.sign > 0 else b.lo[f.axis]) for f in (edge.a, edge.b)}
+        point = (coords[self.u_axis], coords[self.v_axis])
+        match = next((p for p, _ in found if math.dist(p, point) <= 1e-6), None)
+        if match is None:
+            raise LangError(
+                f"{what}: the outline has no corner at {edge.name} any more: a cut or a joint, or an earlier fillet "
+                f"or chamfer took it. The corners a cut made are named by the cut, {method}({self.name}.<cut>, ...).",
+                self.path)
+        return corner_geometry.Named(match, edge.name)
+
+    def _corner_example(self) -> str:
+        """The name of an edge through this board, for messages: front.left
+        on a board lying flat, front.bottom on one standing."""
+        frame = self.scope.frame
+        return f"{frame.direction_of(self.u_axis, -1).name}.{frame.direction_of(self.v_axis, -1).name}"
+
+    def _reshape(self, shape: Shape, what: str) -> None:
+        """Makes `shape`, the outline with corners rounded or cut off, the
+        outline. An error when that takes material where an operation made
+        before lies (a pocket, hole or groove, a joint's), as the operation
+        would then hang over the new edge; through cuts are the outline's own."""
+        removed = self.outline.geometry.difference(shape.geometry)
+        for op in self.ops:
+            if isinstance(op, (Cut, Chamfer)):
+                continue
+            if self._footprint(op).intersection(removed).area > 1e-6:
+                inner = op.op if isinstance(op, EdgeOp) else op
+                label = f"the {inner.kind} {inner.name!r}" if inner.name else f"a {inner.kind}"
+                raise LangError(f"{what} takes material where {label} lies, which was made before it: make it "
+                                "smaller, or make it first, before the operation or joint (connectors joined after "
+                                "it keep to the shorter contact).", self.path)
+        self.outline = shape
 
     def cutout(self, what: Face | Shape | None = None, at: Anchor | Edge | None = None, *,
                pattern: cutout_geometry.Pattern | None = None, border: float = cutout_data.OUTER_INSET,

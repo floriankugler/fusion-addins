@@ -58,6 +58,8 @@ _MIN_CORNER = math.radians(2.0)
 #: up to half a percent of the radius outside it (`_snap_tolerance`).
 _SNAP = 0.05
 _EPS = 1e-9
+#: How close (mm) a corner must lie to a point that names it.
+_AT = 1e-6
 
 
 # -- patterns -------------------------------------------------------------------------
@@ -249,6 +251,10 @@ def _triangle(centre: float, base: float, up: bool, width: float, apex: float,
 
 
 # -- arcs and fillets ---------------------------------------------------------------------
+#
+# Shared beyond the cutouts: `Shape.rounded()` rounds every corner of a
+# shape with `filleted`, and `lang.core.corners` rounds or cuts off chosen
+# corners of a board's outline (`filleted(at=)`, `chamfered`).
 
 def _angle(c: Point2, p: Point2) -> float:
     return math.atan2(p[1] - c[1], p[0] - c[0])
@@ -419,10 +425,11 @@ def _turn(s1: _Seg, s2: _Seg, p: Point2) -> float:
     return turn
 
 
-def _fillet_ring(ring: Sequence[Point2], r: float) -> list[Point2] | None:
+def _fillet_ring(ring: Sequence[Point2], r: float, at: Sequence[Point2] | None = None) -> list[Point2] | None:
     """The ring with every corner filleted with radius `r`, convex and
-    concave alike (the material lies to the left); None when a fillet does
-    not fit between its neighbours."""
+    concave alike (the material lies to the left), or only the corners at
+    the points `at`; None when a fillet does not fit between its
+    neighbours."""
     segs = _segments(ring)
     if segs is None:
         return list(ring)
@@ -436,7 +443,7 @@ def _fillet_ring(ring: Sequence[Point2], r: float) -> list[Point2] | None:
         s1, s2 = segs[k], segs[(k + 1) % n]
         p = s1.b
         turn = _turn(s1, s2, p)
-        if abs(turn) < _MIN_CORNER:
+        if abs(turn) < _MIN_CORNER or (at is not None and not _named(p, at)):
             fillets.append(None)
             continue
         side = 1.0 if turn > 0 else -1.0
@@ -449,6 +456,8 @@ def _fillet_ring(ring: Sequence[Point2], r: float) -> list[Point2] | None:
         if math.dist(centre, p) > 4 * r / max(math.sin(abs(turn) / 2), 1e-3):
             return None
         fillets.append((centre, s1.foot(centre), s2.foot(centre), turn > 0))
+    if at is not None and all(f is None for f in fillets):
+        return list(ring)            # no corner of this ring is named: as it was
     # each segment must keep a part between the fillets at its ends
     for k, s in enumerate(segs):
         before, after = fillets[k - 1], fillets[k]
@@ -506,21 +515,99 @@ def fillet(piece: Polygon, r: float) -> list[Polygon]:
     return [_onto_circles(p, targets) for p in _polygons(opened) if p.area > 1e-6]
 
 
-def filleted(piece: Polygon, r: float) -> Polygon | None:
+def filleted(piece: Polygon, r: float, at: Sequence[Point2] | None = None) -> Polygon | None:
     """The piece with every corner rounded with radius `r`, convex and
     concave alike, exactly: worked out on the lines and arcs it stands for.
+    `at` limits it to the corners at those points (see `corner_points`).
     None when a fillet does not fit between its neighbours. Two fillets
     may use up the edge between them, so a 12 wide rectangle rounded with
     6 gets round ends."""
     piece = orient(piece, 1.0)
-    exterior = _fillet_ring(_ring_points(piece.exterior.coords), r)
-    holes = [_fillet_ring(_ring_points(h.coords), r) for h in piece.interiors]
+    exterior = _fillet_ring(_ring_points(piece.exterior.coords), r, at)
+    holes = [_fillet_ring(_ring_points(h.coords), r, at) for h in piece.interiors]
     if exterior is None or any(h is None for h in holes):
         return None
     out = Polygon(exterior, [h for h in holes if h is not None])
     if out.is_valid and abs(out.area - piece.area) < 0.5 * piece.area + 1:
         return out
     return None
+
+
+def _named(p: Point2, at: Sequence[Point2]) -> bool:
+    return any(math.dist(p, q) <= _AT for q in at)
+
+
+def corner_points(piece: Polygon) -> list[tuple[Point2, bool]]:
+    """The piece's corners, ring by ring in order around each, each with
+    whether it lies on the exterior: where two of the lines and arcs the
+    piece stands for (`lang.emit.arcs.fit`) meet at an angle, convex or
+    concave. Arcs have none, nor have lines and arcs meeting tangentially,
+    such as a rounded corner's."""
+    piece = orient(piece, 1.0)
+    out: list[tuple[Point2, bool]] = []
+    for k, ring in enumerate([piece.exterior, *piece.interiors]):
+        segs = _segments(_ring_points(ring.coords))
+        if segs is None or len(segs) < 2:
+            continue
+        for i, s1 in enumerate(segs):
+            s2 = segs[(i + 1) % len(segs)]
+            if abs(_turn(s1, s2, s1.b)) >= _MIN_CORNER:
+                out.append((s1.b, k == 0))
+    return out
+
+
+def _chamfer_ring(ring: Sequence[Point2], d: float, at: Sequence[Point2]) -> list[Point2] | None:
+    """The ring with its corners at the points `at` cut off by a straight
+    line from `d` before each to `d` after it, measured along its lines and
+    arcs; None when an edge is too short for that."""
+    segs = _segments(ring)
+    if segs is None or len(segs) < 2:
+        return list(ring)
+    n = len(segs)
+    # per corner k (the end of segment k): the cut's ends on segment k and k + 1
+    cuts: list[tuple[Point2, Point2] | None] = []
+    for k in range(n):
+        s1, s2 = segs[k], segs[(k + 1) % n]
+        p = s1.b
+        if abs(_turn(s1, s2, p)) < _MIN_CORNER or not _named(p, at):
+            cuts.append(None)
+            continue
+        if d > s1.length() + 1e-7 or d > s2.length() + 1e-7:
+            return None
+        cuts.append((s1.step(p, -d), s2.step(p, d)))
+    if all(c is None for c in cuts):
+        return list(ring)
+    # each segment must keep a part between the cuts at its ends
+    for k, s in enumerate(segs):
+        before, after = cuts[k - 1], cuts[k]
+        start = s.param(before[1]) if before else 0.0
+        end = s.param(after[0]) if after else s.length()
+        if end < start - 1e-7:
+            return None
+    out: list[Point2] = []
+    for k, s in enumerate(segs):
+        before, after = cuts[k - 1], cuts[k]
+        p = before[1] if before else s.a
+        q = after[0] if after else s.b
+        if s.param(q) < s.param(p):
+            p = q = ((p[0] + q[0]) / 2, (p[1] + q[1]) / 2)     # two cuts use the edge up
+        out += s.points(p, q)
+        if after is not None:
+            out.append(q)            # the cut runs from here to the next segment's start
+    return _deduplicated(out)
+
+
+def chamfered(piece: Polygon, d: float, at: Sequence[Point2]) -> Polygon | None:
+    """The piece with its corners at the points `at` (see `corner_points`)
+    cut off `d` along both their edges, as a router cuts a chamfered
+    corner of an outline; None when an edge is too short for that."""
+    piece = orient(piece, 1.0)
+    exterior = _chamfer_ring(_ring_points(piece.exterior.coords), d, at)
+    holes = [_chamfer_ring(_ring_points(h.coords), d, at) for h in piece.interiors]
+    if exterior is None or any(h is None for h in holes):
+        return None
+    out = Polygon(exterior, [h for h in holes if h is not None])
+    return out if out.is_valid and out.area > 0 else None
 
 
 # -- offsets ---------------------------------------------------------------------------------

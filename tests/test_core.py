@@ -292,11 +292,14 @@ def test_chamfer_targets():
     left, right = cab["left"], cab["right"]
     left.cut(rect(depth=60, height=100), at=left.outer.bottom.front, name="toekick")
     left.hole(d=5, depth=5, at=left.inner.center)
+    area = left.outline.area
     left.chamfer(left.outer.outline, 1).chamfer(left.front.inner, 1).chamfer(left.front.top, 0.5)
     left.chamfer(left.toekick, 1)
     chamfers = [op for op in left.ops if isinstance(op, Chamfer)]
-    assert [op.what for op in chamfers] == ["outline", "front.right", "front.top", "toekick"]
-    assert [op.face for op in chamfers] == ["left", "front", "front", "left"]
+    # front.top runs through the board: a corner of the outline, cut off in it
+    assert [op.what for op in chamfers] == ["outline", "front.right", "toekick"]
+    assert [op.face for op in chamfers] == ["left", "front", "left"]
+    assert left.outline.area == pytest.approx(area - 0.5 * 0.5 ** 2)
     with pytest.raises(LangError):
         left.chamfer(left.ops[1], 1)          # the unnamed hole
     with pytest.raises(LangError):
