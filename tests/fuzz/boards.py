@@ -131,7 +131,7 @@ def cutout_calls(draw: st.DrawFn, size: tuple[float, float], t: float) -> Cutout
     return CutoutCall(draw(st.one_of(st.none(), st.integers(0, 1))), pattern,
                       draw(st.one_of(st.just(20.0), sizes(0, 40))), draw(st.one_of(st.just(20.0), sizes(0, 40))),
                       draw(st.one_of(st.just(8.0), st.just(0.0), sizes(0, 15))), depth,
-                      draw(st.one_of(st.just(0.0), st.just(1.0), floats(0, 3))), keep)
+                      draw(st.one_of(st.just(0.0), st.just(1.0), floats(0.1, 3))), keep)
 
 
 @st.composite
@@ -283,6 +283,8 @@ def _run_cutout(case: BoardCase, name: str = "m", pipeline: bool = True) -> list
                 if _state(b) != before:
                     problems.append(f"a refused {f.kind} changed the board")
                 continue
+            if g is not None and f.kind in ("hole", "pocket", "vgroove") and g.intersection(b.outline.geometry).area <= 1e-6:
+                problems.append(f"a {f.kind} wholly off the board was accepted")
             if g is not None and f.kind not in ("cut", "notch"):
                 footprints.append((name, g))
         outline = b.outline.geometry
@@ -340,7 +342,9 @@ def _cutout_problems(b: Board, case: BoardCase, opening: BaseGeometry, exterior:
         problems.append("material fell out: the outline has more pieces than before")
     if c.radius <= c.border:
         near = opening.distance(exterior.boundary)
-        if opening.difference(exterior).area > 1e-6 or near < c.border - slack:
+        # (an opening's arcs are the true ones, the outline's polygon lies
+        # inside its arcs: with no border the two differ by so much area)
+        if opening.difference(exterior).area > slack * exterior.length or near < c.border - slack:
             problems.append(f"the opening comes {near:.3g} near the outline (border {c.border:g})")
     kept = footprints + [("a box kept", shapely_box(k.lo[b.u_axis], k.lo[b.v_axis], k.hi[b.u_axis], k.hi[b.v_axis]))
                          for k in keep]

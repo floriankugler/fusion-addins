@@ -194,8 +194,8 @@ def test_named_operations_expose_their_edges():
     assert left.groove.floor == Pos("y", 15 - 5) and left.groove.right == Pos("y", 15)
     assert left.groove.left == left.groove.floor
     assert left.groove.bottom == Pos("z", 20) and left.groove.top == Pos("z", 29.5)
-    left.hole(d=8, depth=30, at=left.front.bottom(50), name="dowel")   # into the front narrow face
-    assert left.dowel.floor == Pos("x", 30) and left.dowel.top == Pos("z", 54)
+    left.hole(d=8, depth=30, at=left.front.bottom(150), name="dowel")  # into the front narrow face, above the toekick
+    assert left.dowel.floor == Pos("x", 30) and left.dowel.top == Pos("z", 154)
     # a board placed on a cut's edge, and bays above it
     with cab:
         bottom = board("bottom2", ply15).on(left.toekick.top, toward=cab.top).between(cab["left"], cab["right"])
@@ -274,10 +274,10 @@ def test_edge_face_hole():
     op = bottom.ops[-1]
     assert isinstance(op, EdgeOp) and op.face == "front"
     assert (op.s, op.t) == pytest.approx((65, 7.5))
-    bottom.hole(d=8, depth=20, at=bottom.front.left(50).bottom(5))
+    bottom.hole(d=8, depth=20, at=bottom.front.left(150).bottom(5))
     op = bottom.ops[-1]
     assert isinstance(op, EdgeOp)
-    assert (op.s, op.t) == pytest.approx((65, 5))
+    assert (op.s, op.t) == pytest.approx((165, 5))
 
 
 def test_chamfer_targets():
@@ -708,3 +708,80 @@ def test_parts_of_and_polygons_of():
     mixed = GeometryCollection([square, LineString([(0, 0), (2, 2)]), P(5, 5), Polygon()])
     assert polygons_of(mixed) == [square] and polygons_of(LineString([(0, 0), (1, 1)])) == []
     assert len(parts_of(mixed)) == 3 and parts_of(square) == [square] and parts_of(Polygon()) == []
+
+
+def test_an_operation_that_misses_the_board_is_an_error():
+    """Found compiling fuzz boards in Fusion: holes, pockets and V-grooves
+    wholly where a rounded corner took the board away, holes whose centre
+    lies off the board, and holes into a narrow face where the outline does
+    not reach it, were accepted, and Fusion found nothing to cut. A hole
+    partly on the board, its centre on it, is fine."""
+    with module("m", Box.from_size(width=400, depth=300, height=100)) as m:
+        panel = board("panel", ply15, rect(depth=300, width=400).rounded(100)).on(m.bottom)
+        with pytest.raises(LangError, match="lies off the board"):
+            panel.hole(d=8, at=panel.top.front(5).left(5), depth=5)          # in the rounded-off corner
+        with pytest.raises(LangError, match="centre off the top face"):
+            panel.hole(d=60, at=panel.top.front(20).left(20), depth=5)      # partly on, its centre off
+        panel.hole(d=60, at=panel.top.front(35).left(35), depth=5)          # partly on, its centre on
+        with pytest.raises(LangError, match="front face where the board has none"):
+            panel.hole(d=8, at=panel.front.left(20), depth=10)             # the front face starts 100 in
+        panel.hole(d=8, at=panel.front.left(150), depth=10)
+    assert [op.kind for op in panel.ops] == ["hole", "edge"]
+
+
+def test_an_operation_whose_material_other_operations_took_is_an_error():
+    """Found compiling fuzz boards in Fusion: a cut made after a hole took
+    away all of the board around it, and a hole into a narrow face had its
+    centre in a larger hole made there before; Fusion found nothing to cut
+    for either. A cut taking part of a hole is fine."""
+    with module("m", Box.from_size(width=400, depth=300, height=100)) as m:
+        panel = board("panel", ply15).on(m.bottom)
+        panel.hole(d=8, at=panel.top.front(20).left(20), depth=5, name="pin")
+        with pytest.raises(LangError, match="the cut takes the board away from the hole 'pin' made before, which "
+                                            "then lies off the board"):
+            panel.cut(rect(depth=50, width=50), at=panel.top.front(0).left(0))
+        with pytest.raises(LangError, match="takes the board away from the hole 'pin' made before, which then has "
+                                            "its centre off the top face"):
+            panel.cut(rect(depth=22, width=50), at=panel.top.front(0).left(0))      # takes its centre
+        panel.cut(rect(depth=18, width=50), at=panel.top.front(0).left(0))         # its centre stays
+        panel.hole(d=18, depth=35, at=panel.back.left(200), name="dowel")
+        with pytest.raises(LangError, match="has its centre in the hole 'dowel', made into the back face before"):
+            panel.hole(d=9.5, depth=17, at=panel.back.left(202))
+        panel.hole(d=8, depth=20, at=panel.back.left(220))                        # clear of it
+    assert [op.kind for op in panel.ops] == ["hole", "cut", "edge", "edge"]
+
+
+def test_a_pocket_through_the_board_may_not_split_it():
+    """Found compiling fuzz boards in Fusion: a through pocket cut a board
+    in two, which a through cut may not; Fusion made two bodies."""
+    with module("m", Box.from_size(width=400, depth=300, height=100)) as m:
+        panel = board("panel", ply15).on(m.bottom)
+        panel.pocket(rect(depth=10, width=380), at=panel.top.front(150).left(0), depth=through)   # leaves 20
+        with pytest.raises(LangError, match="splits it in pieces"):
+            panel.hole(d=30, at=panel.top.front(155).left(390), depth=through)   # takes the 20 left
+        with pytest.raises(LangError, match="splits it in pieces"):
+            panel.pocket(rect(depth=10, width=400), at=panel.top.front(250).left(0), depth=through)
+    assert len(panel.ops) == 1
+
+
+def test_a_cut_may_not_leave_only_what_through_pockets_take():
+    """Found by fuzzing cutouts: with border 0 a cutout took all of a board
+    but the corner a through pocket had already taken, which left a board
+    of nothing."""
+    with module("m", Box.from_size(width=400, depth=300, height=100)) as m:
+        panel = board("panel", ply15).on(m.bottom)
+        panel.pocket(rect(depth=20, width=400), at=panel.top.front(0).left(0), depth=through)
+        with pytest.raises(LangError, match="nothing of the board but what pockets and holes through it take"):
+            panel.cut(rect(depth=280, width=400), at=panel.top.back(0).left(0))
+    assert len(panel.ops) == 1 and panel.outline.area == pytest.approx(400 * 300)
+
+
+def test_an_operation_refused_for_its_name_is_not_kept():
+    """Found while ordering the checks: an operation whose name was taken
+    was refused, but stayed among the board's operations."""
+    with module("m", Box.from_size(width=400, depth=300, height=100)) as m:
+        panel = board("panel", ply15).on(m.bottom)
+        panel.hole(d=5, at=panel.top.front(50), depth=5, name="a")
+        with pytest.raises(LangError, match="used twice"):
+            panel.hole(d=5, at=panel.top.front(100), depth=5, name="a")
+    assert len(panel.ops) == 1

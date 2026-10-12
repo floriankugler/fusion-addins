@@ -37,6 +37,8 @@ from dataclasses import dataclass
 from collections.abc import Sequence
 from typing import Literal, Protocol, Self, Union
 
+import shapely
+from shapely import affinity
 from shapely.geometry import LineString, Point, Polygon
 from shapely.geometry import box as shapely_box
 from shapely.geometry.base import BaseGeometry
@@ -55,7 +57,7 @@ from .contours import Contour, ContourLimit, ContourLimits, as_contour_limit
 from .directions import AXES, Axis, Direction, ExtentName, InnerOuter
 from .errors import LangError, one_of
 from .faces import Anchor, Edge, Face, Operation, Outline
-from .geometry import parts_of
+from .geometry import parts_of, polygons_of
 from .layout_types import (ChamferLayout, CutLayout, EdgeOpLayout, HoleLayout, OpLayout,
                            PartLayout, PocketLayout, Rings, VGrooveLayout)
 from .material import Material
@@ -67,6 +69,8 @@ Point2 = tuple[float, float]
 #: How far a point may lie off a face and still be on it, mm (the add-ins'
 #: 1e-4 cm): `hole_fits`.
 ON_FACE_TOLERANCE = 1e-3
+#: How near (mm) an opening may come to itself before it touches itself.
+_PINCH = 1e-6
 #: What `between()` takes: positions, box sides, faces, parts (their nearest
 #: face), contours, and boxes (their sides on the board's in-plane axes).
 Limit = Union[Pos, Affine, HasPosition, "Board", "PartLimit", Contour, ContourLimit, Box]
@@ -610,6 +614,8 @@ class Board:
     # -- operations (ordered) -----------------------------------------------------------------
 
     def _record(self, op: Op, name: str | None) -> None:
+        if name and name in self._named_ops:
+            raise LangError(f"operation name {name!r} used twice.", self.path)
         if self._cutouts and not isinstance(op, Chamfer):
             footprint = self._footprint(op)
             for cutout, opening in self._cutouts:
@@ -618,11 +624,98 @@ class Board:
                     raise LangError(
                         f"{what} lies in the cutout {cutout!r}, which was made before it: make the cutout "
                         "after it, or keep material there with keep=.", self.path)
+        self._check_on_material(op, name)
+        self._check_through(op, name)
         self.ops.append(op)
         if name:
-            if name in self._named_ops:
-                raise LangError(f"operation name {name!r} used twice.", self.path)
             self._named_ops[name] = op
+
+    @staticmethod
+    def _label(op: Op, name: str | None) -> str:
+        inner = op.op if isinstance(op, EdgeOp) else op
+        return f"the {inner.kind} {name!r}" if name else f"a {inner.kind}"
+
+    def _check_on_material(self, op: Op, name: str | None) -> None:
+        """An error for an operation that misses the board: a pocket, hole
+        or V-groove lying wholly where a rounded corner, a taper or a cut
+        took the board away, a hole into a big face whose centre is not on
+        that face, or a hole into a narrow face where the outline does not
+        run along that face or whose centre lies in a hole or pocket made
+        into that face before; Fusion finds nothing to cut there [found by
+        fuzzing, 2026-10-12]. A pocket or groove partly on the board cuts
+        what it reaches."""
+        missing = self._missing(op, self.outline.geometry, self.ops)
+        if missing is not None:
+            raise LangError(f"{self._label(op, name)} {missing}", self.path)
+
+    def _missing(self, op: Op, outline: BaseGeometry, before: Sequence[Op]) -> str | None:
+        """Why `op` misses the board with this outline and the operations
+        `before` it (see `_check_on_material`), or None when it does not."""
+        if isinstance(op, (Cut, Chamfer)):
+            return None
+        if isinstance(op, EdgeOp) and isinstance(op.op, Hole):
+            face = directions.frame.direction(op.face)
+            b = self.box()
+            value = (b.hi[face.axis] if face.sign > 0 else b.lo[face.axis]) + face.sign * op.offset
+            reach = min(op.op.d / 2, 1.0)
+            if face.axis == self.u_axis:
+                along = LineString([(value, op.s - reach), (value, op.s + reach)])
+            else:
+                along = LineString([(op.s - reach, value), (op.s + reach, value)])
+            if outline.boundary.intersection(along).length <= 1e-6:
+                return (f"goes into the {face.name} face where the board has none: its outline does not reach the "
+                        f"{face.name} side there.")
+            # Fusion's hole feature starts at its centre, on the face.
+            centre = Point(op.s, op.t)
+            for other in before:
+                if (isinstance(other, EdgeOp) and other.face == op.face and abs(other.offset - op.offset) < 1e-9
+                        and self._edge_region(other).buffer(-ON_FACE_TOLERANCE).contains(centre)):
+                    return (f"has its centre in {self._label(other, other.op.name)}, made into the {face.name} face "
+                            "before; a hole starts on the face.")
+            return None
+        if self._footprint(op).intersection(outline).area <= 1e-6:
+            return "lies off the board: none of it is on the board's outline."
+        if isinstance(op, Hole):
+            # Fusion's hole feature starts at its centre, on the face.
+            face = self.face(directions.frame.direction(op.face))
+            taken = self._taken_from(face, before)
+            region = outline.difference(unary_union(taken)) if taken else outline
+            if region.distance(Point(op.u, op.v)) > ON_FACE_TOLERANCE:
+                return (f"has its centre off the {face.name} face (off the board, or in a pocket or hole made into "
+                        "it before); a hole starts on the face. For one over the board's edge, cut a circle.")
+        return None
+
+    @staticmethod
+    def _edge_region(op: EdgeOp) -> BaseGeometry:
+        """What a narrow-face operation takes of its face, in the face's
+        (s, t) frame."""
+        if isinstance(op.op, Hole):
+            return cutout_geometry.circle_geometry((op.s, op.t), op.op.d / 2)
+        return affinity.translate(op.op.shape.geometry, op.s, op.t)
+
+    def _through_footprint(self, op: Op) -> BaseGeometry | None:
+        """What a pocket or hole through the board from a big face takes
+        out of its outline; None for other operations."""
+        if isinstance(op, Pocket) and op.depth >= self.thickness - 1e-9 and self._on_big_face(op.face):
+            return op.shape.geometry
+        if isinstance(op, Hole) and (op.through or op.depth >= self.thickness - 1e-9) and self._on_big_face(op.face):
+            return cutout_geometry.circle_geometry((op.u, op.v), op.d / 2)
+        return None
+
+    def _on_big_face(self, world_name: str) -> bool:
+        return directions.frame.direction(world_name).axis == self.t_axis
+
+    def _check_through(self, op: Op, name: str | None) -> None:
+        """An error for a pocket or hole through the board that, with those
+        made before, splits the board in pieces, as a through cut may not
+        [found by fuzzing, 2026-10-12]."""
+        new = self._through_footprint(op)
+        if new is None:
+            return
+        taken = [g for g in (self._through_footprint(o) for o in self.ops) if g is not None] + [new]
+        rest = self.outline.geometry.difference(unary_union(taken))
+        if len([p for p in parts_of(rest) if p.area > 1e-6]) > len(self.outline.polygons()):
+            raise LangError(f"{self._label(op, name)} goes through the board and splits it in pieces.", self.path)
 
     def cut(self, shape: Shape | Board | Box, at: Anchor | Edge | None = None, name: str | None = None,
             chamfer: float = 0.0) -> Self:
@@ -649,8 +742,22 @@ class Board:
         cut = self.outline.difference(placed)
         if cut.is_empty():
             raise LangError("the cut removes the whole board.", self.path)
+        through = [g for g in (self._through_footprint(o) for o in self.ops) if g is not None]
+        if through and cut.geometry.difference(unary_union(through)).area <= 1e-6:
+            raise LangError("the cut leaves nothing of the board but what pockets and holes through it take.",
+                            self.path)
         if len(cut.polygons()) > len(self.outline.polygons()):
             raise LangError(f"the cut{f' {name}' if name else ''} splits the board in pieces.", self.path)
+        # [found by fuzzing, 2026-10-12: a cut took away all of a hole made before, which Fusion then
+        # found nothing to cut for]
+        for k, op in enumerate(self.ops):
+            if isinstance(op, (Cut, Chamfer)):
+                continue
+            missing = self._missing(op, cut.geometry, self.ops[:k])
+            if missing is not None:
+                inner = op.op if isinstance(op, EdgeOp) else op
+                raise LangError(f"the cut{f' {name}' if name else ''} takes the board away from "
+                                f"{self._label(op, inner.name)} made before, which then {missing}", self.path)
         self._record(Cut(placed, name, chamfer), name)       # may refuse it; then the outline stays
         self.outline = cut
 
@@ -977,7 +1084,9 @@ class Board:
             raise LangError(f"cutout(): every piece is too small for radius={radius:g}.", self.path)
         opening = result.geometry
         shape = Shape(opening)
+        self._check_pinched(result.pieces)
         if thru:
+            self._check_touching(result.pieces)
             self._check_islands(opening, kept, name)
             self._cut_through(shape, name, 0.0)
         else:
@@ -1084,6 +1193,47 @@ class Board:
                 raise LangError(f"cutout(): keep= {label} does not lie on this board.", self.path)
             found.append((label, g))
         return found
+
+    def _check_touching(self, pieces: list[Polygon]) -> None:
+        """An error for through openings that touch the outline, or each
+        other, at a point only: Fusion makes no profile of such an outline
+        (a cutout with no border and sharp corners, checked 2026-10-12).
+        Openings sharing an edge with the outline make notches, which is
+        fine."""
+        u, v = self.u_axis, self.v_axis
+        rings = [LineString(r.coords) for poly in self.outline.polygons() for r in [poly.exterior, *poly.interiors]]
+        others: list[BaseGeometry] = [unary_union(rings)] + list(pieces)
+        for i, piece in enumerate(pieces):
+            for other in others[:i + 1]:
+                meet = piece.boundary.intersection(other.boundary if isinstance(other, Polygon) else other)
+                lines = [g for g in parts_of(meet) if g.geom_type in ("LineString", "MultiLineString")]
+                points = [g for g in parts_of(meet) if isinstance(g, Point)
+                          and all(g.distance(line) > 1e-9 for line in lines)]
+                if points:
+                    where = f"{u} {points[0].x:g}, {v} {points[0].y:g}"
+                    what = "the board's outline" if other is others[0] else "another opening"
+                    raise LangError(f"cutout(): an opening touches {what} at a point only ({where}), which Fusion "
+                                    "cannot make a profile of: give it a border, or round its corners (radius=).",
+                                    self.path)
+
+    def _check_pinched(self, pieces: list[Polygon]) -> None:
+        """An error for an opening that touches itself at a point, within a
+        micrometre: snapped to a micrometre it falls in pieces or gains a
+        hole. Fusion makes no surface of such a profile [found by fuzzing, a
+        pocket cutout pinched by the material kept around a pocket, 1e-14
+        across: "Cover failed to make a surface", 2026-10-12]."""
+        u, v = self.u_axis, self.v_axis
+        for piece in pieces:
+            snapped = polygons_of(shapely.set_precision(piece, _PINCH))
+            if len(snapped) <= 1 and sum(len(p.interiors) for p in snapped) <= len(piece.interiors):
+                continue
+            meets = [a.boundary.intersection(b.boundary) for i, a in enumerate(snapped) for b in snapped[i + 1:]]
+            meets += [LineString(h.coords).intersection(LineString(p.exterior.coords)) for p in snapped
+                      for h in p.interiors]
+            points = [g for m in meets for g in parts_of(m) if isinstance(g, Point)]
+            where = f" ({u} {points[0].x:g}, {v} {points[0].y:g})" if points else ""
+            raise LangError(f"cutout(): an opening touches itself at a point only{where}, which Fusion cannot make a "
+                            "surface of: change border=, around= or radius=.", self.path)
 
     def _check_islands(self, opening: BaseGeometry, kept: list[tuple[str, BaseGeometry]], name: str) -> None:
         """A through cutout must not cut kept material free."""
@@ -1268,14 +1418,14 @@ class Board:
 
     # -- where hardware fits on a face -------------------------------------------------------------
 
-    def _taken_from(self, face: Face) -> list[BaseGeometry]:
-        """What the operations took from a big face, in the outline's
-        frame: the pockets, holes and V-grooves made into it (a hole with
-        its countersink), and the pockets and holes through from the other
-        face."""
+    def _taken_from(self, face: Face, ops: Sequence[Op] | None = None) -> list[BaseGeometry]:
+        """What the operations (the board's, or `ops`) took from a big face,
+        in the outline's frame: the pockets, holes and V-grooves made into
+        it (a hole with its countersink), and the pockets and holes through
+        from the other face."""
         name = face.world_name
         taken: list[BaseGeometry] = []
-        for op in self.ops:
+        for op in self.ops if ops is None else ops:
             if isinstance(op, (Pocket, Hole, VGroove)) and op.face == name:
                 taken.append(self._footprint(op))
             elif isinstance(op, (Pocket, Hole)) and op.depth >= self.thickness - 1e-9:

@@ -51,7 +51,7 @@ def test_through_depth_is_none_and_pocket_chamfer_follows_pocket():
     with module("cab", CAB) as cab:
         bottom = board("bottom", ply15).on(cab.bottom)
         bottom.pocket(rect(depth=100, width=20), at=bottom.top.center, depth=through, chamfer=1)
-        bottom.hole(d=6, at=bottom.top.center, depth=to(bottom.bottom))
+        bottom.hole(d=6, at=bottom.top.front(20).left(20), depth=to(bottom.bottom))
     steps = _plan_of(bottom).steps
     pocket, chamfer, hole = steps
     assert isinstance(pocket, PocketStep) and pocket.depth is None

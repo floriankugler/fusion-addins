@@ -455,6 +455,36 @@ def test_an_offset_does_not_turn_an_edge_onto_an_arc_beside_it():
     assert shape.buffer(12 - 1e-3, quad_segs=64).difference(grown).area < 0.05
 
 
+def test_openings_touching_the_outline_at_a_point_are_an_error():
+    """Found compiling fuzz boards in Fusion: a cutout with no border and
+    sharp corners had openings touching the board's edge at single points,
+    and Fusion made no profile of the outline (the part was left out)."""
+    with module("m", Box.from_size(width=300, depth=400, height=100)) as m:
+        panel = board("panel", ply15).on(m.bottom)
+        with pytest.raises(LangError, match="touches the board's outline at a point only"):
+            panel.cutout(pattern=triangles(4, 3, 20), border=0, radius=0)
+        panel.cutout(pattern=triangles(4, 3, 20), border=10, radius=0)     # with a border
+    assert panel.has_operation("cutout")
+
+
+def test_an_opening_that_touches_itself_at_a_point_is_an_error():
+    """Found by fuzzing: the material kept 2 around a through pocket, turned
+    45 degrees at a board's corner, pinched a pocket cutout's opening to a
+    point (1e-14 across); Fusion made no surface of it ("Cover failed to
+    make a surface"), and the preview could not mesh it."""
+    from shapely import affinity
+    from lang.core.shapes import Shape
+    with module("m", Box.from_size(width=41, depth=40, height=100)) as m:
+        panel = board("panel", material("birch", t=6)).on(m.bottom)
+        top = panel.big_faces()[0]
+        panel.add_hole(top, (0, 0), 2, through)
+        panel.add_pocket(top, Shape(affinity.rotate(box(-27, -7.5, 27, 7.5), 45, origin=(0, 0))), through)
+        with pytest.raises(LangError, match=r"an opening touches itself at a point only \(x 13.7886, y 27.2236\)"):
+            panel.cutout(border=0, around=2, radius=8, depth=3)
+        panel.cutout(border=0, around=3, radius=8, depth=3)
+    assert panel.has_operation("cutout")
+
+
 def test_an_offset_closing_a_hole_leaves_no_speck_of_it():
     """Found by fuzzing: a ring around a hole of 0.5 (16 segments a
     quarter), grown by 0.5, kept a hole 0.6 um across, which no drawing
