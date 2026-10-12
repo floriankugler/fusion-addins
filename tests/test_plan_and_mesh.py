@@ -23,9 +23,6 @@ from helpers import ply15
 
 #: A 24-gon's area over its circumscribed circle's radius squared.
 CYLINDER = 12 * math.sin(math.pi / 12)
-#: How far the mesh's tools cut past a fixed depth, so its booleans leave
-#: no skin (`lang.preview.mesh._PAST / 2`); Fusion cuts the depth itself.
-OVER = 0.005
 W, H, T = 200.0, 150.0, 15.0
 
 
@@ -69,22 +66,22 @@ class Case:
 
 
 CASES = [
-    Case("hole top 5", lambda p: p.hole(8, at=p.top.center, depth=5), HoleStep, 5, cylinder(8, 5 + OVER)),
+    Case("hole top 5", lambda p: p.hole(8, at=p.top.center, depth=5), HoleStep, 5, cylinder(8, 5)),
     Case("hole top through", lambda p: p.hole(8, at=p.top.center, depth=through), HoleStep, None, cylinder(8, T)),
     Case("hole top to bottom", lambda p: p.hole(8, at=p.top.center, depth=to(p.bottom, -3)), HoleStep, 12,
-         cylinder(8, 12 + OVER)),
-    Case("hole bottom 5", lambda p: p.hole(8, at=p.bottom.center, depth=5), HoleStep, 5, cylinder(8, 5 + OVER)),
-    Case("hole front 30", lambda p: p.hole(8, at=p.front.center, depth=30), HoleStep, 30, cylinder(8, 30 + OVER)),
+         cylinder(8, 12)),
+    Case("hole bottom 5", lambda p: p.hole(8, at=p.bottom.center, depth=5), HoleStep, 5, cylinder(8, 5)),
+    Case("hole front 30", lambda p: p.hole(8, at=p.front.center, depth=30), HoleStep, 30, cylinder(8, 30)),
     Case("hole front through", lambda p: p.hole(8, at=p.front.center, depth=through), HoleStep, None,
          cylinder(8, W)),
     Case("hole front to back", lambda p: p.hole(8, at=p.front.center, depth=to(p.back, -20)), HoleStep, 180,
-         cylinder(8, 180 + OVER)),
+         cylinder(8, 180)),
     Case("pocket top 5", lambda p: p.pocket(rect(depth=40, width=20), at=p.top.center, depth=5), PocketStep, 5,
-         40 * 20 * (5 + OVER)),
+         40 * 20 * 5),
     Case("pocket top through", lambda p: p.pocket(rect(depth=40, width=20), at=p.top.center, depth=through),
          PocketStep, None, 40 * 20 * T),
     Case("pocket right 10", lambda p: p.pocket(rect(depth=20, height=6), at=p.right.center, depth=10), PocketStep,
-         10, 20 * 6 * (10 + OVER)),
+         10, 20 * 6 * 10),
     Case("pocket right through", lambda p: p.pocket(rect(depth=20, height=6), at=p.right.center, depth=through),
          PocketStep, None, 20 * 6 * H),
     Case("vgroove top", lambda p: p.add_vgroove(p.top, (50, 20), (150, 20), 2), VGrooveStep, 2, 2 * 2 * 100),
@@ -92,19 +89,19 @@ CASES = [
     Case("chamfer top outline", lambda p: p.chamfer(p.top.outline, 1), ChamferStep, None,
          outline_chamfer(W, H, 1), True),
     Case("pocket top chamfered", lambda p: p.pocket(rect(depth=40, width=20), at=p.top.center, depth=5, chamfer=1),
-         PocketStep, 5, 40 * 20 * (5 + OVER) + contour_chamfer(40, 20, 1), True),
+         PocketStep, 5, 40 * 20 * 5 + contour_chamfer(40, 20, 1), True),
     Case("pocket right chamfered", lambda p: p.pocket(rect(depth=20, height=6), at=p.right.center, depth=10,
                                                      chamfer=1),
-         PocketStep, 10, 20 * 6 * (10 + OVER) + contour_chamfer(20, 6, 1), True),
+         PocketStep, 10, 20 * 6 * 10 + contour_chamfer(20, 6, 1), True),
     Case("pocket right named chamfer", lambda p: p.pocket(rect(depth=20, height=6), at=p.right.center, depth=10,
                                                          name="slot").chamfer(p.slot, 1),
-         PocketStep, 10, 20 * 6 * (10 + OVER) + contour_chamfer(20, 6, 1), True),
+         PocketStep, 10, 20 * 6 * 10 + contour_chamfer(20, 6, 1), True),
     Case("hole top chamfered", lambda p: p.hole(8, at=p.top.center, depth=5, chamfer=1), HoleStep, 5,
-         cylinder(8, 5 + OVER) + countersink(8, 1), True, 0.3),
+         cylinder(8, 5) + countersink(8, 1), True, 0.3),
     Case("hole front chamfered", lambda p: p.hole(8, at=p.front.center, depth=30, chamfer=1), HoleStep, 30,
-         cylinder(8, 30 + OVER) + countersink(8, 1), True, 0.3),
+         cylinder(8, 30) + countersink(8, 1), True, 0.3),
     Case("hole front named chamfer", lambda p: p.hole(8, at=p.front.center, depth=30, name="pin").chamfer(p.pin, 1),
-         HoleStep, 30, cylinder(8, 30 + OVER) + countersink(8, 1), True, 0.3),
+         HoleStep, 30, cylinder(8, 30) + countersink(8, 1), True, 0.3),
 ]
 
 

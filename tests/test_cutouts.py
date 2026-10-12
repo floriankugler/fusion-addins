@@ -92,9 +92,9 @@ def test_a_pocket_cutout_has_several_pieces_in_the_layout():
     assert len(steps[1].contour.loops) == 4
     mesh = mesh_part(part, build_layout()["frame"])
     # the preview shows the rims' chamfer too: half a square millimetre
-    # for every millimetre of rim (its pocket tool reaches 0.005 deeper)
+    # for every millimetre of rim
     chamfer = 0.5 * pocket.shape.geometry.boundary.length
-    expected = side.outline.area * 15 - pocket.shape.area * 12.005 - chamfer
+    expected = side.outline.area * 15 - pocket.shape.area * 12 - chamfer
     assert mesh.volume == pytest.approx(expected, rel=1e-5)
 
 

@@ -109,3 +109,18 @@ def test_an_edge_shorter_than_a_micrometre_does_not_break_the_mesh():
     problems: list[str] = []
     mesh = mesh_part(part, layout["frame"], problems.append)
     assert problems == [] and mesh.is_watertight
+
+
+def test_a_shape_that_touches_itself_at_a_point_meshes():
+    """Found by fuzzing: a cutout's opening pinched to a point, 1e-14
+    across; the triangulation left an open edge there, and the preview
+    showed the board uncut. (The language refuses such openings now; the
+    mesher copes with any shape that comes so near itself.)"""
+    from shapely.geometry import Polygon
+    from trimesh.creation import extrude_polygon
+    from lang.preview.mesh import _extruded_polygon  # pyright: ignore[reportPrivateUsage]
+    # a square with a triangle open to the outside through a gap of 2e-14
+    pinched = Polygon([(0, 0), (4, 0), (4, 4), (2 + 1e-14, 4), (3, 2), (1, 2), (2 - 1e-14, 4), (0, 4)])
+    assert pinched.is_valid and not extrude_polygon(pinched, 3).is_volume
+    mesh = _extruded_polygon(pinched, 3)
+    assert mesh.is_volume and mesh.volume == pytest.approx((16 - 2) * 3, rel=1e-5)

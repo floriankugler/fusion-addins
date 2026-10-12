@@ -241,8 +241,8 @@ def test_the_preview_meshes_pockets_in_narrow_faces():
     removed = 200 * 200 * 15 - mesh.volume
     hole = 24 / 2 * 4 ** 2 * math.sin(2 * math.pi / 24)                   # the mesher's 24-sided cylinder
     disc = Point(0, 0).buffer(3, quad_segs=16).area
-    # each tool reaches 0.005 past its depth
-    assert removed == pytest.approx(40 * 6 * 10.005 + 30.005 * hole + 10.005 * disc, rel=1e-6)
+    # each tool stops at its depth
+    assert removed == pytest.approx(40 * 6 * 10 + 30 * hole + 10 * disc, rel=1e-6)
 
 
 def test_box_joint_errors():

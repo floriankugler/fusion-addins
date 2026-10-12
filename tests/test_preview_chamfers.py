@@ -68,3 +68,24 @@ def test_pocket_and_named_hole_chamfers_take_material():
     tray = 0.5 * 300 + 4 / 3
     bolt = math.pi * (5 * 1 + 1 / 3)
     assert without - _volume(panel) == pytest.approx(tray + bolt, rel=2e-3)
+
+
+def test_a_chamfer_whose_contour_folds_when_moved_still_takes_its_material():
+    """Found compiling fuzz boards in Fusion: the preview built a rim
+    chamfer by moving each vertex of the contour along its mitre; where
+    that folded the contour over itself (here a finger of material 1 wide
+    reaching into the opening), the chamfer was left out unsaid, and the
+    preview showed up to 0.3 % more material than Fusion."""
+    from shapely.geometry import box
+    from lang.core.shapes import Shape
+    opening = box(150, 100, 250, 160).difference(box(199.5, 100, 200.5, 130))
+    m, panel = _panel()
+    with m:
+        panel.add_cut(Shape(opening), name="window")
+        panel.chamfer(panel.window, 2)
+    # the chamfer takes, at each depth z from the face, the opening grown by 2 - z
+    c, slices = 2.0, 400
+    chamfer = sum((opening.buffer(c - (k + 0.5) * c / slices, join_style="mitre", mitre_limit=10.0).area - opening.area)
+                  * c / slices for k in range(slices))
+    plain = 400 * 300 * 15 - opening.area * 15
+    assert plain - _volume(panel) == pytest.approx(chamfer, rel=0.02)

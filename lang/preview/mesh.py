@@ -32,14 +32,18 @@ from shapely.geometry import box as shapely_box
 from shapely.geometry.polygon import orient
 from trimesh.creation import extrude_polygon, triangulate_polygon
 
+from ..core.geometry import polygons_of
 from ..core.layout_types import (BoxDict, ChamferLayout, EdgeOpLayout, HardwareLayout, Layout, OpLayout, PartLayout,
                                  Rings, VGrooveLayout)
 from ..emit.plan import (EdgeTarget, LayoutFrame, OpTarget, OutlineTarget, PartFrame, chamfer_target, check_version,
                          named_ops, pieces)
 
 AXES = ("x", "y", "z")
-#: How far a tool reaches past the face it starts from and past its depth,
-#: so the boolean cuts cleanly and leaves no skin, mm.
+#: How far a tool reaches past the face it starts from, and past the far
+#: face when it goes through, so the boolean cuts cleanly and leaves no
+#: skin, mm. (It stops at its depth otherwise: once it reached half of
+#: this past, 5 um, which on a large pocket made the preview a few cm3
+#: lighter than Fusion's part.)
 _PAST = 0.01
 #: How far a countersink's cone reaches into its hole beyond the chamfer,
 #: so it meets the hole's cylinder inside the material, mm.
@@ -64,10 +68,23 @@ def _polygon(rings: Rings) -> Polygon:
 
 def _extruded(rings: Rings, height: float) -> Any:
     """Each polygon of a layout shape extruded by `height`."""
-    polygons = [_polygon(piece) for piece in pieces(rings)]
-    if len(polygons) == 1:
-        return extrude_polygon(polygons[0], height)
-    return trimesh.util.concatenate([extrude_polygon(p, height) for p in polygons])
+    meshes = [_extruded_polygon(_polygon(piece), height) for piece in pieces(rings)]
+    return meshes[0] if len(meshes) == 1 else trimesh.util.concatenate(meshes)
+
+
+def _extruded_polygon(poly: Polygon, height: float) -> Any:
+    """A polygon extruded by `height`. Where its ring touches itself, within
+    `_SAME_POINT`, the triangulation leaves an open edge there [found by
+    fuzzing: a cutout's opening pinched at a point, 1e-14 across]: then it is
+    extruded inset by `_SAME_POINT`, which opens the pinch."""
+    mesh = extrude_polygon(poly, height)
+    if mesh.is_volume:
+        return mesh
+    inset = polygons_of(poly.buffer(-_SAME_POINT, join_style="mitre", mitre_limit=10.0))
+    meshes = [extrude_polygon(p, height) for p in inset]
+    if not meshes or not all(m.is_volume for m in meshes):
+        return mesh
+    return meshes[0] if len(meshes) == 1 else trimesh.util.concatenate(meshes)
 
 
 def _part_transform(part: PartLayout) -> Any:
@@ -91,11 +108,19 @@ def _big_face(pf: PartFrame, face: str) -> float | None:
     return float(ref.sign) if pf.is_big(ref) else None
 
 
+def _reach(depth: float, through: float) -> float:
+    """How high a tool `depth` into a part `through` deep is built: from
+    `_PAST` in front of its face, and `_PAST` past the far one when it goes
+    through."""
+    return depth + _PAST + (_PAST if depth >= through else 0.0)
+
+
 def _from_face(tool: Any, out: float, t: float, depth: float) -> Any:
-    """Moves a tool built upward from z=0, `depth` plus a little high, so
-    that it starts a little outside the big face on the side `out` and goes
+    """Moves a tool built upward from z=0, `_reach(depth, t)` high, so that
+    it starts a little outside the big face on the side `out` and goes
     `depth` into the part."""
-    tool.apply_translation([0, 0, t - depth - _PAST / 2 if out > 0 else -_PAST / 2])
+    beyond = _PAST if depth >= t else 0.0
+    tool.apply_translation([0, 0, t - depth - beyond if out > 0 else -_PAST])
     return tool
 
 
@@ -158,12 +183,13 @@ def _edge_tools(pf: PartFrame, op: EdgeOpLayout) -> list[Any]:
     face = pf.edge_face(op)
     inner = op["op"]
     depth = pf.depth(face, inner["depth"], inner["kind"] == "hole" and inner["through"])
-    height = (pf.extent(face) if depth is None else depth) + _PAST
+    extent = pf.extent(face)
+    height = _reach(extent if depth is None else depth, extent)
     if inner["kind"] == "pocket":
         tool = _extruded(inner["shape"], height)
     else:
         tool = _cylinder(inner["d"], height)
-    tool.apply_translation([0.0, 0.0, -_PAST / 2])
+    tool.apply_translation([0.0, 0.0, -_PAST])
     tools = [tool]
     if inner["chamfer"] > 0:
         tools += _edge_chamfers(op, inner["chamfer"])
@@ -180,7 +206,7 @@ def _edge_chamfers(op: EdgeOpLayout, size: float) -> list[Any]:
     inner = op["op"]
     if inner["kind"] == "hole":
         return [_countersink(inner["d"], size)]
-    tools = [_contour_chamfer(region, size, -1.0, 0.0) for region in _regions(inner["shape"])]
+    tools = [tool for region in _regions(inner["shape"]) for tool in _contour_chamfer(region, size, -1.0, 0.0)]
     return [tool for tool in tools if tool is not None]
 
 
@@ -272,13 +298,38 @@ def _frustum(region: Polygon, d_low: float, z_low: float, d_high: float, z_high:
     return mesh if mesh.is_volume else None
 
 
-def _contour_chamfer(region: Polygon, size: float, out: float, t: float) -> Any | None:
-    """The tool chamfering the contour of `region`, the side of the contour
+#: Slabs a chamfer is cut in where its frustum would fold over itself.
+_CHAMFER_SLABS = 6
+
+
+def _contour_chamfer(region: Polygon, size: float, out: float, t: float) -> list[Any]:
+    """The tools chamfering the contour of `region`, the side of the contour
     without material (an opening, or what lies outside an outline), on the
     face at the top (`out` +1) or bottom (-1) of the part: at the face the
-    tool reaches `size` into the material, at depth `size` none."""
+    tool reaches `size` into the material, at depth `size` none. One
+    frustum; where moving the contour's vertices folds it over itself
+    (short edges at an inside corner), `_CHAMFER_SLABS` slabs, each the
+    region grown as at its middle depth, which take as much material."""
     face = t if out > 0 else 0.0
-    return _frustum(region, size + _PAST, face + out * _PAST, -_PAST, face - out * (size + _PAST))
+    tool = _frustum(region, size + _PAST, face + out * _PAST, -_PAST, face - out * (size + _PAST))
+    if tool is not None:
+        return [tool]
+    slabs: list[Any] = []
+    for k in range(_CHAMFER_SLABS):
+        top, bottom = size * k / _CHAMFER_SLABS, size * (k + 1) / _CHAMFER_SLABS
+        section = region.buffer(size - (top + bottom) / 2, join_style="mitre", mitre_limit=10.0)
+        if k == 0:
+            top = -_PAST
+        for piece in polygons_of(section):
+            slab = extrude_polygon(piece, bottom - top)
+            if not slab.is_volume:
+                # rings touching at a point, which the triangulation cannot
+                # close: grown a ten-thousandth, they part
+                slab = extrude_polygon(polygons_of(piece.buffer(1e-4, join_style="mitre"))[0], bottom - top)
+            slab.apply_translation([0.0, 0.0, face - bottom if out > 0 else face + top])
+            if slab.is_volume:
+                slabs.append(slab)
+    return slabs
 
 
 def _edge_chamfer(pf: PartFrame, a: str, b: str, size: float) -> Any | None:
@@ -328,9 +379,7 @@ def _chamfer_tools(part: PartLayout, pf: PartFrame) -> list[Any]:
         if out is None:
             continue
         for region in regions:
-            tool = _contour_chamfer(region, size, out, t)
-            if tool is not None:
-                tools.append(tool)
+            tools += _contour_chamfer(region, size, out, t)
     return tools
 
 
@@ -392,9 +441,9 @@ def mesh_part(part: PartLayout, frame: dict[str, str], report: Report | None = N
                 continue
             depth = min(op["depth"], t)
             if op["kind"] == "pocket":
-                tools.append(_from_face(_extruded(op["shape"], depth + _PAST), out, t, depth))
+                tools.append(_from_face(_extruded(op["shape"], _reach(depth, t)), out, t, depth))
             else:
-                tool = _cylinder(op["d"], depth + _PAST)
+                tool = _cylinder(op["d"], _reach(depth, t))
                 tool.apply_translation([op["u"], op["v"], 0.0])
                 tools.append(_from_face(tool, out, t, depth))
                 if op["chamfer"] > 0:
