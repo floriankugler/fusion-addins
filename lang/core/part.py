@@ -13,6 +13,11 @@ ordered operation like the others, so it goes after the joins whose holes
 it must spare, and an operation made later inside one of its openings is
 an error.
 
+Dog bones (`side.dogbones()`, see `dogbones.py`) are the exception to the
+order: they wait until the board is finished (`finish()`, when the layout
+is built) and go into the inside corners it has then, including those of
+operations and joints written after the call.
+
 Faces and edges are properties named by world direction (`side.front`,
 `side.front.inner`), so editors can complete them; project aliases go
 through `face()` and `edge()`. A point on a face for `at=` is named
@@ -36,6 +41,7 @@ from lib import cutout_patterns as cutout_data
 
 from . import cutouts as cutout_geometry
 from . import directions
+from . import dogbones as dogbone_geometry
 from . import scope as scopes
 from .box import Box
 from .contours import Contour, ContourLimit, ContourLimits, as_contour_limit
@@ -51,6 +57,8 @@ from .shapes import Shape, box_shape
 
 Point2 = tuple[float, float]
 Limit = Union[Pos, Affine, HasPosition, "Board", "PartLimit", Contour, ContourLimit]
+#: What `dogbones(at=)` takes: a named operation (or its name), a big face, the outline.
+DogBoneTarget = Union["Operation", str, "Face", "Outline"]
 
 
 class Face:
@@ -512,6 +520,10 @@ class Board:
         self._cutouts: list[tuple[str, BaseGeometry]] = []
         #: Notes for the layout's problems, such as cutout pieces left out.
         self.notes: list[str] = []
+        #: The dog bones asked for, put into the corners when the board is finished.
+        self._dogbones: list[dogbone_geometry.Request] = []
+        #: The operations and outline the last `finish()` left.
+        self._finished: tuple[int, Shape | None] | None = None
 
     # -- identity ----------------------------------------------------------------------
 
@@ -1288,6 +1300,52 @@ class Board:
                 return name
         return None
 
+    def dogbones(self, tool: float = 6.0, relief: float = 0.1,
+                 at: DogBoneTarget | Sequence[DogBoneTarget] | None = None) -> Self:
+        """Dog bones in every inside corner of the board, as the
+        dog_bones_native add-in makes them: a circle `relief` wider than
+        the `tool`, on the corner's bisector, reaching just past the
+        corner, through the board or as deep as the pocket the corner is
+        in. `at=` limits them to the corners of named operations
+        (`side.toekick`, or a name), of a big face (`side.inner`: what it
+        shows, through cuts and its own pockets, as when the add-in is
+        given a face), or of the outline's outer boundary
+        (`side.outer.outline`).
+
+        The corners are found when the board is finished, as the layout is
+        built, so this also covers the corners that joints and operations
+        made after the call add. Corners relieved already (by a joint's own
+        dog bones, a hole over them) and rounded ones get none; see
+        `lang.core.dogbones`."""
+        if tool <= 0:
+            raise LangError(f"dogbones(): tool must be positive, got {tool:g}.", self.path)
+        if relief < 0:
+            raise LangError(f"dogbones(): relief must not be negative, got {relief:g}.", self.path)
+        targets: tuple[dogbone_geometry.Target, ...] | None = None
+        if at is not None:
+            items = [at] if isinstance(at, (str, Operation, Face, Outline)) else list(at)
+            if not items:
+                raise LangError("dogbones(): at= is empty.", self.path)
+            targets = tuple(self._dogbone_target(item) for item in items)
+        self._dogbones.append(dogbone_geometry.Request(float(tool), float(relief), targets))
+        return self
+
+    def _dogbone_target(self, item: DogBoneTarget) -> dogbone_geometry.Target:
+        if isinstance(item, str):
+            return dogbone_geometry.Target("operation", item)
+        if isinstance(item, Operation):
+            if item.part is not self:
+                raise LangError(f"dogbones(at=): {item!r} is not an operation of this board.", self.path)
+            return dogbone_geometry.Target("operation", item.name)
+        face = item.face if isinstance(item, Outline) else item
+        if face.part is not self:
+            raise LangError(f"dogbones(at=): {face!r} is not a face of this board.", self.path)
+        if isinstance(item, Outline):
+            return dogbone_geometry.Target("outline")
+        if not face.is_big:
+            raise LangError(f"dogbones(at=): {face!r} is a narrow face; name a big face.", self.path)
+        return dogbone_geometry.Target("face", face.world_name)
+
     # -- operations at computed positions (joints and hardware) ------------------------------------
 
     def _big_face_of_mine(self, face: Face, what: str) -> None:
@@ -1400,7 +1458,29 @@ class Board:
 
     # -- layout ---------------------------------------------------------------------------------------
 
+    def finish(self) -> None:
+        """Makes what waits for the board's final shape: the dog bones
+        asked for with `dogbones()`, in the inside corners it has now. The
+        layout step calls it; it does nothing more until the board changes
+        again."""
+        if not self._dogbones or self._finished == (len(self.ops), self._outline):
+            return
+        for request in self._dogbones:
+            for relief in dogbone_geometry.reliefs(self, request):
+                shape = relief.shape
+                for _, opening in self._cutouts:
+                    # A cutout's sharp corner: its opening is empty already.
+                    shape = shape.difference(Shape(opening))
+                name = self.unique_op_name(relief.name)
+                if relief.face is None:
+                    self.add_cut(shape, name=name)
+                else:
+                    face = next(f for f in self.big_faces() if f.world_name == relief.face)
+                    self.add_pocket(face, shape, through if relief.depth is None else relief.depth, name=name)
+        self._finished = (len(self.ops), self._outline)
+
     def to_layout(self) -> PartLayout:
+        self.finish()
         b = self.box()
         return {
             "path": self.path,

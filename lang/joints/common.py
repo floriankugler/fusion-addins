@@ -170,6 +170,17 @@ class ContactGeometry:
         coords: dict[Axis, float] = {self.c.axis: along, self.normal: self.c.plane + self.away * from_edge}
         return (coords[e.u_axis], coords[e.v_axis])
 
+    def along_face(self, along: float, across: float) -> Point2:
+        """A direction on the face-on board's face, in that face's frame."""
+        return self.on_face(along, across)
+
+    def along_board(self, along: float, from_edge: float) -> Point2:
+        """A direction on a big face of the edge-on board, `from_edge`
+        positive away from its end, in that face's frame."""
+        e = self.c.edge_on
+        coords: dict[Axis, float] = {self.c.axis: along, self.normal: self.away * from_edge}
+        return (coords[e.u_axis], coords[e.v_axis])
+
     @staticmethod
     def inside(face: Face, distance: float) -> float:
         """The coordinate `distance` into a board's thickness from its big

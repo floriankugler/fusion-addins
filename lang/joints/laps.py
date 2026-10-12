@@ -7,20 +7,38 @@ the given side, the other boards' notches the opposite way. The
 split lies in the middle of the height both boards have at the crossing,
 or at `at=`, a position. `clearance=` widens every notch by that much on
 each side. Each notch is a through cut named `lap_<other board>`.
+
+A router leaves its radius in a notch's two inside corners, at its floor,
+so they get dog bones for a `tool=` mm cutter, `relief=` wider than the
+tool, as part of the notch's cut: `dogbones="corner"` (the default) on each
+corner's bisector, as tenons and the dog_bones_native add-in make them
+(`lang.core.dogbones`); `"hidden"` along the floor, touching the notch's
+side and bulging past the floor into the part of the crossing that stays
+this board's, where the other board covers it on both faces; None for
+none. A corner without material around it (a notch flush with the board's
+end) gets none.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 
+from shapely.geometry import Point
+
 from ..core.box import Box
 from ..core.crossing import Crossing, crossing
 from ..core.directions import AXES, Axis, Direction
-from ..core.errors import LangError
+from ..core.dogbones import DogBones, corner_relief, hidden_relief
+from ..core.errors import LangError, one_of
 from ..core.part import Board
 from ..core.refs import PosLike, Side, as_pos
+from ..core.shapes import Shape, box_shape
 
 #: How far a notch reaches past the board's edge, so it opens cleanly.
 _PAST = 1.0
+#: How far from a corner the probes for material lie, mm.
+_PROBE = 0.01
+
+Point2 = tuple[float, float]
 
 
 @dataclass(frozen=True)
@@ -28,17 +46,41 @@ class HalfLap:
     toward: Direction
     at: float | None = None
     clearance: float = 0.0
+    dogbones: DogBones | None = "corner"
+    tool: float = 6.0
+    relief: float = 0.1
+
+    @property
+    def radius(self) -> float:
+        """The dog bones' radius at a square corner: the tool's plus half the relief."""
+        return (self.tool + self.relief) / 2
 
     def join(self, part: Board, /, partners: list[Board]) -> None:
-        # Every crossing is checked before any board is cut.
+        # Every crossing is checked and every notch worked out before any
+        # board is cut, each against the outline the notches before it leave.
         laps: list[tuple[Board, Crossing, float]] = []
         for other in partners:
             c = crossing(part, other)
             if c is None:
                 raise LangError(f"half_lap: {other.path} does not cross this board.", part.path)
             laps.append((other, c, self._split(part, other, c)))
+        outlines: dict[int, Shape] = {}
+        notches: list[tuple[Board, Shape, str]] = []
         for other, c, split in laps:
-            self._lap(part, other, c, split)
+            d = self.toward
+            pb, ob = part.box(), other.box()
+            low = min(pb.lo[c.axis], ob.lo[c.axis]) - _PAST
+            high = max(pb.hi[c.axis], ob.hi[c.axis]) + _PAST
+            # This board's notch opens toward `toward`, the other's the other way.
+            mine = (split, high) if d.sign > 0 else (low, split)
+            theirs = (low, split) if d.sign > 0 else (split, high)
+            for board, across, span, opens in ((part, other, mine, d.sign), (other, part, theirs, -d.sign)):
+                outline = outlines.get(id(board), board.outline)
+                shape = self._notch(board, across, c.axis, span, split, opens, outline)
+                outlines[id(board)] = outline.difference(shape)
+                notches.append((board, shape, f"lap_{across.name}"))
+        for board, shape, name in notches:
+            board.add_cut(shape, name=board.unique_op_name(name))
 
     def _split(self, part: Board, other: Board, c: Crossing) -> float:
         if self.toward.axis != c.axis:
@@ -50,18 +92,7 @@ class HalfLap:
                             f"with {other.path} ({c.lo:g} to {c.hi:g}).", part.path)
         return split
 
-    def _lap(self, part: Board, other: Board, c: Crossing, split: float) -> None:
-        d = self.toward
-        pb, ob = part.box(), other.box()
-        low = min(pb.lo[c.axis], ob.lo[c.axis]) - _PAST
-        high = max(pb.hi[c.axis], ob.hi[c.axis]) + _PAST
-        # This board's notch opens toward `toward`, the other's the other way.
-        mine = (split, high) if d.sign > 0 else (low, split)
-        theirs = (low, split) if d.sign > 0 else (split, high)
-        part.cut(self._notch(part, other, c.axis, mine), name=part.unique_op_name(f"lap_{other.name}"))
-        other.cut(self._notch(other, part, c.axis, theirs), name=other.unique_op_name(f"lap_{part.name}"))
-
-    def _notch(self, part: Board, other: Board, axis: Axis, span: tuple[float, float]) -> Box:
+    def _region(self, part: Board, other: Board, axis: Axis, span: tuple[float, float]) -> Box:
         """The region cut from `part`: through its thickness, as wide as
         `other` is thick (plus the clearance), over `span` along `axis`."""
         pb, ob = part.box(), other.box()
@@ -70,16 +101,68 @@ class HalfLap:
         hi: dict[Axis, float] = {t: pb.hi[t], w: ob.hi[w] + self.clearance, axis: span[1]}
         return Box({a: lo[a] for a in AXES}, {a: hi[a] for a in AXES})
 
+    def _notch(self, part: Board, other: Board, axis: Axis, span: tuple[float, float], split: float,
+               opens: int, outline: Shape) -> Shape:
+        """The notch for `other` in `part`'s outline frame, with a dog bone
+        in each corner at its floor, `split` on `axis`; it opens toward
+        `opens` (+1 or -1) along `axis`. `outline` is the board's material
+        before it."""
+        box = self._region(part, other, axis, span)
+        u, v, w = part.u_axis, part.v_axis, other.t_axis
+        notch = box_shape(box.lo[u], box.lo[v], box.hi[u], box.hi[v])
+        if self.dogbones is None:
+            return notch
 
-def half_lap(toward: Side | Direction, at: PosLike | None = None, clearance: float = 0.0) -> HalfLap:
+        def at(across: float, along: float) -> Point2:
+            coords: dict[Axis, float] = {w: across, axis: along}
+            return (coords[u], coords[v])
+
+        width = box.hi[w] - box.lo[w]
+        r = self.radius
+        if self.dogbones == "hidden" and width < 2 * r - 1e-9:
+            raise LangError(f"half_lap: hidden dog bones are {2 * r:g} across, wider than the notch for "
+                            f"{other.path} ({width:g}); use corner dog bones or a smaller tool.", part.path)
+        material = outline.geometry
+        up = at(0.0, float(opens))                       # along the notch's sides, toward its opening
+        for edge, inward in ((box.lo[w], 1.0), (box.hi[w], -1.0)):
+            corner = at(edge, split)
+            around = [at(edge - inward * _PROBE, split + opens * _PROBE),    # beside the notch
+                      at(edge - inward * _PROBE, split - opens * _PROBE),    # beside and below its floor
+                      at(edge + inward * _PROBE, split - opens * _PROBE)]    # below its floor
+            if not all(material.contains(Point(p)) for p in around):
+                continue                                 # not an inside corner of the material
+            floor = at(inward, 0.0)                      # along the floor, into the notch
+            if self.dogbones == "corner":
+                notch = notch.union(corner_relief(corner, floor, up, self.tool, self.relief))
+                continue
+            relief = hidden_relief(corner, floor, self.tool, self.relief)
+            if not material.contains(Point(at(edge + inward * r, split - opens * (r + _PROBE)))):
+                raise LangError(f"half_lap: hidden dog bones would break out of the board below the notch for "
+                                f"{other.path}; use corner dog bones or a smaller tool.", part.path)
+            notch = notch.union(relief)
+        return notch
+
+
+def half_lap(toward: Side | Direction, at: PosLike | None = None, clearance: float = 0.0,
+             dogbones: DogBones | None = "corner", tool: float = 6.0, relief: float = 0.1) -> HalfLap:
     """A half lap with each board named in `join()`. `toward` is the side this
     board's notches open to (`floor.top`: notched from the top, the other
     boards from below); `at` a position for the split instead of the middle
-    of the shared height; `clearance` widens each notch per side."""
+    of the shared height; `clearance` widens each notch per side. Dog bones
+    for a `tool` mm cutter, `relief` wider, in the notches' inside corners:
+    on the corners (`"corner"`), along the floor where the other board
+    covers them (`"hidden"`), or None."""
     direction = toward.outward if isinstance(toward, Side) else toward
     split = as_pos(at, "half_lap(at=)") if at is not None else None
     if split is not None and split.axis != direction.axis:
         raise LangError(f"half_lap: at={split} is not on the axis of toward={direction.name}.")
     if clearance < 0:
         raise LangError("half_lap: clearance must not be negative.")
-    return HalfLap(direction, split.value if split is not None else None, float(clearance))
+    if dogbones is not None:
+        one_of(dogbones, DogBones, "half_lap(dogbones=)")
+    if tool <= 0:
+        raise LangError("half_lap: tool must be positive.")
+    if relief < 0:
+        raise LangError("half_lap: relief must not be negative.")
+    return HalfLap(direction, split.value if split is not None else None, float(clearance), dogbones,
+                   float(tool), float(relief))

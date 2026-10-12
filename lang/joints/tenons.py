@@ -16,7 +16,8 @@ dog-bone reliefs for a `tool=` mm cutter, `relief=` wider than the tool:
 `"hidden"` puts them into the tenon's root and past the mortise's ends,
 where the shoulder covers them once assembled. A mortise corner where the
 mortise breaks out of its board needs none, nor does a tenon flush with the
-end of its board.
+end of its board. The reliefs' geometry is `lang.core.dogbones`, shared
+with half laps and `board.dogbones()`.
 
 Along each contact: `count=` tenons `width=` wide, the outer ones `margin=`
 from the contact's ends (a single one centred), `even=True` for tenons as
@@ -30,26 +31,22 @@ per contact.
 """
 from __future__ import annotations
 
-import math
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import ClassVar, Literal
+from typing import ClassVar
 
 from shapely.geometry import Point
 
 from ..core.contact import Contact
+from ..core.dogbones import DogBones, corner_relief, hidden_relief
 from ..core.errors import LangError, one_of
 from ..core.part import Board
 from ..core.refs import DepthSpec, Pos, PosLike, to
-from ..core.shapes import Shape, box_shape, circle
+from ..core.shapes import Shape, box_shape
 from .common import EPS, ContactGeometry, Point2, TenonPlacement, join_contacts, make_spacing, opposite_face, touching
-
-DogBones = Literal["corner", "hidden"]
 
 #: How far a tenon reaches back into its board, so it joins the outline cleanly, mm.
 _OVERLAP = 1.0
-#: Sides per quarter circle of a relief; the emitter draws it as an arc.
-_RELIEF_SEGMENTS = 16
 #: How far outside a corner the probe for material lies, mm.
 _PROBE = 0.01
 
@@ -176,24 +173,22 @@ class Tenons:
         `along` meets the board's end; `side` is -1 at the tenon's start,
         +1 at its end. The tenon grows toward negative distances from the
         edge."""
+        corner = g.on_board(along, 0.0)
+        out = g.along_board(0.0, -1.0)                        # along the tenon's side, away from the board
         if self.dogbones == "hidden":
-            center = g.on_board(along, -self.radius)          # on the tenon's side, biting into it
-        else:
-            o = self.tool / (2 * math.sqrt(2))                 # on the bisector, half a tool from the corner
-            center = g.on_board(along + side * o, -o)
-        return circle(2 * self.radius, center, _RELIEF_SEGMENTS)
+            return hidden_relief(corner, out, self.tool, self.relief)     # biting into the tenon's side
+        return corner_relief(corner, g.along_board(side, 0.0), out, self.tool, self.relief)
 
     def _mortise_relief(self, g: ContactGeometry, along: float, across: float, into_along: float,
                         into_across: float) -> Shape:
         """The relief at a mortise corner; `into_*` point into the mortise."""
+        corner = g.on_face(along, across)
+        end = g.along_face(0.0, into_across)                  # along the mortise's end, across the joint
         if self.dogbones == "hidden":
-            # On the mortise's end, across the joint: it stays tangent to the
-            # long side and reaches past the end, under the shoulder.
-            center = g.on_face(along, across + into_across * self.radius)
-        else:
-            o = self.tool / (2 * math.sqrt(2))
-            center = g.on_face(along + into_along * o, across + into_across * o)
-        return circle(2 * self.radius, center, _RELIEF_SEGMENTS)
+            # On the mortise's end: it stays tangent to the long side and
+            # reaches past the end, under the shoulder.
+            return hidden_relief(corner, end, self.tool, self.relief)
+        return corner_relief(corner, g.along_face(into_along, 0.0), end, self.tool, self.relief)
 
 
 def _box(a: Point2, b: Point2) -> Shape:
