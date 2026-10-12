@@ -1335,10 +1335,10 @@ const settling = [];            // preview.open() calls, settled once their desi
 let isListed;
 const listed = new Promise((resolve) => { isListed = resolve; });
 
-// At first the design the URL hash names, or the one shown last; the server
-// says whether it still exists.
+// At first the design the URL hash names, else the first in the folder; the
+// server says whether it still exists.
 const fromHash = readHash();
-let wanted = fromHash.design ?? stored('design', null);
+let wanted = fromHash.design ?? null;
 if (wanted !== null && fromHash.camera) views.set(wanted, { camera: fromHash.camera });
 
 function setDesigns(names) {
@@ -1358,7 +1358,6 @@ function openDesign(name) {
   for (const { reject } of settling.splice(0)) reject(new Error(`switched to ${name}`));
   design = name;
   wanted = null;
-  store('design', name);
   version = loadedVersion = designUrl = shownBuild = null;
   const view = views.get(name);
   hidden.clear();

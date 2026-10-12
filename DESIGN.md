@@ -1165,9 +1165,10 @@ below is proposed]
   frames; a Python error raised inside the language also names where
   (`raised in lang/core/shapes.py:243`), and `python -m lang.build
   --traceback` prints the whole stack [2026-10-12]. The hash
-  carries the design (`#design=van&eye=…`); each design keeps its own
-  camera, hidden parts, selection and section while the page is open,
-  one shown for the first time is fitted. Given a single build file the
+  carries the design (`#design=van&eye=…`); without one the page opens
+  the folder's first design alphabetically [Florian, 2026-10-12]. Each
+  design keeps its own camera, hidden parts, selection and section while
+  the page is open, one shown for the first time is fitted. Given a single build file the
   server builds it into `--out` on every save, as before.
 - SpaceMouse: the viewer talks to 3DxWare's navigation server
   (`lang/preview/viewer/spacemouse.js`), which works in Chrome and in the
