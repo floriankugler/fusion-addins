@@ -6,7 +6,8 @@ from lang.core.ops import Cut, Hole
 from lang.core.layout_types import HardwareBodyLayout, HardwareLayout
 from lang.core.scope import registry
 from lang.core.checks import _has_material  # type: ignore[reportPrivateUsage]
-from lang.hardware.slides import BOTTOM_HEIGHT, INNER_FACE_OFFSET, DrawerSlide
+from lang.emit.plan import HoleStep, plan_layout
+from lang.hardware.slides import BOTTOM_HEIGHT, INNER_FACE_OFFSET, DrawerSlide, HookHole
 from lib.drawer_slides import DYNAPRO_40, DYNAPRO_50_70, MOVENTO_760H, MOVENTO_766H, SlideModel
 
 
@@ -116,6 +117,33 @@ def test_slide_machines_a_blum_drawer_box():
     holes = [op for op in k.ops if isinstance(op, Hole)]
     assert all(h.face == "back" and h.d == 6 and h.depth == 10 for h in holes)
     assert {(h.u, h.v) for h in holes} == {(li + 7, z1 + 11), (ri - 7, z1 + 11)}
+
+
+@pytest.mark.parametrize("model, diameter, count", [(DYNAPRO_40, 2.0, 6), (MOVENTO_760H, 6.0, 2)])
+def test_hook_holes_through_the_back_go_in_from_its_inner_face(model: SlideModel, diameter: float, count: int):
+    """Florian 2026-10-12: the rear hook holes may go all the way through
+    the back board, `hook_hole=(d, through)`. Then they are drilled from
+    the back board's inner face (front, toward the drawer's middle), so
+    nothing is machined from its rear face; same places, through the 12
+    mm back, and the plan drills them to the far face."""
+    _, fixed = _drawer(DrawerSlide(model, nl=450))
+    registry.reset()
+    _, parts = _drawer(DrawerSlide(model, nl=450, hook_hole=(diameter, through)))
+    holes = [op for op in parts["back"].ops if isinstance(op, Hole)]
+    assert len(holes) == count
+    assert all(h.face == "front" and h.d == diameter and h.through and h.depth == 12 for h in holes)
+    assert ({(h.u, h.v) for h in holes}
+            == {(h.u, h.v) for h in fixed["back"].ops if isinstance(h, Hole) and h.face == "back"})
+    plan = plan_layout(build_layout())
+    back = next(p for p in plan.parts if p.path == "cab.drawer1.back")
+    (step,) = [s for s in back.steps if isinstance(s, HoleStep)]
+    assert step.depth is None and len(step.points) == count
+
+
+@pytest.mark.parametrize("hook_hole", [(0.0, 8.0), (2.0, 0.0), (-6.0, through)])
+def test_bad_hook_holes_are_refused(hook_hole: HookHole):
+    with pytest.raises(LangError, match="hook_hole= needs a diameter and a depth"):
+        DrawerSlide(DYNAPRO_40, nl=450, hook_hole=hook_hole)
 
 
 def test_slide_refuses_what_it_cannot_take():

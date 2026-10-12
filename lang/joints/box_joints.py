@@ -40,10 +40,13 @@ joint, outside or inside:
 part of the outline (`Board.add_to_outline`), the board's box stays where
 it was placed. The grooves are pockets in narrow faces (`add_edge_pocket`),
 the fingers' starting at their tips, in front of the board's end: the one
-machining of this repo's joints that is not made from a big face.
+machining of this repo's joints that is not made from a big face. They
+stay cuts from the end planes, as in the add-in: Florian mills them with
+the board lying flat, the roundovers step by step with a flat cutter
+(2026-10-12).
 
-Defaults are the add-in's dialog's: 5 fingers, no margin, a 6 mm tool, no
-clearance. With a margin smaller than half the clearance along the joint
+Defaults are the add-in's dialog's (kept by Florian, 2026-10-12): 5
+fingers, no margin, a 6 mm tool, no clearance. With a margin smaller than half the clearance along the joint
 the outer gaps reach past the board's ends (the add-in's sketch fails
 there); here they are cut there all the same.
 """

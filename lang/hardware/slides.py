@@ -8,7 +8,9 @@ bottom), and its sides hang below the panel by the recess. The carcass
 needs NL + 3 of depth behind the runner's front. `drawer_box()` returns
 that box; `recess` the bottom panel's height above the sides' lower edge.
 `machine_box()` cuts the front and back boards out for the couplings and
-rear hooks and drills the back board for the hooks.
+rear hooks and drills the back board for the hooks: into its rear face,
+or through it from its inner face when the hook hole's depth is
+`through`, so the back needs no machining from its rear face.
 
 Mounted on a drawer scope, a slide pre-drills the carcass sides: a row 38
 mm above the bay's bottom, at the hole positions of `lib.drawer_slides`
@@ -35,7 +37,7 @@ from ..core.box import Box
 from ..core.directions import Direction, Frame
 from ..core.errors import LangError
 from ..core.layout_types import BoxDict, HardwareBodyLayout
-from ..core.refs import Pos, PosLike, as_pos
+from ..core.refs import Pos, PosLike, Through, as_pos
 
 if TYPE_CHECKING:
     from ..core.part import Board
@@ -65,8 +67,9 @@ class BoxMachining:
     """What the drawer box needs cut and drilled for a slide family, mm.
     The cut-outs run from the board's lower edge up to the bottom panel's
     underside; widths are measured from the drawer sides' inner faces.
-    Hook holes are drilled into the back board's rear face, given as
-    (from the side's inner face, above the bottom panel's underside)."""
+    Hook holes are drilled into the back board's rear face (or through it
+    from its inner face), given as (from the side's inner face, above the
+    bottom panel's underside)."""
     #: Width of the cut-out at each end of the front board, for the couplings.
     front_cutout: float
     #: Width of the cut-out at each end of the back board, for the rear hooks.
@@ -86,6 +89,12 @@ BOX_MACHINING: dict[str, BoxMachining] = {
                           hook_holes=((42.0, 15.0), (42.0, 15.0 + 32.0), (10.0, 15.0 + 32.0)),
                           hook_hole=(2.0, 8.0)),
 }
+
+
+#: The rear hooks' holes as a slide takes them: (diameter, depth) in mm,
+#: the depth a number (into the back board's rear face) or `through` (from
+#: its inner face).
+HookHole = tuple[float, float | Through]
 
 
 def _family(model: data.SlideModel) -> str:
@@ -159,11 +168,12 @@ RUNNER_SHAPES: dict[str, RunnerShape] = {
 class DrawerSlide:
     """One slide model at a nominal length, with the pre-drill settings:
     `holes` per side from the odd or even set (see `lib.drawer_slides`),
-    `predrill` as (diameter, depth) in mm."""
+    `predrill` as (diameter, depth) in mm; `hook_hole` the rear hooks'
+    holes in the back board, (diameter, depth) or (diameter, `through`)."""
 
     def __init__(self, model: data.SlideModel, nl: int, holes: int = 4, odd: bool = True,
                  predrill: tuple[float, float] = (2.0, 4.0), bottom_recess: float | None = None,
-                 hook_hole: tuple[float, float] | None = None):
+                 hook_hole: HookHole | None = None):
         if nl not in model.nominal_lengths:
             raise LangError(f"{model.name} is not made in NL {nl}; lengths: {model.nominal_lengths}.")
         self.model = model
@@ -171,10 +181,16 @@ class DrawerSlide:
         self.holes = holes
         self.odd = odd
         self.predrill = predrill
+        if hook_hole is not None:
+            diameter, depth = hook_hole
+            if diameter <= 0 or (not isinstance(depth, Through) and depth <= 0):
+                raise LangError(f"{self.name}: hook_hole= needs a diameter and a depth greater than zero, or "
+                                f"through, not {hook_hole!r}.")
         #: (diameter, depth) of the rear hooks' holes in the back board, or
         #: None for the family's: Grass pre-drills 2 x 8 for the hook's
-        #: screws, Blum drills 6 x 10 for its pin.
-        self.hook_hole = hook_hole
+        #: screws, Blum drills 6 x 10 for its pin. A depth of `through`
+        #: drills them through from the back board's inner face.
+        self.hook_hole: HookHole | None = hook_hole
         lo, hi = BOTTOM_RECESS[_family(model)]
         if bottom_recess is None:
             bottom_recess = (lo + hi) / 2
@@ -240,7 +256,9 @@ class DrawerSlide:
         each hook (`hook_hole` diameter and depth): Grass three pre-drill
         holes, 42 from the side's inner face at 15 and 47 above the floor's
         underside and 10 from the inner face at 47; Blum one hole, 7 from
-        the inner face at 11."""
+        the inner face at 11. With a depth of `through` they go through
+        the back board from its inner face, where a box joint's reliefs
+        are too, so the back needs no machining from its rear face."""
         try:
             data = BOX_MACHINING[_family(self.model)]
         except KeyError:
@@ -249,6 +267,8 @@ class DrawerSlide:
         width_axis = frame.direction("left").axis
         floor_bottom = floor.bottom.position
         diameter, depth = self.hook_hole or data.hook_hole
+        # through holes from the inner face, fixed-depth ones from the rear
+        hook_face = back.inner if isinstance(depth, Through) else back.outer
         for side in sides:
             inward = side.inner.direction            # from this side into the drawer
             if inward.axis != width_axis:
@@ -265,7 +285,7 @@ class DrawerSlide:
                 board.cut(region, name=f"{what}_{which}")
             for across, up in data.hook_holes:
                 at = Pos(width_axis, inner + inward.sign * across)
-                back.hole(d=diameter, depth=depth, at=back.outer.bottom(floor_bottom + up).left(at))
+                back.hole(d=diameter, depth=depth, at=hook_face.bottom(floor_bottom + up).left(at))
 
     def hole_positions(self) -> list[float]:
         """Pre-drill positions behind the runner's front, mm."""

@@ -788,7 +788,8 @@ proposed]
   other board's end in the plane of this board's outer face, covering its
   end, which the joint runs along the whole width of, so cut-outs at the
   joint (a slide's coupling cut-out) go after the join; else the join
-  fails naming the boards. The add-in's dialog gives the defaults:
+  fails naming the boards. The add-in's dialog gives the defaults
+  [decided by Florian 2026-10-12: they stay the dialog's]:
   `fingers` 5, the odd count of both boards' fingers together, all
   (length - 2 * margin) / fingers wide; `margin` 0, which widens the outer
   two; `tool` 6; `clearance=(along, across)` (0, 0), which widens notches
@@ -820,12 +821,18 @@ proposed]
   drawer cabinet's drawer boxes are box-jointed, as Florian's Dynapro
   boxes (7 fingers, margin 2, tool 6, clearance 0.1), before the slide's
   cut-outs; their floor grooves lie inside the sides' lowest finger.
-  Machining [open]: with a board flat on the machine, the grooves along
-  the fingers are roundovers of the edges at its inner face (a roundover
-  bit from that face would make them), but the square halves of the
-  notch-wall grooves cannot be milled from the inner face with a round
-  cutter; the add-in models all of them as cuts from the end planes. Not
-  yet verified in Fusion against the add-in.
+  Machining [decided by Florian 2026-10-12]: no change to the geometry.
+  Florian machines box joints with the boards lying flat and mills the
+  finger roundovers step by step with a flat cutter, which works well, so
+  the grooves along the fingers and the notch walls stay as the add-in
+  models them, cuts from the end planes. (The question was that, with a
+  board flat on the machine, the finger grooves are roundovers of the
+  edges at its inner face, but the square halves of the notch-wall
+  grooves cannot be milled from the inner face with a round cutter.) The
+  drawer back stays machined from both faces; only the slide's rear hook
+  holes may go through it from its inner face instead (`hook_hole=(d,
+  through)`, see the slides below). Not yet verified in Fusion against
+  the add-in.
 - **Dog bones** (`lang/core/dogbones.py`) [decided by Florian 2026-10-12,
   implemented 2026-10-12]: a router leaves its radius in every inside
   corner, so a part with square corners does not go in; a dog bone takes
@@ -926,7 +933,13 @@ proposed]
   default 2 x 8, 42 mm from the side's inner face at 15 and 47 above the
   floor's underside and 10 mm from the inner face at 47; Blum one 6 x 10
   hole for the hook's pin, 7 from the inner face at 11 above the floor's
-  underside (confirmed by Florian 2026-10-12). Cut-outs are named
+  underside (confirmed by Florian 2026-10-12). The depth may be `through`
+  (`hook_hole=(2, through)`) [decided by Florian 2026-10-12, for either
+  family]: the holes then go all the way through the back board, drilled
+  from its inner face, as a hole is drilled from the face its `at=` names,
+  so the back board needs nothing from its rear face (its box joint's
+  reliefs are in the inner face too); fixed-depth holes stay in the rear
+  face, where the hook sits. Cut-outs are named
   `coupling_left`, `hook_right` and so on. Blum's TIP-ON BLUMOTION
   variant (a 125 mm back cut-out) is not covered.
   `drawer.mount(slide, sides=(left, right), front=face.back)` pre-drills the
