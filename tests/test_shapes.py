@@ -1,0 +1,143 @@
+"""`Shape.rounded()`, and operations given a shape without area."""
+import math
+import re
+from collections.abc import Callable
+
+import pytest
+from shapely.geometry import Point
+
+from lang import *
+from lang.core.ops import Pocket
+from lang.core.scope import registry
+from lang.emit.arcs import Arc2, Line2, fit
+
+ply15 = material("birch", t=15)
+#: What a quarter circle of radius 1 leaves of its square.
+CORNER = 1 - math.pi / 4
+
+
+@pytest.fixture(autouse=True)
+def fresh_registry():
+    registry.reset()
+    yield
+    registry.reset()
+
+
+def _curves(shape: Shape) -> list[str]:
+    """The lines and arcs of the shape's one ring, an arc as `arc r=<radius>
+    <sweep in degrees>`, starting with the first arc."""
+    (ring,) = shape.rings()
+    out: list[str] = []
+    for c in fit(ring):
+        if isinstance(c, Arc2):
+            sweep = math.degrees(abs(math.remainder(math.atan2(c.b[1] - c.center[1], c.b[0] - c.center[0])
+                                                    - math.atan2(c.a[1] - c.center[1], c.a[0] - c.center[0]),
+                                                    2 * math.pi)))
+            out.append(f"arc r={c.radius:.6g} {sweep:.4g}")
+        else:
+            assert isinstance(c, Line2)
+            out.append("line")
+    first = next(i for i, c in enumerate(out) if c.startswith("arc"))
+    return out[first:] + out[:first]
+
+
+def test_half_the_narrow_width_rounds_the_ends_fully():
+    for shape in (rect(depth=80, width=12), rect(depth=12, width=80)):
+        slot = shape.rounded(6)
+        assert slot.bounds == pytest.approx(shape.bounds)
+        assert slot.axes == shape.axes
+        assert slot.area == pytest.approx(80 * 12 - 4 * CORNER * 36, abs=0.02)
+        # each end one half circle, not two quarters with a line between
+        assert _curves(slot) == ["arc r=6 180", "line", "arc r=6 180", "line"]
+
+
+def test_half_the_width_with_rounding_noise_is_still_a_slot():
+    width = 0.1 * 3 * 40                                  # 12.000000000000002
+    slot = rect(depth=80, width=width).rounded(width / 2 + 1e-9)
+    assert _curves(slot) == ["arc r=6 180", "line", "arc r=6 180", "line"]
+
+
+def test_a_radius_beyond_half_the_narrow_width_is_an_error():
+    with pytest.raises(LangError, match=r"rounded\(6\.5\): the radius is more than half the shape's narrow "
+                                        r"width \(12, "):
+        rect(depth=80, width=12).rounded(6.5)
+    with pytest.raises(LangError, match=r"rounded\(6\.000001\): .* narrow width \(12, "):
+        rect(depth=80, width=12).rounded(6 + 1e-6)
+    with pytest.raises(LangError, match=r"rounded\(10\.5\): .* narrow width \(20, "):
+        circle(20).rounded(10.5)
+
+
+def test_every_corner_is_rounded_concave_ones_too():
+    ell = polygon([(0, 0), (100, 0), (100, 30), (30, 30), (30, 100), (0, 100)])
+    rounded = ell.rounded(5)
+    # five convex corners lose a little, the concave one at (30, 30) gains as much
+    assert rounded.area == pytest.approx(ell.area - 4 * CORNER * 25, abs=0.02)
+    assert rounded.geometry.contains(Point(30.5, 30.5))
+    assert not rounded.geometry.contains(Point(99.5, 0.5))
+    assert _curves(rounded) == ["arc r=5 90", "line"] * 6
+
+
+def test_arcs_are_not_corners():
+    for shape, radius in ((rect(depth=80, width=40).rounded(10), 10), (rect(depth=80, width=12).rounded(6), 6),
+                          (circle(30), 15), (circle(30), 5)):
+        assert shape.rounded(radius).geometry.symmetric_difference(shape.geometry).area < 1e-6
+
+
+def test_rounding_with_zero_or_a_negative_radius():
+    shape = rect(depth=80, width=12)
+    assert shape.rounded(0) is shape
+    with pytest.raises(LangError, match="must not be negative"):
+        shape.rounded(-1)
+
+
+def test_an_edge_too_short_for_its_arcs_is_an_error():
+    # the clip's edge is 7.1 long; each 135 degree corner needs 4.1 of it
+    with pytest.raises(LangError, match=r"rounded\(10\): an edge of the shape is too short"):
+        rect(depth=80, width=60).clip("top.right", top=5, right=5).rounded(10)
+    rect(depth=80, width=60).clip("top.right", top=5, right=5).rounded(8)
+
+
+def test_a_rounded_slot_cuts_and_pockets():
+    with module("m", Box.from_size(width=400, depth=300, height=100)) as m:
+        with board("panel", ply15).on(m.bottom).show(m.top) as panel:
+            before = panel.outline.area
+            panel.cut(rect(depth=80, width=12).rounded(6), at=panel.top.center, name="slot")
+            panel.pocket(rect(depth=60, width=10).rounded(5), at=panel.top.front(20), depth=5, name="groove")
+    slot = 80 * 12 - 4 * CORNER * 36
+    assert panel.outline.area == pytest.approx(before - slot, abs=0.02)
+    groove = panel.op("groove").op
+    assert isinstance(groove, Pocket)
+    assert groove.shape.area == pytest.approx(60 * 10 - 4 * CORNER * 25, abs=0.02)
+
+
+#: A shape without area: what a difference leaves of a shape inside another.
+EMPTY = circle(10).difference(circle(20))
+
+#: Each operation that takes a shape, by the name its error gives.
+OPERATIONS: list[tuple[str, Callable[[Board], object]]] = [
+    ("cut()", lambda p: p.cut(EMPTY, at=p.top.center)),
+    ("pocket()", lambda p: p.pocket(EMPTY, at=p.top.center, depth=5)),
+    ("pocket()", lambda p: p.pocket(EMPTY, at=p.front.center, depth=5)),
+    ("cutout()", lambda p: p.cutout(EMPTY, at=p.bottom.center)),
+    ("add_cut()", lambda p: p.add_cut(EMPTY)),
+    ("add_pocket()", lambda p: p.add_pocket(p.top, EMPTY, 5)),
+    ("add_edge_pocket()", lambda p: p.add_edge_pocket(p.left, EMPTY, 5)),
+    ("add_to_outline()", lambda p: p.add_to_outline(EMPTY)),
+    ("cut()", lambda p: p.cut(rect(depth=20, width=20).intersection(rect(depth=20, width=20).moved(20, 0)),
+                              at=p.top.center)),           # two squares side by side share only an edge
+]
+
+
+@pytest.mark.parametrize("what, operation", OPERATIONS)
+def test_an_operation_with_an_empty_shape_is_an_error(what: str, operation: Callable[[Board], object]):
+    with module("m", Box.from_size(width=400, depth=300, height=100)) as m:
+        panel = board("panel", ply15).on(m.bottom).show(m.top)
+        with pytest.raises(LangError, match=rf"m\.panel: {re.escape(what)}: the shape is empty"):
+            operation(panel)
+        assert panel.ops == []
+
+
+def test_a_board_with_an_empty_shape_is_an_error():
+    with module("m", Box.from_size(width=400, depth=300, height=100)) as m:
+        with pytest.raises(LangError, match=r"m\.panel: board\(\): the shape is empty"):
+            board("panel", ply15, rect(depth=100, width=100).difference(rect(depth=200, width=200))).on(m.bottom)

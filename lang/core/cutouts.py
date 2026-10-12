@@ -461,10 +461,14 @@ def _fillet_ring(ring: Sequence[Point2], r: float) -> list[Point2] | None:
         before, after = fillets[k - 1], fillets[k]
         p = before[2] if before else s.a
         q = after[1] if after else s.b
+        if s.param(q) < s.param(p):
+            # the fillets at both ends use the segment up, give or take
+            # rounding (a slot's end): they meet halfway
+            p = q = ((p[0] + q[0]) / 2, (p[1] + q[1]) / 2)
         out += s.points(p, q)
         if after is not None:
-            centre, a, b, ccw = after
-            out += _arc_points(centre, r, a, b, ccw)[:-1]
+            centre, _, b, ccw = after
+            out += _arc_points(centre, r, q, b, ccw)[:-1]
     return _deduplicated(out)
 
 
@@ -490,12 +494,9 @@ def fillet(piece: Polygon, r: float) -> list[Polygon]:
     if piece.buffer(-r, join_style="round").is_empty:
         return []
     piece = orient(piece, 1.0)
-    exterior = _fillet_ring(_ring_points(piece.exterior.coords), r)
-    holes = [_fillet_ring(_ring_points(h.coords), r) for h in piece.interiors]
-    if exterior is not None and all(h is not None for h in holes):
-        out = Polygon(exterior, [h for h in holes if h is not None])
-        if out.is_valid and abs(out.area - piece.area) < 0.5 * piece.area + 1:
-            return [out]
+    out = filleted(piece, r)
+    if out is not None:
+        return [out]
     # A fillet does not fit between its neighbours (a short piece of edge
     # between two corners): round the outside corners as a cutter would,
     # leave the inside ones, and put the arcs the piece had back onto their
@@ -503,6 +504,23 @@ def fillet(piece: Polygon, r: float) -> list[Polygon]:
     targets = _arc_targets(piece, 0.0)
     opened = piece.buffer(-r, join_style="round", quad_segs=16).buffer(r, join_style="round", quad_segs=16)
     return [_onto_circles(p, targets) for p in _polygons(opened) if p.area > 1e-6]
+
+
+def filleted(piece: Polygon, r: float) -> Polygon | None:
+    """The piece with every corner rounded with radius `r`, convex and
+    concave alike, exactly: worked out on the lines and arcs it stands for.
+    None when a fillet does not fit between its neighbours. Two fillets
+    may use up the edge between them, so a 12 wide rectangle rounded with
+    6 gets round ends."""
+    piece = orient(piece, 1.0)
+    exterior = _fillet_ring(_ring_points(piece.exterior.coords), r)
+    holes = [_fillet_ring(_ring_points(h.coords), r) for h in piece.interiors]
+    if exterior is None or any(h is None for h in holes):
+        return None
+    out = Polygon(exterior, [h for h in holes if h is not None])
+    if out.is_valid and abs(out.area - piece.area) < 0.5 * piece.area + 1:
+        return out
+    return None
 
 
 # -- offsets ---------------------------------------------------------------------------------

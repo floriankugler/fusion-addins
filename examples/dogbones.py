@@ -33,8 +33,7 @@ with module("panels", Box.from_size(width=600, depth=400, height=200)) as m:
         panel.pocket(rect(depth=100, width=100), at=top.front(140).left(40), depth=4, name="recess")
         panel.pocket(rect(depth=40, width=40), at=top.front(170).left(70), depth=10, name="well")
         panel.pocket(rect(depth=60, width=40), at=panel.bottom.back(40).right(40), depth=6, name="below")
-        panel.cut(rect(depth=68, width=12).union(circle(12, (0, 6))).union(circle(12, (68, 6))),
-                  at=top.front(60).right(200), name="slot")
+        panel.cut(rect(depth=80, width=12).rounded(6), at=top.front(60).right(200), name="slot")
         panel.cut(rect(depth=60, width=60).rounded(10), at=top.back(60).left(250), name="rounded")
 
     with board("shelf", ply15).on(m.top).show(m.top) as shelf:

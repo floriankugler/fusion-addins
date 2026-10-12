@@ -498,6 +498,8 @@ class Board:
         self.material = material
         self._shape = shape
         self.scope = scopes.current()
+        if shape is not None:
+            self._check_area(shape, "board()")
         self.scope.register(self)
         # placement, set once each
         self._on: Side | None = None
@@ -927,6 +929,13 @@ class Board:
             raise LangError(f"at= names a point on {at.part.path}, not on this board.", self.path)
         return at
 
+    def _check_area(self, shape: Shape, what: str) -> None:
+        """An error for a shape without area, such as what a difference
+        leaves of a shape inside another: an operation with it would do
+        nothing, and nothing would say so."""
+        if shape.is_empty() or shape.area <= 1e-6:
+            raise LangError(f"{what}: the shape is empty (it has no area), so it would do nothing.", self.path)
+
     def _place_shape(self, shape: Shape, anchor: Anchor) -> Shape:
         """The shape in the frame of the anchor's face, with its matching
         side or corner on the anchor's point."""
@@ -984,6 +993,7 @@ class Board:
             if at is not None:
                 raise LangError("cut(): at= is not used when cutting with a part or box.", self.path)
             return self._cut_region(shape, name, chamfer)
+        self._check_area(shape, "cut()")
         anchor = self._anchor(at)
         if not anchor.face.is_big:
             raise LangError("cut(): a cut goes through the board; anchor it on a big face.", self.path)
@@ -1055,6 +1065,7 @@ class Board:
                name: str | None = None, chamfer: float = 0.0) -> Self:
         """A pocket of `shape` from the face the anchor names (the centre of
         the show face by default), `depth` deep."""
+        self._check_area(shape, "pocket()")
         anchor = self._anchor(at)
         f = anchor.face
         if depth is None:
@@ -1188,6 +1199,7 @@ class Board:
     def _cutout_face(self, what: Face | Shape | None, at: Anchor | Edge | None) -> tuple[Face, BaseGeometry | None]:
         """The face a cutout is cut from and its region, if one is given."""
         if isinstance(what, Shape):
+            self._check_area(what, "cutout()")
             anchor = self._anchor(at) if at is not None else self._default_cutout_face().center
             if not anchor.face.is_big:
                 raise LangError("cutout(): place the region on a big face.", self.path)
@@ -1360,6 +1372,7 @@ class Board:
         For joints and hardware, which compute positions themselves; build
         files use `pocket()`."""
         self._big_face_of_mine(face, "add_pocket()")
+        self._check_area(shape, "add_pocket()")
         d, spec, _ = self._depth(face, depth)
         self._record(Pocket(shape, face.world_name, d, spec, name), name)
         return self
@@ -1367,6 +1380,7 @@ class Board:
     def add_cut(self, shape: Shape, name: str | None = None) -> Self:
         """A through cut with `shape` already in the outline's frame (world
         coordinates on its two axes); see `add_pocket`."""
+        self._check_area(shape, "add_cut()")
         self._cut_through(shape, name, 0.0)
         return self
 
@@ -1382,6 +1396,7 @@ class Board:
             raise LangError(f"add_edge_pocket(): {face!r} is a big face; this takes a narrow face.", self.path)
         if depth <= 0:
             raise LangError(f"depth must be positive, got {depth}.", self.path)
+        self._check_area(shape, "add_edge_pocket()")
         world = face.world_name
         self._record(EdgeOp(world, Pocket(shape, world, float(depth), f"{depth:g}", name), offset=float(offset)),
                      name)
@@ -1391,6 +1406,7 @@ class Board:
         """Widens the outline by `shape`, in the outline's frame: material a
         joint adds, such as tenons growing out of the board's end. The
         board's box, its placement, stays as it was."""
+        self._check_area(shape, "add_to_outline()")
         self.outline = self.outline.union(shape)
         return self
 

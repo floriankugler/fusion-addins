@@ -17,13 +17,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import cast
 
-from shapely import affinity
+from shapely import affinity, maximum_inscribed_circle
 from shapely.geometry import LineString, MultiPolygon, Point, Polygon
 from shapely.geometry import box as shapely_box
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
 
 from . import directions
+from .cutouts import filleted
 from .directions import AXES, Axis, ExtentName
 from .errors import LangError
 
@@ -159,10 +160,38 @@ class Shape:
         return self._derived(self.geometry.difference(triangle))
 
     def rounded(self, radius: float) -> Shape:
-        """Rounds every corner, the inside ones as a cutter would leave
-        them."""
-        g = self.geometry.buffer(-radius, join_style="round").buffer(radius, join_style="round")
-        return self._derived(g)
+        """Rounds every corner with `radius`, convex and concave alike: as a
+        cutter of that radius leaves the inside corners of a pocket or cut
+        in this shape (its convex ones) or of a board with this outline
+        (its concave ones). The arcs are exact, worked out on the lines and
+        arcs the shape stands for, as the cutouts' fillets are.
+
+        Half the shape's narrow width rounds its ends fully, so
+        `rect(depth=80, width=12).rounded(6)` is a slot. A larger radius,
+        no circle of which fits in the shape, is an error, and so is one
+        too large for an edge between two corners."""
+        if radius < 0:
+            raise LangError(f"rounded({radius:.10g}): the radius must not be negative.")
+        if radius == 0:
+            return self
+        pieces: list[Polygon] = []
+        for poly in self.polygons():
+            # A polygon standing for an arc lies inside it by up to half a
+            # percent of the radius, so a circle rounded with its own radius
+            # fits; a shape with corners fits within 1e-7 (`filleted`).
+            fits = not poly.buffer(-radius * 0.994, join_style="round").is_empty
+            out = filleted(poly, radius) if fits else None
+            if out is None:
+                if not fits or poly.buffer(-radius, join_style="round").is_empty:
+                    width = 2 * float(maximum_inscribed_circle(poly).length)
+                    raise LangError(
+                        f"rounded({radius:.10g}): the radius is more than half the shape's narrow width "
+                        f"({round(width, 1):g}, the largest circle in it), so nothing would be left.")
+                raise LangError(
+                    f"rounded({radius:.10g}): an edge of the shape is too short for the arcs at its ends, "
+                    "so not every corner can be rounded with it.")
+            pieces.append(out)
+        return self._derived(unary_union(pieces)) if pieces else self
 
     # -- export ---------------------------------------------------------------------
 

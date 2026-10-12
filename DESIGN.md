@@ -385,6 +385,13 @@ proposed]
   the cutter radius by construction and no 3D fillet feature exists. Chamfers and
   holes map to Fusion's features. [proposed; "fillets" in the original wording
   meant these corner radii]
+  `shape.rounded(r)` [implemented 2026-10-12] rounds every corner with r,
+  convex and concave alike (the inside corners of a cut in the shape and of
+  a board with it as its outline), with exact arcs, as the cutouts' fillets.
+  Half the narrow width rounds the ends fully, so `rect(depth=80,
+  width=12).rounded(6)` is a slot; a larger r, or one too large for an
+  edge between two corners, is an error, and so is any operation given a
+  shape without area (it used to do nothing, silently).
   Anything that does not fit the flat model goes through the escape hatches
   below; that flags the part as no longer plain flat work. [proposed]
 - **Polygons** [proposed]: clip a rectangle's corner; trim by reference planes with
