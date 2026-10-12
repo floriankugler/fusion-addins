@@ -202,9 +202,9 @@ def test_at_names_operations_faces_or_the_outline():
             panel.cut(rect(depth=40, width=40), at=top.center, name="window")
             panel.pocket(rect(depth=40, width=40), at=top.back(40).left(40), depth=5, name="dado")
             panel.pocket(rect(depth=40, width=40), at=panel.bottom.back(40).right(40), depth=5, name="below")
-            named: dict[str, DogBoneTarget] = {"window": panel.window, "outline": panel.outer.outline,
-                                               "bottom": panel.bottom}
-            panel.dogbones(at=[named.get(a, a) for a in at])
+            named: dict[str, DogBoneTarget] = {"notch": panel.notch, "window": panel.window, "dado": panel.dado,
+                                               "outline": panel.outer.outline, "bottom": panel.bottom}
+            panel.dogbones(at=[named[a] for a in at])
         build_layout()
         return sorted(op.name or "" for op in _dogbones(panel))
 
@@ -283,9 +283,24 @@ def test_dogbones_errors():
             panel.dogbones(at=panel.front)
         with pytest.raises(LangError, match="not a face of this board"):
             panel.dogbones(at=other.top)
-        panel.dogbones(at="nothing")
-    with pytest.raises(LangError, match="no operation named 'nothing'"):
-        build_layout()
+        other.cut(rect(depth=60, width=80), at=other.top.front.left, name="notch")
+        with pytest.raises(LangError, match="not an operation of this board"):
+            panel.dogbones(at=other.notch)
+
+
+def test_dogbones_at_takes_operations_not_their_names():
+    """Florian 2026-10-12: at= takes the operation itself; a name, alone
+    or in a list, is refused, saying what to write instead."""
+    m, panel = _panel()
+    with m:
+        panel.cut(rect(depth=60, width=80), at=panel.top.front.left, name="notch")
+        with pytest.raises(LangError, match=r"takes the operation itself, not its name 'notch': write panel\.notch"):
+            panel.dogbones(at="notch")  # type: ignore[arg-type]
+        with pytest.raises(LangError, match="not its name 'notch'"):
+            panel.dogbones(at=[panel.outer.outline, "notch"])  # type: ignore[list-item]
+        with pytest.raises(LangError, match="takes operations, big faces or an outline"):
+            panel.dogbones(at=[42])  # type: ignore[list-item]
+    assert panel._dogbones == []  # type: ignore[reportPrivateUsage]
 
 
 def test_a_relief_that_would_split_the_board_is_an_error():

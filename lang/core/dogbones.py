@@ -286,8 +286,9 @@ def _polygons(g: BaseGeometry) -> list[Polygon]:
 
 @dataclass(frozen=True)
 class Target:
-    """What `dogbones(at=)` names: a named operation, a big face by its
-    world name, or the outline's outer boundary."""
+    """What `dogbones(at=)` names: a named operation (given as the
+    operation, kept by its name), a big face by its world name, or the
+    outline's outer boundary."""
     kind: Literal["operation", "face", "outline"]
     name: str = ""
 
@@ -317,10 +318,6 @@ def reliefs(board: Board, request: Request) -> list[Relief]:
     """The reliefs a request puts into the board's corners as it is now,
     one per operation the corners belong to (the last that runs through
     each) and depth."""
-    if request.at is not None:
-        for target in request.at:
-            if target.kind == "operation" and not board.has_operation(target.name):
-                raise LangError(f"dogbones(at=): no operation named {target.name!r}.", board.path)
     groups: dict[tuple[str, str | None, float | None], list[Shape]] = {}
     for c in corners(board):
         if request.at is not None and not any(_names(c, target) for target in request.at):

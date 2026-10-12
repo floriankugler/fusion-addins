@@ -57,8 +57,8 @@ from .shapes import Shape, box_shape
 
 Point2 = tuple[float, float]
 Limit = Union[Pos, Affine, HasPosition, "Board", "PartLimit", Contour, ContourLimit]
-#: What `dogbones(at=)` takes: a named operation (or its name), a big face, the outline.
-DogBoneTarget = Union["Operation", str, "Face", "Outline"]
+#: What `dogbones(at=)` takes: a named operation itself (not its name), a big face, the outline.
+DogBoneTarget = Union["Operation", "Face", "Outline"]
 
 
 class Face:
@@ -1318,16 +1318,17 @@ class Board:
         dog_bones_native add-in makes them: a circle `relief` wider than
         the `tool`, on the corner's bisector, reaching just past the
         corner, through the board or as deep as the pocket the corner is
-        in. `at=` limits them to the corners of named operations
-        (`side.toekick`, or a name), of a big face (`side.inner`: what it
-        shows, through cuts and its own pockets, as when the add-in is
-        given a face), or of the outline's outer boundary
-        (`side.outer.outline`).
+        in. `at=` limits them to the corners of named operations, given
+        as the operations themselves (`side.toekick`), not their names, of
+        a big face (`side.inner`: what it shows, through cuts and its own
+        pockets, as when the add-in is given a face), or of the outline's
+        outer boundary (`side.outer.outline`).
 
         The corners are found when the board is finished, as the layout is
         built, so this also covers the corners that joints and operations
-        made after the call add. Corners relieved already (by a joint's own
-        dog bones, a hole over them) and rounded ones get none; see
+        made after the call add; an operation named in `at=` must exist
+        when it is named. Corners relieved already (by a joint's own dog
+        bones, a hole over them) and rounded ones get none; see
         `lang.core.dogbones`."""
         if tool <= 0:
             raise LangError(f"dogbones(): tool must be positive, got {tool:g}.", self.path)
@@ -1335,16 +1336,20 @@ class Board:
             raise LangError(f"dogbones(): relief must not be negative, got {relief:g}.", self.path)
         targets: tuple[dogbone_geometry.Target, ...] | None = None
         if at is not None:
-            items = [at] if isinstance(at, (str, Operation, Face, Outline)) else list(at)
+            items: list[object] = [at] if isinstance(at, (str, Operation, Face, Outline)) else list(at)
             if not items:
                 raise LangError("dogbones(): at= is empty.", self.path)
             targets = tuple(self._dogbone_target(item) for item in items)
         self._dogbones.append(dogbone_geometry.Request(float(tool), float(relief), targets))
         return self
 
-    def _dogbone_target(self, item: DogBoneTarget) -> dogbone_geometry.Target:
+    def _dogbone_target(self, item: object) -> dogbone_geometry.Target:
         if isinstance(item, str):
-            return dogbone_geometry.Target("operation", item)
+            raise LangError(f"dogbones(at=) takes the operation itself, not its name {item!r}: "
+                            f"write {self.name}.{item} (or {self.name}.op({item!r})) once the operation is made.",
+                            self.path)
+        if not isinstance(item, (Operation, Face, Outline)):
+            raise LangError(f"dogbones(at=) takes operations, big faces or an outline, not {item!r}.", self.path)
         if isinstance(item, Operation):
             if item.part is not self:
                 raise LangError(f"dogbones(at=): {item!r} is not an operation of this board.", self.path)

@@ -646,7 +646,8 @@ proposed]
   (default 0). Each notch is a through cut named `lap_<other board>`, so
   the emitter needs nothing new. Its two inside corners at the floor get
   dog bones as part of the notch's cut [implemented 2026-10-12, see "Dog
-  bones" below]: `dogbones="corner"` (default, as on tenons), `"hidden"`
+  bones" below]: `dogbones="corner"` (default, as on tenons [decided by
+  Florian 2026-10-12]), `"hidden"`
   (centred on the floor, touching the notch's side, bulging past the
   floor into the half of the crossing that stays this board's, where the
   other board covers it on both faces; the notch must be wider than the
@@ -831,11 +832,13 @@ proposed]
   the corner out. Two ways, as Florian decided:
   - per board: `side.dogbones(tool=6, relief=0.1)` relieves every inside
     corner of the board, `at=` only some: the corners of named operations
-    (`side.toekick`, or the name as a string, which may name an operation
-    a later join makes), of a big face (`side.inner`: what that face
-    shows, through cuts and its own pockets, as when the add-in is given a
-    face) or of the outline's outer boundary (`side.outer.outline`), one
-    or a list. It is resolved when the board is finished (`Board.finish`,
+    (`side.toekick`), of a big face (`side.inner`: what that face shows,
+    through cuts and its own pockets, as when the add-in is given a face)
+    or of the outline's outer boundary (`side.outer.outline`), one or a
+    list. `at=` takes objects only [decided by Florian 2026-10-12]: the
+    operation itself, never its name as a string, which is an error saying
+    to write `side.toekick` instead; so an operation a later join makes is
+    named after that join. It is resolved when the board is finished (`Board.finish`,
     called by `to_layout`), not when called, so it also covers the corners
     that joints and operations written after it make; it is the one
     operation that ignores the order on the page. Reliefs go in as
