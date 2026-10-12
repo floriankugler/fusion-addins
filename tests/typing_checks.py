@@ -22,6 +22,15 @@ def operations() -> None:
         side.fillet(side.front.bottom, r=5)                                   # type: ignore  # radius=, not r=
 
 
+def joints() -> None:
+    top = world_frame().direction("top")
+    with module("j", Box.from_size(width=600, depth=400, height=40)) as m:
+        half_lap(m.top, split=m.bottom + 10, clearance=0.2)
+        half_lap(m.top, at=m.bottom + 10)                                     # type: ignore  # split=, not at=
+        half_lap(m.top, m.bottom + 10)                                        # type: ignore  # settings by keyword
+    half_lap(top, clearance=0.2, dogbones=None)
+
+
 def shapes() -> None:
     rect(depth=50, height=50).clip(top=10, back=10)
     rect(depth=50, height=50).clip("top.back", top=10, back=10)               # type: ignore  # no strings

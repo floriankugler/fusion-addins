@@ -347,7 +347,7 @@ def test_half_lap_dog_bone_errors():
         with pytest.raises(LangError, match="wider than the notch"):
             long.join(cross, using=half_lap(toward=g.top, dogbones="hidden", tool=16))
         with pytest.raises(LangError, match="would break out of grid.long below its notch"):
-            long.join(cross, using=half_lap(toward=g.top, at=g.bottom + 2, dogbones="hidden"))
+            long.join(cross, using=half_lap(toward=g.top, split=g.bottom + 2, dogbones="hidden"))
     assert long.ops == [] and cross.ops == []
     with g:
         long.join(cross, using=half_lap(toward=g.top, dogbones="hidden", tool=14.9))     # 15 across: just fits

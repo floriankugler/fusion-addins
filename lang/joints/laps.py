@@ -5,8 +5,9 @@ notched to half the height they share, so they slot together flush.
 each board named, all of which it must cross: its own notches open toward
 the given side, the other boards' notches the opposite way. The
 split lies in the middle of the height both boards have at the crossing,
-or at `at=`, a position. `clearance=` widens every notch by that much on
-each side. Each notch is a through cut named `lap_<other board>`.
+or at `split=`, a position. `clearance=` is the play in every notch, in
+total, half of it on each side, as with tenons and box joints. Each notch
+is a through cut named `lap_<other board>`.
 
 A router leaves its radius in a notch's two inside corners, at its floor,
 so they get dog bones for a `tool=` mm cutter, `relief=` wider than the
@@ -42,7 +43,9 @@ _PAST = 1.0
 @dataclass(frozen=True)
 class HalfLap:
     toward: Direction
-    at: float | None = None
+    #: Where the notches meet, on `toward`'s axis; None for the middle.
+    split: float | None = None
+    #: The play in each notch, in total: half on each side.
     clearance: float = 0.0
     dogbones: DogBones | None = "corner"
     tool: float = 6.0
@@ -89,7 +92,7 @@ class HalfLap:
     def _split(self, c: Crossing) -> float:
         if self.toward.axis != c.axis:
             raise LangError(f"toward={self.toward.name} does not run along the line where the two meet ({c.axis}).")
-        split = self.at if self.at is not None else (c.lo + c.hi) / 2
+        split = self.split if self.split is not None else (c.lo + c.hi) / 2
         if not c.lo < split < c.hi:
             raise LangError(f"the split at {c.axis}={split:g} lies outside the height the two share "
                             f"({c.lo:g} to {c.hi:g}).")
@@ -97,11 +100,13 @@ class HalfLap:
 
     def _region(self, part: Board, other: Board, axis: Axis, span: tuple[float, float]) -> Box:
         """The region cut from `part`: through its thickness, as wide as
-        `other` is thick (plus the clearance), over `span` along `axis`."""
+        `other` is thick plus the clearance, half of it on each side, over
+        `span` along `axis`."""
         pb, ob = part.box(), other.box()
         t, w = part.t_axis, other.t_axis
-        lo: dict[Axis, float] = {t: pb.lo[t], w: ob.lo[w] - self.clearance, axis: span[0]}
-        hi: dict[Axis, float] = {t: pb.hi[t], w: ob.hi[w] + self.clearance, axis: span[1]}
+        play = self.clearance / 2
+        lo: dict[Axis, float] = {t: pb.lo[t], w: ob.lo[w] - play, axis: span[0]}
+        hi: dict[Axis, float] = {t: pb.hi[t], w: ob.hi[w] + play, axis: span[1]}
         return Box({a: lo[a] for a in AXES}, {a: hi[a] for a in AXES})
 
     def _notch(self, part: Board, other: Board, axis: Axis, span: tuple[float, float], split: float,
@@ -147,19 +152,20 @@ class HalfLap:
         return notch
 
 
-def half_lap(toward: Side | Direction, at: PosLike | None = None, clearance: float = 0.0,
+def half_lap(toward: Side | Direction, *, split: PosLike | None = None, clearance: float = 0.0,
              dogbones: DogBones | None = "corner", tool: float = 6.0, relief: float = 0.1) -> HalfLap:
     """A half lap with each board named in `join()`. `toward` is the side this
     board's notches open to (`floor.top`: notched from the top, the other
-    boards from below); `at` a position for the split instead of the middle
-    of the shared height; `clearance` widens each notch per side. Dog bones
-    for a `tool` mm cutter, `relief` wider, in the notches' inside corners:
-    on the corners (`"corner"`), along the floor where the other board
-    covers them (`"hidden"`), or None."""
+    boards from below); `split` a position for where the notches meet
+    instead of the middle of the shared height; `clearance` the play in
+    each notch, in total, half of it on each side. Dog bones for a `tool`
+    mm cutter, `relief` wider, in the notches' inside corners: on the
+    corners (`"corner"`), along the floor where the other board covers them
+    (`"hidden"`), or None."""
     direction = toward.outward if isinstance(toward, Side) else toward
-    split = as_pos(at, "half_lap(at=)") if at is not None else None
-    if split is not None and split.axis != direction.axis:
-        raise LangError(f"half_lap: at={split} is not on the axis of toward={direction.name}.")
+    position = as_pos(split, "half_lap(split=)") if split is not None else None
+    if position is not None and position.axis != direction.axis:
+        raise LangError(f"half_lap: split={position} is not on the axis of toward={direction.name}.")
     if clearance < 0:
         raise LangError("half_lap: clearance must not be negative.")
     if dogbones is not None:
@@ -168,5 +174,5 @@ def half_lap(toward: Side | Direction, at: PosLike | None = None, clearance: flo
         raise LangError("half_lap: tool must be positive.")
     if relief < 0:
         raise LangError("half_lap: relief must not be negative.")
-    return HalfLap(direction, split.value if split is not None else None, float(clearance), dogbones,
+    return HalfLap(direction, position.value if position is not None else None, float(clearance), dogbones,
                    float(tool), float(relief))
