@@ -5,7 +5,7 @@ from typing import cast
 import adsk.core
 import adsk.fusion
 
-from lib import addin, inputs, ui_placement, utils
+from lib import addin, door_latches, inputs, ui_placement, utils
 from lib.fusionbootstrap.runtime import RuntimeInfo
 
 
@@ -18,31 +18,32 @@ def _mm(value_cm: float) -> str:
     return f"{value_cm * 10:g} mm"
 
 
-# Latch drilling specifications (all values in cm).
-EVERLOCK_PILOT_COLUMN_OFFSET = 2.6
-EVERLOCK_LOWER_ROW_INSET = 2.6
-EVERLOCK_MAIN_INSET = 3.0
-EVERLOCK_UPPER_ROW_INSET = 4.2
-EVERLOCK_MAIN_DIAMETER = 2.5
-EVERLOCK_CARCASS_PAIR_OFFSET = 1.4
-EVERLOCK_CARCASS_INSET = 2.5
-PULL_LOCK_MAIN_INSET = 3.4
-PULL_LOCK_DIAMETER = 3.81
-PULL_LOCK_COUNTERBORE_DIAMETER = 4.8
-PULL_LOCK_MIN_REMAINING = 1.0
-PULL_LOCK_CARCASS_PAIR_OFFSET = 0.95
-PULL_LOCK_CARCASS_INSET = 2.9
-# Sugatsune LL-66 one-touch latch. The latch body mounts on the inside of the
-# door, the counter plate under the carcass board.
-#   - Body mounting holes are 56 mm apart, 6.5 mm below the body's top edge;
-#     the body top sits 3.5 mm below the carcass face, so the hole line runs
-#     10 mm below it (the datasheet's mounting drawing dimensions both).
-#   - Counter plate holes are 20 mm apart, 24 mm from the door's inner face
-#     (19 mm + 5 mm when a gasket is used; the gap variant is not modeled).
-LL66_DOOR_PILOT_HALF_SPACING = 2.8
-LL66_DOOR_PILOT_INSET = 1.0
-LL66_CARCASS_PAIR_OFFSET = 1.0
-LL66_CARCASS_INSET = 2.4
+def _cm(value_mm: float) -> float:
+    return value_mm / 10
+
+
+# Latch drilling specifications in cm, from lib/door_latches.py (mm), which
+# documents them (the LL-66's from Sugatsune's datasheet) and shares them
+# with the modeling language.
+EVERLOCK_PILOT_COLUMN_OFFSET = _cm(door_latches.EVERLOCK_PILOT_COLUMN_OFFSET)
+EVERLOCK_LOWER_ROW_INSET = _cm(door_latches.EVERLOCK_LOWER_ROW_INSET)
+EVERLOCK_MAIN_INSET = _cm(door_latches.EVERLOCK_MAIN_INSET)
+EVERLOCK_UPPER_ROW_INSET = _cm(door_latches.EVERLOCK_UPPER_ROW_INSET)
+EVERLOCK_MAIN_DIAMETER = _cm(door_latches.EVERLOCK_MAIN_DIAMETER)
+EVERLOCK_CARCASS_PAIR_OFFSET = _cm(door_latches.EVERLOCK_CARCASS_PAIR_OFFSET)
+EVERLOCK_CARCASS_INSET = _cm(door_latches.EVERLOCK_CARCASS_INSET)
+PULL_LOCK_MAIN_INSET = _cm(door_latches.PULL_LOCK_MAIN_INSET)
+PULL_LOCK_DIAMETER = _cm(door_latches.PULL_LOCK_DIAMETER)
+PULL_LOCK_COUNTERBORE_DIAMETER = _cm(door_latches.PULL_LOCK_COUNTERBORE_DIAMETER)
+PULL_LOCK_MIN_REMAINING = _cm(door_latches.PULL_LOCK_MIN_REMAINING)
+PULL_LOCK_CARCASS_PAIR_OFFSET = _cm(door_latches.PULL_LOCK_CARCASS_PAIR_OFFSET)
+PULL_LOCK_CARCASS_INSET = _cm(door_latches.PULL_LOCK_CARCASS_INSET)
+# Sugatsune LL-66 one-touch latch: the body on the inside of the door, the
+# counter plate under the carcass board.
+LL66_DOOR_PILOT_HALF_SPACING = _cm(door_latches.LL66_DOOR_PILOT_HALF_SPACING)
+LL66_DOOR_PILOT_INSET = _cm(door_latches.LL66_DOOR_PILOT_INSET)
+LL66_CARCASS_PAIR_OFFSET = _cm(door_latches.LL66_CARCASS_PAIR_OFFSET)
+LL66_CARCASS_INSET = _cm(door_latches.LL66_CARCASS_INSET)
 
 
 @dataclass(frozen=True)
@@ -122,7 +123,7 @@ class DoorLatchNativeInputs(inputs.Inputs):
         self.offset = inputs.FloatInput(
             id="offset",
             name="End Offset",
-            default_value=10,
+            default_value=_cm(door_latches.END_OFFSET),
             tool_tip=(
                 "Distance from each end of the Door Edge to the first and "
                 "last latch station."
@@ -134,7 +135,7 @@ class DoorLatchNativeInputs(inputs.Inputs):
         self.predrill_diameter = inputs.FloatInput(
             id="predrill_diameter",
             name="Predrill Diameter",
-            default_value=2.54 / 8,
+            default_value=_cm(door_latches.PREDRILL_DIAMETER),
             tool_tip="Diameter of the latch screw pilot holes.",
             units=units,
         )
@@ -142,7 +143,7 @@ class DoorLatchNativeInputs(inputs.Inputs):
         self.predrill_depth = inputs.FloatInput(
             id="predrill_depth",
             name="Predrill Depth",
-            default_value=0.3,
+            default_value=_cm(door_latches.PREDRILL_DEPTH),
             tool_tip="Depth of the latch screw pilot holes.",
             units=units,
         )
