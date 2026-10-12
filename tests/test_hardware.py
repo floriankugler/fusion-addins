@@ -1,3 +1,5 @@
+import re
+
 import pytest
 
 from lang import *
@@ -7,7 +9,7 @@ from lang.core.layout_types import HardwareBodyLayout, HardwareLayout
 from lang.core.scope import registry
 from lang.core.checks import _has_material  # type: ignore[reportPrivateUsage]
 from lang.emit.plan import HoleStep, plan_layout
-from lang.hardware.slides import BOTTOM_HEIGHT, INNER_FACE_OFFSET, DrawerSlide, HookHole
+from lang.hardware.slides import BOTTOM_HEIGHT, BOX_MACHINING, INNER_FACE_OFFSET, DrawerSlide, HookHole
 from lib.drawer_slides import DYNAPRO_40, DYNAPRO_50_70, MOVENTO_760H, MOVENTO_766H, SlideModel
 
 
@@ -21,6 +23,7 @@ def fresh_registry():
 ply15 = material("birch", t=15)
 ply12 = material("birch", t=12)
 ply9 = material("birch", t=9)
+ply18 = material("birch", t=18)
 
 
 def test_slide_dictates_the_drawer_box():
@@ -77,11 +80,12 @@ def test_slide_machines_the_drawer_box():
     assert DrawerSlide(DYNAPRO_40, nl=450, hook_hole=(3, 10)).hook_hole == (3, 10)
 
 
-def _drawer(slide: DrawerSlide, machine: bool = True) -> tuple[Scope, dict[str, Board]]:
+def _drawer(slide: DrawerSlide, machine: bool = True, into: str = "lrf",
+            floor_material: Material = ply9) -> tuple[Scope, dict[str, Board]]:
     """A drawer in a 600 x 500 x 300 cabinet in the van's terms, built
     much as the example builds one: 12 mm sides, front and back, a 9 mm
-    floor in grooves in the sides, the runners mounted from the face's
-    back."""
+    floor in grooves in the sides and the front (`into`: l, r, f, k; not
+    the back, as with Blum), the runners mounted from the face's back."""
     with module("cab", Box.from_size(width=600, depth=500, height=300)) as cab:
         left = board("left", ply15).on(cab.left)
         right = board("right", ply15).on(cab.right)
@@ -93,14 +97,62 @@ def _drawer(slide: DrawerSlide, machine: bool = True) -> tuple[Scope, dict[str, 
             r = board("right", ply12).on(box.right).between(box.front, box.back, box.bottom, box.top)
             f = board("front", ply12).on(box.front).between(l, r, box.bottom, box.top)
             k = board("back", ply12).on(box.back).between(l, r, box.bottom, box.top)
-            floor = board("floor", ply9).on(box.bottom + slide.recess).between(l, r, f, k)
-            floor.join(l, r, using=groove(5, clearance=(0.5, 0.5)))
+            floor = board("floor", floor_material).on(box.bottom + slide.recess).between(l, r, f, k)
+            named = {"l": l, "r": r, "f": f, "k": k}
+            floor.join(*(named[c] for c in into), using=groove(5, clearance=(0.5, 0.5)))
             if machine:
                 slide.machine_box(sides=(l, r), front=f, back=k, floor=floor)
         d.mount(slide, sides=(left, right), front=face.back)
     return d, {"carcass_left": left, "carcass_right": right, "face": face, "left": l, "right": r,
                "front": f, "back": k, "floor": floor}
 
+
+
+@pytest.mark.parametrize("model, hook, thick, into", [
+    (MOVENTO_760H, (6.0, 10.0), False, "cab.drawer1.floor"),
+    (MOVENTO_760H, (6.0, through), False, "cab.drawer1.floor"),
+    # 6.75 deep from the rear face of the 12 mm back: 5.25 short of its
+    # inner face, past the floor's 5, inside its groove's 5.5
+    (MOVENTO_760H, (6.0, 6.75), False, "groove_floor, where cab.drawer1.floor goes into it"),
+    (DYNAPRO_40, (2.0, 8.0), True, "cab.drawer1.floor"),
+])
+def test_hook_holes_must_not_run_into_the_floor(model: SlideModel, hook: HookHole, thick: bool, into: str):
+    """Florian 2026-10-12: a rear hook hole that would run into the floor
+    where it goes into the back board, or into its groove there, is an
+    error, and nothing is cut. Blum's hole (6 mm, 11 above the floor's
+    underside) meets a 9 mm floor grooved into the back; Grass's (15 and
+    47 above) only a floor thicker than 14, here 18."""
+    slide = DrawerSlide(model, nl=450, hook_hole=hook)
+    material_ = ply18 if thick else ply9
+    _, parts = _drawer(slide, machine=False, into="lrfk", floor_material=material_)
+    k, f = parts["back"], parts["front"]
+    up = 15 if thick else 11
+    with pytest.raises(LangError, match=rf"cab\.drawer1\.back: .*: the rear hook's {hook[0]:g} mm hole \d+ from "
+                                        rf"cab\.drawer1\.left's inner face and {up} above the floor's underside "
+                                        rf"would run into {re.escape(into)}: leave the back board out of the floor's "
+                                        "groove join"):
+        slide.machine_box(sides=(parts["left"], parts["right"]), front=f, back=k, floor=parts["floor"])
+    assert not [op for op in (*k.ops, *f.ops) if isinstance(op, (Cut, Hole))]       # nothing cut
+    # with the floor in the sides and the front only, the back is drilled
+    registry.reset()
+    _, parts = _drawer(slide, into="lrf", floor_material=material_)
+    family = "Grass" if model is DYNAPRO_40 else "Blum"
+    assert len([op for op in parts["back"].ops if isinstance(op, Hole)]) == 2 * len(BOX_MACHINING[family].hook_holes)
+
+
+def test_a_floor_placed_into_the_back_without_a_groove_is_checked_too():
+    slide = DrawerSlide(MOVENTO_760H, nl=450)
+    with module("cab", Box.from_size(width=600, depth=500, height=300)) as cab:
+        bay = cab.interior
+        with scope("drawer1", bay):
+            box = slide.drawer_box(bay, front=bay.front, side_thickness=12, height=150)
+            l = board("left", ply12).on(box.left).between(box.front, box.back, box.bottom, box.top)
+            r = board("right", ply12).on(box.right).between(box.front, box.back, box.bottom, box.top)
+            f = board("front", ply12).on(box.front).between(l, r, box.bottom, box.top)
+            k = board("back", ply12).on(box.back).between(l, r, box.bottom, box.top)
+            floor = board("floor", ply9).on(box.bottom + slide.recess).between(l, r, f, k.into(5))
+            with pytest.raises(LangError, match=r"would run into cab\.drawer1\.floor: leave the back board out"):
+                slide.machine_box(sides=(l, r), front=f, back=k, floor=floor)
 
 def test_slide_machines_a_blum_drawer_box():
     """Blum: 75 mm cut-outs at both ends of the front and the back board,

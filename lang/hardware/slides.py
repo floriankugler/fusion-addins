@@ -31,18 +31,27 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
+from shapely.geometry import Point, Polygon
+from shapely.geometry import box as shapely_box
+from shapely.geometry.base import BaseGeometry
+from shapely.ops import unary_union
+
 from lib import drawer_slides as data
 
+from ..core import directions
 from ..core.box import Box
-from ..core.directions import Direction, Frame
+from ..core.directions import Axis, Direction, Frame
 from ..core.errors import LangError
 from ..core.layout_types import BoxDict, HardwareBodyLayout
+from ..core.ops import Pocket
 from ..core.refs import Pos, PosLike, Through, as_pos
 
 if TYPE_CHECKING:
-    from ..core.part import Board
+    from ..core.part import Board, Face
     from ..core.scope import Scope
 
+#: Far enough to stand for "beyond the board", mm.
+_FAR = 1e9
 #: The drawer sides' inner faces from the carcass sides (LW - 42), mm.
 INNER_FACE_OFFSET = 21.0
 #: Thickest drawer side the runner takes, mm (both catalogs: max. 16).
@@ -258,7 +267,13 @@ class DrawerSlide:
         underside and 10 from the inner face at 47; Blum one hole, 7 from
         the inner face at 11. With a depth of `through` they go through
         the back board from its inner face, where a box joint's reliefs
-        are too, so the back needs no machining from its rear face."""
+        are too, so the back needs no machining from its rear face.
+
+        A hook hole that would run into the floor, where it goes into the
+        back board, or into the groove it sits in there, is an error, and
+        nothing is cut: with Blum (11 above the floor's underside) a floor
+        of 8 mm or more cannot go into the back, so its groove join names
+        the sides and the front only."""
         try:
             data = BOX_MACHINING[_family(self.model)]
         except KeyError:
@@ -270,22 +285,67 @@ class DrawerSlide:
         # through holes from the inner face, fixed-depth ones from the rear
         hook_face = back.inner if isinstance(depth, Through) else back.outer
         for side in sides:
-            inward = side.inner.direction            # from this side into the drawer
-            if inward.axis != width_axis:
+            if side.inner.direction.axis != width_axis:
                 raise LangError(f"{self.name}: {side.path} is not a side of the drawer box.", side.path)
+        for board in (front, back):
+            if board.box().frame.direction("back").axis == width_axis:
+                raise LangError(f"{self.name}: {board.path} is not the drawer's front or back.", board.path)
+        holes = [(side, Pos(width_axis, side.inner.value + side.inner.direction.sign * across), up)
+                 for side in sides for across, up in data.hook_holes]
+        for side, at, up in holes:
+            self._check_hook_hole(back, floor, hook_face, at, floor_bottom + up, diameter, depth, side)
+        for side in sides:
+            inward = side.inner.direction            # from this side into the drawer
             inner = side.inner.value
             which = (-inward).name                   # the side's own name in the frame: left or right
             for board, width, what in ((front, data.front_cutout, "coupling"), (back, data.back_cutout, "hook")):
                 box = board.box()
-                if box.frame.direction("back").axis == width_axis:
-                    raise LangError(f"{self.name}: {board.path} is not the drawer's front or back.", board.path)
                 region = (box.with_side(-inward, inner)
                              .with_side(inward, inner + inward.sign * width)
                              .with_side(frame.direction("top"), floor_bottom.value))
                 board.cut(region, name=f"{what}_{which}")
-            for across, up in data.hook_holes:
-                at = Pos(width_axis, inner + inward.sign * across)
-                back.hole(d=diameter, depth=depth, at=hook_face.bottom(floor_bottom + up).left(at))
+            for hole_side, at, up in holes:
+                if hole_side is side:
+                    back.hole(d=diameter, depth=depth, at=hook_face.bottom(floor_bottom + up).left(at))
+
+    def _check_hook_hole(self, back: Board, floor: Board, face: Face, at: Pos, height: Pos, diameter: float,
+                         depth: float | Through, side: Board) -> None:
+        """An error when the hook hole at `at` and `height` on the back
+        board's face `face` would run into the floor where it goes into the
+        back board, or into a pocket of the back board the floor lies in
+        there (its groove, with the groove's clearance)."""
+        t, ft = back.t_axis, floor.t_axis
+        if ft not in (back.u_axis, back.v_axis) or t not in (floor.u_axis, floor.v_axis):
+            return                                   # not a floor across the back board
+        bb = back.box()
+        floor_t = _span(floor, t, (bb.lo[t], bb.hi[t]))
+        if floor_t is None:
+            return                                   # the floor does not go into the back board
+        reach = back.thickness if isinstance(depth, Through) else depth
+        hole_t = _sorted(face.value, face.value - face.direction.sign * reach)
+        coords = {at.axis: at.value, height.axis: height.value}
+        hole = Point(coords[back.u_axis], coords[back.v_axis]).buffer(diameter / 2, quad_segs=16)
+        what: str | None = None
+        if hole.intersection(_section(floor, back, hole_t)).area > 1e-6:
+            what = floor.path
+        else:
+            held = _section(floor, back, floor_t)
+            for op in back.ops:
+                if not isinstance(op, Pocket) or op.shape.geometry.intersection(held).area <= 1e-6:
+                    continue
+                pocket_face = back.face(directions.frame.direction(op.face))
+                pocket_t = _sorted(pocket_face.value, pocket_face.value - pocket_face.direction.sign * op.depth)
+                if not (_overlap(pocket_t, floor_t) and _overlap(pocket_t, hole_t)):
+                    continue
+                if hole.intersection(op.shape.geometry).area > 1e-6:
+                    what = f"{op.name or 'the pocket'}, where {floor.path} goes into it"
+                    break
+        if what is not None:
+            raise LangError(
+                f"{self.name}: the rear hook's {diameter:g} mm hole {abs(at.value - side.inner.value):g} from "
+                f"{side.path}'s inner face and {height.value - floor.bottom.value:g} above the floor's underside "
+                f"would run into {what}: leave the back board out of the floor's groove join (name the sides and "
+                "the front only, as with Blum), or make the floor thinner.", back.path)
 
     def hole_positions(self) -> list[float]:
         """Pre-drill positions behind the runner's front, mm."""
@@ -345,6 +405,48 @@ class DrawerSlide:
             boxes = [_world_box(starts, box) for box in self.runner_boxes().values()]
             bodies.append(HardwareBodyLayout(name=which, boxes=boxes))
         scope.place_hardware("runners", bodies)
+
+
+def _sorted(a: float, b: float) -> tuple[float, float]:
+    return (a, b) if a <= b else (b, a)
+
+
+def _overlap(a: tuple[float, float], b: tuple[float, float]) -> bool:
+    return min(a[1], b[1]) - max(a[0], b[0]) > 1e-6
+
+
+def _span(floor: Board, axis: Axis, within: tuple[float, float]) -> tuple[float, float] | None:
+    """The stretch along `axis` (one of the floor's in-plane axes) that the
+    floor's outline covers within `within`, or None."""
+    i = 0 if floor.u_axis == axis else 1
+    b = floor.outline.bounds
+    lo, hi = max(b[i], within[0]), min(b[i + 2], within[1])
+    return (lo, hi) if hi - lo > 1e-6 else None
+
+
+def _section(floor: Board, back: Board, band: tuple[float, float]) -> BaseGeometry:
+    """The floor's material within `band` along the back board's thickness,
+    seen on the back board's face, in its outline frame: where along the
+    back the floor's outline reaches into the band, through the floor's
+    thickness."""
+    t, ft = back.t_axis, floor.t_axis
+    u, v = floor.u_axis, floor.v_axis
+    along: Axis = u if v == t else v
+    lo: dict[Axis, float] = {u: -_FAR, v: -_FAR}
+    hi: dict[Axis, float] = {u: _FAR, v: _FAR}
+    lo[t], hi[t] = band
+    inside = floor.outline.geometry.intersection(shapely_box(lo[u], lo[v], hi[u], hi[v]))
+    i = 0 if along == u else 1
+    fb = floor.box()
+    pieces: list[BaseGeometry] = []
+    for g in getattr(inside, "geoms", [inside]):
+        if g.is_empty or g.area <= 1e-9:
+            continue
+        corners: dict[Axis, tuple[float, float]] = {along: (float(g.bounds[i]), float(g.bounds[i + 2])),
+                                                    ft: (fb.lo[ft], fb.hi[ft])}
+        bu, bv = corners[back.u_axis], corners[back.v_axis]
+        pieces.append(shapely_box(bu[0], bv[0], bu[1], bv[1]))
+    return unary_union(pieces) if pieces else Polygon()
 
 
 def _world_box(starts: tuple[tuple[Direction, float], ...], box: RunnerBox) -> BoxDict:
