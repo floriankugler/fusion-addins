@@ -2,7 +2,7 @@
 import math
 
 import pytest
-from shapely.geometry import Point, box
+from shapely.geometry import Point, Polygon, box
 
 from lang import *
 from lang.core.shapes import Shape, slot_shape
@@ -121,6 +121,20 @@ def test_two_overlapping_circles_meet_at_their_crossing():
             assert _on_circle(p, (0, 0), 7.5) and _on_circle(p, (11.2, 0), 7.5)
 
 
+def test_two_arcs_with_one_chord_between_them_meet_at_their_crossing():
+    """Found by fuzzing: two overlapping circles offset with mitred joins
+    (`grown`, as a cutout keeps material around them) leave a single short
+    chord between the two arcs. Both arcs reached for it, one for each of
+    its ends, so they overlapped and did not join."""
+    from lang.core.cutouts import circle_geometry, grown
+    shape = Shape(grown(circle_geometry((0, 1), 1).union(circle_geometry((0, 0), 1)), 1))
+    curves = fit(_ring(shape))
+    assert _kinds(curves) == "AA"
+    for c, d in zip(curves, curves[1:] + curves[:1]):
+        assert isinstance(c, Arc2) and isinstance(d, Arc2) and c.b == d.a
+        assert _on_circle(c.b, (0, 1), 2) and _on_circle(c.b, (0, 0), 2)
+
+
 def test_a_rounded_ring_started_near_an_arc_s_end_keeps_the_arc_whole():
     """Every corner rounded with arcs of a vertex per degree, the ring
     starting three vertices before an arc ends: those three would be too few
@@ -131,3 +145,67 @@ def test_a_rounded_ring_started_near_an_arc_s_end_keeps_the_arc_whole():
     for start in range(len(ring)):
         curves = fit(ring[start:] + ring[:start])
         assert sorted(_kinds(curves)) == ["A"] * 4 + ["L"] * 4, start
+
+
+def _joined_and_simple(ring: list[tuple[float, float]]) -> list[Line2 | Arc2 | Circle2]:
+    from shapely.geometry import LinearRing
+    curves = fit(ring)
+    for c, d in zip(curves, curves[1:] + curves[:1]):
+        assert not isinstance(c, Circle2) and not isinstance(d, Circle2) and c.b == d.a
+    drawn: list[tuple[float, float]] = []
+    for c in curves:
+        assert not isinstance(c, Circle2)
+        drawn.append(c.a)
+        if isinstance(c, Arc2):
+            # the arc every tenth of a degree, the way it turns through mid
+            (ax, ay), (mx, my), (bx, by), (ox, oy) = c.a, c.mid, c.b, c.center
+            ccw = (mx - ax) * (by - my) - (my - ay) * (bx - mx) > 0
+            a0, am, a1 = (math.atan2(y - oy, x - ox) for x, y in (c.a, c.mid, c.b))
+            sign = 1 if ccw else -1
+            sweep = (sign * (am - a0)) % (2 * math.pi) + (sign * (a1 - am)) % (2 * math.pi)
+            n = math.ceil(math.degrees(sweep) * 10)
+            drawn += [(ox + c.radius * math.cos(a0 + sign * sweep * k / n),
+                       oy + c.radius * math.sin(a0 + sign * sweep * k / n)) for k in range(1, n)]
+    assert LinearRing(drawn).is_simple
+    return curves
+
+
+def test_an_arc_reaching_for_the_start_of_another_arc_meets_it_where_the_circles_cross():
+    """Found by fuzzing: a circle of the cutouts' kind and a coarse one (8
+    segments a quarter) united and offset 11 inward. The coarse arc reached
+    for the first vertex of the fine one and moved it along the fine arc's
+    first chord, off the fine circle, which then got a wrong centre."""
+    from shapely.geometry.polygon import orient
+    from lang.core.cutouts import circle_geometry, grown
+    shape = grown(circle_geometry((-110, 92), 169.5).union(Point(73, 25).buffer(200, quad_segs=8)), -11)
+    assert isinstance(shape, Polygon)
+    ring = [(float(x), float(y)) for x, y in list(orient(shape, 1.0).exterior.coords)[:-1]]
+    curves = _joined_and_simple(ring)
+    arcs = [c for c in curves if isinstance(c, Arc2)]
+    assert sorted((round(a.center[0], 6), round(a.center[1], 6), round(a.radius, 6)) for a in arcs) == \
+        [(-110, 92, 158.5), (73, 25, 189)]
+    meeting = [c.b for c, d in zip(curves, curves[1:] + curves[:1]) if isinstance(c, Arc2) and isinstance(d, Arc2)]
+    assert len(meeting) == 1
+    assert _on_circle(meeting[0], (-110, 92), 158.5) and _on_circle(meeting[0], (73, 25), 189)
+
+
+def test_a_vertex_moved_onto_an_arc_stays_short_of_the_next_vertex():
+    """Found by fuzzing: where three shapes meet within a millimetre, an arc
+    reached for a vertex followed by a line 1.4 long, and the line's crossing
+    with the arc's circle lay past that line's far end: the drawn ring ran
+    back on itself."""
+    from shapely import affinity
+    from shapely.geometry.polygon import orient
+    from shapely.ops import unary_union
+    from lang.core.cutouts import circle_geometry, filleted
+    cx, cy = -95.05993986624881, 165.25231422302477
+    rounded = filleted(affinity.rotate(box(cx - 149.5, cy - 93.5, cx + 149.5, cy + 93.5), 45, origin=(cx, cy)), 18.7)
+    assert rounded is not None
+    shape = unary_union([circle_geometry((145.29664200454295, 177.5), 123), rounded])
+    shape = unary_union([shape.difference(circle_geometry((-2.8072725530149967, -178.5), 102.5)),
+                         Point(199.5, 200).buffer(165, quad_segs=8)])
+    moved = affinity.translate(shape, 4992, 1525)
+    assert isinstance(moved, Polygon)
+    shape = orient(moved, 1.0)
+    for ring in [shape.exterior, *shape.interiors]:
+        _joined_and_simple([(float(x), float(y)) for x, y in list(ring.coords)[:-1]])

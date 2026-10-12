@@ -154,6 +154,19 @@ def _onto_line(circle: tuple[Point2, float], p: Point2, q: Point2, near: Point2)
     return min(points, key=lambda x: math.dist(x, near))
 
 
+def _short_of(target: Point2 | None, x: Point2, other: Point2) -> Point2 | None:
+    """`target`, a point on the line from the vertex `x` to `other`, when it
+    lies short of `other`: a vertex moved past the line's other end would
+    turn the line back on itself."""
+    if target is None:
+        return None
+    dx, dy = other[0] - x[0], other[1] - x[1]
+    length2 = dx * dx + dy * dy
+    if length2 == 0 or ((target[0] - x[0]) * dx + (target[1] - x[1]) * dy) / length2 >= 1 - 1e-9:
+        return None
+    return target
+
+
 def _onto_circles(a: tuple[Point2, float], b: tuple[Point2, float], near: Point2) -> Point2 | None:
     """Where two circles cross, nearest `near`."""
     (ac, ar), (bc, br) = a, b
@@ -233,18 +246,54 @@ def _snap(pieces: list[_Piece], points: Sequence[Point2], moved: dict[int, Point
         if before.circle is None and before.j - before.i == 1 and _chord_of(piece, at(piece.i), at(before.i), -1):
             starts[before.i % n] = (piece, before)
     absorbed: list[_Piece] = []
+    # A single chord between two arcs is claimed by both, the one before
+    # it reaching for its far end and the one after it for its near end:
+    # the two arcs meet where their circles cross, at its near end.
+    for m in sorted(ends):
+        before_arc, chord = ends[m]
+        near = chord.i % n
+        if near not in starts or starts[near][1] is not chord:
+            continue
+        after_arc = starts.pop(near)[0]
+        del ends[m]
+        assert before_arc.circle is not None and after_arc.circle is not None
+        a, b = at(chord.i), at(chord.j)
+        target = _onto_circles(before_arc.circle, after_arc.circle, ((a[0] + b[0]) / 2, (a[1] + b[1]) / 2))
+        reach = 2 * min(before_arc.circle[1], after_arc.circle[1]) * math.sin(MAX_STEP / 2)
+        if target is None or max(math.dist(target, a), math.dist(target, b)) > reach \
+                or _glancing(target, before_arc.circle, after_arc.circle):
+            continue
+        moved[near] = target
+        after_arc.i -= 1
+        absorbed.append(chord)
+    # The arc a vertex begins or ends without a chord between: a vertex an
+    # arc reaches for that begins another arc goes where the two circles
+    # cross, not along that arc's first chord.
+    starting = {p.i % n: p for p in pieces if p.circle is not None}
+    ending = {p.j % n: p for p in pieces if p.circle is not None}
     for m in sorted(set(ends) | set(starts)):
         x = at(m)
         end, start = ends.get(m), starts.get(m)
+        circles: tuple[tuple[Point2, float], tuple[Point2, float]] | None = None
         if end is not None and start is not None:
             assert end[0].circle is not None and start[0].circle is not None
-            target = _onto_circles(end[0].circle, start[0].circle, x)
+            circles = (end[0].circle, start[0].circle)
+        elif end is not None and m in starting:
+            beyond = starting[m].circle
+            assert end[0].circle is not None and beyond is not None
+            circles = (end[0].circle, beyond)
+        elif start is not None and m in ending:
+            beyond = ending[m].circle
+            assert start[0].circle is not None and beyond is not None
+            circles = (beyond, start[0].circle)
+        if circles is not None:
+            target = _onto_circles(circles[0], circles[1], x)
         elif end is not None:
             assert end[0].circle is not None
-            target = _onto_line(end[0].circle, x, at(m + 1), x)
+            target = _short_of(_onto_line(end[0].circle, x, at(m + 1), x), x, at(m + 1))
         else:
             assert start is not None and start[0].circle is not None
-            target = _onto_line(start[0].circle, at(m - 1), x, x)
+            target = _short_of(_onto_line(start[0].circle, at(m - 1), x, x), x, at(m - 1))
         arc = (end or start)
         assert arc is not None and arc[0].circle is not None
         reach = 2 * arc[0].circle[1] * math.sin(MAX_STEP / 2)
@@ -253,9 +302,8 @@ def _snap(pieces: list[_Piece], points: Sequence[Point2], moved: dict[int, Point
         # Where the arc meets the line or the other arc at a glancing angle
         # (a fillet touching them), the crossing found is ill-conditioned
         # and may lie far along the curves; the vertex stays.
-        if end is not None and start is not None:
-            assert end[0].circle is not None and start[0].circle is not None
-            glancing = _glancing(target, end[0].circle, start[0].circle)
+        if circles is not None:
+            glancing = _glancing(target, circles[0], circles[1])
         else:
             following = at(m + 1) if end is not None else at(m - 1)
             glancing = _glancing(target, arc[0].circle, None, following)
