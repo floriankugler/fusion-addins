@@ -74,11 +74,15 @@ class VGroove:
 @dataclass
 class EdgeOp:
     """An operation on a narrow face, positioned in that face's own (s, t)
-    frame: s along the face, t across the thickness."""
+    frame: s along the face, t across the thickness. It starts `offset`
+    in front of the face, its depth measured from there: a box joint's
+    finger grooves start at the fingers' tips, which reach past the
+    board's box."""
     face: str
     op: Hole | Pocket
     s: float = 0.0
     t: float = 0.0
+    offset: float = 0.0
     kind: Literal["edge"] = "edge"
 
 

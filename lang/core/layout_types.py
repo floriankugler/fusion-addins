@@ -81,6 +81,10 @@ class EdgeOpLayout(TypedDict):
     s: float
     t: float
     op: HoleLayout | PocketLayout
+    #: How far in front of the face the operation starts (mm, absent when
+    #: it starts at the face): a box joint's finger grooves start at the
+    #: fingers' tips, past the board's box.
+    offset: NotRequired[float]
 
 
 OpLayout = CutLayout | PocketLayout | HoleLayout | ChamferLayout | VGrooveLayout | EdgeOpLayout

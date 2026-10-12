@@ -6,8 +6,10 @@ chamfer along a contour (a cut's or pocket's rim, a face's outline) is a
 frustum: the contour at the chamfer's depth lofted to the contour moved the
 chamfer's size into the material at the face, vertex by vertex, so its
 sides are flat at 45 degrees. A chamfer along the edge between two faces
-is a triangular prism; a hole's is a cone (a countersink). Operations on
-narrow faces are not meshed yet. Hardware is the union of its boxes.
+is a triangular prism; a hole's is a cone (a countersink). Pockets and
+holes in narrow faces are prisms and cylinders along the face's axis,
+from the plane they start at (`offset` in front of the face). Hardware is
+the union of its boxes.
 """
 from __future__ import annotations
 
@@ -22,8 +24,8 @@ from shapely.geometry import box as shapely_box
 from shapely.geometry.polygon import orient
 from trimesh.creation import extrude_polygon, triangulate_polygon
 
-from ..core.layout_types import (BoxDict, ChamferLayout, HardwareLayout, HoleLayout, Layout, OpLayout, PartLayout,
-                                 Rings, VGrooveLayout)
+from ..core.layout_types import (BoxDict, ChamferLayout, EdgeOpLayout, HardwareLayout, HoleLayout, Layout, OpLayout,
+                                 PartLayout, Rings, VGrooveLayout)
 from ..emit.plan import pieces
 
 AXES = ("x", "y", "z")
@@ -66,6 +68,40 @@ def _from_face(tool: Any, face: str, frame: dict[str, str], t_axis: str, t: floa
     if code[1] != t_axis:
         return trimesh.Trimesh()
     tool.apply_translation([0, 0, t - depth - 0.005 if code[0] == "+" else -0.005])
+    return tool
+
+
+def _edge_tool(part: PartLayout, op: EdgeOpLayout, frame: dict[str, str]) -> Any:
+    """A pocket or hole in a narrow face, in the part's (u, v, t) frame:
+    its shape (or circle) in the face's (s, t) frame, extruded along the
+    face's axis from a little in front of where it starts to its depth."""
+    code = frame[op["face"]]
+    axes, box = part["axes"], part["box"]
+    axis, out = code[1], (1.0 if code[0] == "+" else -1.0)
+    if axis == axes["t"]:
+        return trimesh.Trimesh()
+    i_face = AXES.index(axis)
+    start = (box["max"] if out > 0 else box["min"])[i_face] + out * op.get("offset", 0.0)
+    inner = op["op"]
+    height = inner["depth"] + 0.01
+    if inner["kind"] == "pocket":
+        tool = _extruded(inner["shape"], height)
+    else:
+        tool = trimesh.creation.cylinder(radius=inner["d"] / 2, height=height, sections=24)
+        tool.apply_translation([0.0, 0.0, height / 2])
+    # The tool is built in (s, t, depth); s is the in-plane axis that is not
+    # the face's, t the thickness, depth runs into the part from `start`.
+    local = {axes["u"]: 0, axes["v"]: 1}
+    s_axis = axes["v"] if axis == axes["u"] else axes["u"]
+    m = np.zeros((4, 4))
+    m[3, 3] = 1.0
+    m[local[s_axis], 0] = 1.0
+    m[local[s_axis], 3] = op["s"]
+    m[2, 1] = 1.0
+    m[2, 3] = op["t"] - box["min"][AXES.index(axes["t"])]
+    m[local[axis], 2] = -out
+    m[local[axis], 3] = start + out * 0.005
+    tool.apply_transform(m)
     return tool
 
 
@@ -322,6 +358,8 @@ def mesh_part(part: PartLayout, frame: dict[str, str]) -> Any:
                 tools.append(_countersink_tool(op, frame, t_axis, t))
         elif op["kind"] == "vgroove":
             tools.append(_vgroove_tool(op, frame, t_axis, t))
+        elif op["kind"] == "edge":
+            tools.append(_edge_tool(part, op, frame))
     tools += _chamfer_tools(part, frame)
     tools = [tool for tool in tools if len(tool.faces)]
     if tools:

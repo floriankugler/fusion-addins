@@ -406,7 +406,7 @@ class Operation:
                 u0, v0, u1, v1 = inner.shape.bounds
                 extents[s_axis] = (u0 + op.s, u1 + op.s)
                 extents[t_axis] = (v0 + op.t, v1 + op.t)
-            value = b.hi[face.axis] if face.sign > 0 else b.lo[face.axis]
+            value = (b.hi[face.axis] if face.sign > 0 else b.lo[face.axis]) + face.sign * op.offset
             extents[face.axis] = tuple(sorted((value, value - face.sign * inner.depth)))  # type: ignore[assignment]
             return extents
         u, v = part.u_axis, part.v_axis
@@ -1312,6 +1312,23 @@ class Board:
         self._cut_through(shape, name, 0.0)
         return self
 
+    def add_edge_pocket(self, face: Face, shape: Shape, depth: float, name: str | None = None,
+                        offset: float = 0.0) -> Self:
+        """A pocket into a narrow face, `shape` already placed in the face's
+        frame (world coordinates on its (s, t) axes, see `face_axes`),
+        `depth` deep from a plane `offset` in front of the face; see
+        `add_pocket`. A box joint's grooves along its fingers are cut so."""
+        if face.part is not self:
+            raise LangError(f"add_edge_pocket(): {face!r} is not a face of this board.", self.path)
+        if face.is_big:
+            raise LangError(f"add_edge_pocket(): {face!r} is a big face; this takes a narrow face.", self.path)
+        if depth <= 0:
+            raise LangError(f"depth must be positive, got {depth}.", self.path)
+        world = face.world_name
+        self._record(EdgeOp(world, Pocket(shape, world, float(depth), f"{depth:g}", name), offset=float(offset)),
+                     name)
+        return self
+
     def add_to_outline(self, shape: Shape) -> Self:
         """Widens the outline by `shape`, in the outline's frame: material a
         joint adds, such as tenons growing out of the board's end. The
@@ -1466,6 +1483,8 @@ def _op_to_layout(op: Op) -> OpLayout:
     assert inner["kind"] in ("hole", "pocket")
     edge: EdgeOpLayout = {"kind": "edge", "face": op.face, "s": op.s, "t": op.t,
                           "op": inner}  # type: ignore[typeddict-item]
+    if op.offset:
+        edge["offset"] = op.offset
     return edge
 
 

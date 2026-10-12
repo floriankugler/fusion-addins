@@ -33,7 +33,7 @@ from typing import TYPE_CHECKING, Literal
 from .arcs import Arc2, Curve2, Line2, fit
 
 if TYPE_CHECKING:
-    from ..core.layout_types import (ChamferLayout, HardwareLayout, HoleLayout, Layout, OpLayout,
+    from ..core.layout_types import (ChamferLayout, EdgeOpLayout, HardwareLayout, HoleLayout, Layout, OpLayout,
                                      PartLayout, PocketLayout, Rings)
 
 Axis = Literal["x", "y", "z"]
@@ -312,9 +312,18 @@ class _Part:
 
     def depth(self, face: FaceRef, depth: float, through: bool = False) -> float | None:
         """A depth from `face`, or None when it reaches the opposite face:
-        the thickness for a big face, the part's extent for a narrow one."""
-        extent = self.hi[face.axis] - self.lo[face.axis]
+        the thickness for a big face, the part's extent for a narrow one
+        (and the offset for an operation starting in front of the face)."""
+        far = self.lo[face.axis] if face.sign > 0 else self.hi[face.axis]
+        extent = abs(face.value - far)
         return None if through or depth >= extent - 1e-9 else depth
+
+    def edge_face(self, op: EdgeOpLayout) -> FaceRef:
+        """The plane a narrow-face operation starts from: its face, moved
+        by its offset in front of it."""
+        face = self.face(op["face"])
+        offset = op.get("offset", 0.0)
+        return FaceRef(face.axis, face.sign, face.value + face.sign * offset) if offset else face
 
 
 def plan_part(part: PartLayout, frame: _Frame, problems: list[str]) -> PartPlan:
@@ -354,7 +363,7 @@ def _plan_op(p: _Part, plan: PartPlan, op: OpLayout, show: FaceRef,
         steps.append(VGrooveStep(face, p.point(face, op["start"][0], op["start"][1]),
                                  p.point(face, op["end"][0], op["end"][1]), op["depth"]))
     elif op["kind"] == "edge":
-        face = p.face(op["face"])
+        face = p.edge_face(op)
         inner = op["op"]
         if inner["kind"] == "pocket":
             _add_pocket(p, steps, face, inner, (op["s"], op["t"]))
@@ -411,7 +420,7 @@ def _chamfer_contour(p: _Part, op: ChamferLayout, show: FaceRef,
             f = p.face(target["face"])
             return CircleContour(f, p.point(f, target["u"], target["v"]), target["d"] / 2)
         if target["kind"] == "edge":
-            f = p.face(target["face"])
+            f = p.edge_face(target)
             inner = target["op"]
             if inner["kind"] == "pocket":
                 return ShapeContour(f, p.loops(f, inner["shape"], (target["s"], target["t"])))
