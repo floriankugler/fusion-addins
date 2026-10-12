@@ -308,6 +308,29 @@ class ContactGeometry:
         return (b.lo[t] + b.hi[t]) / 2
 
 
+# -- hidden dog bones ----------------------------------------------------------------------------
+
+def hidden_width(tool: float, relief: float) -> float:
+    """A hidden dog bone's diameter, the tool plus the relief
+    (`lang.core.dogbones.hidden_relief`): the room it needs across the
+    edge it is centred on, and how far it reaches from the edge it
+    touches."""
+    return tool + relief
+
+
+def hidden_fits(room: float, tool: float, relief: float) -> bool:
+    """Whether a hidden dog bone fits in `room`: at least its diameter."""
+    return room >= hidden_width(tool, relief) - EPS
+
+
+def hidden_far_side(corner: Point2, along: Point2, bulge: Point2, tool: float, relief: float) -> Point2:
+    """A point just past where the hidden dog bone at `corner`, centred
+    along the unit vector `along`, bulges furthest toward `bulge`: the
+    board must have material there, or the relief breaks out of it."""
+    r = hidden_width(tool, relief) / 2
+    return (corner[0] + along[0] * r + bulge[0] * (r + PROBE), corner[1] + along[1] * r + bulge[1] * (r + PROBE))
+
+
 def face_toward(part: Board, sign: int, axis: Axis) -> Face:
     return part.face(part.scope.frame.direction_of(axis, sign))
 

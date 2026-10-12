@@ -33,7 +33,7 @@ from ..core.errors import LangError, one_of
 from ..core.part import Board
 from ..core.refs import PosLike, Side, as_pos
 from ..core.shapes import Shape, box_shape
-from .common import PROBE, Names, Point2, reported
+from .common import PROBE, Names, Point2, hidden_far_side, hidden_fits, hidden_width, reported
 
 #: How far a notch reaches past the board's edge, so it opens cleanly.
 _PAST = 1.0
@@ -121,10 +121,9 @@ class HalfLap:
             return (coords[u], coords[v])
 
         width = box.hi[w] - box.lo[w]
-        r = self.radius
-        if self.dogbones == "hidden" and width < 2 * r - 1e-9:
-            raise LangError(f"hidden dog bones are {2 * r:g} across, wider than the notch in {part.path} "
-                            f"({width:g}); use corner dog bones or a smaller tool.")
+        if self.dogbones == "hidden" and not hidden_fits(width, self.tool, self.relief):
+            raise LangError(f"hidden dog bones are {hidden_width(self.tool, self.relief):g} across, wider than the "
+                            f"notch in {part.path} ({width:g}); use corner dog bones or a smaller tool.")
         material = outline.geometry
         up = at(0.0, float(opens))                       # along the notch's sides, toward its opening
         for edge, inward in ((box.lo[w], 1.0), (box.hi[w], -1.0)):
@@ -139,7 +138,9 @@ class HalfLap:
                 notch = notch.union(corner_relief(corner, floor, up, self.tool, self.relief))
                 continue
             relief = hidden_relief(corner, floor, self.tool, self.relief)
-            if not material.contains(Point(at(edge + inward * r, split - opens * (r + PROBE)))):
+            # centred on the floor, bulging below it
+            far = hidden_far_side((edge, split), (inward, 0.0), (0.0, float(-opens)), self.tool, self.relief)
+            if not material.contains(Point(at(*far))):
                 raise LangError(f"hidden dog bones would break out of {part.path} below its notch; use corner dog "
                                 "bones or a smaller tool.")
             notch = notch.union(relief)

@@ -44,7 +44,7 @@ from ..core.part import Board
 from ..core.refs import DepthSpec, Pos, PosLike, to
 from ..core.shapes import Shape, box_shape
 from .common import (EPS, PROBE, ContactGeometry, ContactJoint, Naming, Point2, Spacing, TenonPlacement,
-                     join_contacts, make_spacing, opposite_face, union_all)
+                     hidden_fits, hidden_width, join_contacts, make_spacing, opposite_face, union_all)
 
 #: How far a tenon reaches back into its board, so it joins the outline cleanly, mm.
 _OVERLAP = 1.0
@@ -120,14 +120,22 @@ class Tenons(ContactJoint):
         if any(b - a < w - EPS for a, b in zip(stations, stations[1:])):
             raise LangError(f"the {w:g} mm tenons overlap.")
         if self.dogbones == "hidden":
-            r = self.radius
-            if w <= 2 * r:
-                raise LangError(f"hidden dog bones cut {r:g} into each end of a tenon; the tenons must be wider "
-                                f"than {2 * r:g}.")
-            if e.thickness + self.clearance[1] < r:
-                raise LangError("hidden dog bones would reach past the far side of the mortise; use a smaller tool.")
-            if f.thickness - self.remaining < r:
-                raise LangError("hidden dog bones would reach past the end of the tenon; use a smaller tool or less "
+            # Each is a circle as wide as the tool plus the relief: one bites
+            # into each side of a tenon and reaches that far along it from
+            # the shoulder; a mortise's spans its width across the joint.
+            d = hidden_width(self.tool, self.relief)
+            if w <= d + EPS:
+                raise LangError(f"hidden dog bones cut {d / 2:g} into each side of a tenon; the tenons must be "
+                                f"wider than {d:g}.")
+            across = e.thickness + self.clearance[1]
+            if not hidden_fits(across, self.tool, self.relief):
+                raise LangError(f"hidden dog bones are {d:g} across, wider than the mortises across the joint "
+                                f"({across:g}): they would show past the shoulder; use corner dog bones or a "
+                                "smaller tool.")
+            length = f.thickness - self.remaining
+            if not hidden_fits(length, self.tool, self.relief):
+                raise LangError(f"hidden dog bones reach {d:g} along the tenons from the shoulder, past the end of "
+                                f"the {length:g} mm tenons; use corner dog bones, a smaller tool or less "
                                 "remaining.")
 
     def place(self, c: Contact, stations: list[float], naming: Naming) -> None:

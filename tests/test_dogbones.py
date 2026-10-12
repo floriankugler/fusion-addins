@@ -349,6 +349,10 @@ def test_half_lap_dog_bone_errors():
         with pytest.raises(LangError, match="would break out of grid.long below its notch"):
             long.join(cross, using=half_lap(toward=g.top, at=g.bottom + 2, dogbones="hidden"))
     assert long.ops == [] and cross.ops == []
+    with g:
+        long.join(cross, using=half_lap(toward=g.top, dogbones="hidden", tool=14.9))     # 15 across: just fits
+    notch = long.op("lap_cross").op
+    assert isinstance(notch, Cut) and notch.shape.bounds[0] == pytest.approx(192.5)       # nothing past the sides
     with pytest.raises(LangError, match="dogbones"):
         half_lap(toward=world_frame().direction("top"), dogbones="square")  # type: ignore[arg-type]
     with pytest.raises(LangError, match="tool must be positive"):

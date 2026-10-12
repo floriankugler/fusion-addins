@@ -64,7 +64,8 @@ from ..core.dogbones import DogBones, corner_relief, hidden_relief
 from ..core.errors import LangError, one_of
 from ..core.part import Board, Face
 from ..core.shapes import Shape, box_shape
-from .common import EPS, PROBE, Names, Point2, find_contacts, other_of, reported
+from .common import (EPS, Names, Point2, PROBE, find_contacts, hidden_far_side, hidden_fits, hidden_width, other_of,
+                     reported)
 
 
 @dataclass(frozen=True)
@@ -216,12 +217,12 @@ class Groove:
         across = frame.direction(0.0, -s_w)          # along the end, into the groove
         back = frame.direction(-s_a, 0.0)            # along the edge, back into the groove
         if self.dogbones == "hidden":
-            r = (self.tool + self.relief) / 2
-            if width < 2 * r - EPS:
-                raise LangError(f"hidden dog bones are {2 * r:g} across, wider than the {width:g} mm groove for "
-                                f"{panel.path}; use corner dog bones or a smaller tool.")
-            a, w = corner
-            if not board.outline.geometry.contains(Point(frame.point(a + s_a * (r + PROBE), w - s_w * r))):
+            if not hidden_fits(width, self.tool, self.relief):
+                raise LangError(f"hidden dog bones are {hidden_width(self.tool, self.relief):g} across, wider than "
+                                f"the {width:g} mm groove for {panel.path}; use corner dog bones or a smaller tool.")
+            # centred on the end, bulging past it
+            far = hidden_far_side(corner, (0.0, -s_w), (s_a, 0.0), self.tool, self.relief)
+            if not board.outline.geometry.contains(Point(frame.point(*far))):
                 raise LangError(f"hidden dog bones would break out of {board.path} past the end of the groove for "
                                 f"{panel.path}; use corner dog bones or a smaller tool.")
             return hidden_relief(point, across, self.tool, self.relief)

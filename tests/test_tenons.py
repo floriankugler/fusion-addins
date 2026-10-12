@@ -78,6 +78,36 @@ def test_hidden_dog_bones_sit_under_the_shoulder():
     assert has_material(left, (180.05 + 1, 399.9)) == [True]                   # not past the long side
 
 
+def test_hidden_dog_bones_need_their_whole_width():
+    """A hidden relief is the tool plus the relief across (6.1): a 5 mm
+    shelf's mortise, 5.1 across the joint, would show it bulging 1 mm past
+    both long sides, outside the shoulder; the check compared the mortise
+    with the radius before. With 1.1 of play across the reliefs fit."""
+    with module("unit", Box.from_size(width=600, depth=300, height=800)) as u:
+        left = board("left", ply15).on(u.left)
+        thin = board("thin", material("birch", t=5)).on(Pos("z", 100), toward=u.top).between(left, u.right)
+        before = state(thin, left)
+        with pytest.raises(LangError, match=r"^unit\.thin: tenons with unit\.left: hidden dog bones are 6\.1 across, "
+                                            r"wider than the mortises across the joint \(5\.1\)"):
+            thin.join(left, using=tenons(count=1, width=50, dogbones="hidden"))
+        assert state(thin, left) == before
+        thin.join(left, using=tenons(count=1, width=50, dogbones="hidden", clearance=(0.1, 1.1)))
+    mortise = left.op("mortise_thin_1").op
+    assert isinstance(mortise, Cut)
+    assert (mortise.shape.bounds[1], mortise.shape.bounds[3]) == pytest.approx((99.45, 105.55))   # 0.55 per side
+
+
+def test_hidden_dog_bones_must_not_reach_past_the_tenons_end():
+    """They reach 6.1 along the tenon from the shoulder: with remaining=9.5
+    the tenon into the 15 mm side is 5.5 long."""
+    u, left, _, shelf = _unit()
+    with u:
+        with pytest.raises(LangError, match="hidden dog bones reach 6.1 along the tenons from the shoulder, past the "
+                                            "end of the 5.5 mm tenons"):
+            shelf.join(left, using=tenons(count=1, width=50, remaining=9.5, dogbones="hidden"))
+        shelf.join(left, using=tenons(count=1, width=50, remaining=8.9, dogbones="hidden"))    # 6.1 long: fits
+
+
 def test_even_tenons_are_as_wide_as_the_gaps():
     u, left, _, shelf = _unit()
     with u:
