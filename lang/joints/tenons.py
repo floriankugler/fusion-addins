@@ -44,7 +44,7 @@ from ..core.part import Board
 from ..core.refs import DepthSpec, Pos, PosLike, to
 from ..core.shapes import Shape, box_shape
 from .common import (EPS, PROBE, ContactGeometry, ContactJoint, Naming, Point2, Spacing, TenonPlacement,
-                     make_spacing, opposite_face, union_all)
+                     join_contacts, make_spacing, opposite_face, union_all)
 
 #: How far a tenon reaches back into its board, so it joins the outline cleanly, mm.
 _OVERLAP = 1.0
@@ -63,7 +63,8 @@ class Tenons(ContactJoint):
     tool: float
     relief: float
     dogbones: DogBones
-    #: What the joint made, per contact, for the joints that sit in its gaps.
+    #: What the joint made, per contact, for the joints that sit in its gaps;
+    #: only joins that succeeded.
     made: list[TenonPlacement] = field(default_factory=list[TenonPlacement], compare=False, repr=False)
     label: ClassVar[str] = "tenons"
 
@@ -71,6 +72,13 @@ class Tenons(ContactJoint):
     def radius(self) -> float:
         """The reliefs' radius: the tool's plus half the relief."""
         return (self.tool + self.relief) / 2
+
+    def join(self, part: Board, /, partners: list[Board]) -> None:
+        planned = join_contacts(self, part, partners)
+        # Recorded once the whole join has succeeded: a join that fails,
+        # whichever board it fails on, leaves no placement behind.
+        self.made.extend(TenonPlacement(c, tuple(stations), self.width_on(c), c.face_on.thickness - self.remaining)
+                         for c, stations in planned)
 
     def placements(self, part: Board, other: Board) -> list[TenonPlacement]:
         """What these tenons made between the two boards."""
@@ -154,7 +162,6 @@ class Tenons(ContactJoint):
                 f.add_cut(mortise, name=name)
             else:
                 f.add_pocket(c.face, mortise, mortise_depth, name=name)
-        self.made.append(TenonPlacement(c, tuple(stations), w, length))
 
     def _root_relief(self, g: ContactGeometry, along: float, side: float) -> Shape:
         """The relief at a tenon's root, the corner where its side at

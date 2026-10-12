@@ -22,7 +22,7 @@ from lang.core.layout import build_layout
 from lang.core.ops import Cut, Pocket
 from lang.core.scope import registry
 from lang.emit.plan import PocketStep, plan_layout
-from helpers import has_material, overlap, part_meshes, ply12, ply9
+from helpers import has_material, overlap, part_meshes, ply12, ply9, state
 
 EXAMPLES = Path(__file__).resolve().parent.parent / "examples"
 O = 6 / (2 * math.sqrt(2))          # a corner relief's centre, along each edge from the corner
@@ -263,6 +263,22 @@ def test_boards_at_a_corner_go_into_one_join():
                                             "join"):
             p["floor"].join(p["f"], using=groove(5))
     assert p["f"].ops == []
+
+
+def test_a_join_that_fails_on_a_board_changes_none():
+    """The left side has a cutout just under the floor; the groove, 0.5
+    lower than the floor with the height clearance, would run into it. The
+    floor has grown into all four boards by then, and some of them have
+    their grooves: every one is restored."""
+    m, p = _box()
+    with m:
+        p["l"].cutout(rect(depth=100, height=10), at=p["l"].inner.bottom, border=5, radius=0)
+        boards = [p[n] for n in ("floor", "l", "r", "f", "k")]
+        before = state(*boards)
+        with pytest.raises(LangError, match=r"^box\.floor: groove with box\.left: box\.left: the pocket 'groove_floor' "
+                                            r"lies in the cutout 'cutout'"):
+            p["floor"].join(p["l"], p["r"], p["f"], p["k"], using=groove(5, clearance=(0.5, 1)))
+        assert state(*boards) == before
 
 
 def test_a_board_the_panel_does_not_meet_is_an_error():

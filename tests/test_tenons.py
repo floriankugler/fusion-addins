@@ -6,7 +6,7 @@ from shapely.geometry import Point, box
 
 from lang import *
 from lang.core.layout import build_layout
-from lang.core.ops import Cut, Pocket
+from lang.core.ops import Cut, Hole, Pocket
 from helpers import has_material, ply15, ply18, state
 
 O = 6 / (2 * math.sqrt(2))          # a corner relief's centre, along each edge from the corner
@@ -105,6 +105,45 @@ def test_either_board_can_make_the_call():
     assert has_material(shelf, (55, 1)) == [True] and _named(left, "mortise_shelf") == ["mortise_shelf_1", "mortise_shelf_2"]
 
 
+def test_a_join_that_fails_on_its_second_board_changes_nothing():
+    """The left side takes its tenons; the right one is a rail as high as
+    the shelf, which its mortise would cut in two. The shelf has grown its
+    first tenons by then: every board is restored, and the tenons record
+    nothing, so no joint can sit in gaps they never made."""
+    with module("unit", Box.from_size(width=600, depth=300, height=800)) as u:
+        left = board("left", ply15).on(u.left)
+        rail = board("rail", ply15).on(u.right).between(Pos("z", 400), Pos("z", 418))
+        shelf = board("shelf", ply18).on(Pos("z", 400), toward=u.top).between(left, rail)
+        t = tenons(count=2, width=50)
+        before = state(shelf, left, rail)
+        with pytest.raises(LangError, match=r"^unit\.shelf: tenons with unit\.rail: unit\.rail: the cut "
+                                            r"mortise_shelf_1 splits the board in pieces"):
+            shelf.join(left, rail, using=t)
+        assert state(shelf, left, rail) == before
+        assert t.made == []
+        with pytest.raises(LangError, match="not joined with the tenons given"):
+            shelf.join(left, using=screws(gaps=t))
+        shelf.join(left, using=t)                                       # the pair that fits still joins
+    assert [p.contact.face_on for p in t.made] == [left]
+
+
+def test_one_tenon_joint_for_two_pairs():
+    """One tenons object joins two shelves; the screws in its gaps find
+    each shelf's own tenons."""
+    u, left, right, shelf = _unit()
+    with u:
+        low = board("low", ply18).on(Pos("z", 100), toward=u.top).between(left, right)
+        t = tenons(count=2, width=50, margin=50)                      # tenons 50..100 and 200..250
+        shelf.join(left, using=t)
+        low.join(right, using=t)
+        shelf.join(left, using=screws(gaps=t))
+        low.join(right, using=screws(gaps=t, offset=12))
+    assert len(t.made) == 2
+    assert [h.u for h in left.ops if isinstance(h, Hole) and (h.name or "").startswith("screw_")] == [25, 150, 275]
+    assert [(h.u, h.v) for h in right.ops if isinstance(h, Hole) and (h.name or "").startswith("screw_")] == [
+        (38, 109), (112, 109), (188, 109), (262, 109)]
+
+
 def test_tenons_are_numbered_across_the_contacts_of_a_pair():
     """The shelf's end notched in the middle meets the side twice, x 0..100
     and 200..300: one tenon each, numbered on."""
@@ -144,6 +183,8 @@ def test_tenon_errors():
         with pytest.raises(LangError, match=r"^unit\.left: tenons with unit\.shelf: remaining=15 leaves no tenon in "
                                             r"unit\.left \(15 thick\)\.$"):
             left.join(shelf, using=tenons(count=1, width=50, remaining=15))
+    assert state(left, right, shelf) == [(box(0, 0, 300, 800).wkt, []), (box(0, 0, 300, 800).wkt, []),
+                                         (box(0, 15, 300, 585).wkt, [])]
     for message, make in (("give width=, or even=True", lambda: tenons(count=2)),
                           ("works the width out", lambda: tenons(count=2, width=50, even=True)),
                           ("two tenons or more", lambda: tenons(count=1, even=True)),
@@ -151,4 +192,3 @@ def test_tenon_errors():
                           ("give count= or at=", lambda: tenons(width=50))):
         with pytest.raises(LangError, match=message):
             make()
-    assert all(p.ops == [] for p in (left, right)) and len(shelf.ops) == 0

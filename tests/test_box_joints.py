@@ -19,7 +19,7 @@ from lang.core.layout import build_layout
 from lang.core.ops import Cut, EdgeOp, Pocket
 from lang.core.scope import registry
 from lang.emit.plan import Arc, Circle, FaceRef, PocketStep, plan_layout
-from helpers import has_material, overlap, part_meshes, ply12, ply15
+from helpers import has_material, overlap, part_meshes, ply12, ply15, state
 
 #: What a 3 mm radius leaves in a right-angled corner; the polygons, inscribed
 #: in the arcs, leave 0.01 more.
@@ -253,6 +253,7 @@ def test_box_joint_errors():
         with pytest.raises(LangError, match=message):
             make()
     m, a, b = _pair()
+    before = state(a, b)
     with m:
         with pytest.raises(LangError, match="too narrow for the corner reliefs"):
             b.join(a, using=box_joint(25))                          # 6 wide: not wider than the tool
@@ -262,7 +263,7 @@ def test_box_joint_errors():
             b.join(a, using=box_joint(25, tool=0, clearance=(6, 0)))
         with pytest.raises(LangError, match=r"^pair\.b: box_joint with pair\.c: the two do not touch"):
             b.join(board("c", ply15).on(Pos("x", 100), toward=m.back), using=box_joint())
-    assert a.ops == [] and b.ops == []
+    assert state(a, b) == before
     with pytest.raises(LangError, match="pair.a is 2.5 thick, not thicker than the tool's radius"):
         registry.reset()
         with module("pair", Box.from_size(width=200, depth=200, height=150)) as m:
@@ -279,10 +280,25 @@ def test_box_joint_errors():
 ])
 def test_the_corner_must_be_a_flush_corner(make: Any, message: str):
     m, a, b = make()
+    before = state(a, b)
     with m:
         with pytest.raises(LangError, match=message):
             b.join(a, using=box_joint())
-    assert a.ops == [] and b.ops == []
+    assert state(a, b) == before
+
+
+def test_a_joint_that_fails_on_the_notched_board_changes_neither():
+    """A slot in a just past the notches' bottoms (x 12.2 to 20): the
+    second notch cuts a's finger between the two loose. b has grown its
+    fingers and lost its gaps by then; both are restored."""
+    m, a, b = _pair()
+    with m:
+        a.cut(rect(depth=7.8, height=140), at=a.right.front(12.2), name="slot")
+        before = state(a, b)
+        with pytest.raises(LangError, match=r"^pair\.b: box_joint with pair\.a: pair\.a: the cut notch_b_2 splits the "
+                                            r"board in pieces"):
+            b.join(a, using=box_joint(5, margin=5, tool=0, clearance=(0, 0.5)))
+    assert state(a, b) == before
 
 
 def test_errors_are_reported_on_the_board_whose_join_was_called():

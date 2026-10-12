@@ -5,7 +5,7 @@ from shapely.geometry import Point
 from lang import *
 from lang.core.crossing import crossing
 from lang.core.layout import build_layout
-from helpers import ply15
+from helpers import ply15, state
 
 
 def _grid(n_cross: int = 1) -> tuple[Scope, list[Board], Board]:
@@ -64,8 +64,22 @@ def test_a_half_lap_joins_only_the_boards_named():
     assert long.has_operation("lap_cross1")
 
 
+def test_a_lap_that_fails_on_the_other_board_cuts_neither():
+    """The cross board has a slot from its top down to z 14: its notch from
+    below, cut after the long board's, would cut it in two."""
+    g, (a,), long = _grid()
+    with g:
+        a.cut(rect(width=10, height=16), at=a.front.top, name="slot")
+        before = state(long, a)
+        with pytest.raises(LangError, match=r"^grid\.long: half_lap with grid\.cross0: grid\.cross0: the cut lap_long "
+                                            r"splits the board in pieces"):
+            long.join(a, using=half_lap(toward=g.top))
+    assert state(long, a) == before
+
+
 def test_half_lap_errors():
     g, (a,), long = _grid()
+    before = state(long, a)
     with g:
         with pytest.raises(LangError, match="does not run along"):
             long.join(a, using=half_lap(toward=g.front))
@@ -84,6 +98,6 @@ def test_half_lap_errors():
         with pytest.raises(LangError, match=r"^grid\.cross0: half_lap with grid\.long: hidden dog bones are 16\.1 "
                                             r"across, wider than the notch in grid\.cross0 \(15\)"):
             a.join(long, using=half_lap(toward=g.top, dogbones="hidden", tool=16))
-    assert long.ops == [] and a.ops == []                 # nothing is cut when a join fails
+    assert state(long, a) == before                       # nothing is cut when a join fails
     with pytest.raises(LangError, match="at=.* is not on the axis"):
         half_lap(toward=world_frame().direction("top"), at=Pos("x", 3))

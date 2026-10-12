@@ -287,6 +287,7 @@ def test_clamex_p14_is_a_hole():
 def test_spacing_and_join_errors():
     cab, p = carcass()
     left, right, bottom = p["left"], p["right"], p["bottom"]
+    before = state(*p.values())
     with cab:
         with pytest.raises(LangError, match=r"^cab\.left: domino with cab\.right: the two do not touch"):
             left.join(right, using=domino("4x20", count=2))
@@ -307,7 +308,7 @@ def test_spacing_and_join_errors():
     with pytest.raises(LangError, match="give count= or at="):
         cabineo()
     # a failed join leaves every board untouched
-    assert all(part.ops == [] for part in p.values())
+    assert state(*p.values()) == before
 
 
 def test_errors_are_reported_on_the_board_whose_join_was_called():
