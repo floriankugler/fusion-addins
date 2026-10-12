@@ -8,9 +8,10 @@ from lang.core.contact import contacts
 from lang.core.layout import build_layout
 from lang.core.ops import Hole, Pocket, VGroove
 from lang.preview.mesh import mesh_part
+from lang.joints.common import ContactJoint
 from lang.joints.connectors import CabineoInsert, CabineoModel, ClamexModel, DominoSize
 from lib import connector_data
-from helpers import carcass, ply15, state
+from helpers import carcass, ply9, ply15, state
 
 
 
@@ -299,7 +300,7 @@ def test_spacing_and_join_errors():
             bottom.join(left, using=cabineo(at=[Pos("x", 600)]))
         with pytest.raises(LangError, match="end=260 leaves no room"):
             bottom.join(left, using=cabineo(count=2, end=260))
-        with pytest.raises(LangError, match="reaches past the contact"):
+        with pytest.raises(LangError, match=r"at x=5, the slot would reach past the contact \(x 0 to 500\)"):
             bottom.join(left, using=domino("4x20", count=2, end=5))
         with pytest.raises(LangError, match="face=front is not a big face"):
             bottom.join(left, using=cabineo(count=2, face=cab.front))
@@ -325,6 +326,64 @@ def test_errors_are_reported_on_the_board_whose_join_was_called():
     message = "the 10.5 mm deep pocket goes through cab.back (9 thick)."
     assert str(from_back.value) == f"cab.back: cabineo with cab.left: {message}"
     assert str(from_side.value) == f"cab.left: cabineo with cab.back: {message}"
+
+
+@pytest.mark.parametrize("joint, message", [
+    # the guide holes 50.5 either side, 7.7 wide
+    (clamex(at=[Pos("x", 10)]), "at x=10, the guide holes would reach past the contact"),
+    (clamex(count=2, end=54), "at x=54, the guide holes"),
+    # the 15 mm access holes, 0.6 wider with an anti-break relief, 16.7 flush
+    (cabineo(at=[Pos("x", 7)]), "at x=7, the Cabineo would reach past the contact"),
+    (cabineo(at=[Pos("x", 7.8)], surface="anti-break"), "at x=7.8, the Cabineo"),
+    (cabineo(at=[Pos("x", 8)], surface="flush"), "at x=8, the Cabineo"),
+    # the last of two Dominos, 6 longer than the first, which is exact
+    (domino("4x20", count=2, end=10, loose=6), "at x=490, the slot would reach past the contact"),
+    (screws(at=[Pos("x", 1)]), "at x=1, the screw would reach past the contact"),
+])
+def test_connectors_must_stay_within_the_contact(joint: ContactJoint, message: str):
+    cab, p = carcass()
+    before = state(p["bottom"], p["left"])
+    with cab, pytest.raises(LangError, match=f"^cab.bottom: {joint.label} with cab.left: {message}"):
+        p["bottom"].join(p["left"], using=joint)
+    assert state(p["bottom"], p["left"]) == before
+
+
+def test_connectors_near_the_contacts_ends_that_fit():
+    cab, p = carcass()
+    with cab:
+        p["bottom"].join(p["left"], using=clamex(at=[Pos("x", 54.35)]))
+        p["bottom"].join(p["right"], using=cabineo(at=[Pos("x", 8.1)], surface="anti-break"))
+        p["top"].join(p["left"], using=domino("4x20", count=2, end=10, loose=3.4))     # 20 long: to the end
+        p["top"].join(p["right"], using=screws(at=[Pos("x", 2)]))
+    assert [h.u for h in _holes(p["left"], "clamex_bottom_1")] == pytest.approx([3.85, 104.85])   # 3.85 from the end
+    slot = _pockets(p["left"], "domino_top_2")[0]
+    assert slot.shape.bounds[2] == pytest.approx(500)
+
+
+def test_a_connector_must_lie_where_the_face_on_board_covers_the_end():
+    """The back (x 491..500) stands on a bottom that ends at x 495: the
+    contact covers only 4 of the back's 9 mm. The connectors stay where the
+    back's thickness puts them, so a Domino centred on it would reach past
+    the bottom's edge, and so would screws; one fenced into the part the
+    bottom covers fits."""
+    with module("cab", Box.from_size(width=600, depth=500, height=720)) as cab:
+        left = board("left", ply15).on(cab.left)
+        right = board("right", ply15).on(cab.right)
+        bottom = board("bottom", ply15).on(cab.bottom).between(left, right, cab.front, Pos("x", 495))
+        back = board("back", ply9).on(cab.back).between(left, right, cab.bottom + 15, cab.top)
+        (c,) = contacts(back, bottom)
+        assert (c.across_lo, c.across_hi, back.show_face.value) == (491, 495, 500)
+        before = state(back, bottom)
+        with pytest.raises(LangError, match=r"^cab\.back: domino with cab\.bottom: the slot \(x 493\.5 to 497\.5\) "
+                                            r"would reach past cab\.bottom, which covers the end of cab\.back only "
+                                            r"from x=491 to 495\.$"):
+            back.join(bottom, using=domino("4x20", count=2))
+        with pytest.raises(LangError, match=r"^cab\.bottom: screws with cab\.back: the screw \(x 493\.5 to 497\.5\)"):
+            bottom.join(back, using=screws(count=2))
+        assert state(back, bottom) == before
+        back.join(bottom, using=domino("4x20", count=2, fence=7))     # 7 in from the back's outer face
+    (slot, _) = _pockets(bottom, "domino_back_")
+    assert (round(slot.shape.bounds[0], 6), round(slot.shape.bounds[2], 6)) == (491, 495)
 
 
 def test_the_preview_cuts_the_marks():

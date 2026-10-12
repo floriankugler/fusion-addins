@@ -212,6 +212,27 @@ class Spacing:
         return [c.lo + s for s in data.stations(c.length, self.count, self.end)]
 
 
+def check_along(c: Contact, what: str, spans: Sequence[tuple[float, float]]) -> None:
+    """What a joint makes at each station, from lo to hi along the contact,
+    must lie within it: past its ends one board or both end."""
+    for lo, hi in spans:
+        if lo < c.lo - EPS or hi > c.hi + EPS:
+            raise LangError(f"at {c.axis}={(lo + hi) / 2:g}, {what} would reach past the contact ({c.axis} "
+                            f"{c.lo:g} to {c.hi:g}).")
+
+
+def check_across(c: Contact, what: str, lo: float, hi: float) -> None:
+    """What a joint makes in the face-on board, from lo to hi across the
+    contact, must lie where that board covers the edge-on board's end:
+    from `across_lo` to `across_hi`, less than the edge-on board's
+    thickness where the face-on board ends inside it. A connector stays
+    where the edge-on board's thickness puts it (the Domino's mortise in
+    its end, the Cabineo in its pocket), so it is checked, not moved."""
+    if lo < c.across_lo - EPS or hi > c.across_hi + EPS:
+        raise LangError(f"{what} ({c.across} {lo:g} to {hi:g}) would reach past {c.face_on.path}, which covers the "
+                        f"end of {c.edge_on.path} only from {c.across}={c.across_lo:g} to {c.across_hi:g}.")
+
+
 def check_gaps(label: str, spacing: Spacing, c: Contact, minimum: float) -> None:
     """With `gaps=`, every gap must be at least `minimum` long."""
     if spacing.gaps is None:

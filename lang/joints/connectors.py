@@ -45,8 +45,8 @@ from ..core.errors import LangError, one_of
 from ..core.part import Board, Face
 from ..core.refs import DepthSpec, PosLike, through, to
 from ..core.shapes import circle, slot_shape
-from .common import (EPS, ContactGeometry, FaceChoice, Naming, SpacedJoint, Spacing, check_gaps, face_choice,
-                     hidden_face, make_spacing, opposite_face, pick_face, start_index)
+from .common import (EPS, ContactGeometry, FaceChoice, Naming, SpacedJoint, Spacing, check_across, check_along,
+                     check_gaps, face_choice, hidden_face, make_spacing, opposite_face, pick_face, start_index)
 from .tenons import Tenons
 
 DominoSize = Literal["4x20", "5x30", "6x40", "8x36", "8x40", "8x50", "8x80", "8x100", "10x50", "10x80",
@@ -102,6 +102,12 @@ class Domino(SpacedJoint):
             return g.middle
         return g.inside(self._reference(g.c.edge_on), self.fence)
 
+    def _lengths(self, c: Contact, stations: list[float]) -> list[float]:
+        """Each slot's length: the first from the front, left or bottom
+        exact, the others `loose` longer."""
+        exact = start_index(c.edge_on, c.axis, len(stations))
+        return [self.slot_length + (self.loose if i != exact else 0.0) for i in range(len(stations))]
+
     def check(self, c: Contact, stations: list[float]) -> None:
         e, f = c.edge_on, c.face_on
         self._reference(e)
@@ -121,9 +127,8 @@ class Domino(SpacedJoint):
                                 f"{f.thickness:g} thick; pick a shorter Domino or give remaining=.")
         elif self.remaining >= f.thickness - EPS:
             raise LangError(f"remaining={self.remaining:g} leaves no slot in {f.path} ({f.thickness:g} thick).")
-        for s in stations:
-            if s - self.slot_length / 2 < c.lo - EPS or s + self.slot_length / 2 > c.hi + EPS:
-                raise LangError(f"the slot at {c.axis}={s:g} reaches past the contact ({c.lo:g} to {c.hi:g}).")
+        check_along(c, "the slot", [(s - n / 2, s + n / 2) for s, n in zip(stations, self._lengths(c, stations))])
+        check_across(c, "the slot", centre - h / 2, centre + h / 2)
 
     def place(self, c: Contact, stations: list[float], naming: Naming) -> None:
         g = ContactGeometry(c)
@@ -131,9 +136,7 @@ class Domino(SpacedJoint):
         centre, h = self._centre(g), self.slot_height
         depth: DepthSpec = (self.size.length / 2 + data.DOMINO_DEPTH_OFFSET if self.remaining is None
                             else to(opposite_face(c.face), -self.remaining))
-        exact = start_index(e, c.axis, len(stations))
-        for i, s in enumerate(stations):
-            length = self.slot_length + (self.loose if i != exact else 0.0)
+        for i, (s, length) in enumerate(zip(stations, self._lengths(c, stations))):
             half_span = (length - h) / 2
             shape = slot_shape(g.on_face(s - half_span, centre), g.on_face(s + half_span, centre), h)
             f.add_pocket(c.face, shape, depth, name=naming(f, f"domino_{e.name}_{naming.number(i)}"))
@@ -211,6 +214,11 @@ class Clamex(SpacedJoint):
         if not self.through and data.CLAMEX_GUIDE_DEPTH >= f.thickness - EPS:
             raise LangError(f"the {data.CLAMEX_GUIDE_DEPTH:g} mm guide holes go through {f.path}; "
                             "give through=True.")
+        # the guide holes reach furthest along the contact, the access slot or hole less far
+        half = max(data.CLAMEX_GUIDE_SPACING / 2 + self.guide_d / 2, self.model.access_width / 2)
+        check_along(c, "the guide holes", [(s - half, s + half) for s in stations])
+        middle = ContactGeometry(c).middle
+        check_across(c, "the guide holes", middle - self.guide_d / 2, middle + self.guide_d / 2)
 
     def place(self, c: Contact, stations: list[float], naming: Naming) -> None:
         g = ContactGeometry(c)
@@ -275,14 +283,36 @@ class Cabineo(SpacedJoint):
                             f"({e.thickness:g} thick).")
         if not self.through and self.guide.depth >= f.thickness - EPS:
             raise LangError(f"the {self.guide.depth:g} mm deep hole goes through {f.path}; give through=True.")
+        check_along(c, "the Cabineo", [(s - self._half_along, s + self._half_along) for s in stations])
+        # The hole itself: a threaded insert's collar, 12.7 wide 5 from the
+        # access face, reaches past a 15 mm board's face, as in the add-in.
+        across, half = self._across(ContactGeometry(c)), self.guide.diameter / 2
+        check_across(c, "the hole for its screw", across - half, across + half)
+
+    @property
+    def _half_along(self) -> float:
+        """How far the Cabineo reaches along the contact from its station:
+        the access pocket with its relief, or the screw hole's collar."""
+        access = data.CABINEO_ACCESS_DIAMETER / 2
+        if self.surface == "flush":
+            access = max(access, data.CABINEO_FLUSH_RELIEF_WIDTH / 2)
+        elif self.surface == "anti-break":
+            access += self.anti_break[1]
+        return max(access, self.guide.diameter / 2, (self.guide.collar_diameter or 0.0) / 2)
+
+    def _across(self, g: ContactGeometry) -> float:
+        """Where the screw hole lies across the contact: 5 mm (5.8 flush)
+        from the access face."""
+        e = g.c.edge_on
+        offset = data.CABINEO_FLUSH_GUIDE_OFFSET if self.surface == "flush" else data.CABINEO_GUIDE_OFFSET
+        return g.inside(pick_face(e, self.face, hidden_face(e)), offset)
 
     def place(self, c: Contact, stations: list[float], naming: Naming) -> None:
         g = ContactGeometry(c)
         e, f = c.edge_on, c.face_on
         access = pick_face(e, self.face, hidden_face(e))
         centres = data.CABINEO_ACCESS_CENTERS
-        offset = data.CABINEO_FLUSH_GUIDE_OFFSET if self.surface == "flush" else data.CABINEO_GUIDE_OFFSET
-        across = g.inside(access, offset)
+        across = self._across(g)
         guide = self.guide
         guide_depth: DepthSpec = through if self.through else guide.depth
         for i, s in enumerate(stations):

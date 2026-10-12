@@ -33,8 +33,8 @@ from ..core.contact import Contact
 from ..core.errors import LangError
 from ..core.part import Board, Face
 from ..core.refs import PosLike, through
-from .common import (EPS, ContactGeometry, Naming, SpacedJoint, Spacing, TenonPlacement, TenonSource, face_toward,
-                     make_spacing, opposite_face, placement_of)
+from .common import (EPS, ContactGeometry, Naming, SpacedJoint, Spacing, TenonPlacement, TenonSource, check_across,
+                     check_along, face_toward, make_spacing, opposite_face, placement_of)
 from .tenons import Tenons
 
 #: How far beyond the tenon board's face the other board is probed for
@@ -84,9 +84,10 @@ class Screws(SpacedJoint):
             return
         if self.sink >= f.thickness - EPS:
             raise LangError(f"the countersink is deeper than {f.path} is thick.")
-        for s in stations:
-            if not c.lo - EPS <= s <= c.hi + EPS:
-                raise LangError(f"a screw at {c.axis}={s:g} lies outside the contact ({c.lo:g} to {c.hi:g}).")
+        r = self.d / 2
+        check_along(c, "the screw", [(s - r, s + r) for s in stations])
+        middle = ContactGeometry(c).middle
+        check_across(c, "the screw", middle - r, middle + r)
 
     def place(self, c: Contact, stations: list[float], naming: Naming) -> None:
         g = ContactGeometry(c)
