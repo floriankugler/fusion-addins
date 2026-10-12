@@ -170,13 +170,16 @@ def test_example_plans_completely(tmp_path: Path):
         assert len(predrill.points) == 12 and predrill.d == 2.0   # 3 drawers x 4 slide holes
     assert [p.component for p in plan.parts if p.path.endswith("floor")] == [
         ("drawercab", "drawer1"), ("drawercab", "drawer2"), ("drawercab", "drawer3")]
-    # the runner pairs: one model per drawer, axes as world vectors, the right runner offset
+    # the runner pairs: one per drawer, a body of five world boxes per runner
     assert [h.path for h in plan.hardware] == [f"drawercab.drawer{i}.runners" for i in (1, 2, 3)]
     runners = plan.hardware[0]
-    assert runners.component == ("drawercab", "drawer1") and runners.model.endswith(".stp")
-    assert runners.axes == ((-1.0, 0.0, 0.0), (0.0, -1.0, 0.0), (0.0, 0.0, 1.0))
-    assert runners.origin == (585.0, 481.0, 117.1)
-    assert [b.offset for b in runners.bodies] == [(0.0, 0.0, 0.0), (170.0, 0.0, 0.0)]
+    assert runners.component == ("drawercab", "drawer1") and runners.name == "runners"
+    assert [b.name for b in runners.bodies] == ["left", "right"] and len(runners.bodies[0].boxes) == 5
+    # the cabinet opens toward +y (the aisle), so the drawer's left runner
+    # lies against the carcass side's inner face at x 585: its flange from
+    # 4 behind the face's back at y 485 to NL + 1.5, from 1.1 above the
+    # bay's bottom at z 115
+    assert runners.bodies[0].boxes[0] == ((582.5, 485.0 - 451.5, 116.1), (585.0, 485.0 - 4, 164.0))
     # facts for Multi Arrange: the sides are machined from their inner faces,
     # where the shelf-pin and pre-drill holes are, which face each other
     left = next(p for p in plan.parts if p.path == "drawercab.left")

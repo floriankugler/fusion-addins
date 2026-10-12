@@ -3,23 +3,26 @@
 A slide dictates the drawer box: its sides' inner faces sit 21 mm from the
 carcass sides (inner width LW - 42, both catalogs), its length is the
 nominal length less 10 (SKL = NL - 10), its bottom panel's underside lies
-28 mm above the slide's bottom (the bay's bottom), and its sides hang below
-the panel by the recess. The carcass needs NL + 3 of depth behind the
-runner's front. `drawer_box()` returns that box; `recess` the bottom
-panel's height above the sides' lower edge. `machine_box()` cuts the
-front and back boards out for the couplings and rear hooks and pre-drills
-the back board for the hooks.
+28.5 mm (Blum) or 28 mm (Grass) above the slide's bottom (the bay's
+bottom), and its sides hang below the panel by the recess. The carcass
+needs NL + 3 of depth behind the runner's front. `drawer_box()` returns
+that box; `recess` the bottom panel's height above the sides' lower edge.
+`machine_box()` cuts the front and back boards out for the couplings and
+rear hooks and drills the back board for the hooks.
 
 Mounted on a drawer scope, a slide pre-drills the carcass sides: a row 38
 mm above the bay's bottom, at the hole positions of `lib.drawer_slides`
 measured from the runner's front (the drawer face's back for inset
-fronts, the carcass front edge for overlay fronts). The runner's own front
-is 4 mm behind that.
+fronts, the carcass front edge for overlay fronts). The runners' own
+fronts are 4 mm (Grass) or 2 mm (Blum) behind that. It also places the
+runner pair as boxes (`RunnerShape`), one body per runner.
 
 Sources: Grass "Dynapro Planungshinweise" 113378 12/2021 (installation
 dimensions and assembly steps; read 2026-10-11), Blum TD-132/1 DE/06.22
-p.5; hole patterns from `lib.drawer_slides`; drawer-box machining as
-Florian read it from the Grass sheet (2026-10-11).
+p.5 and the Blum catalogue 2024/2025 p.413 (Movento planning and drawer
+assembly); hole patterns from `lib.drawer_slides`; drawer-box machining
+as Florian read it from the Grass and Blum sheets (2026-10-11/12); runner
+shapes measured from Häfele's CAD models (2026-10-12).
 """
 from __future__ import annotations
 
@@ -45,8 +48,10 @@ MAX_SIDE_THICKNESS = 16.0
 #: Drawer box length below the nominal length (SKL = NL - 10), mm.
 BOX_SHORTER_THAN_NL = 10.0
 #: The bottom panel's underside above the slide's bottom (the bay's
-#: bottom), mm: 10 below the screw row at 38 (Grass; Blum assumed).
-BOTTOM_HEIGHT = 28.0
+#: bottom), where the drawer member's top carries it, per model family,
+#: mm: Blum "min. 28.5" with the screw row at 38; Grass 10 below the screw
+#: row. (Häfele's Dynapro models put the member's top at 28.5 as well.)
+BOTTOM_HEIGHT: dict[str, float] = {"Blum": 28.5, "Grass": 28.0}
 #: Allowed height of the bottom panel's underside above the sides' lower
 #: edge, per model family, mm.
 BOTTOM_RECESS: dict[str, tuple[float, float]] = {
@@ -66,14 +71,20 @@ class BoxMachining:
     front_cutout: float
     #: Width of the cut-out at each end of the back board, for the rear hooks.
     back_cutout: float
-    #: Pre-drill positions for each rear hook.
+    #: Hole positions for each rear hook.
     hook_holes: tuple[tuple[float, float], ...]
+    #: (diameter, depth) of the hook holes unless the slide says otherwise.
+    hook_hole: tuple[float, float]
 
 
-#: Per model family (Grass per Florian's reading of the Dynapro sheet).
+#: Per model family. Grass: pre-drill holes for the screws of the rear
+#: hook. Blum: one hole for the rear hook's pin; with TIP-ON BLUMOTION
+#: (not modelled) the back board's cut-out is 125 wide.
 BOX_MACHINING: dict[str, BoxMachining] = {
+    "Blum": BoxMachining(front_cutout=75.0, back_cutout=75.0, hook_holes=((7.0, 11.0),), hook_hole=(6.0, 10.0)),
     "Grass": BoxMachining(front_cutout=69.0, back_cutout=35.0,
-                          hook_holes=((42.0, 15.0), (42.0, 15.0 + 32.0), (10.0, 15.0 + 32.0))),
+                          hook_holes=((42.0, 15.0), (42.0, 15.0 + 32.0), (10.0, 15.0 + 32.0)),
+                          hook_hole=(2.0, 8.0)),
 }
 
 
@@ -81,36 +92,67 @@ def _family(model: data.SlideModel) -> str:
     return model.name.split()[0]
 
 
+#: Two ends of a box along one axis, mm.
+Extent = tuple[float, float]
+#: A box in a runner's frame: its x, y and z extents. x runs from the
+#: carcass side's inner face toward the drawer, y back from the runner
+#: front of the hole positions, z up from the bay's bottom.
+RunnerBox = tuple[Extent, Extent, Extent]
+
+
 @dataclass(frozen=True)
-class RunnerModel:
-    """A STEP file of a runner pair from Häfele's CAD box, with the facts
-    needed to place it: in the file, x = 0 is the left runner's mounting
-    face, y = 0 its front (`front_offset` behind the carcass edge), z is
-    up with the screw row at `row_z`; the right runner is the mirrored
-    second body, `pair_distance` away."""
-    file: str
-    #: The same model as a mesh for the preview, or None for envelope boxes.
-    mesh: str | None
-    bodies: tuple[str, str]
-    front_offset: float
-    row_z: float
-    pair_distance: float
-    #: Each body's bounding box in the file's frame, mm.
-    envelopes: tuple[Envelope, Envelope]
+class RunnerShape:
+    """A closed runner of a slide family as five boxes: the cabinet rail
+    (a flange against the carcass side and a base with the carriage), the
+    drawer member, whose top carries the bottom panel, the coupling under
+    the panel's front end and the rear hook behind the drawer box. Each
+    family keeps one cross-section across all its lengths and load
+    classes; the lengths follow from NL. The real cabinet rail ends 2/3 to
+    9/10 of the way back, depending on model and length; here it runs the
+    whole length. The coupling takes the width of the front board's
+    cut-out, the space reserved for it."""
+    #: The cabinet rail's front behind the runner front, mm.
+    front: float
+    #: The runner's rear end beyond NL, mm.
+    rear: float
+    #: The runner's lowest point above the bay's bottom, mm.
+    bottom: float
+    #: The flange: thickness and top.
+    flange: Extent
+    #: The base with the carriage on it: width and top.
+    base: Extent
+    #: How far the drawer member, beside the base, reaches from the side.
+    member: float
+    #: The coupling: length behind the drawer box's front, height below the bottom panel.
+    coupling: Extent
+    #: The rear hook above the bottom panel's underside: from and to across, and its top.
+    hook: tuple[float, float, float]
+
+    def boxes(self, nl: float, floor: float, box_length: float, coupling_width: float) -> dict[str, RunnerBox]:
+        """The boxes at nominal length `nl`, the bottom panel's underside
+        at `floor`, the drawer box `box_length` long (from the runner front)."""
+        end = nl + self.rear
+        x0, x1, top = self.hook
+        return {
+            "flange": ((0.0, self.flange[0]), (self.front, end), (self.bottom, self.flange[1])),
+            "base": ((0.0, self.base[0]), (self.front, end), (self.bottom, self.base[1])),
+            "member": ((self.base[0], self.member), (self.front, end), (self.bottom, floor)),
+            "coupling": ((INNER_FACE_OFFSET, INNER_FACE_OFFSET + coupling_width), (0.0, self.coupling[0]),
+                         (floor - self.coupling[1], floor)),
+            "hook": ((x0, x1), (box_length, end), (floor, top)),
+        }
 
 
-Envelope = tuple[tuple[float, float, float], tuple[float, float, float]]
-
-#: Model files by (slide model name, nominal length). Measured in Fusion
-#: after import (2026-10-11): holes at y = 6..257 (catalog 10..261, so
-#: KV = y + 4), row at z = 35.9, bodies x 0..57.1 and 342.9..400.
-RUNNER_MODELS: dict[tuple[str, int], RunnerModel] = {
-    (data.DYNAPRO_40.name, 450): RunnerModel(
-        file="catalog/hardware/grass_dynapro_40_nl450_433.19.608.stp",
-        mesh="catalog/hardware/grass_dynapro_40_nl450_433.19.608.gltf",
-        bodies=("Body1", "Body2"), front_offset=4.0, row_z=35.9, pair_distance=400.0,
-        envelopes=(((0.0, -2.6, -1.0), (57.1, 447.5, 46.9)),
-                   ((342.9, -2.6, -1.0), (400.0, 447.5, 46.9)))),
+#: Per model family, measured from Häfele's models (2026-10-12): Dynapro
+#: 40 kg NL 300, 450 and 600 and 70 kg NL 500 (433.19.602/608/613,
+#: 433.20.630), Movento 760H NL 250, 450 and 600, 766H NL 450 and the
+#: Movento coupling (433.24.010/018/024/218, 433.24.980). The Dynapro
+#: models include the coupling. Rounded to 0.1 mm.
+RUNNER_SHAPES: dict[str, RunnerShape] = {
+    "Blum": RunnerShape(front=2.0, rear=2.5, bottom=0.0, flange=(2.9, 48.9), base=(23.1, 4.9), member=62.3,
+                        coupling=(88.6, 13.3), hook=(16.6, 47.5, 51.1)),
+    "Grass": RunnerShape(front=4.0, rear=1.5, bottom=1.1, flange=(2.5, 49.0), base=(22.9, 12.9), member=53.9,
+                         coupling=(61.5, 23.6), hook=(24.5, 39.5, 34.9)),
 }
 
 
@@ -121,7 +163,7 @@ class DrawerSlide:
 
     def __init__(self, model: data.SlideModel, nl: int, holes: int = 4, odd: bool = True,
                  predrill: tuple[float, float] = (2.0, 4.0), bottom_recess: float | None = None,
-                 hook_predrill: tuple[float, float] = (2.0, 8.0)):
+                 hook_hole: tuple[float, float] | None = None):
         if nl not in model.nominal_lengths:
             raise LangError(f"{model.name} is not made in NL {nl}; lengths: {model.nominal_lengths}.")
         self.model = model
@@ -129,8 +171,10 @@ class DrawerSlide:
         self.holes = holes
         self.odd = odd
         self.predrill = predrill
-        #: (diameter, depth) of the rear hooks' pre-drill holes in the back board.
-        self.hook_predrill = hook_predrill
+        #: (diameter, depth) of the rear hooks' holes in the back board, or
+        #: None for the family's: Grass pre-drills 2 x 8 for the hook's
+        #: screws, Blum drills 6 x 10 for its pin.
+        self.hook_hole = hook_hole
         lo, hi = BOTTOM_RECESS[_family(model)]
         if bottom_recess is None:
             bottom_recess = (lo + hi) / 2
@@ -153,17 +197,23 @@ class DrawerSlide:
         return self.nl + data.DEPTH_ALLOWANCE
 
     @property
+    def bottom_height(self) -> float:
+        """The bottom panel's underside above the bay's bottom."""
+        return BOTTOM_HEIGHT[_family(self.model)]
+
+    @property
     def side_lift(self) -> float:
         """The drawer sides' lower edge above the bay's bottom: the bottom
-        panel's underside at 28 less the recess the sides hang below it."""
-        return BOTTOM_HEIGHT - self.recess
+        panel's underside (`bottom_height`) less the recess the sides hang
+        below it."""
+        return self.bottom_height - self.recess
 
     def drawer_box(self, bay: Box, front: PosLike, side_thickness: float, height: float) -> Box:
         """The drawer box's outer envelope in `bay`: the runner's front at
         `front`, the sides' inner faces 21 mm from the carcass sides, the
         box NL - 10 long and `height` high, its sides' lower edge
         `side_lift` above the bay's bottom so that the bottom panel's
-        underside lies 28 above it."""
+        underside lies `bottom_height` above it."""
         if side_thickness > MAX_SIDE_THICKNESS:
             raise LangError(f"{self.name}: drawer sides may be at most {MAX_SIDE_THICKNESS:g} mm thick.")
         clearance = INNER_FACE_OFFSET - side_thickness
@@ -183,12 +233,14 @@ class DrawerSlide:
     def machine_box(self, sides: tuple[Board, Board], front: Board, back: Board, floor: Board) -> None:
         """`slide.machine_box(sides=(l, r), front=f, back=k, floor=floor)`:
         the drawer box's cut-outs and holes. At each end of the front board
-        a cut-out for the coupling, 69 wide from the side's inner face, and
-        at each end of the back board one for the rear hook, 35 wide; both
-        from the board's lower edge up to the floor's underside. Into the
-        back board's rear face, three pre-drill holes per hook (`hook_predrill`
-        diameter and depth): 42 from the side's inner face at 15 and 47
-        above the floor's underside, and 10 from the inner face at 47."""
+        a cut-out for the coupling and at each end of the back board one
+        for the rear hook, from the side's inner face (Grass 69 and 35
+        wide, Blum 75 and 75) and from the board's lower edge up to the
+        floor's underside. Into the back board's rear face the holes for
+        each hook (`hook_hole` diameter and depth): Grass three pre-drill
+        holes, 42 from the side's inner face at 15 and 47 above the floor's
+        underside and 10 from the inner face at 47; Blum one hole, 7 from
+        the inner face at 11."""
         try:
             data = BOX_MACHINING[_family(self.model)]
         except KeyError:
@@ -196,7 +248,7 @@ class DrawerSlide:
         frame = floor.box().frame
         width_axis = frame.direction("left").axis
         floor_bottom = floor.bottom.position
-        diameter, depth = self.hook_predrill
+        diameter, depth = self.hook_hole or data.hook_hole
         for side in sides:
             inward = side.inner.direction            # from this side into the drawer
             if inward.axis != width_axis:
@@ -247,48 +299,43 @@ class DrawerSlide:
                 side.hole(d=diameter, depth=depth, at=face.bottom(row).front(along))
         self._place_runners(scope, sides, front_pos)
 
-    def _place_runners(self, scope: Scope, sides: tuple[Board, Board], front_pos: Pos) -> None:
-        """Records the runner pair's model, when there is a file for this
-        slide and length: the left runner's mounting face on the left side's
-        inner face, its front 4 mm behind the runner front, its screw row
-        38 mm above the bay bottom; the right runner moved to the right side.
+    def runner_boxes(self) -> dict[str, RunnerBox]:
+        """One runner's boxes in its own frame (see `RunnerBox`)."""
+        family = _family(self.model)
+        return RUNNER_SHAPES[family].boxes(self.nl, self.bottom_height, self.box_length,
+                                           BOX_MACHINING[family].front_cutout)
 
-        Left and right are the drawer's, standing in front of it: the
-        runners are a left-hand and a right-hand part. A module written
-        without front= (in the van's terms) or mirrored calls the drawer's
-        right its left, so the drawer's right is worked out from its back
-        and up; the model's axes go to the drawer's right, back and up, a
-        rotation in any frame, so the model is never mirrored."""
-        model = RUNNER_MODELS.get((self.model.name, self.nl))
-        if model is None:
-            return
+    def _place_runners(self, scope: Scope, sides: tuple[Board, Board], front_pos: Pos) -> None:
+        """Records the runner pair, a body per runner named by the
+        drawer's own left and right, seen standing in front of it: each
+        runner's boxes from its side's inner face, the runner front at
+        `front_pos` and the bay's bottom. A module written without front=
+        (in the van's terms) or mirrored calls the drawer's right its
+        left, so the drawer's right is worked out from its back and up."""
         bay = scope._need_box("mount")  # type: ignore[reportPrivateUsage]
         frame = bay.frame
         back, up = frame.direction("back"), frame.direction("top")
-        right_dir = _cross(frame, back, up)
-        left_side = next((s for s in sides if s.inner.direction == right_dir), None)
-        right_side = next((s for s in sides if s.inner.direction == -right_dir), None)
-        if left_side is None or right_side is None:
-            raise LangError(f"{self.name}: sides must be one left and one right carcass side.")
-        inner_width = abs(right_side.inner.value - left_side.inner.value)
-        origin = [0.0, 0.0, 0.0]
-        origin[_index(right_dir.axis)] = left_side.inner.value
-        origin[_index(back.axis)] = front_pos.value + back.sign * model.front_offset
-        origin[_index(up.axis)] = bay.bottom.value + (data.HOLE_ROW_HEIGHT - model.row_z)
-        def envelope(index: int) -> BoxDict:
-            lo, hi = model.envelopes[index]
-            return {"min": list(lo), "max": list(hi)}
-        bodies = [
-            HardwareBodyLayout(name=model.bodies[0], offset=[0.0, 0.0, 0.0], envelope=envelope(0)),
-            HardwareBodyLayout(name=model.bodies[1], offset=[inner_width - model.pair_distance, 0.0, 0.0],
-                               envelope=envelope(1)),
-        ]
-        scope.place_hardware("runners", model.file, (origin[0], origin[1], origin[2]),
-                             {"x": right_dir, "y": back, "z": up}, bodies, mesh=model.mesh)
+        right = _cross(frame, back, up)
+        bodies: list[HardwareBodyLayout] = []
+        for which, inward in (("left", right), ("right", -right)):
+            side = next((s for s in sides if s.inner.direction == inward), None)
+            if side is None:
+                raise LangError(f"{self.name}: sides must be one left and one right carcass side.")
+            starts = ((inward, side.inner.value), (back, front_pos.value), (up, bay.bottom.value))
+            boxes = [_world_box(starts, box) for box in self.runner_boxes().values()]
+            bodies.append(HardwareBodyLayout(name=which, boxes=boxes))
+        scope.place_hardware("runners", bodies)
 
 
-def _index(axis: str) -> int:
-    return "xyz".index(axis)
+def _world_box(starts: tuple[tuple[Direction, float], ...], box: RunnerBox) -> BoxDict:
+    """A runner box in world coordinates: each of its extents measured
+    along a direction from a world position."""
+    lo, hi = [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]
+    for (direction, start), (a, b) in zip(starts, box):
+        ends = sorted((start + direction.sign * a, start + direction.sign * b))
+        i = "xyz".index(direction.axis)
+        lo[i], hi[i] = ends
+    return {"min": lo, "max": hi}
 
 
 def _cross(frame: Frame, a: Direction, b: Direction) -> Direction:

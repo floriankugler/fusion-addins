@@ -203,19 +203,17 @@ class PartPlan:
 @dataclass
 class HardwareBodyPlan:
     name: str
-    offset: Point3  #: in the model's frame, mm
+    #: Boxes along the world axes as (min, max) corners, mm; the body is their union.
+    boxes: list[tuple[Point3, Point3]]
 
 
 @dataclass
 class HardwarePlan:
-    """A model file to import and place: the model's axes as world vectors
-    and its origin in world mm, plus per-body offsets in the model's frame."""
+    """A bought part to draw as boxes, one body per piece, in a component
+    of its own below its scope's."""
     path: str
     component: tuple[str, ...]
     name: str
-    model: str
-    origin: Point3
-    axes: tuple[Vec, Vec, Vec]
     bodies: list[HardwareBodyPlan]
 
 
@@ -426,8 +424,8 @@ def _chamfer_contour(p: _Part, op: ChamferLayout, show: FaceRef,
 
 
 def plan_layout(layout: Layout) -> Plan:
-    if layout["version"] != 1:
-        raise ValueError(f"layout version {layout['version']} is not supported (expected 1).")
+    if layout["version"] != 2:
+        raise ValueError(f"layout version {layout['version']} is not supported (expected 2).")
     frame = _Frame(layout["frame"])
     problems: list[str] = list(layout["problems"])
     parts: list[PartPlan] = []
@@ -441,15 +439,13 @@ def plan_layout(layout: Layout) -> Plan:
     return Plan(parts, problems, hardware)
 
 
-def _code_vector(code: str) -> Vec:
-    return _unit(_as_axis(code[1]), 1 if code[0] == "+" else -1)
-
-
 def plan_hardware(item: HardwareLayout) -> HardwarePlan:
-    segments = item["path"].split(".")
-    o = item["origin"]
+    def corner(c: list[float]) -> Point3:
+        return (c[0], c[1], c[2])
     return HardwarePlan(
-        item["path"], tuple(segments[:-1]), item["name"], item["model"], (o[0], o[1], o[2]),
-        (_code_vector(item["axes"]["x"]), _code_vector(item["axes"]["y"]), _code_vector(item["axes"]["z"])),
-        [HardwareBodyPlan(b["name"], (b["offset"][0], b["offset"][1], b["offset"][2])) for b in item["bodies"]],
+        item["path"], tuple(item["path"].split(".")[:-1]), item["name"],
+        [HardwareBodyPlan(b["name"], [(corner(box["min"]), corner(box["max"])) for box in b["boxes"]])
+         for b in item["bodies"]],
     )
+
+

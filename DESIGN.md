@@ -753,53 +753,71 @@ proposed]
   length, position and floor recess, so those numbers never appear in cabinet
   code. [decided; first hardware implemented 2026-10-11]
   `lang/hardware/slides.py`: `DrawerSlide(model, nl)` with the models of
-  `lib/drawer_slides.py`. `slide.drawer_box(bay, front=face.back,
+  `lib/drawer_slides.py` (Movento 760H and 766H, Dynapro 40 and 50/70 kg,
+  every nominal length). `slide.drawer_box(bay, front=face.back,
   side_thickness=, height=)` is the drawer box: the sides' inner faces 21 mm
   from the carcass sides (inner width LW - 42 in both catalogs, sides up to
-  16 mm), NL - 10 long, with the bottom panel's underside 28 mm above the
-  bay bottom (10 below the screw row; Grass, Blum assumed) and the sides
-  hanging below it by `slide.recess` (Grass 10-13, Blum 12-15, default the
-  middle), so the sides' lower edge is `slide.side_lift` above the bay
-  bottom; it refuses a bay shallower than NL + 3.
+  16 mm), NL - 10 long, with the bottom panel's underside above the bay
+  bottom by `slide.bottom_height` (Blum 28.5, "min. 28.5" with the screw
+  row at 38; Grass 28, 10 below the screw row as the Grass sheet says,
+  kept although Häfele's Dynapro models put the drawer member's top at
+  28.5 too [decided 2026-10-12]) and the sides hanging
+  below it by `slide.recess` (Grass 10-13, Blum 12-15, default the middle),
+  so the sides' lower edge is `slide.side_lift` above the bay bottom; it
+  refuses a bay shallower than NL + 3.
   `slide.machine_box(sides=(l, r), front=f, back=k, floor=floor)` machines
-  the drawer box (Grass; no Blum data yet): a cut-out at each end of the
-  front board for the couplings, 69 mm wide from the side's inner face,
-  and one at each end of the back board for the rear hooks, 35 mm wide,
-  both from the board's lower edge up to the floor's underside; and three
-  pre-drill holes per hook into the back board's rear face
-  (`hook_predrill`, default 2 x 8): 42 mm from the side's inner face at
-  15 and 47 above the floor's underside, and 10 mm from the inner face at
-  47. Cut-outs are named `coupling_left`, `hook_right` and so on.
+  the drawer box: a cut-out at each end of the front board for the
+  couplings and one at each end of the back board for the rear hooks,
+  from the side's inner face (Grass 69 and 35 mm wide, Blum 75 and 75)
+  and from the board's lower edge up to the floor's underside; and the
+  holes for each hook into the back board's rear face (`hook_hole`,
+  diameter and depth): Grass three pre-drill holes for the hook's screws,
+  default 2 x 8, 42 mm from the side's inner face at 15 and 47 above the
+  floor's underside and 10 mm from the inner face at 47; Blum one 6 x 10
+  hole for the hook's pin, 7 from the inner face at 11 above the floor's
+  underside (confirmed by Florian 2026-10-12). Cut-outs are named
+  `coupling_left`, `hook_right` and so on. Blum's TIP-ON BLUMOTION
+  variant (a 125 mm back cut-out) is not covered.
   `drawer.mount(slide, sides=(left, right), front=face.back)` pre-drills the
   carcass sides: a row 38 mm above the bay bottom at the hole positions the
   add-in uses, measured from the runner's front. Hardware mounts through
   `Scope.mount(hardware, **options)`, which hands the scope to the hardware
   object, so core knows nothing about slides.
-  The runner pair's 3D model is placed too: the layout has a `hardware`
-  list per module (a model file relative to the repository, the model's
-  axes as world directions, a world origin, and per-body offsets in the
-  model's frame plus an envelope box), the emitter imports the STEP into
-  the scope's component and moves each body into place, and the preview
-  shows the same model from the CAD box's glTF export, whose pieces are
-  assigned to bodies by their envelopes because the file names nothing;
-  without a mesh file the envelope boxes stand in. Häfele's CAD box delivers the file (`teccad.hafele.com`,
-  `ccHandler.aspx?CadBox=2&CssClass=topco&Mandant=HDE&ArtikelNr=...`,
-  format STEP, article 433.19.608 for Dynapro 40 kg NL 450) as a left and
-  right runner 400 mm apart; in it x = 0 is the mounting face, y = 0 the
-  runner front 4 mm behind the carcass edge, and the screw row sits at
-  z = 35.9, which the placement aligns with the pre-drilled holes.
-  Verified: all 24 pre-drill holes of the example coincide with the
-  runners' screw holes. Not yet: Blum's drawer-box machining and models
-  for other lengths and for Movento; one slide variant is the prototype
-  for now. The model files are committed with the code so that the build is
-  one package. Sources: Grass "Dynapro Planungshinweise" 113378 12/2021
-  (the definitive sheet: installation dimensions, fastening positions and
-  assembly steps), Blum TD-132/1 DE/06.22 p.5.
+  The runner pair is placed too, as boxes [decided 2026-10-12, replacing
+  the STEP and glTF files of one variant]: the layout has a `hardware` list
+  per module, each item with bodies made of boxes in world coordinates,
+  one body per runner, named by the drawer's own left and right; the
+  emitter makes each body as the union of temporary B-rep boxes in a
+  component of its own, the preview as the union of box meshes. Five
+  boxes per runner (`RunnerShape`): the cabinet rail's flange against the
+  carcass side and its base with the carriage, the drawer member whose
+  top carries the floor, the coupling under the floor's front end, as
+  wide as the front board's cut-out (the space reserved for it), and the
+  rear hook behind the drawer box. Each family keeps one cross-section
+  across all lengths and load classes, measured from Häfele's CAD box
+  (`teccad.hafele.com`, `ccHandler.aspx?CadBox=2&CssClass=topco&Mandant=HDE&ArtikelNr=...`;
+  Dynapro 433.19.600-613 and 433.20.615-635, Movento 760H 433.24.010-024,
+  766H 433.24.2xx, Movento coupling 433.24.980/981); the lengths follow
+  from NL. The real cabinet rail ends 2/3 to 9/10 of the way back,
+  irregularly by model and length (Dynapro NL 300/450/600 at 250/285/456,
+  Movento 760H NL 250/450/600 at 232/304/404), so the boxes run it the
+  whole length. Why boxes: a file per variant would be some 45 files of
+  about 1 MB, each needing its frame measured; the language decides
+  nothing from the detail, and the hole patterns were verified against
+  every model once (`lib/drawer_slides.py`; the 24 pre-drill holes of the
+  example coincided with the Dynapro model's screw holes). Checked: with
+  the drawer box machined, the runner boxes overlap none of its parts nor
+  the carcass, and without the cut-outs the couplings hit the front board
+  and the drawer members the back board. Sources: Grass "Dynapro
+  Planungshinweise" 113378 12/2021 (the definitive sheet: installation
+  dimensions, fastening positions and assembly steps), Blum TD-132/1
+  DE/06.22 p.5, the Blum catalogue 2024/2025 p.413 (Movento planning and
+  drawer assembly).
 - Not covered by an add-in today, as far as seen: a groove for drawer floors
   (done with `side.cut(floor.box().grown(...))`), and the drawer-box
   dimensions per slide model (box width, length, recess, the coupling and
-  hook cut-outs and the hook pre-drilling are in `lang/hardware/slides.py`
-  for Grass; Blum is still to be collected). [open]
+  hook cut-outs and the hook holes, in `lang/hardware/slides.py` for both
+  families). [open]
 
 ### Runs: tubes, ducts and keep-outs
 
@@ -966,9 +984,8 @@ below is proposed]
   hole's as a cone, one along a contour (a cut's or pocket's rim, a face's
   outline) as a frustum from the contour at the chamfer's depth to the
   contour moved its size into the material at the face, with mitred
-  corners, one along an edge as a triangular prism; hardware as catalog
-  envelope boxes,
-  later the real meshes exported once from Fusion; the vehicle and master
+  corners, one along an edge as a triangular prism; hardware as the boxes
+  its object gives (a slide's runners); the vehicle and master
   geometry from the snapshot mesh; grain as a subtle stripe per board; colors by
   material; check overlays (interference pairs, parts flagged not flat, sheet
   fit).
@@ -1516,9 +1533,8 @@ Still to do (listed by Florian 2026-10-11, roughly in his order of weight):
   (concealed_hinge_native), hatch hinges (hatch_hinge), ball catches
   (ball_catch), door latches (door_latch_native), and whatever else the
   van needs.
-- **Complete the slides**: Blum (Movento) drawer-box machining, runner
-  models for other nominal lengths and for Movento, the other Dynapro
-  load classes.
+- ~~**Complete the slides**~~: done 2026-10-12 (Blum drawer-box
+  machining; runners as boxes for every model and length).
 - **Joints**: box joints (box_joint), the drawer floor's groove as a join,
   screws through a drawer face into the box front (two boards face to
   face, which contacts do not cover yet), dog bones on any inside corner

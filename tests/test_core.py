@@ -312,7 +312,7 @@ def test_layout_json_roundtrip(tmp_path: Path) -> None:
     cab.export("top", cab.top)
     cab.check(no_interference)
     layout = write_layout(tmp_path / "layout.json")
-    assert layout["version"] == 1
+    assert layout["version"] == 2
     module_layout = layout["modules"][0]
     assert [p["path"] for p in module_layout["parts"]] == ["cab.left", "cab.right", "cab.bottom", "cab.back"]
     left = module_layout["parts"][0]

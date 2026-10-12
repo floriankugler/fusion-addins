@@ -1,4 +1,4 @@
-"""The layout file's shape, version 1.
+"""The layout file's shape, version 2.
 
 This is the contract between the language and its consumers (the preview
 mesher, the Fusion emitter). Bump LAYOUT_VERSION on incompatible changes.
@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Literal, NotRequired, TypedDict
 
-LAYOUT_VERSION = 1
+LAYOUT_VERSION = 2
 
 #: One or more polygons as rings of [u, v] points, one polygon after the
 #: other: its exterior ring, counter-clockwise, then its holes, clockwise.
@@ -25,12 +25,6 @@ class AxesDict(TypedDict):
     t: str
     u: str
     v: str
-
-
-class ModelAxesDict(TypedDict):
-    x: str
-    y: str
-    z: str
 
 
 class CutLayout(TypedDict):
@@ -123,29 +117,19 @@ class ExportValue(TypedDict):
 
 
 class HardwareBodyLayout(TypedDict):
-    #: The body's name inside the model file.
+    #: The body's name within its hardware item.
     name: str
-    #: Where the body goes, in the model's own frame (mm); non-zero when a
-    #: file holds a pair whose spacing the build decides.
-    offset: list[float]
-    #: The body's bounding box in the model's frame (mm), for the preview.
-    envelope: BoxDict
+    #: The body's shape: boxes along the world axes (mm), touching or
+    #: overlapping, whose union is the body.
+    boxes: list[BoxDict]
 
 
 class HardwareLayout(TypedDict):
-    """A bought part placed from a model file: the file's frame mapped to
-    world directions and a world origin."""
+    """A bought part, drawn as simple boxes: the space it takes, not its
+    detail. Each body is one piece of it (a left and a right runner)."""
     path: str
     kind: Literal["hardware"]
     name: str
-    #: Model file, relative to the repository root.
-    model: str
-    #: The same model as a mesh (glTF) for the preview, or None.
-    mesh: str | None
-    #: World origin of the model's origin, mm.
-    origin: list[float]
-    #: World direction code (`+y`, `-x`, ...) of each model axis.
-    axes: ModelAxesDict
     bodies: list[HardwareBodyLayout]
 
 

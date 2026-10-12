@@ -259,21 +259,12 @@ class Scope:
             out.extend(child.all_hardware())
         return out
 
-    def place_hardware(self, name: str, model: str, origin: tuple[float, float, float],
-                       axes: dict[str, Direction], bodies: list[HardwareBodyLayout],
-                       mesh: str | None = None) -> HardwareLayout:
-        """Records a bought part placed from a model file: the model's x, y
-        and z axes along the given directions, its origin at `origin`
-        (world mm), with `mesh` as the preview's copy of the model.
-        Hardware objects call this from `mount`."""
+    def place_hardware(self, name: str, bodies: list[HardwareBodyLayout]) -> HardwareLayout:
+        """Records a bought part as bodies made of world boxes. Hardware
+        objects call this from `mount`."""
         if name in self.parts or name in self.children:
             raise LangError(f"hardware name {name!r} collides with a part or scope name.", self.path)
-        item: HardwareLayout = {
-            "path": f"{self.path}.{name}", "kind": "hardware", "name": name, "model": model, "mesh": mesh,
-            "origin": [float(c) for c in origin],
-            "axes": {"x": axes["x"].code, "y": axes["y"].code, "z": axes["z"].code},
-            "bodies": bodies,
-        }
+        item: HardwareLayout = {"path": f"{self.path}.{name}", "kind": "hardware", "name": name, "bodies": bodies}
         self.hardware.append(item)
         return item
 
