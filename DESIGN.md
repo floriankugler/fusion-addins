@@ -437,8 +437,11 @@ proposed]
     rounded before the join, which then keeps clear of it.
   `examples/operations.py` rounds a corner of a board lying flat, one of
   a standing board and the corners of a notch, and cuts a corner off. The
-  emit plan has them as true arcs, tangent to their edges (tested); not
-  compiled in Fusion yet. Kept as chosen [decided by Florian 2026-10-12]:
+  emit plan has them as true arcs, tangent to their edges (tested).
+  Verified in Fusion 2026-10-12 on that example: each rounded corner is
+  one cylindrical face of its radius about the arc's centre, the cut-off
+  corner one face at 45 degrees, the volumes within 0.002 % of the
+  preview's. Kept as chosen [decided by Florian 2026-10-12]:
   a chamfer on an edge through the board changes the outline instead of
   making a Fusion chamfer; a fillet or chamfer cutting into an earlier
   operation at its corner is an error; corners are not named by a point
@@ -988,7 +991,10 @@ proposed]
   the floor's underside) the floor does not go into the back, so its
   groove join names the sides and the front only,
   `floor.join(l, r, f, using=groove(...))`; Grass's holes (15 and 47
-  above) clear a floor up to 14 thick.
+  above) clear a floor up to 14 thick. Verified in Fusion 2026-10-12: the
+  drawer cabinet compiles with its grooved floors in 1.8 s (214
+  features), every body one solid, each floor overlapping none of its
+  four boards and no side its front or back.
 - **Dog bones** (`lang/core/dogbones.py`) [decided by Florian 2026-10-12,
   implemented 2026-10-12]: a router leaves its radius in every inside
   corner, so a part with square corners does not go in; a dog bone takes
@@ -2093,8 +2099,8 @@ Still to do (listed by Florian 2026-10-11, roughly in his order of weight):
   machining; runners as boxes for every model and length).
 - ~~**Joints**~~: ~~box joints~~ (done 2026-10-12, see "Box joints" under
   Joints and hardware), ~~the drawer floor's groove as a join~~ (done
-  2026-10-12, `groove()`, into all four boards, see "Grooves" there; a
-  Fusion check of the drawer cabinet is queued), ~~dog bones on any inside
+  2026-10-12, `groove()`, into all four boards, see "Grooves" there),
+  ~~dog bones on any inside
   corner~~ (done 2026-10-12, `board.dogbones()` and half laps'
   `dogbones=`, see "Dog bones" under Joints and hardware). Screws through
   a drawer face into the box front were dropped by Florian on 2026-10-12
