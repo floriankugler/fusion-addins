@@ -313,7 +313,9 @@ proposed]
   `side.cut(floor.box().grown(top=0.5, left=0.5))`, so the gap is explicit
   per side and the operation stays a plain cut. A part as a `between()`
   limit means its nearest face; `part.into(n)` and `part.gap(n)` move it.
-  This is the primitive the `groove` joint will reduce to.
+  A drawer floor's grooves are the `groove` joint now [2026-10-12], which
+  grows the floor into the boards and cuts what it then occupies in each
+  (see "Grooves" under Joints and hardware).
 - **Cutouts** [decided and implemented 2026-10-11; `lang/core/cutouts.py`,
   `Board.cutout`]: what the Face Cutout add-in (cutouts_native) does, as an
   operation. `side.cutout()` cuts out a big face inside a `border=` (20),
@@ -869,7 +871,8 @@ proposed]
   so that the emitter recovers the piece left of it as an arc. The
   drawer cabinet's drawer boxes are box-jointed, as Florian's Dynapro
   boxes (7 fingers, margin 2, tool 6, clearance 0.1), before the slide's
-  cut-outs; their floor grooves lie inside the sides' lowest finger.
+  cut-outs; their floors lie in the sides' lowest finger, in grooves in
+  all four boards (see "Grooves" below).
   Machining [decided by Florian 2026-10-12]: no change to the geometry.
   Florian machines box joints with the boards lying flat and mills the
   finger roundovers step by step with a flat cutter, which works well, so
@@ -888,6 +891,85 @@ proposed]
   known bug) and the language's joint comes out whole. The drawer cabinet
   compiles with its box-jointed drawers in 1.6 s (208 features), every
   body one solid, no side overlapping its front or back.
+- **Grooves** (`lang/joints/grooves.py`) [asked for by Florian 2026-10-12,
+  spelled as the other joints; implemented 2026-10-12]: a panel set into
+  grooves in the boards around it, a drawer floor in its box:
+  `floor.join(l, r, f, k, using=groove(5, clearance=(0.5, 0.5)))`. The
+  floor is placed between the boards' faces (`between(l, r, f, k)`), so it
+  meets each edge-on (a contact); the join moves each edge of it that lies
+  on a named board's face `depth` into that board, a corner between two
+  such edges with both, and cuts every board a pocket for what the floor
+  then occupies in it, from the face the floor meets, `groove_<panel>`.
+  The floor goes into the front and back too, not only the sides [Florian].
+  Its box stays where it was placed (`Board.add_to_outline`), as with
+  tenons and fingers. Chosen while implementing: the join grows the panel,
+  rather than the panel being placed `into(n)` the boards and the join
+  only cutting, so the depth is stated once, the placement reads as the
+  box's inside (as in the drawer cabinet sketched under Examples), and the
+  corners are filled the same way for every board; `side.cut(floor.box()
+  .grown(...))` stays for grooves by hand. Either board may make the call
+  (`left.join(floor, using=groove(5))` grooves the left side alone,
+  `side.join(low, high, using=groove(4))` cuts dados for two shelves); the
+  boards at a corner of the panel go into one join, so that the corner
+  goes into both, and a later join at a corner an earlier one moved is an
+  error. Settings [chosen while implementing, for Florian to confirm]:
+  - `clearance=(depth, height)`, (0, 0) by default [Florian: 0 unless
+    given; he usually gives 0.5, as the drawer cabinet does]: the groove's
+    bottom lies `depth` beyond the panel's edge, and its ends as far beyond
+    the panel's corners; it is `height` wider than the panel is thick, all
+    of it above a panel lying flat, whose underside stays on the groove's
+    lower wall, which the slide's cut-outs and hook holes are measured
+    from; half on either side of a panel that stands (a back in grooves).
+  - `chamfer=3` [Florian: 3 to 4, so the floor goes in easily]: the
+    panel's corners between two grooved edges are cut off at 45 degrees, 3
+    along each edge, by the helper `chamfer()` cuts a corner of the
+    outline off with (`lang/core/corners.py`), once the panel has grown:
+    `floor.chamfer(floor.front.left, 3)` names the corner of the placement
+    box, which the grown floor no longer has. At most twice the depth, or
+    the chamfer would reach past the boards' faces and show; None or 0 for
+    square corners. Corners next to an edge that goes into no groove stay
+    square.
+  - Dog bones where a groove stops inside its board, as part of its
+    pocket: `dogbones="corner"` (the default, as on tenons and half laps),
+    `"hidden"` (centred on the groove's end, bulging past the end only; an
+    error where that would break out of the board) or None; `tool=6`,
+    `relief=0.1`, a tool wider than the groove being an error. A corner
+    relief bulges 0.93 past the groove's edges as well, which at a corner
+    of the panel the end of the board the corner goes into covers.
+    `board.dogbones()` adds nothing more there, since the reliefs are
+    arcs, and relieves a groove joined with `dogbones=None` like any
+    pocket.
+  Nothing shows [Florian: grooves must not show]: a groove is as long as
+  the panel needs, so it stops inside its board where the board goes on
+  past the panel's corner and runs out of it where the board ends first,
+  as into a box joint's gap; at a corner of the panel either way is
+  covered by the board the corner goes into. In the drawer cabinet the
+  floors lie in the sides' lowest finger: the sides' grooves stop 6.5
+  short of their ends, the front's and back's run out into the joints'
+  gaps; at a height where the front and back carry the finger, theirs stop
+  inside it and the sides' run out into the notch, which the finger fills.
+  A groove as deep as its board is thick would show on the far face and
+  is an error. An end that runs out of a board where the panel's edge
+  beside it goes into no board of the join (a floor running on under a
+  back standing on it, a through dado) may show, and the board gets a note
+  in the layout's problems naming that end. Since the grooves take
+  whatever lies in their way, they also take the fillets a box joint's
+  cutter keeps at the fingers' roots, which reach into the floor's corner
+  where it lies near the end of a finger: the hand-built Dynapro drawer
+  (2026-09-21), whose front and back grooves ended at the sides' faces,
+  needed corner chamfers of 2 * (depth - clearance + 1) to clear them;
+  here the 3 mm chamfer is only for putting the box together. Checked with
+  the preview's meshes (exact booleans): the drawer cabinet's floors
+  overlap none of their four boards with 7, 9 and 11 fingers (with 11 the
+  floor lies across the end of a finger); grooves kept within each board's
+  box would overlap. `no_interference` does not see the floor's corners:
+  like tenons and fingers they lie outside the placement box it filters
+  on, and looking past the boxes would report every box joint, whose
+  fingers clear each other only through their grooves in narrow faces,
+  which it does not count yet. Not checked: a panel's edge running past
+  the end of its board; holes drilled later into a groove, such as Blum's
+  rear hook hole (6 x 10, 11 above the floor's underside) in a back the
+  floor goes into (the examples use Grass, whose hook holes lie above it).
 - **Dog bones** (`lang/core/dogbones.py`) [decided by Florian 2026-10-12,
   implemented 2026-10-12]: a router leaves its radius in every inside
   corner, so a part with square corners does not go in; a dog bone takes
@@ -1239,7 +1321,7 @@ proposed]
   inner face before; corrected in the add-in too, whose sketch now
   dimensions the pair from the door's projected front edge).
 - Not covered by an add-in today, as far as seen: a groove for drawer floors
-  (done with `side.cut(floor.box().grown(...))`), the drawer-box
+  (the `groove` joint since 2026-10-12, see "Grooves" above), the drawer-box
   dimensions per slide model (box width, length, recess, the coupling and
   hook cut-outs and the hook holes, in `lang/hardware/slides.py` for both
   families), and the sliding brackets (`lib/sliding_brackets.py` is ready
@@ -1984,12 +2066,14 @@ Still to do (listed by Florian 2026-10-11, roughly in his order of weight):
   "Joints and hardware"). Open: whatever else the van needs.
 - ~~**Complete the slides**~~: done 2026-10-12 (Blum drawer-box
   machining; runners as boxes for every model and length).
-- **Joints**: ~~box joints~~ (done 2026-10-12, see "Box joints" under
-  Joints and hardware), the drawer floor's groove as a join, ~~dog bones
-  on any inside corner~~ (done 2026-10-12, `board.dogbones()` and half
-  laps' `dogbones=`, see "Dog bones" under Joints and hardware). Screws
-  through a drawer face into the box front were dropped by Florian on
-  2026-10-12 as not important.
+- ~~**Joints**~~: ~~box joints~~ (done 2026-10-12, see "Box joints" under
+  Joints and hardware), ~~the drawer floor's groove as a join~~ (done
+  2026-10-12, `groove()`, into all four boards, see "Grooves" there; a
+  Fusion check of the drawer cabinet is queued), ~~dog bones on any inside
+  corner~~ (done 2026-10-12, `board.dogbones()` and half laps'
+  `dogbones=`, see "Dog bones" under Joints and hardware). Screws through
+  a drawer face into the box front were dropped by Florian on 2026-10-12
+  as not important.
 - Arcs from the snapshot's contours (open question 16). (The preview's
   other chamfers are done, 2026-10-11.)
 
