@@ -1,3 +1,4 @@
+import math
 import re
 
 import pytest
@@ -347,3 +348,47 @@ def test_one_stations_rule_in_lib():
                     lambda: door_latches.stations(160, 2, 80), lambda: sliding_brackets.stations(100, 2, 50)):
         with pytest.raises(ValueError):
             refused()
+
+
+# -- core helpers for hardware (review findings 25, 27) -----------------------------------------------
+
+def test_hole_fits_on_the_face_region():
+    """`Board.hole_fits`: the centre and the four points a radius away on
+    the face, less the holes, pockets and V-grooves made into it and those
+    through from the other face, and the circle clear of them."""
+    with module("m", Box.from_size(width=400, depth=300, height=100)) as m:
+        panel = board("panel", ply15).on(m.bottom)          # x 0..300 (u), y 0..400 (v), faces top and bottom
+        panel.pocket(rect(width=40, depth=40), at=panel.top.front(50).left(50), depth=5)
+        panel.hole(d=10, depth=5, at=panel.bottom.front(Pos("x", 150)).left(Pos("y", 200)))
+        panel.hole(d=10, depth=through, at=panel.bottom.front(Pos("x", 250)).left(Pos("y", 300)))
+    top, bottom = panel.top, panel.bottom
+    assert panel.hole_fits(top, (150, 100), 5)
+    assert not panel.hole_fits(top, (299, 100), 5)               # its rim over the edge
+    assert panel.hole_fits(top, (297.5, 100), 5)                 # tangent to the edge
+    assert not panel.hole_fits(top, (70, 70), 2)                 # in the pocket on the top
+    assert panel.hole_fits(bottom, (70, 70), 2)                  # the pocket does not reach the bottom
+    assert not panel.hole_fits(bottom, (150, 200), 2)            # in the hole made into the bottom
+    assert panel.hole_fits(top, (150, 200), 2)                   # which does not reach the top
+    assert not panel.hole_fits(top, (250, 300), 2)               # a through hole counts on both faces
+    # its circle overlapping the hole diagonally, every probe outside it
+    assert not panel.hole_fits(bottom, (150 + 6.5, 200 + 6.5), 10)
+    assert panel.hole_fits(bottom, (150 + 7.5, 200 + 7.5), 10)
+    region = panel.face_region(top)
+    assert region.area == pytest.approx(300 * 400 - 40 * 40 - math.pi * 25, rel=1e-3)
+    with pytest.raises(LangError, match="narrow face"):
+        panel.hole_fits(panel.front, (0, 0), 2)
+
+
+def test_one_hardware_name_per_scope():
+    """`place_hardware` refuses a second item of one name; hardware of
+    which one scope holds several numbers it with `unique_hardware_name`."""
+    with module("m", Box.from_size(width=400, depth=300, height=100)) as m:
+        board("panel", ply15).on(m.bottom)
+    m.place_hardware("door_hinges", [])
+    with pytest.raises(LangError, match="hardware name 'door_hinges' is used twice in this scope"):
+        m.place_hardware("door_hinges", [])
+    with pytest.raises(LangError, match="collides with a part"):
+        m.place_hardware("panel", [])
+    assert m.unique_hardware_name("door_hinges") == "door_hinges_2"
+    assert m.unique_hardware_name("panel") == "panel_2"
+    assert m.unique_hardware_name("runners") == "runners"

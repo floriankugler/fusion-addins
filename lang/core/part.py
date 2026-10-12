@@ -64,6 +64,9 @@ from .refs import Affine, DepthSpec, HasPosition, Pos, PosLike, Side, Through, T
 from .shapes import Shape, box_shape
 
 Point2 = tuple[float, float]
+#: How far a point may lie off a face and still be on it, mm (the add-ins'
+#: 1e-4 cm): `hole_fits`.
+ON_FACE_TOLERANCE = 1e-3
 #: What `between()` takes: positions, box sides, faces, parts (their nearest
 #: face), contours, and boxes (their sides on the board's in-plane axes).
 Limit = Union[Pos, Affine, HasPosition, "Board", "PartLimit", Contour, ContourLimit, Box]
@@ -1240,6 +1243,52 @@ class Board:
         while name in self._named_ops:
             name, n = f"{base}_{n}", n + 1
         return name
+
+    # -- where hardware fits on a face -------------------------------------------------------------
+
+    def _taken_from(self, face: Face) -> list[BaseGeometry]:
+        """What the operations took from a big face, in the outline's
+        frame: the pockets, holes and V-grooves made into it (a hole with
+        its countersink), and the pockets and holes through from the other
+        face."""
+        name = face.world_name
+        taken: list[BaseGeometry] = []
+        for op in self.ops:
+            if isinstance(op, (Pocket, Hole, VGroove)) and op.face == name:
+                taken.append(self._footprint(op))
+            elif isinstance(op, (Pocket, Hole)) and op.depth >= self.thickness - 1e-9:
+                taken.append(op.shape.geometry if isinstance(op, Pocket)
+                             else cutout_geometry.circle_geometry((op.u, op.v), op.d / 2))
+        return taken
+
+    def face_region(self, face: Face) -> BaseGeometry:
+        """A big face as an area in the outline's frame (see `face_axes`),
+        where hardware can bear on it or drill into it: the outline less
+        what the operations took from that face (`_taken_from`)."""
+        self._big_face_of_mine(face, "face_region()")
+        taken = self._taken_from(face)
+        region = self.outline.geometry
+        return region.difference(unary_union(taken)) if taken else region
+
+    def hole_fits(self, face: Face, point: Point2, d: float) -> bool:
+        """Whether a hole `d` across at `point` (in the face's frame) lies on
+        the big face `face`: its centre and the four points its radius away
+        along the face's axes on `face_region()`, give or take
+        `ON_FACE_TOLERANCE`, as the add-ins probe a face (`isPointOnFace`),
+        and its circle clear of the holes, pockets and V-grooves made
+        before. Hardware checks every hole with it before it drills one."""
+        self._big_face_of_mine(face, "hole_fits()")
+        taken = self._taken_from(face)
+        region = self.outline.geometry.difference(unary_union(taken)) if taken else self.outline.geometry
+        u, v = point
+        r = d / 2
+        probes = [(u, v), (u - r, v), (u + r, v), (u, v - r), (u, v + r)]
+        if any(region.distance(Point(p)) > ON_FACE_TOLERANCE for p in probes):
+            return False
+        if r <= ON_FACE_TOLERANCE:
+            return True
+        circle = Point(u, v).buffer(r - ON_FACE_TOLERANCE, quad_segs=16)
+        return not any(circle.intersects(g) for g in taken)
 
     # -- relations ---------------------------------------------------------------------------------
 

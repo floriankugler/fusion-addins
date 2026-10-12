@@ -276,12 +276,25 @@ class Scope:
 
     def place_hardware(self, name: str, bodies: list[HardwareBodyLayout]) -> HardwareLayout:
         """Records a bought part as bodies made of world boxes. Hardware
-        objects call this from `mount`."""
+        objects call this from `mount`, with a name from
+        `unique_hardware_name` where one scope may hold several."""
         if name in self.parts or name in self.children:
             raise LangError(f"hardware name {name!r} collides with a part or scope name.", self.path)
+        if any(item["name"] == name for item in self.hardware):
+            raise LangError(f"hardware name {name!r} is used twice in this scope.", self.path)
         item: HardwareLayout = {"path": f"{self.path}.{name}", "kind": "hardware", "name": name, "bodies": bodies}
         self.hardware.append(item)
         return item
+
+    def unique_hardware_name(self, base: str) -> str:
+        """`base`, or `base_2`, `base_3`... when a part, a child scope or a
+        hardware item of this scope has that name: for hardware of which
+        one scope may hold several, such as the hinges of two doors."""
+        taken = set(self.parts) | set(self.children) | {item["name"] for item in self.hardware}
+        name, n = base, 2
+        while name in taken:
+            name, n = f"{base}_{n}", n + 1
+        return name
 
     # -- API -------------------------------------------------------------------------------------
 

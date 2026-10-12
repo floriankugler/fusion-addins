@@ -38,7 +38,7 @@ from shapely.ops import unary_union
 
 from lib import cutout_patterns as data
 
-from ..emit.arcs import Arc2, Circle2, Line2, fit
+from ..emit.arcs import Arc2, Circle2, Curve2, Line2, fit
 from .directions import ExtentName
 from .errors import LangError, one_of
 from .geometry import polygons_of
@@ -736,3 +736,135 @@ def circle_geometry(c: Point2, r: float) -> Polygon:
     """A circle as a polygon with its vertices exactly on it, close enough
     together to be drawn as a circle again."""
     return _circle(c, r)
+
+
+# -- an exact inset of one polygon ---------------------------------------------------------------
+
+def inset(polygon: Polygon, d: float) -> BaseGeometry:
+    """The polygon's outline moved `d` inward, as Fusion offsets a sketch
+    loop: lines move square to themselves and meet where they met, so a
+    sharp corner stays sharp, and arcs keep their centres, so a corner
+    rounded with r becomes one rounded with r - d. Exact: worked out on the
+    lines and arcs the polygon stands for (`lang.emit.arcs.fit`), with the
+    arcs' vertices on their circles and the lines where they belong.
+    Outlines it cannot offset that way (an arc or a line vanishing) are
+    left to `grown`, which is exact up to a few ten-thousandths of a
+    millimetre where a line meets an arc. A ball catch's hatch is its
+    opening inset by the slot."""
+    ring = [(float(x), float(y)) for x, y in list(orient(polygon, 1.0).exterior.coords)[:-1]]
+    curves = fit(ring)
+    if len(curves) == 1 and isinstance(curves[0], Circle2):
+        whole = curves[0]
+        return _circle(whole.center, whole.radius - d) if whole.radius > d else Polygon()
+    moved = [_inset_curve(c, d) for c in curves]
+    n = len(moved)
+    joints: list[Point2 | None] = [_inset_joint(moved[k], moved[(k + 1) % n]) for k in range(n)]
+    points: list[Point2] = []
+    for k, curve in enumerate(moved):
+        start, end = joints[k - 1], joints[k]
+        if start is None or end is None:
+            return grown(polygon, -d)
+        points.append(start)
+        if isinstance(curve, Arc2):
+            points += _arc_between(curve, start, end)
+    out = Polygon(points)
+    reference = grown(polygon, -d)
+    if not out.is_valid or out.is_empty or out.hausdorff_distance(reference) > 0.01:
+        return reference
+    return out
+
+
+def _inset_curve(curve: Curve2, d: float) -> Curve2:
+    """A line or arc of a counter-clockwise ring moved `d` to its left,
+    into the ring."""
+    if isinstance(curve, Line2):
+        (ax, ay), (bx, by) = curve.a, curve.b
+        length = math.hypot(bx - ax, by - ay)
+        nx, ny = -(by - ay) / length, (bx - ax) / length
+        return Line2((ax + nx * d, ay + ny * d), (bx + nx * d, by + ny * d))
+    assert isinstance(curve, Arc2)
+    (ax, ay), (mx, my), (bx, by) = curve.a, curve.mid, curve.b
+    left = (mx - ax) * (by - my) - (my - ay) * (bx - mx) > 0     # turning left: the centre is inside
+    radius = curve.radius - d if left else curve.radius + d
+    c = curve.center
+
+    def on(p: Point2) -> Point2:
+        dx, dy = p[0] - c[0], p[1] - c[1]
+        k = radius / math.hypot(dx, dy)
+        return (c[0] + dx * k, c[1] + dy * k)
+    return Arc2(on(curve.a), on(curve.mid), on(curve.b), c, radius) if radius > 1e-9 else Line2(c, c)
+
+
+def _inset_joint(p: Curve2, q: Curve2) -> Point2 | None:
+    """Where the moved curve `p` ends and `q` begins: their common end
+    where they met tangentially, else where they cross (nearest the ends);
+    None when they do not."""
+    end, start = _curve_ends(p)[1], _curve_ends(q)[0]
+    if math.dist(end, start) <= 1e-6:
+        return ((end[0] + start[0]) / 2, (end[1] + start[1]) / 2)
+    near = ((end[0] + start[0]) / 2, (end[1] + start[1]) / 2)
+    if isinstance(p, Line2) and isinstance(q, Line2):
+        return _lines_cross(p, q)
+    if isinstance(p, Arc2) and isinstance(q, Arc2):
+        return _circles_cross(p, q, near)
+    line, arc = (p, q) if isinstance(p, Line2) else (q, p)
+    assert isinstance(line, Line2) and isinstance(arc, Arc2)
+    return _line_circle_cross(line, arc, near)
+
+
+def _curve_ends(curve: Curve2) -> tuple[Point2, Point2]:
+    assert not isinstance(curve, Circle2)
+    return curve.a, curve.b
+
+
+def _lines_cross(p: Line2, q: Line2) -> Point2 | None:
+    (ax, ay), (bx, by) = p.a, p.b
+    (cx, cy), (dx, dy) = q.a, q.b
+    ux, uy, wx, wy = bx - ax, by - ay, dx - cx, dy - cy
+    den = ux * wy - uy * wx
+    if abs(den) < 1e-12:
+        return None
+    t = ((cx - ax) * wy - (cy - ay) * wx) / den
+    return (ax + t * ux, ay + t * uy)
+
+
+def _line_circle_cross(line: Line2, arc: Arc2, near: Point2) -> Point2 | None:
+    (ax, ay), (bx, by) = line.a, line.b
+    (cx, cy), r = arc.center, arc.radius
+    length = math.hypot(bx - ax, by - ay)
+    if length == 0:
+        return None
+    ux, uy = (bx - ax) / length, (by - ay) / length
+    fx, fy = ax - cx, ay - cy
+    b = fx * ux + fy * uy
+    disc = b * b - (fx * fx + fy * fy - r * r)
+    if disc < 0:
+        return None
+    points = [(ax + t * ux, ay + t * uy) for t in (-b - math.sqrt(disc), -b + math.sqrt(disc))]
+    return min(points, key=lambda x: math.dist(x, near))
+
+
+def _circles_cross(p: Arc2, q: Arc2, near: Point2) -> Point2 | None:
+    (pc, pr), (qc, qr) = (p.center, p.radius), (q.center, q.radius)
+    dist = math.dist(pc, qc)
+    if dist == 0 or dist > pr + qr or dist < abs(pr - qr):
+        return None
+    along = (dist * dist + pr * pr - qr * qr) / (2 * dist)
+    h = math.sqrt(max(pr * pr - along * along, 0.0))
+    ux, uy = (qc[0] - pc[0]) / dist, (qc[1] - pc[1]) / dist
+    mx, my = pc[0] + along * ux, pc[1] + along * uy
+    return min([(mx - h * uy, my + h * ux), (mx + h * uy, my - h * ux)], key=lambda x: math.dist(x, near))
+
+
+def _arc_between(arc: Arc2, start: Point2, end: Point2) -> list[Point2]:
+    """The vertices strictly between `start` and `end` on the arc's circle,
+    the way the arc turns, at most `_ARC_STEP` apart."""
+    c, r = arc.center, arc.radius
+    (ax, ay), (mx, my), (bx, by) = arc.a, arc.mid, arc.b
+    ccw = (mx - ax) * (by - my) - (my - ay) * (bx - mx) > 0
+    a0 = math.atan2(start[1] - c[1], start[0] - c[0])
+    a1 = math.atan2(end[1] - c[1], end[0] - c[0])
+    sweep = (a1 - a0) % (2 * math.pi) if ccw else -((a0 - a1) % (2 * math.pi))
+    steps = max(4, math.ceil(abs(sweep) / _ARC_STEP))
+    return [(c[0] + r * math.cos(a0 + sweep * i / steps), c[1] + r * math.sin(a0 + sweep * i / steps))
+            for i in range(1, steps)]
