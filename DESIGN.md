@@ -302,7 +302,8 @@ proposed]
   3-axis machine cannot reach a narrow face, so every connector is machined
   from the big faces of both boards. [decided 2026-10-11 by Florian,
   replacing the earlier "Domino, Cabineo, screws into an edge" on narrow
-  faces]
+  faces] The box joint's grooves along its fingers are the one exception,
+  as the add-in models them (see "Box joints" under Joints and hardware).
 - **Cutting with a part or a box** [decided 2026-10-10]: `side.cut(floor)`
   removes the region the floor occupies inside the side, its outline through
   its thickness; a pocket from the face the region enters through, or a
@@ -761,6 +762,54 @@ proposed]
   add-ins cut the Cabineo pocket 10.5 and 11 deep; Florian: 10.5 is right,
   so tenons_native now reads all its Lamello and screw dimensions from
   `lib/connector_data.py` too.
+- **Box joints** (`lang/joints/box_joints.py`) [implemented 2026-10-12]:
+  the corners of a drawer box as the box_joint add-in makes them, spelled
+  like the other joints: `front.join(left, right, using=box_joint(7,
+  margin=2, clearance=(0.1, 0.1)))`, from either board. The board that
+  meets the other edge-on grows fingers through the other board, flush
+  with its outer face (`Board.add_to_outline`, its box stays the placement
+  box); the other board gets the notches. The corner must be flush: the
+  other board's end in the plane of this board's outer face, covering its
+  end, which the joint runs along the whole width of, so cut-outs at the
+  joint (a slide's coupling cut-out) go after the join; else the join
+  fails naming the boards. The add-in's dialog gives the defaults:
+  `fingers` 5, the odd count of both boards' fingers together, all
+  (length - 2 * margin) / fingers wide; `margin` 0, which widens the outer
+  two; `tool` 6; `clearance=(along, across)` (0, 0), which widens notches
+  and gaps by half the first per side and cuts their bottoms the second
+  deeper than the other board is thick. The cutter's radius stays as
+  fillets at the bottoms of the notches and gaps, through the board, and
+  every finger is rounded over along its mating corners to nest in them,
+  by grooves along it from the end: the fingers' from their tips, the
+  other board's along the notch walls, opened square on the notch's side
+  in a band one radius deep at the inner face, where the root of the
+  finger in the notch is not rounded. Dog bones one radius deep sit in
+  both inner faces, on the notch walls at the notch bottoms and on the
+  fingers' sides at the gaps' bottoms. Nothing shows on the assembled
+  joint; `tool=0` makes a square one. The notches and gaps are through
+  cuts (`notch_<other>_1`, `gap_<other>_1`...), the dog bones pockets
+  (`notch_<other>_reliefs`, `finger_<other>_reliefs`), the grooves
+  pockets in narrow faces (`notch_<other>_grooves`,
+  `finger_<other>_grooves`). The finger grooves start at the fingers'
+  tips, in front of the board's end, so an operation on a narrow face has
+  an `offset` now, how far in front of the face it starts (layout field
+  `offset`, `Board.add_edge_pocket`), which the plan turns into the plane
+  the cut starts from; the emitter needed nothing new. The preview meshes
+  pockets and holes in narrow faces now. Two differences from the add-in:
+  a margin smaller than half the clearance along the joint works, the
+  outer gaps are cut past the board's ends (the add-in's sketch fails
+  there); and where the board's end runs through an outer gap's outer
+  fillet (with a clearance across), the fillet has a vertex on the end,
+  so that the emitter recovers the piece left of it as an arc. The
+  drawer cabinet's drawer boxes are box-jointed, as Florian's Dynapro
+  boxes (7 fingers, margin 2, tool 6, clearance 0.1), before the slide's
+  cut-outs; their floor grooves lie inside the sides' lowest finger.
+  Machining [open]: with a board flat on the machine, the grooves along
+  the fingers are roundovers of the edges at its inner face (a roundover
+  bit from that face would make them), but the square halves of the
+  notch-wall grooves cannot be milled from the inner face with a round
+  cutter; the add-in models all of them as cuts from the end planes. Not
+  yet verified in Fusion against the add-in.
 - Hardware carries its own rules. A drawer slide determines the drawer box width,
   length, position and floor recess, so those numbers never appear in cabinet
   code. [decided; first hardware implemented 2026-10-11]
@@ -1740,7 +1789,8 @@ Still to do (listed by Florian 2026-10-11, roughly in his order of weight):
   hardware"). Open: whatever else the van needs.
 - ~~**Complete the slides**~~: done 2026-10-12 (Blum drawer-box
   machining; runners as boxes for every model and length).
-- **Joints**: box joints (box_joint), the drawer floor's groove as a join,
+- **Joints**: ~~box joints~~ (done 2026-10-12, see "Box joints" under
+  Joints and hardware; the Fusion comparison is pending), the drawer floor's groove as a join,
   screws through a drawer face into the box front (two boards face to
   face, which contacts do not cover yet), dog bones on any inside corner
   (dog_bones_native).

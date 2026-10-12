@@ -17,7 +17,7 @@ from .core.part import Anchor, Board, Edge, Face, Operation, Outline, board
 from .core.refs import Pos, Side, spread, through, to
 from .core.scope import Scope, check, module, registry, scope
 from .core.shapes import Shape, circle, polygon, rect
-from .joints import cabineo, clamex, domino, half_lap, screws, tenons
+from .joints import box_joint, cabineo, clamex, domino, half_lap, screws, tenons
 from .master import Master, Plane, master
 
 __all__ = [
@@ -28,4 +28,5 @@ __all__ = [
     "Scope", "module", "scope", "registry", "check",
     "no_interference", "fits_sheet", "inside", "inside_box", "LangError",
     "master", "Master", "Plane", "Contour", "half_lap", "domino", "clamex", "cabineo", "tenons", "screws",
+    "box_joint",
 ]

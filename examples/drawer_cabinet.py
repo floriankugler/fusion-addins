@@ -2,9 +2,9 @@
 pockets and holes, drawer slides as the first hardware, and connectors in
 the carcass. The slide dictates the drawer box and pre-drills the carcass
 sides; the bottom and top are joined to the sides with Cabineos, the back
-to all four with Dominos. The drawer boxes are not joined yet. Built on
-its own, it stands in a box of its own; van.py imports `drawer_cabinet`
-and places it in the master's kitchen box."""
+to all four with Dominos. The drawer boxes are box-jointed at their
+corners. Built on its own, it stands in a box of its own; van.py imports
+`drawer_cabinet` and places it in the master's kitchen box."""
 from lang import *
 from lang.hardware.slides import DrawerSlide
 from lib.drawer_slides import DYNAPRO_40
@@ -84,12 +84,19 @@ def drawer(name: str, bay: Box, panel: Box, slide: DrawerSlide) -> Scope:
         r = board("right", ply12).on(box.right).between(box.front, box.back, box.bottom, box.top)
         f = board("front", ply12).on(box.front).between(l, r, box.bottom, box.top)
         k = board("back", ply12).on(box.back).between(l, r, box.bottom, box.top)
+        # Box joints at the four corners: the sides run the full length and
+        # get the notches, the front and back grow the fingers, which show
+        # on the sides. The joints go before the slide's cut-outs at the
+        # front's and back's lower ends, which they run along.
+        for end in (f, k):
+            end.join(l, r, using=box_joint(7, margin=2, clearance=(0.1, 0.1)))
         # the floor reaches 5 mm into the sides
         floor = (board("floor", ply9)
                  .on(box.bottom + slide.recess)
                  .between(l.into(5), r.into(5), f, k))
         # the grooves: what the floor occupies in each side, with 0.5 mm of
-        # room above the floor and beyond its edges
+        # room above the floor and beyond its edges; they stop at the front
+        # and back, inside the sides' lowest finger
         room = floor.box().grown(top=0.5, left=0.5, right=0.5)
         for side in (l, r):
             side.cut(room, name="floor_groove")
