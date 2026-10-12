@@ -709,8 +709,23 @@ renderer.domElement.addEventListener('pointerup', (e) => {
 // -- keys -------------------------------------------------------------------------
 
 const modes = ['shaded', 'hidden', 'ghost'];
+
+// The shortcuts work wherever the focus is, also on a checkbox, the slider
+// or a dropdown just used, except where a key types text. Keys with Cmd,
+// Ctrl or Alt are the browser's.
+function typesText(el) {
+  if (el.isContentEditable || el.tagName === 'TEXTAREA') return true;
+  return el.tagName === 'INPUT' && !['checkbox', 'radio', 'range', 'button', 'color'].includes(el.type);
+}
+
+// A dropdown keeps the focus after a choice and would take letters as a
+// search for an option, so it gives the focus back.
+for (const el of document.querySelectorAll('select')) {
+  el.addEventListener('change', () => el.blur());
+}
+
 window.addEventListener('keydown', (e) => {
-  if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+  if (typesText(e.target) || e.metaKey || e.ctrlKey || e.altKey) return;
   const step = e.shiftKey ? 0.1 : 0.01;
   switch (e.key) {
     case 'f': fit(); break;
