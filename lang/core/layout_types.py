@@ -38,7 +38,10 @@ class PocketLayout(TypedDict):
     kind: Literal["pocket"]
     name: str | None
     face: str
+    #: mm from the face; through a big face it is the thickness, through a
+    #: narrow face the board's extent across it.
     depth: float
+    #: How the build file gave the depth, for a reader only (`lang.core.ops`).
     depth_spec: str
     chamfer: float
     shape: Rings
@@ -51,7 +54,9 @@ class HoleLayout(TypedDict):
     u: float
     v: float
     d: float
+    #: mm from the face, as for a pocket.
     depth: float
+    #: How the build file gave the depth, for a reader only.
     depth_spec: str
     through: bool
     chamfer: float
@@ -143,6 +148,8 @@ class ModuleLayout(TypedDict):
     parts: list[PartLayout]
     hardware: list[HardwareLayout]
     exports: dict[str, ExportValue | float | str]
+    #: This module's problems: its checks' and the notes its parts left.
+    #: The layout's `problems` repeat them.
     problems: list[str]
 
 
@@ -174,6 +181,8 @@ class Layout(TypedDict):
     units: Literal["mm"]
     frame: dict[str, str]
     modules: list[ModuleLayout]
+    #: Every problem of the build, once: the modules' and the snapshots'
+    #: notes. What a consumer shows or reports.
     problems: list[str]
     #: Snapshots of the master the build read (absent in older layouts).
     snapshots: NotRequired[list[SnapshotLayout]]

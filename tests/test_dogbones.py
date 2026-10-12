@@ -17,18 +17,11 @@ from lang.core.ops import Cut, Pocket
 from lang.core.part import DogBoneTarget
 from lang.core.scope import registry
 from lang.emit.plan import Arc, plan_layout
+from helpers import has_material, ply15
 
-ply15 = material("birch", t=15)
 R = 3.05                            # a square corner's relief: the 6 mm tool plus 0.1, halved
 O = 3 / math.sqrt(2)                # its centre, along each edge from the corner
 EXAMPLES = Path(__file__).resolve().parent.parent / "examples"
-
-
-@pytest.fixture(autouse=True)
-def fresh_registry():
-    registry.reset()
-    yield
-    registry.reset()
 
 
 def _panel() -> tuple[Scope, Board]:
@@ -36,10 +29,6 @@ def _panel() -> tuple[Scope, Board]:
     with module("m", Box.from_size(width=600, depth=400, height=100)) as m:
         panel = board("panel", ply15).on(m.bottom).show(m.top)
     return m, panel
-
-
-def _has(part: Board, *points: tuple[float, float]) -> list[bool]:
-    return [bool(part.outline.geometry.contains(Point(p))) for p in points]
 
 
 def _dogbones(part: Board) -> list[Cut | Pocket]:
@@ -92,7 +81,7 @@ def test_corners_of_the_outline_and_of_cuts_at_any_angle():
         top = panel.top
         panel.cut(rect(depth=60, width=80), at=top.front.left, name="notch")
         panel.cut(polygon([(60, 0), (0, 20), (60, 40)]), at=top.back.left(150), name="vee")
-        panel.cut(rect(depth=80, width=60).clip("top.right", top=20, right=20), at=top.center, name="window")
+        panel.cut(rect(depth=80, width=60).clip(back=20, right=20), at=top.center, name="window")
     found = {(round(c.point[0], 6), round(c.point[1], 6)): c for c in corners(panel)}
     assert set(found) == {(60, 80), (340, 170), (160, 270), (240, 270), (160, 330), (220, 330), (240, 310)}
     assert math.degrees(found[(340, 170)].angle) == pytest.approx(2 * math.degrees(math.atan(20 / 60)))
@@ -171,7 +160,7 @@ def test_dogbones_go_into_the_corners_the_board_has_when_the_layout_is_built():
         layout = build_layout()
     assert [op.name for op in _dogbones(panel)] == ["notch_dogbones"]
     # through the corner at (60, 80): the relief's centre lies on the diagonal into the notch
-    assert _has(panel, (60.03, 80.03), (60 - O, 80 - O), (61, 82)) == [False, False, True]
+    assert has_material(panel, (60.03, 80.03), (60 - O, 80 - O), (61, 82)) == [False, False, True]
     ops = layout["modules"][0]["parts"][0]["ops"]
     assert [op.get("name") for op in ops] == ["notch", "notch_dogbones"]
     build_layout()                                      # once only
@@ -189,7 +178,7 @@ def test_dogbones_cover_a_joint_made_after_the_call():
     build_layout()
     assert [op.name for op in _dogbones(long)] == ["lap_cross_dogbones"]
     assert _dogbones(cross) == []
-    assert _has(long, (192.5 - 0.03, 15 - 0.03), (192.5 + O, 15 + O)) == [False, False]
+    assert has_material(long, (192.5 - 0.03, 15 - 0.03), (192.5 + O, 15 + O)) == [False, False]
 
 
 def test_at_names_operations_faces_or_the_outline():
@@ -265,7 +254,7 @@ def test_a_sharp_cutout_gets_dog_bones_in_its_corners():
     lobe = corner_relief((0.0, 0.0), (1.0, 0.0), (0.0, 1.0), 6.0, 0.1).geometry.difference(
         shapely_box(0, 0, 100, 100)).area
     assert relief.shape.area == pytest.approx(4 * lobe)
-    assert _has(panel, (20 - 0.03, 20 - 0.03), (19, 19)) == [False, True]
+    assert has_material(panel, (20 - 0.03, 20 - 0.03), (19, 19)) == [False, True]
 
 
 def test_dogbones_errors():
@@ -328,9 +317,9 @@ def test_a_half_lap_has_corner_dog_bones_by_default():
     with g:
         long.join(cross, using=half_lap(toward=g.top))
     # long is notched from the top, 192.5 to 207.5 above z = 15; cross from below, 292.5 to 307.5 under it
-    assert _has(long, (192.5 + O, 15 + O), (192.5 - 0.6, 15 - 0.6), (200, 14)) == [False, True, True]
-    assert _has(long, (207.5 - O, 15 + O), (192.4, 20)) == [False, True]
-    assert _has(cross, (292.5 + O, 15 - O), (307.5 - O, 15 - O), (300, 16)) == [False, False, True]
+    assert has_material(long, (192.5 + O, 15 + O), (192.5 - 0.6, 15 - 0.6), (200, 14)) == [False, True, True]
+    assert has_material(long, (207.5 - O, 15 + O), (192.4, 20)) == [False, True]
+    assert has_material(cross, (292.5 + O, 15 - O), (307.5 - O, 15 - O), (300, 16)) == [False, False, True]
     notch = long.op("lap_cross").op
     assert isinstance(notch, Cut)
     lobe = corner_relief((0.0, 0.0), (1.0, 0.0), (0.0, 1.0), 6.0, 0.1).geometry.difference(
@@ -343,13 +332,13 @@ def test_hidden_dog_bones_bulge_past_the_floor_and_none_leave_it_square():
     with g:
         long.join(cross, using=half_lap(toward=g.top, dogbones="hidden"))
     # tangent to the notch's sides, centred on its floor, reaching R below it
-    assert _has(long, (192.5 + R, 15 - R + 0.05), (192.5 + R, 15 - R - 0.05), (192.4, 15.5)) == [False, True, True]
-    assert _has(long, (200, 14.9)) == [True]               # between the two
+    assert has_material(long, (192.5 + R, 15 - R + 0.05), (192.5 + R, 15 - R - 0.05), (192.4, 15.5)) == [False, True, True]
+    assert has_material(long, (200, 14.9)) == [True]               # between the two
     registry.reset()
     g, cross, long = _grid()
     with g:
         long.join(cross, using=half_lap(toward=g.top, dogbones=None))
-    assert _has(long, (192.6, 15.1), (192.4, 15.1), (192.6, 14.9)) == [False, True, True]
+    assert has_material(long, (192.6, 15.1), (192.4, 15.1), (192.6, 14.9)) == [False, True, True]
 
 
 def test_half_lap_dog_bone_errors():
@@ -361,9 +350,9 @@ def test_half_lap_dog_bone_errors():
             long.join(cross, using=half_lap(toward=g.top, at=g.bottom + 2, dogbones="hidden"))
     assert long.ops == [] and cross.ops == []
     with pytest.raises(LangError, match="dogbones"):
-        half_lap(toward=frame.direction("top"), dogbones="square")  # type: ignore[arg-type]
+        half_lap(toward=world_frame().direction("top"), dogbones="square")  # type: ignore[arg-type]
     with pytest.raises(LangError, match="tool must be positive"):
-        half_lap(toward=frame.direction("top"), tool=0)
+        half_lap(toward=world_frame().direction("top"), tool=0)
 
 
 # -- the example --------------------------------------------------------------------------------------

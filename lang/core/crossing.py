@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 from shapely.geometry import box as shapely_box
 
 from .directions import AXES, Axis
+from .geometry import parts_of
 
 if TYPE_CHECKING:
     from .part import Board
@@ -44,8 +45,8 @@ def _spans(part: Board, band_axis: Axis, band: Span, axis: Axis) -> list[Span]:
     inside = part.outline.geometry.intersection(shapely_box(lo[u], lo[v], hi[u], hi[v]))
     i = 0 if axis == u else 1
     spans: list[Span] = []
-    for g in getattr(inside, "geoms", [inside]):
-        if g.is_empty or g.area <= 1e-9:
+    for g in parts_of(inside):
+        if g.area <= 1e-9:
             continue
         b = g.bounds
         spans.append((float(b[i]), float(b[i + 2])))

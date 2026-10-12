@@ -7,10 +7,9 @@ face's axes, or fails when the face lies in another plane. A circle has no
 orientation, and `polygon(points)` is the raw escape hatch whose u and v are
 the face's axes in x, y, z order.
 
-Anchors of a shape are named in the 2D sense: `left`/`right` along u,
-`bottom`/`top` along v, `center`, and corners such as `bottom.left`. When a
-shape is placed on a face of a part, the face maps world direction names
-to u and v.
+A shape is placed on a face with an `Anchor`: which point of its bounding
+box (a corner, the middle of an edge, the centre) goes onto the face's
+point; the face maps the direction names it was given to u and v.
 """
 from __future__ import annotations
 
@@ -31,8 +30,10 @@ from .errors import LangError
 Ring = list[tuple[float, float]]
 #: The two world axes a shape's u and v are bound to, or None for a raw shape.
 Axes = tuple[Axis, Axis] | None
-_ANCHOR_U: dict[str, float] = {"left": 0.0, "right": 1.0}
-_ANCHOR_V: dict[str, float] = {"bottom": 0.0, "top": 1.0}
+#: A raw shape's edges (it has no plane until it is placed): left and right
+#: along u, bottom and top along v, each with whether it is the high end.
+_RAW_EDGES: dict[str, tuple[int, bool]] = {"left": (0, False), "right": (0, True),
+                                           "bottom": (1, False), "top": (1, True)}
 
 
 @dataclass(frozen=True)
@@ -43,32 +44,6 @@ class Anchor:
     fv: float
     names_u: bool
     names_v: bool
-
-
-def parse_anchor(name: str, u_names: dict[str, float] = _ANCHOR_U,
-                 v_names: dict[str, float] = _ANCHOR_V) -> Anchor:
-    """Parses `"center"`, `"left"`, `"top"`, `"bottom.left"` and the like.
-    The dictionaries map edge names to 0 or 1 on their axis, so a face can
-    pass world direction names instead of the 2D defaults."""
-    if name == "center":
-        return Anchor(0.5, 0.5, False, False)
-    fu, fv = 0.5, 0.5
-    names_u = names_v = False
-    for part in name.split("."):
-        if part in u_names:
-            if names_u:
-                raise LangError(f"Anchor {name!r} names two edges on the same axis.")
-            fu, names_u = u_names[part], True
-        elif part in v_names:
-            if names_v:
-                raise LangError(f"Anchor {name!r} names two edges on the same axis.")
-            fv, names_v = v_names[part], True
-        else:
-            raise LangError(
-                f"Anchor {name!r}: {part!r} is not an edge of this face; "
-                f"expected {', '.join(list(u_names) + list(v_names))} or center."
-            )
-    return Anchor(fu, fv, names_u, names_v)
 
 
 class Shape:
@@ -137,27 +112,49 @@ class Shape:
         """Outward offset (negative inward), with sharp corners kept."""
         return self._derived(self.geometry.buffer(distance, join_style="mitre"))
 
-    def clip(self, corner: str, **sizes: float) -> Shape:
-        """Cuts a corner off along a diagonal. `corner` names a corner in the
-        2D sense (`"top.right"`) and `sizes` the leg lengths along the two
-        edges it names, keyed by those edge names: `.clip("top.right", top=380,
-        right=120)` removes a triangle whose legs run 380 along the top edge
-        and 120 down the right edge."""
-        anchor = parse_anchor(corner)
-        if not (anchor.names_u and anchor.names_v):
-            raise LangError(f"clip: {corner!r} is not a corner.")
-        u_edge = next(n for n in corner.split(".") if n in _ANCHOR_U)
-        v_edge = next(n for n in corner.split(".") if n in _ANCHOR_V)
-        try:
-            along_u = sizes[v_edge]   # the leg along the top/bottom edge runs in u
-            along_v = sizes[u_edge]   # the leg along the left/right edge runs in v
-        except KeyError as missing:
-            raise LangError(f"clip: give the leg length along {missing.args[0]!r}.") from None
-        cx, cy = self.anchor_point(anchor)
-        su = -1 if anchor.fu > 0.5 else 1
-        sv = -1 if anchor.fv > 0.5 else 1
+    def clip(self, *, front: float | None = None, back: float | None = None, left: float | None = None,
+             right: float | None = None, top: float | None = None, bottom: float | None = None) -> Shape:
+        """Cuts a corner off along a diagonal. The corner is named by its
+        two edges, each with the length of the cut along it:
+        `rect(depth=500, height=720).clip(top=380, back=120)` takes a
+        triangle off the top back corner whose legs run 380 along the top
+        edge and 120 along the back edge. A rectangle's edges are named as
+        the frame names the plane it lies in (front and back along the
+        depth...); a raw shape (`polygon`, `circle`), which has no plane
+        until it is placed, has left and right along u, bottom and top
+        along v."""
+        named = {n: s for n, s in (("front", front), ("back", back), ("left", left), ("right", right),
+                                   ("top", top), ("bottom", bottom)) if s is not None}
+        if len(named) != 2:
+            raise LangError(f"clip: name the corner by its two edges with the cut's length along each, "
+                            f"e.g. clip(top=380, back=120); got {', '.join(named) or 'none'}.")
+        legs: dict[int, tuple[bool, float]] = {}       # per axis (0 u, 1 v): the edge's end, the leg along it
+        for name, size in named.items():
+            if size <= 0:
+                raise LangError(f"clip: {name}={size:g}; the leg must be positive.")
+            index, high = self._edge(name)
+            if index in legs:
+                raise LangError(f"clip: {', '.join(named)} lie on one axis; name two edges that meet at a corner.")
+            legs[index] = (high, size)
+        (high_u, along_v), (high_v, along_u) = legs[0], legs[1]   # the u edge runs along v, and the v edge along u
+        x0, y0, x1, y1 = self.bounds
+        cx, cy = (x1 if high_u else x0), (y1 if high_v else y0)
+        su, sv = (-1 if high_u else 1), (-1 if high_v else 1)
         triangle = Polygon([(cx, cy), (cx + su * along_u, cy), (cx, cy + sv * along_v)])
         return self._derived(self.geometry.difference(triangle))
+
+    def _edge(self, name: str) -> tuple[int, bool]:
+        """Which axis (0 u, 1 v) an edge named by direction is the end of,
+        and whether it is the high end."""
+        if self.axes is None:
+            if name not in _RAW_EDGES:
+                raise LangError(f"clip: a raw shape has no plane yet, so its edges are left, right, bottom and "
+                                f"top, not {name}.")
+            return _RAW_EDGES[name]
+        d = directions.current_frame().direction(name)
+        if d.axis not in self.axes:
+            raise LangError(f"clip: {name} is not an edge of a shape in {_plane(self.axes)}.")
+        return self.axes.index(d.axis), d.sign > 0
 
     def rounded(self, radius: float) -> Shape:
         """Rounds every corner with `radius`, convex and concave alike: as a

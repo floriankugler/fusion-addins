@@ -17,11 +17,11 @@ exports through attribute access.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Protocol
+from typing import TYPE_CHECKING, Any, Callable, ParamSpec, Protocol
 
 from . import directions
 from .box import Box
-from .directions import Axis, Direction, ExtentName, Frame
+from .directions import AXES, EXTENT_NAMES, Axis, Direction, ExtentName, Frame
 from .errors import LangError
 from .layout_types import HardwareBodyLayout, HardwareLayout, SnapshotLayout
 from .refs import Pos, Side
@@ -30,6 +30,8 @@ if TYPE_CHECKING:
     from .part import Board
 
 Check = Callable[["Scope"], list[str]]
+#: A hardware object's own `mount` keywords, which `Scope.mount` passes on.
+P = ParamSpec("P")
 
 
 class SnapshotSource(Protocol):
@@ -41,10 +43,13 @@ class SnapshotSource(Protocol):
     def to_layout(self) -> SnapshotLayout: ...
 
 
-class Mountable(Protocol):
-    """Hardware that can be mounted in a scope (see `lang.hardware`)."""
+class Mountable(Protocol[P]):
+    """Hardware that can be mounted in a scope (see `lang.hardware`). Its
+    `mount` names the parts it goes on as typed keywords, and
+    `Scope.mount` takes the same, so the type checker and the editor see
+    them: `cab.mount(hinge, door=door, carcass=left)`."""
 
-    def mount(self, scope: Scope, /, **options: Any) -> None: ...
+    def mount(self, scope: Scope, /, *args: P.args, **kwargs: P.kwargs) -> None: ...
 
 
 class Registry:
@@ -55,10 +60,13 @@ class Registry:
         self.snapshots: list[SnapshotSource] = []
 
     def reset(self) -> None:
+        """Forgets everything a build made, the world frame included: the
+        next build starts from the default frame unless it sets its own."""
         self.roots.clear()
         self.root_parts.clear()
         self.snapshots.clear()
         _stack.clear()
+        directions.set_frame(Frame())
 
     def use_snapshot(self, snapshot: SnapshotSource) -> None:
         """Records a snapshot the build reads; one entry per file and hash."""
@@ -132,7 +140,9 @@ class Scope:
             return self._box
         return self.parent.box if self.parent is not None else None
 
-    def _need_box(self, what: str) -> Box:
+    def require_box(self, what: str) -> Box:
+        """The scope's box (its own or the enclosing one's), or an error
+        naming `what` needed it."""
         box = self.box
         if box is None:
             raise LangError(f"{what}: this scope has no box.", self.path)
@@ -141,7 +151,7 @@ class Scope:
     # -- the box's sides and extents -------------------------------------------------
 
     def side(self, direction: str) -> Side:
-        return self._need_box(direction).side(direction)
+        return self.require_box(direction).side(direction)
 
     @property
     def front(self) -> Side:
@@ -168,7 +178,7 @@ class Scope:
         return self.side("bottom")
 
     def extent(self, name: ExtentName) -> float:
-        return self._need_box("extent").extent(name)
+        return self.require_box("extent").extent(name)
 
     @property
     def width(self) -> float:
@@ -183,17 +193,22 @@ class Scope:
         return self.extent("height")
 
     def center(self, name: ExtentName) -> Pos:
-        return self._need_box("center").center(name)
+        return self.require_box("center").center(name)
 
     @property
     def interior(self) -> Box:
         """The box inside the parts placed on its sides: for each side, the
-        inner face of a board lying on it, else the side itself."""
-        b = self._need_box("interior")
+        inner face of a board lying on it and covering the side's middle
+        (a carcass side, a bottom between the sides, a back), else the side
+        itself. A small part on a side, such as a foot or a cleat in a
+        corner, does not count."""
+        b = self.require_box("interior")
         inner = b
         for part in self.parts.values():
             pb = part.box()
             t = part.t_axis
+            if not all(pb.lo[a] - 1e-9 <= (b.lo[a] + b.hi[a]) / 2 <= pb.hi[a] + 1e-9 for a in AXES if a != t):
+                continue
             if abs(pb.lo[t] - b.lo[t]) < 1e-9 and pb.hi[t] < b.hi[t]:
                 inner = inner.with_side(self.frame.direction_of(t, -1), max(inner.lo[t], pb.hi[t]))
             elif abs(pb.hi[t] - b.hi[t]) < 1e-9 and pb.lo[t] > b.lo[t]:
@@ -271,8 +286,17 @@ class Scope:
     # -- API -------------------------------------------------------------------------------------
 
     def export(self, name: str, value: object) -> Scope:
+        """Publishes a value for other modules, read as `module.<name>`. The
+        name must be free: not a part's or child scope's, not a direction or
+        alias (`cab.top` is the box's side), not an attribute of a scope
+        (`width`, `interior`, `mount`...), each of which would hide it."""
         if name in self.parts or name in self.children:
             raise LangError(f"export {name!r} collides with a part or scope name.", self.path)
+        if self.frame.is_direction(name) or name in EXTENT_NAMES:
+            raise LangError(f"export {name!r}: cab.{name} is the box's {name}, which would hide it; "
+                            "choose another name, e.g. worktop.", self.path)
+        if name.startswith("_") or hasattr(Scope, name) or name in self.__dict__:
+            raise LangError(f"export {name!r}: a scope's {name} would hide it; choose another name.", self.path)
         self.exports[name] = value
         return self
 
@@ -280,11 +304,11 @@ class Scope:
         self.checks.extend(checks)
         return self
 
-    def mount(self, hardware: Mountable, **options: object) -> Scope:
+    def mount(self, hardware: Mountable[P], /, *args: P.args, **kwargs: P.kwargs) -> Scope:
         """Mounts hardware in this scope: `drawer.mount(slide, sides=(left,
         right), front=face.back)`. The hardware decides what that means;
-        the options are its own."""
-        hardware.mount(self, **options)
+        the keywords are its own `mount`'s, checked by the type checker."""
+        hardware.mount(self, *args, **kwargs)
         return self
 
     def run_checks(self) -> list[str]:

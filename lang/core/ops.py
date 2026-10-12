@@ -2,7 +2,9 @@
 
 Positions are in the part's (u, v) frame, the frame of its outline. `face`
 names the face the operation is made from, by world direction. Depths are
-resolved to millimetres from the face, with the original spec kept.
+resolved to millimetres from the face; `depth_spec` keeps how the build
+file gave it (`"through"`, `"to(outer, -3)"`, `"10"`), for a reader of the
+layout file only: no consumer interprets it.
 """
 from __future__ import annotations
 

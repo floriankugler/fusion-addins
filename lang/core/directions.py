@@ -50,7 +50,10 @@ def _flip(code: str) -> str:
 
 @dataclass(frozen=True)
 class Direction:
-    name: str
+    """A world axis and sign with the name a frame gives it. Two directions
+    are equal when they point the same way, whatever frames name them:
+    a module's `front` and the van's `right` can be one direction."""
+    name: str = field(compare=False)
     axis: Axis
     sign: int
     frame: Frame = field(compare=False, hash=False, repr=False)
@@ -139,6 +142,13 @@ class Frame:
                    left=_code(left_axis, left_sign), right=_code(left_axis, -left_sign),
                    top=up.code, bottom=_code(up.axis, -up.sign))
 
+    def cross(self, a: Direction, b: Direction) -> Direction:
+        """The direction of the cross product a x b of two perpendicular
+        directions, named by this frame: `cross(back, top)` is a
+        cabinetmaker's right in a module's frame."""
+        axis, sign = _cross(a, b)
+        return self.direction_of(axis, sign)
+
     def mirrored(self) -> Frame:
         """This frame with left and right swapped."""
         d = self._by_name
@@ -199,12 +209,20 @@ class Frame:
         return "Frame(" + ", ".join(f"{d.name}={d.code}" for d in self._by_name.values()) + ")"
 
 
-#: The world frame.
+#: The world frame. Read it through `world_frame()` from outside this
+#: module: `set_frame` rebinds the name, so a copy imported earlier would
+#: still be the old frame.
 frame = Frame()
 
 
+def world_frame() -> Frame:
+    """The world frame, as `set_frame` last set it."""
+    return frame
+
+
 def set_frame(new_frame: Frame) -> None:
-    """Replaces the world frame. Call before creating any part."""
+    """Replaces the world frame. Call before creating any part; a new build
+    starts from the default frame again (`registry.reset()`)."""
     global frame
     frame = new_frame
 

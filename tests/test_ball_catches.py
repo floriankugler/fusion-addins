@@ -33,21 +33,13 @@ from lang.emit.arcs import Arc2, Line2, fit
 from lang.emit.plan import Arc, FaceRef, HoleStep, plan_layout
 from lang.hardware.ball_catches import CATCH_SHAPES, BallCatch, CatchModel
 from lib import ball_catches as data
+from helpers import ply12, ply15
 
-ply15 = material("birch", t=15)
-ply12 = material("birch", t=12)
 BOX = Box.from_size(width=800, depth=1000, height=100)
 #: The placeholder boxes; the expectations below follow them, so measured
 #: numbers only change this table.
 SHAPE = CATCH_SHAPES["GN 450"]
 HOLDER, WEBS, JAW, BALL = SHAPE.holder, SHAPE.webs, SHAPE.jaw, SHAPE.ball
-
-
-@pytest.fixture(autouse=True)
-def fresh_registry():
-    registry.reset()
-    yield
-    registry.reset()
 
 
 def _floor(catch: BallCatch | None = None, edge: str | None = "left", front: bool = False,

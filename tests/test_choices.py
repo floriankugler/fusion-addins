@@ -5,17 +5,9 @@ it takes, not in a KeyError or in silence."""
 import pytest
 
 from lang import *
-from lang.core.scope import registry
+from helpers import ply15
 
-ply15 = material("birch", t=15)
 BOX = Box.from_size(width=600, depth=500, height=720)
-
-
-@pytest.fixture(autouse=True)
-def fresh_registry():
-    registry.reset()
-    yield
-    registry.reset()
 
 
 @pytest.mark.parametrize("call, message", [

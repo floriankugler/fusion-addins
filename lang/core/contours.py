@@ -35,6 +35,7 @@ from .box import Box
 from .directions import AXES, Axis
 from .errors import LangError
 from .shapes import Shape
+from .geometry import parts_of, polygons_of
 
 Point3 = tuple[float, float, float]
 Point2 = tuple[float, float]
@@ -116,7 +117,7 @@ def _area(g: BaseGeometry) -> BaseGeometry:
     """The polygonal part of a geometry (make_valid may add lines)."""
     if isinstance(g, (Polygon, MultiPolygon)):
         return g
-    parts = [p for p in getattr(g, "geoms", []) if isinstance(p, (Polygon, MultiPolygon))]
+    parts = polygons_of(g)
     return unary_union(parts) if parts else Polygon()
 
 
@@ -340,8 +341,8 @@ class ContourLimits:
         lo, hi = area.bounds[1] - 1.0, area.bounds[3] + 1.0
         hit = area.intersection(LineString([(t, lo), (t, hi)]))
         out: list[tuple[float, float]] = []
-        for g in getattr(hit, "geoms", [hit]):
-            if isinstance(g, LineString) and not g.is_empty:
+        for g in parts_of(hit):
+            if isinstance(g, LineString):
                 ys = [float(y) for _, y in g.coords]
                 out.append((min(ys), max(ys)))
         return sorted(out)
@@ -375,9 +376,7 @@ def _crossings(line: LineString, t: float) -> list[float]:
     lo, hi = line.bounds[1] - _FAR, line.bounds[3] + _FAR
     hit = line.intersection(LineString([(t, lo), (t, hi)]))
     values: set[float] = set()
-    for part in getattr(hit, "geoms", [hit]):
-        if part.is_empty:
-            continue
+    for part in parts_of(hit):
         coords = cast(Sequence[Sequence[float]], getattr(part, "coords", []))
         values.update(round(float(c[1]), 9) for c in coords)
     return sorted(values)

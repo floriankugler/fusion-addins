@@ -8,11 +8,10 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from . import directions
-from .directions import AXES, Axis, Direction, ExtentName, Frame
+from .directions import AXES, DIRECTION_NAMES, Axis, Direction, ExtentName, Frame
 from .errors import LangError
+from .layout_types import BoxDict
 from .refs import Pos, PosLike, Side, as_pos
-
-_SIDE_NAMES = ("front", "back", "left", "right", "top", "bottom")
 #: Where a split starts: it runs from this side toward the opposite one.
 _SPLIT_FROM: dict[ExtentName, str] = {"height": "bottom", "width": "left", "depth": "front"}
 
@@ -170,7 +169,7 @@ class Box:
         """A copy with sides moved inward by the given amounts."""
         lo, hi = dict(self.lo), dict(self.hi)
         amounts = (front, back, left, right, top, bottom)
-        for name, amount in zip(_SIDE_NAMES, amounts):
+        for name, amount in zip(DIRECTION_NAMES, amounts):
             if amount == 0.0:
                 continue
             d = self.frame.direction(name)
@@ -194,7 +193,7 @@ class Box:
         `bay.with_sides(front=drawer_face.back)`."""
         box = self
         values = (front, back, left, right, top, bottom)
-        for name, value in zip(_SIDE_NAMES, values):
+        for name, value in zip(DIRECTION_NAMES, values):
             if value is None:
                 continue
             d = self.frame.direction(name)
@@ -217,11 +216,14 @@ class Box:
                    for a in AXES)
 
     def intersection(self, other: Box) -> Box:
-        """The common region; only meaningful when the boxes overlap."""
+        """The common region; an error when the boxes do not overlap or
+        touch."""
+        if any(max(self.lo[a], other.lo[a]) > min(self.hi[a], other.hi[a]) + 1e-9 for a in AXES):
+            raise LangError(f"{self!r} and {other!r} have no region in common.")
         return Box({a: max(self.lo[a], other.lo[a]) for a in AXES},
                    {a: min(self.hi[a], other.hi[a]) for a in AXES}, self.frame)
 
-    def as_dict(self) -> dict[str, list[float]]:
+    def as_dict(self) -> BoxDict:
         return {"min": [self.lo[a] for a in AXES], "max": [self.hi[a] for a in AXES]}
 
     def __repr__(self) -> str:

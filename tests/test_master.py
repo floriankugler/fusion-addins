@@ -8,19 +8,9 @@ from shapely.geometry import Point
 from lang import *
 from lang.core.layout import build_layout
 from lang.core.refs import as_pos
-from lang.core.scope import registry
+from helpers import ply12, ply15
 
 FIXTURE = Path(__file__).resolve().parents[1] / "examples" / "van_snapshot.json"
-
-ply15 = material("birch", t=15)
-ply12 = material("birch", t=12)
-
-
-@pytest.fixture(autouse=True)
-def fresh_registry():
-    registry.reset()
-    yield
-    registry.reset()
 
 
 @pytest.fixture
@@ -49,7 +39,7 @@ def test_planes_are_positions(van: Master):
 def test_a_tilted_plane_is_an_error_when_used(van: Master):
     roof = van.plane("Dach geneigt")         # binding it is fine
     with pytest.raises(LangError, match="tilted"):
-        board("x", ply15).on(roof, toward=frame.direction("top")).box()
+        board("x", ply15).on(roof, toward=world_frame().direction("top")).box()
 
 
 def test_boxes_and_parameters(van: Master):
@@ -143,7 +133,7 @@ def test_a_panel_takes_the_outline_in_its_own_plane(van: Master):
 
 def test_an_open_contour_in_the_board_plane_is_an_edge(van: Master):
     edge = van.contour("Bett.Kante")                   # a line along x at y = -890, z = 900
-    shelf = board("shelf", ply15).on(Pos("z", 1000), toward=frame.direction("bottom")).between(
+    shelf = board("shelf", ply15).on(Pos("z", 1000), toward=world_frame().direction("bottom")).between(
         edge.gap(10), Pos("y", -500), Pos("x", 2400), Pos("x", 3000))
     box = shelf.box()
     assert (box.lo["y"], box.hi["y"]) == pytest.approx((-880, -500))
@@ -221,3 +211,25 @@ def test_the_van_example_builds_without_problems(tmp_path: Path):
     assert laps == 48
     assert layout["problems"] == []
     assert layout.get("snapshots", [])[0]["hash"] == master(FIXTURE).hash
+
+
+def test_a_helper_reads_the_master_relative_to_its_caller(tmp_path: Path):
+    """A function in a library file reads the snapshot for the build files
+    that call it: relative to the file it names, not its own."""
+    van = master("van_snapshot.json", relative_to=FIXTURE.parent / "van.py")
+    assert van.path == FIXTURE
+    with pytest.raises(LangError, match="no snapshot at"):
+        master("van_snapshot.json", relative_to=tmp_path / "build.py")
+
+
+def test_a_snapshot_that_is_not_json_is_a_lang_error(tmp_path: Path):
+    broken = tmp_path / "snapshot.json"
+    broken.write_text("{ not json")
+    with pytest.raises(LangError, match="snapshot.json is not a snapshot"):
+        master(broken)
+
+
+def test_planes_compute_like_positions(van: Master):
+    level = van.plane("Bodenniveau")
+    assert isinstance(level + 10, Pos) and (level - 10).value == level.value - 10
+    assert ((level + level) / 2) == level.position and level - level == 0

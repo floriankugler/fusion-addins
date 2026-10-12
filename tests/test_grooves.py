@@ -11,12 +11,10 @@ into the sides.
 """
 import math
 import runpy
-import warnings
 from pathlib import Path
 from typing import Any
 
 import pytest
-import trimesh
 from shapely.geometry import Point
 
 from lang import *
@@ -24,20 +22,11 @@ from lang.core.layout import build_layout
 from lang.core.ops import Cut, Pocket
 from lang.core.scope import registry
 from lang.emit.plan import PocketStep, plan_layout
-from lang.preview.mesh import mesh_part
+from helpers import has_material, overlap, part_meshes, ply12, ply9
 
-ply12 = material("birch", t=12)
-ply9 = material("birch", t=9)
 EXAMPLES = Path(__file__).resolve().parent.parent / "examples"
 O = 6 / (2 * math.sqrt(2))          # a corner relief's centre, along each edge from the corner
 R = 3.05                            # its radius: the 6 mm tool plus 0.1, halved
-
-
-@pytest.fixture(autouse=True)
-def fresh_registry():
-    registry.reset()
-    yield
-    registry.reset()
 
 
 def _box(floor_to: str = "k") -> tuple[Scope, dict[str, Board]]:
@@ -64,26 +53,10 @@ def _groove(part: Board) -> Pocket:
     return op
 
 
-def _has(part: Board, *points: tuple[float, float]) -> list[bool]:
-    return [bool(part.outline.geometry.contains(Point(p))) for p in points]
-
-
-def _overlap(a: Any, b: Any) -> float:
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", RuntimeWarning)       # trimesh on a result without volume
-        common = trimesh.boolean.intersection([a, b], engine="manifold")
-        return float(common.volume) if len(common.faces) else 0.0
-
 
 def _problems() -> list[str]:
     """The layout's problems: the checks' and the notes parts left."""
-    layout = build_layout()
-    return layout["problems"] + [p for m in layout["modules"] for p in m["problems"]]
-
-
-def _meshes() -> dict[str, Any]:
-    layout = build_layout()
-    return {p["path"]: mesh_part(p, layout["frame"]) for m in layout["modules"] for p in m["parts"]}
+    return build_layout()["problems"]
 
 
 # -- the panel ---------------------------------------------------------------------------------
@@ -97,7 +70,7 @@ def test_the_floor_goes_into_all_four_with_its_corners_chamfered():
     assert floor.box().lo["x"] == 12 and floor.box().hi["y"] == 288       # the box stays where it was placed
     # 3 mm along both edges off each corner, inside the grooves
     assert floor.outline.area == pytest.approx(186 * 286 - 4 * 4.5)
-    assert _has(floor, (191.6, 291.6), (191.4, 291.4), (7.1, 9.8), (7.1, 10.0)) == [False, True, False, True]
+    assert has_material(floor, (191.6, 291.6), (191.4, 291.4), (7.1, 9.8), (7.1, 10.0)) == [False, True, False, True]
     assert floor.ops == []                                                 # an outline, no operation
 
 
@@ -115,7 +88,7 @@ def test_a_chamfer_may_reach_the_boards_faces_but_not_past_them():
     with m:
         p["floor"].join(p["l"], p["r"], p["f"], p["k"], using=groove(4, chamfer=8))
     # the chamfer's line runs through the corner where the boards' faces meet
-    assert _has(p["floor"], (11.9, 12.0), (12.1, 12.1)) == [False, True]
+    assert has_material(p["floor"], (11.9, 12.0), (12.1, 12.1)) == [False, True]
     with pytest.raises(LangError, match="a 10.5 mm chamfer reaches out of a 5 mm groove .* at most twice the depth"):
         groove(5, chamfer=10.5)
 
@@ -229,7 +202,7 @@ def test_a_groove_running_out_where_no_board_covers_it_is_noted():
     assert problems == [f"box.{side}: the groove for box.floor runs out of it at its back end, where it shows "
                         "unless something covers it." for side in ("left", "right")]
     # its corners at the front are chamfered, those at the back are not
-    assert _has(p["floor"], (7.1, 7.1), (199.9, 7.1)) == [False, True]
+    assert has_material(p["floor"], (7.1, 7.1), (199.9, 7.1)) == [False, True]
 
 
 def test_dados_for_shelves_from_the_side():
@@ -317,9 +290,9 @@ def test_the_floor_fills_its_grooves_and_overlaps_no_board():
     m, p = _box()
     with m:
         p["floor"].join(p["l"], p["r"], p["f"], p["k"], using=groove(5, clearance=(0.5, 0.5)))
-    meshes = _meshes()
+    meshes = part_meshes()
     for name in ("left", "right", "front", "back"):
-        assert _overlap(meshes["box.floor"], meshes[f"box.{name}"]) < 1e-6, name
+        assert overlap(meshes["box.floor"], meshes[f"box.{name}"]) < 1e-6, name
     assert meshes["box.floor"].volume == pytest.approx((186 * 286 - 4 * 4.5) * 9)
     plan = plan_layout(build_layout())
     assert plan.problems == []
@@ -328,15 +301,15 @@ def test_the_floor_fills_its_grooves_and_overlaps_no_board():
     assert isinstance(step, PocketStep) and step.depth == 5.5
 
 
-def test_without_the_grooves_the_floor_would_overlap():
+def test_without_the_grooves_the_floor_wouldoverlap():
     m, p = _box()
     with m:
         p["floor"].join(p["l"], p["r"], p["f"], p["k"], using=groove(5))
     for part in (p["l"], p["f"]):
         part.ops.clear()
-    meshes = _meshes()
-    assert _overlap(meshes["box.floor"], meshes["box.left"]) == pytest.approx((186 * 5 - 2 * 4.5) * 9, rel=1e-3)
-    assert _overlap(meshes["box.floor"], meshes["box.front"]) == pytest.approx(276 * 5 * 9, rel=1e-3)
+    meshes = part_meshes()
+    assert overlap(meshes["box.floor"], meshes["box.left"]) == pytest.approx((186 * 5 - 2 * 4.5) * 9, rel=1e-3)
+    assert overlap(meshes["box.floor"], meshes["box.front"]) == pytest.approx(276 * 5 * 9, rel=1e-3)
 
 
 def _cabinet(tmp_path: Path, fingers: int, dogbones: str | None = None) -> None:
@@ -361,11 +334,11 @@ def test_in_the_drawer_cabinet_nothing_overlaps_and_nothing_shows(tmp_path: Path
     out where it would show."""
     _cabinet(tmp_path, fingers, dogbones)
     assert _problems() == []
-    meshes = _meshes()
+    meshes = part_meshes()
     for i in (1, 2, 3):
         base = f"drawercab.drawer{i}"
         for name in ("left", "right", "front", "back"):
-            assert _overlap(meshes[f"{base}.floor"], meshes[f"{base}.{name}"]) < 1e-6, (base, name)
+            assert overlap(meshes[f"{base}.floor"], meshes[f"{base}.{name}"]) < 1e-6, (base, name)
 
 
 def test_hidden_dog_bones_where_the_floor_lies_across_the_end_of_a_finger(tmp_path: Path):

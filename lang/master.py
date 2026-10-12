@@ -18,7 +18,9 @@ Fusion:
 
 A missing name, a name the master uses twice and a sketch that is not one
 chain of curves are errors when the name is used. A relative path is taken
-from the directory of the file that calls `master()`. The layout records
+from the directory of the file that calls `master()`, or of the file given
+as `relative_to=` (a helper that reads the master for its callers passes
+their `__file__`). The layout records
 the snapshot's hash and carries its boxes and contours for the preview.
 """
 from __future__ import annotations
@@ -27,24 +29,23 @@ import difflib
 import inspect
 import json
 from pathlib import Path
-from typing import overload
 
 from .core.box import Box
 from .core.contours import Contour
 from .core.directions import AXES, Axis
 from .core.errors import LangError
 from .core.layout_types import SnapshotLayout
-from .core.refs import Affine, HasPosition, Pos
+from .core.refs import Pos, PositionArithmetic
 from .core.scope import registry
 from .core.snapshot_types import SNAPSHOT_VERSION, SnapshotDict
 
 _KIND_WORDS = {"planes": "plane", "contours": "contour", "boxes": "box", "parameters": "parameter"}
 
 
-class Plane:
+class Plane(PositionArithmetic):
     """A construction plane of the master. When it is axis aligned it is a
     position on its axis (`position`), so it works wherever a position
-    does."""
+    does, the position algebra included."""
 
     def __init__(self, name: str, origin: list[float], normal: list[float]):
         self.name = name
@@ -70,33 +71,6 @@ class Plane:
     @property
     def value(self) -> float:
         return self.position.value
-
-    @overload
-    def __add__(self, other: float) -> Pos: ...
-    @overload
-    def __add__(self, other: Pos | Affine | HasPosition) -> Pos | Affine: ...
-
-    def __add__(self, other: float | Pos | Affine | HasPosition) -> Pos | Affine:
-        return self.position + other
-
-    def __radd__(self, other: float) -> Pos:
-        return self.position + other
-
-    @overload
-    def __sub__(self, other: float) -> Pos: ...
-    @overload
-    def __sub__(self, other: Pos | HasPosition) -> float: ...
-
-    def __sub__(self, other: float | Pos | HasPosition) -> Pos | float:
-        return self.position - other
-
-    def __mul__(self, other: float) -> Affine:
-        return self.position * other
-
-    __rmul__ = __mul__
-
-    def __truediv__(self, other: float) -> Affine:
-        return self.position / other
 
     def __repr__(self) -> str:
         axis = self.axis
@@ -184,18 +158,25 @@ class Master:
         }
 
 
-def master(path: str | Path) -> Master:
+def master(path: str | Path, relative_to: str | Path | None = None) -> Master:
     """Reads a snapshot of the master document. A relative path is taken
-    from the directory of the calling file."""
+    from the directory of `relative_to` (a file), by default of the file
+    that calls `master()`."""
     p = Path(path)
     if not p.is_absolute():
-        frame = inspect.currentframe()
-        caller = frame.f_back if frame is not None else None
-        file = caller.f_globals.get("__file__") if caller is not None else None
+        file: object = relative_to
+        if file is None:
+            frame = inspect.currentframe()
+            caller = frame.f_back if frame is not None else None
+            file = caller.f_globals.get("__file__") if caller is not None else None
         p = (Path(str(file)).resolve().parent if file else Path.cwd()) / p
     p = p.resolve()
     if not p.is_file():
         raise LangError(f"no snapshot at {p}; take one with the Snapshot button in Fusion.")
-    found = Master(p, json.loads(p.read_text(encoding="utf-8")))
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as error:
+        raise LangError(f"{p.name} is not a snapshot (not valid JSON: {error}); take a new one.") from None
+    found = Master(p, data)
     registry.use_snapshot(found)
     return found

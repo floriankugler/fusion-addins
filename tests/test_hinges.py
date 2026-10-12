@@ -27,18 +27,9 @@ from lang.core.scope import registry
 from lang.emit.plan import FaceRef, HoleStep, plan_layout
 from lang.hardware.hinges import HINGE_SHAPES, ConcealedHinge, HingeModel
 from lib import concealed_hinges
+from helpers import ply12, ply15, ply9
 
-ply15 = material("birch", t=15)
-ply12 = material("birch", t=12)
-ply9 = material("birch", t=9)
 BOX = Box.from_size(width=500, depth=350, height=700)
-
-
-@pytest.fixture(autouse=True)
-def fresh_registry():
-    registry.reset()
-    yield
-    registry.reset()
 
 
 def _holes(part: Board) -> list[tuple[str | None, str, float, float, float, float]]:

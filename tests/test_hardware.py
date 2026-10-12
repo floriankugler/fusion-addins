@@ -5,25 +5,13 @@ import pytest
 from lang import *
 from lang.core.layout import build_layout
 from lang.core.ops import Cut, Hole
-from lang.core.layout_types import HardwareBodyLayout, HardwareLayout
+from lang.core.layout_types import HardwareLayout
 from lang.core.scope import registry
 from lang.core.checks import _has_material  # type: ignore[reportPrivateUsage]
 from lang.emit.plan import HoleStep, plan_layout
 from lang.hardware.slides import BOTTOM_HEIGHT, BOX_MACHINING, INNER_FACE_OFFSET, DrawerSlide, HookHole
 from lib.drawer_slides import DYNAPRO_40, DYNAPRO_50_70, MOVENTO_760H, MOVENTO_766H, SlideModel
-
-
-@pytest.fixture(autouse=True)
-def fresh_registry():
-    registry.reset()
-    yield
-    registry.reset()
-
-
-ply15 = material("birch", t=15)
-ply12 = material("birch", t=12)
-ply9 = material("birch", t=9)
-ply18 = material("birch", t=18)
+from helpers import bounds, ply12, ply15, ply18, ply9
 
 
 def test_slide_dictates_the_drawer_box():
@@ -105,7 +93,6 @@ def _drawer(slide: DrawerSlide, machine: bool = True, into: str = "lrf",
         d.mount(slide, sides=(left, right), front=face.back)
     return d, {"carcass_left": left, "carcass_right": right, "face": face, "left": l, "right": r,
                "front": f, "back": k, "floor": floor}
-
 
 
 @pytest.mark.parametrize("model, hook, thick, into", [
@@ -236,11 +223,6 @@ def test_mount_predrills_the_carcass_sides():
     assert layout["modules"][0]["hardware"] == [runners]
 
 
-def _bounds(body: HardwareBodyLayout) -> tuple[list[float], list[float]]:
-    boxes = body["boxes"]
-    return ([min(b["min"][i] for b in boxes) for i in range(3)], [max(b["max"][i] for b in boxes) for i in range(3)])
-
-
 def test_runners_lie_against_the_carcass_sides():
     """The module is in the van's terms (no front=), so the drawer's left,
     seen standing in front of it, is the module's right side, at y 585..600.
@@ -258,8 +240,8 @@ def test_runners_lie_against_the_carcass_sides():
         d.mount(slide, sides=(left, right), front=face.back)
     (runners,) = d.hardware
     by_name = {b["name"]: b for b in runners["bodies"]}
-    assert _bounds(by_name["left"]) == ([15, 585 - 90, 1.1], [15 + 451.5, 585, 49])
-    assert _bounds(by_name["right"]) == ([15, 15, 1.1], [15 + 451.5, 15 + 90, 49])
+    assert bounds(by_name["left"]) == ([15, 585 - 90, 1.1], [15 + 451.5, 585, 49])
+    assert bounds(by_name["right"]) == ([15, 15, 1.1], [15 + 451.5, 15 + 90, 49])
     flange = by_name["left"]["boxes"][0]
     assert flange == {"min": [19, 582.5, 1.1], "max": [466.5, 585, 49]}
     # flange, base, drawer member, coupling, hook: the member's top carries
@@ -346,4 +328,4 @@ def test_runners_are_named_by_the_drawers_own_sides_whatever_the_frame():
     plain, cabinet = _runners(front=False), _runners(front=True)
     assert plain["bodies"] == cabinet["bodies"]
     left = next(b for b in plain["bodies"] if b["name"] == "left")
-    assert _bounds(left)[1][1] == 585                       # the drawer's left is +y, facing +x
+    assert bounds(left)[1][1] == 585                       # the drawer's left is +y, facing +x

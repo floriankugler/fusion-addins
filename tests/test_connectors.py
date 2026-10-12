@@ -7,37 +7,11 @@ from lang import *
 from lang.core.contact import contacts
 from lang.core.layout import build_layout
 from lang.core.ops import Hole, Pocket, VGroove
-from lang.core.scope import registry
 from lang.preview.mesh import mesh_part
 from lang.joints.connectors import CabineoInsert, CabineoModel, ClamexModel, DominoSize
 from lib import connector_data
+from helpers import carcass, ply15
 
-ply15 = material("birch", t=15)
-ply9 = material("birch", t=9)
-
-
-@pytest.fixture(autouse=True)
-def fresh_registry():
-    registry.reset()
-    yield
-    registry.reset()
-
-
-def _carcass(toekick: bool = False) -> tuple[Scope, dict[str, Board]]:
-    """Sides on the left and right (y), bottom and top between them, a 9 mm
-    back between all four, in a 600 wide, 500 deep, 720 high box: depth
-    runs along x (front at 0), width along y, height along z."""
-    with module("cab", Box.from_size(width=600, depth=500, height=720)) as cab:
-        left = board("left", ply15).on(cab.left)
-        right = board("right", ply15).on(cab.right)
-        if toekick:
-            for side in (left, right):
-                side.cut(rect(depth=60, height=100), at=side.outer.bottom.front)
-        bottom = board("bottom", ply15).on(cab.bottom).between(left, right)
-        top = board("top", ply15).on(cab.top).between(left, right)
-        back = board("back", ply9).on(cab.back).between(left, right, bottom, top)
-        check(no_interference)
-    return cab, {"left": left, "right": right, "bottom": bottom, "top": top, "back": back}
 
 
 def _ops(part: Board, prefix: str) -> list[Pocket | Hole]:
@@ -55,7 +29,7 @@ def _holes(part: Board, prefix: str) -> list[Hole]:
 # -- contacts ---------------------------------------------------------------------------------
 
 def test_a_board_between_two_others_meets_both_edge_on():
-    _, p = _carcass()
+    _, p = carcass()
     (c,) = contacts(p["bottom"], p["left"])
     assert (c.axis, c.lo, c.hi, c.across, c.across_lo, c.across_hi) == ("x", 0, 500, "z", 0, 15)
     assert c.face.name == "right" and c.end.name == "left" and c.plane == 15
@@ -68,13 +42,13 @@ def test_a_board_between_two_others_meets_both_edge_on():
 
 
 def test_a_contact_covers_only_where_both_boards_have_material():
-    _, p = _carcass(toekick=True)
+    _, p = carcass(toekick=True)
     (c,) = contacts(p["bottom"], p["left"])                  # the toe kick notch takes the front 60
     assert (c.lo, c.hi) == (60, 500)
 
 
 def test_a_notched_end_meets_in_two_places():
-    cab, p = _carcass()
+    cab, p = carcass()
     with cab:
         divider = board("divider", ply15).center(Pos("y", 300)).between(p["bottom"], p["top"])
         divider.cut(rect(depth=100, height=50), at=divider.left.bottom)
@@ -85,7 +59,7 @@ def test_a_notched_end_meets_in_two_places():
 # -- Domino -------------------------------------------------------------------------------------
 
 def test_dominos_are_slots_in_the_face_and_marks_on_the_edge_on_board():
-    cab, p = _carcass()
+    cab, p = carcass()
     with cab:
         p["bottom"].join(p["left"], p["right"], using=domino("4x20", count=3))
     slots = _pockets(p["left"], "domino_bottom_")
@@ -107,7 +81,7 @@ def test_dominos_are_slots_in_the_face_and_marks_on_the_edge_on_board():
 
 
 def test_domino_marks_can_skip_the_outer_ones_or_be_left_out():
-    cab, p = _carcass()
+    cab, p = carcass()
     with cab:
         p["bottom"].join(p["left"], using=domino("4x20", count=3, marks="middle", face=cab.top))
         p["top"].join(p["left"], using=domino("4x20", count=3, marks=None))
@@ -121,7 +95,7 @@ def test_domino_marks_can_skip_the_outer_ones_or_be_left_out():
 
 
 def test_domino_depth_fence_and_loose_slots():
-    cab, p = _carcass()
+    cab, p = carcass()
     with cab:
         with pytest.raises(LangError, match="5x30 needs a 15.5 mm deep slot.*remaining="):
             p["bottom"].join(p["left"], using=domino("5x30", count=2))
@@ -136,7 +110,7 @@ def test_domino_depth_fence_and_loose_slots():
 
 
 def test_dominos_around_a_back_panel():
-    cab, p = _carcass()
+    cab, p = carcass()
     with cab:
         p["back"].join(p["left"], p["right"], p["bottom"], p["top"], using=domino("4x20", count=2))
     for name in ("left", "right", "bottom", "top"):
@@ -164,7 +138,7 @@ def test_clamex_and_cabineo_models_match_the_data():
 # -- Cabineo ------------------------------------------------------------------------------------
 
 def test_cabineo_pockets_the_edge_on_board_and_drills_the_other():
-    cab, p = _carcass()
+    cab, p = carcass()
     with cab:
         p["bottom"].join(p["left"], using=cabineo(count=2, face=cab.bottom))
     access = _ops(p["bottom"], "cabineo_left_")
@@ -181,7 +155,7 @@ def test_cabineo_pockets_the_edge_on_board_and_drills_the_other():
 
 
 def test_a_connector_join_reads_the_same_from_either_board():
-    cab, p = _carcass()
+    cab, p = carcass()
     with cab:
         p["left"].join(p["bottom"], p["top"], using=cabineo(count=2))
     assert len(_holes(p["bottom"], "cabineo_left_")) == 6 and len(_holes(p["top"], "cabineo_left_")) == 6
@@ -190,7 +164,7 @@ def test_a_connector_join_reads_the_same_from_either_board():
 
 
 def test_cabineo_defaults_to_the_hidden_face_and_its_variants():
-    cab, p = _carcass()
+    cab, p = carcass()
     with cab:
         p["top"].show(cab.top)
         p["top"].join(p["right"], using=cabineo("8 M6", count=1, surface="flush"))
@@ -208,7 +182,7 @@ def test_cabineo_defaults_to_the_hidden_face_and_its_variants():
 
 
 def test_cabineo_needs_a_board_thicker_than_its_pocket():
-    cab, p = _carcass()
+    cab, p = carcass()
     with cab:
         with pytest.raises(LangError, match="10.5 mm deep pocket goes through this board"):
             p["back"].join(p["left"], using=cabineo(count=2))
@@ -217,7 +191,7 @@ def test_cabineo_needs_a_board_thicker_than_its_pocket():
 # -- Clamex ---------------------------------------------------------------------------------------
 
 def test_clamex_p10_slot_and_guide_holes():
-    cab, p = _carcass()
+    cab, p = carcass()
     with cab:
         p["bottom"].join(p["right"], using=clamex(count=1))
     (slot,) = _ops(p["bottom"], "clamex_right_1")
@@ -231,7 +205,7 @@ def test_clamex_p10_slot_and_guide_holes():
 
 
 def test_clamex_p14_is_a_hole():
-    cab, p = _carcass()
+    cab, p = carcass()
     with cab:
         p["top"].join(p["left"], using=clamex("P-14", at=[Pos("x", 100)], through=True))
     (access,) = _ops(p["top"], "clamex_left_1")
@@ -243,7 +217,7 @@ def test_clamex_p14_is_a_hole():
 # -- spacing and errors -----------------------------------------------------------------------------
 
 def test_spacing_and_join_errors():
-    cab, p = _carcass()
+    cab, p = carcass()
     left, right, bottom = p["left"], p["right"], p["bottom"]
     with cab:
         with pytest.raises(LangError, match="cab.right does not touch this board"):
@@ -269,7 +243,7 @@ def test_spacing_and_join_errors():
 
 
 def test_the_preview_cuts_the_marks():
-    cab, p = _carcass()
+    cab, p = carcass()
     with cab:
         p["bottom"].join(p["left"], using=domino("4x20", count=3))
     layout = build_layout()

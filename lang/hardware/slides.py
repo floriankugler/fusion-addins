@@ -45,6 +45,7 @@ from ..core.errors import LangError
 from ..core.layout_types import BoxDict, HardwareBodyLayout
 from ..core.ops import Pocket
 from ..core.refs import Pos, PosLike, Through, as_pos
+from ..core.geometry import parts_of
 
 if TYPE_CHECKING:
     from ..core.part import Board, Face
@@ -363,7 +364,7 @@ class DrawerSlide:
         self.predrill_sides(scope, sides, cast(PosLike, options["front"]))
 
     def predrill_sides(self, scope: Scope, sides: tuple[Board, Board], front: PosLike) -> None:
-        bay = scope._need_box("mount")  # type: ignore[reportPrivateUsage]
+        bay = scope.require_box("mount")
         front_pos = as_pos(front, "mount(front=)")
         back = bay.frame.direction("back")
         if front_pos.axis != back.axis:
@@ -392,7 +393,7 @@ class DrawerSlide:
         `front_pos` and the bay's bottom. A module written without front=
         (in the van's terms) or mirrored calls the drawer's right its
         left, so the drawer's right is worked out from its back and up."""
-        bay = scope._need_box("mount")  # type: ignore[reportPrivateUsage]
+        bay = scope.require_box("mount")
         frame = bay.frame
         back, up = frame.direction("back"), frame.direction("top")
         right = _cross(frame, back, up)
@@ -439,8 +440,8 @@ def _section(floor: Board, back: Board, band: tuple[float, float]) -> BaseGeomet
     i = 0 if along == u else 1
     fb = floor.box()
     pieces: list[BaseGeometry] = []
-    for g in getattr(inside, "geoms", [inside]):
-        if g.is_empty or g.area <= 1e-9:
+    for g in parts_of(inside):
+        if g.area <= 1e-9:
             continue
         corners: dict[Axis, tuple[float, float]] = {along: (float(g.bounds[i]), float(g.bounds[i + 2])),
                                                     ft: (fb.lo[ft], fb.hi[ft])}

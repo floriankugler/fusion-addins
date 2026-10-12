@@ -25,17 +25,9 @@ from lang.core.scope import registry
 from lang.emit.plan import HoleStep, plan_layout
 from lang.hardware.sliding_brackets import BRACKET_SHAPES, BracketBox, BracketModel, SlidingBracket
 from lib import sliding_brackets as data
+from helpers import ply12, ply18
 
 
-@pytest.fixture(autouse=True)
-def fresh_registry():
-    registry.reset()
-    yield
-    registry.reset()
-
-
-ply18 = material("birch", t=18)
-ply12 = material("birch", t=12)
 BOX = Box.from_size(width=600, depth=400, height=500)
 PF_L: BracketModel = "Pacofix PF-L"
 SPEC = data.PACOFIX_PF_L

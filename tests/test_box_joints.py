@@ -8,12 +8,10 @@ through a, a gets the notches. With 5 fingers and a margin of 5 on the
 0..33), 61..89, 117..145 (..150), b's at 33..61 and 89..117.
 """
 import math
-import warnings
 from collections import Counter
 from typing import Any
 
 import pytest
-import trimesh
 from shapely.geometry import Point
 
 from lang import *
@@ -21,20 +19,11 @@ from lang.core.layout import build_layout
 from lang.core.ops import Cut, EdgeOp, Pocket
 from lang.core.scope import registry
 from lang.emit.plan import Arc, Circle, FaceRef, PocketStep, plan_layout
-from lang.preview.mesh import mesh_part
+from helpers import has_material, overlap, part_meshes, ply12, ply15
 
-ply15 = material("birch", t=15)
-ply12 = material("birch", t=12)
 #: What a 3 mm radius leaves in a right-angled corner; the polygons, inscribed
 #: in the arcs, leave 0.01 more.
 SPANDREL = 9 * (1 - math.pi / 4)
-
-
-@pytest.fixture(autouse=True)
-def fresh_registry():
-    registry.reset()
-    yield
-    registry.reset()
 
 
 def _pair(a_from: float = 0.0, a_height: float = 150.0, b_at: float = 0.0) -> tuple[Scope, Board, Board]:
@@ -46,24 +35,9 @@ def _pair(a_from: float = 0.0, a_height: float = 150.0, b_at: float = 0.0) -> tu
     return m, a, b
 
 
-def _has(part: Board, *points: tuple[float, float]) -> list[bool]:
-    return [bool(part.outline.geometry.contains(Point(p))) for p in points]
-
-
 def _names(part: Board) -> list[str | None]:
     return [op.op.name if isinstance(op, EdgeOp) else getattr(op, "name", None) for op in part.ops]
 
-
-def _meshes() -> dict[str, Any]:
-    layout = build_layout()
-    return {p["path"]: mesh_part(p, layout["frame"]) for m in layout["modules"] for p in m["parts"]}
-
-
-def _overlap(a: Any, b: Any) -> float:
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", RuntimeWarning)       # trimesh on a result without volume
-        common = trimesh.boolean.intersection([a, b], engine="manifold")
-        return float(common.volume) if len(common.faces) else 0.0
 
 
 def test_a_square_joint():
@@ -71,17 +45,17 @@ def test_a_square_joint():
     with m:
         b.join(a, using=box_joint(5, margin=5, tool=0))
     # a: notches 12 deep (b's thickness) through it, where b's fingers go
-    assert _has(a, (6, 20), (6, 47), (6, 75), (6, 103), (6, 130), (12.01, 47)) == [True, False, True, False, True, True]
+    assert has_material(a, (6, 20), (6, 47), (6, 75), (6, 103), (6, 130), (12.01, 47)) == [True, False, True, False, True, True]
     assert a.outline.area == pytest.approx(200 * 150 - 2 * 12 * 28)
     # b: fingers through a's 15, flush with its outer face, and the gaps between
-    assert _has(b, (0.01, 47), (7.5, 103), (7.5, 20), (7.5, 75), (7.5, 2), (-0.01, 47)) == [
+    assert has_material(b, (0.01, 47), (7.5, 103), (7.5, 20), (7.5, 75), (7.5, 2), (-0.01, 47)) == [
         True, True, False, False, False, False]
     assert b.outline.area == pytest.approx(185 * 150 + 2 * 15 * 28)
     assert b.box().lo["y"] == 15                         # the box stays where b was placed
     assert _names(a) == ["notch_b_1", "notch_b_2"] and _names(b) == ["gap_a_1", "gap_a_2", "gap_a_3"]
     # assembled, the two fill the corner without overlapping
-    meshes = _meshes()
-    assert _overlap(meshes["pair.a"], meshes["pair.b"]) < 1e-6
+    meshes = part_meshes()
+    assert overlap(meshes["pair.a"], meshes["pair.b"]) < 1e-6
     assert meshes["pair.a"].volume + meshes["pair.b"].volume == pytest.approx(
         (200 * 150 * 15) + (185 * 150 * 12), rel=1e-9)
 
@@ -94,16 +68,16 @@ def test_clearances_and_the_fillets_the_cutter_keeps():
     notch = a.op("notch_b_1").op
     assert isinstance(notch, Cut) and notch.shape.bounds == pytest.approx((-1.0, 32.9, 12.5, 61.1))
     assert notch.shape.area == pytest.approx(13.5 * 28.2 - 2 * SPANDREL, abs=0.05)
-    assert _has(a, (6, 32.89), (6, 32.91), (12.45, 47), (12.55, 47)) == [True, False, False, True]
+    assert has_material(a, (6, 32.89), (6, 32.91), (12.45, 47), (12.55, 47)) == [True, False, False, True]
     # its bottom corners keep the cutter's radius, centred 3 inside them
-    assert _has(a, (12.4, 33.0), (11.0, 34.0), (12.4, 61.0), (11.0, 60.0)) == [True, False, True, False]
+    assert has_material(a, (12.4, 33.0), (11.0, 34.0), (12.4, 61.0), (11.0, 60.0)) == [True, False, True, False]
     # b's fingers are 0.2 narrower, the gaps' bottoms (b's seats) 0.5 deeper
     # than a is thick, with their own fillets kept
-    assert _has(b, (7.5, 33.05), (7.5, 33.15), (15.45, 75), (15.55, 75)) == [False, True, False, True]
-    assert _has(b, (15.4, 61.0), (14.0, 62.0)) == [True, False]
+    assert has_material(b, (7.5, 33.05), (7.5, 33.15), (15.45, 75), (15.55, 75)) == [False, True, False, True]
+    assert has_material(b, (15.4, 61.0), (14.0, 62.0)) == [True, False]
     # the stock grows from one radius before the first notch wall: the outer
     # gaps carve it back but keep the outer fingers' root fillets whole
-    assert _has(b, (15.4, 33.0), (10, 30.0)) == [True, False]
+    assert has_material(b, (15.4, 33.0), (10, 30.0)) == [True, False]
 
 
 def test_fingers_are_rounded_over_by_grooves_from_their_tips():
@@ -169,12 +143,12 @@ def test_hidden_dog_bones_in_both_inner_faces():
     box_joint(3, margin=5, tool=6, clearance=(0.2, 0.5)),
     box_joint(9, margin=0, tool=6, clearance=(0.3, 0.0)),
 ])
-def test_the_assembled_joint_does_not_overlap(joint: Any):
+def test_the_assembled_joint_does_notoverlap(joint: Any):
     m, a, b = _pair()
     with m:
         b.join(a, using=joint)
-    meshes = _meshes()
-    assert _overlap(meshes["pair.a"], meshes["pair.b"]) < 1e-3
+    meshes = part_meshes()
+    assert overlap(meshes["pair.a"], meshes["pair.b"]) < 1e-3
     assert all(mesh.is_volume for mesh in meshes.values())
 
 
@@ -189,14 +163,14 @@ def test_all_four_corners_of_a_drawer_box(tool: float):
         f.join(l, r, using=box_joint(5, tool=tool))
         l.join(k, using=box_joint(5, tool=tool))
         k.join(r, using=box_joint(5, tool=tool))
-    meshes = _meshes()
+    meshes = part_meshes()
     sides, ends = [meshes["box.left"], meshes["box.right"]], [meshes["box.front"], meshes["box.back"]]
     assert sides[0].volume == pytest.approx(sides[1].volume) and ends[0].volume == pytest.approx(ends[1].volume)
     if tool == 0:
         # two 12 x 30 x 12 notches per corner in the sides, as many fingers on the ends
         assert sides[0].volume == pytest.approx(300 * 150 * 12 - 4 * 12 * 30 * 12)
         assert ends[0].volume == pytest.approx(376 * 150 * 12 + 4 * 12 * 30 * 12)
-    assert all(_overlap(s, e) < 1e-3 for s in sides for e in ends)
+    assert all(overlap(s, e) < 1e-3 for s in sides for e in ends)
 
 
 def test_three_fingers_make_one_notch():
@@ -205,7 +179,7 @@ def test_three_fingers_make_one_notch():
         b.join(a, using=box_joint(3, tool=0))
     # 150 / 3 = 50: a's fingers at 0..50 and 100..150, b's between
     assert _names(a) == ["notch_b_1"] and _names(b) == ["gap_a_1", "gap_a_2"]
-    assert _has(b, (7.5, 75), (7.5, 49), (7.5, 101)) == [True, False, False]
+    assert has_material(b, (7.5, 75), (7.5, 49), (7.5, 101)) == [True, False, False]
 
 
 def test_with_no_margin_the_end_gaps_reach_past_the_ends():
@@ -216,9 +190,9 @@ def test_with_no_margin_the_end_gaps_reach_past_the_ends():
         b.join(a, using=box_joint(5, tool=6, clearance=(0.2, 0.5)))
     gap = b.op("gap_a_1").op
     assert isinstance(gap, Cut) and gap.shape.bounds[1] == pytest.approx(-0.1)
-    assert len(b.outline.polygons()) == 1 and _has(b, (7.5, 0.5), (15.6, 0.5)) == [False, True]
-    meshes = _meshes()
-    assert _overlap(meshes["pair.a"], meshes["pair.b"]) < 1e-3
+    assert len(b.outline.polygons()) == 1 and has_material(b, (7.5, 0.5), (15.6, 0.5)) == [False, True]
+    meshes = part_meshes()
+    assert overlap(meshes["pair.a"], meshes["pair.b"]) < 1e-3
 
 
 def test_either_board_can_make_the_call():
@@ -263,7 +237,7 @@ def test_the_preview_meshes_pockets_in_narrow_faces():
         p.hole(d=8, depth=30, at=p.front.right(50))
         # 5 in front of the left face (y 0), 15 deep: 10 of it in the board
         p.add_edge_pocket(p.left, Shape(Point(100, 7.5).buffer(3, quad_segs=16)), 15, offset=5)
-    mesh = _meshes()["m.p"]
+    mesh = part_meshes()["m.p"]
     removed = 200 * 200 * 15 - mesh.volume
     hole = 24 / 2 * 4 ** 2 * math.sin(2 * math.pi / 24)                   # the mesher's 24-sided cylinder
     disc = Point(0, 0).buffer(3, quad_segs=16).area

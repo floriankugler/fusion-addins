@@ -9,56 +9,64 @@ import json
 from pathlib import Path
 
 from . import directions
+from .errors import LangError
 from .layout_types import LAYOUT_VERSION, ExportValue, Layout, ModuleLayout, SnapshotLayout
-from .refs import Pos, as_pos
+from .refs import as_pos
 from .scope import registry
 
 
 def build_layout() -> Layout:
-    """Resolves all registered modules and parts into one layout dict."""
+    """Resolves all registered modules and parts into one layout dict.
+    Each module lists its own problems (its checks' and the notes its parts
+    left); the layout's `problems` are all of them, once each, and the
+    snapshots' notes."""
     f = directions.frame
     modules: list[ModuleLayout] = []
     problems: list[str] = []
     for root in registry.roots:
-        parts = [part.to_layout() for part in root.all_parts()]
-        problems.extend(root.run_checks())
+        all_parts = root.all_parts()
+        parts = [part.to_layout() for part in all_parts]
+        checks = root.run_checks()
         box = root.box
-        notes = [note for part in root.all_parts() for note in part.notes]
+        notes = [note for part in all_parts for note in part.notes]
         modules.append({
             "path": root.path,
-            "box": box.as_dict() if box else None,  # type: ignore[typeddict-item]
+            "box": box.as_dict() if box else None,
             "parts": parts,
             "hardware": root.all_hardware(),
             "exports": {k: _export_value(v) for k, v in root.exports.items()},
-            "problems": list(root.problems) + notes,
+            "problems": checks + notes,
         })
+        problems += checks + notes
     loose = [part.to_layout() for part in registry.root_parts]
     if loose:
         notes = [note for part in registry.root_parts for note in part.notes]
         modules.append({"path": "", "box": None, "parts": loose, "hardware": [], "exports": {}, "problems": notes})
+        problems += notes
     # One entry per snapshot file and hash, however often it was read.
     snapshots: dict[tuple[str, str], SnapshotLayout] = {}
     for snapshot in registry.snapshots:
         snapshots.setdefault((str(snapshot.path), snapshot.hash), snapshot.to_layout())
-        problems.extend(note for note in snapshot.notes if note not in problems)
+        problems += snapshot.notes
     return {
         "version": LAYOUT_VERSION,
         "units": "mm",
         "frame": {d.name: f"{'+' if d.sign > 0 else '-'}{d.axis}" for d in f.directions()},
         "modules": modules,
-        "problems": problems,
+        "problems": list(dict.fromkeys(problems)),
         "snapshots": list(snapshots.values()),
     }
 
 
 def _export_value(value: object) -> ExportValue | float | str:
+    """A number, a position (anything `as_pos` takes), or else its text."""
     if isinstance(value, (int, float)):
         return float(value)
     try:
-        pos: Pos = as_pos(value)
-        return {"axis": pos.axis, "value": pos.value}
-    except Exception:
+        pos = as_pos(value)
+    except LangError:
         return str(value)
+    return {"axis": pos.axis, "value": pos.value}
 
 
 def write_layout(path: str | Path) -> Layout:

@@ -5,16 +5,7 @@ from shapely.geometry import Point
 from lang import *
 from lang.core.crossing import crossing
 from lang.core.layout import build_layout
-from lang.core.scope import registry
-
-ply15 = material("birch", t=15)
-
-
-@pytest.fixture(autouse=True)
-def fresh_registry():
-    registry.reset()
-    yield
-    registry.reset()
+from helpers import ply15
 
 
 def _grid(n_cross: int = 1) -> tuple[Scope, list[Board], Board]:
@@ -91,4 +82,4 @@ def test_half_lap_errors():
             long.join(long, using=half_lap(toward=g.top))
     assert long.ops == [] and a.ops == []                 # nothing is cut when a join fails
     with pytest.raises(LangError, match="at=.* is not on the axis"):
-        half_lap(toward=frame.direction("top"), at=Pos("x", 3))
+        half_lap(toward=world_frame().direction("top"), at=Pos("x", 3))

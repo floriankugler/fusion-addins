@@ -50,6 +50,7 @@ from ..emit.arcs import MAX_STEP, Line2, fit
 from .errors import LangError
 from .ops import Cut, Hole, Pocket
 from .shapes import Shape, circle
+from .geometry import polygons_of
 
 if TYPE_CHECKING:
     from .part import Board
@@ -175,7 +176,7 @@ def corners(board: Board) -> list[Corner]:
                 voids.append(g0.intersection(g1))
     void = unary_union(voids) if voids else Polygon()
     material = outline.difference(void) if voids else outline
-    exteriors = [p.exterior for p in _polygons(outline)]
+    exteriors = [p.exterior for p in polygons_of(outline)]
 
     through: dict[tuple[float, float], Corner] = {}
     found: list[Corner] = []
@@ -244,7 +245,7 @@ def _concave(region: BaseGeometry) -> Iterator[tuple[Point2, Point2, Point2]]:
     (as `arcs.fit` reads the rings) where the boundary turns away from the
     material by more than an arc's segment does. Each with the unit
     vectors along its two edges, away from it."""
-    for poly in _polygons(region):
+    for poly in polygons_of(region):
         poly = orient(poly, 1.0)              # the material on the left of every ring
         for ring in [poly.exterior, *poly.interiors]:
             curves = fit(list(ring.coords))
@@ -274,12 +275,6 @@ def _disc(c: Point2, r: float) -> Polygon:
     """A hole as a polygon with its vertices on the circle, fine enough to
     read as an arc."""
     return Point(*c).buffer(r, quad_segs=SEGMENTS)
-
-
-def _polygons(g: BaseGeometry) -> list[Polygon]:
-    if isinstance(g, Polygon):
-        return [] if g.is_empty or g.area <= 0 else [g]
-    return [p for sub in getattr(g, "geoms", []) for p in _polygons(sub)]
 
 
 # -- what board.dogbones() asks for --------------------------------------------------------------
@@ -348,7 +343,7 @@ def _relief_shape(c: Corner, request: Request) -> Shape:
     corner's level that touches the corner)."""
     disc = corner_relief(c.point, c.a, c.b, request.tool, request.relief)
     p = Point(c.point)
-    own = unary_union([g for g in _polygons(disc.geometry.intersection(c.level)) if g.distance(p) < _ON])
+    own = unary_union([g for g in polygons_of(disc.geometry.intersection(c.level)) if g.distance(p) < _ON])
     excess = disc.geometry.intersection(c.keep).difference(own)
     if excess.area <= _SLIVER:
         return disc

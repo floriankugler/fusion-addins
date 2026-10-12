@@ -8,15 +8,7 @@ from lang import *
 from lang.core.layout import build_layout
 from lang.core.scope import registry
 from lang.preview.mesh import mesh_part
-
-ply15 = material("birch", t=15)
-
-
-@pytest.fixture(autouse=True)
-def fresh_registry():
-    registry.reset()
-    yield
-    registry.reset()
+from helpers import ply15
 
 
 def _volume(part: Board) -> float:

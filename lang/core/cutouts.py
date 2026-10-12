@@ -31,7 +31,7 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
-from shapely.geometry import LineString, MultiPolygon, Polygon
+from shapely.geometry import LineString, Polygon
 from shapely.geometry.base import BaseGeometry
 from shapely.geometry.polygon import orient
 from shapely.ops import unary_union
@@ -41,6 +41,7 @@ from lib import cutout_patterns as data
 from ..emit.arcs import Arc2, Circle2, Line2, fit
 from .directions import ExtentName
 from .errors import LangError, one_of
+from .geometry import polygons_of
 
 if TYPE_CHECKING:
     from .part import Anchor
@@ -149,7 +150,7 @@ def openings(region: BaseGeometry, frame: PatternFrame, pattern: Pattern | None,
         raw = region.difference(_cross_bands(frame, pattern, path))
     else:
         raw = region.intersection(_triangles(frame, pattern, radius, path))
-    pieces = [p for p in _polygons(raw) if p.area > 1e-6]
+    pieces = [p for p in polygons_of(raw) if p.area > 1e-6]
     if radius <= 0:
         return Openings(pieces, 0)
     rounded: list[Polygon] = []
@@ -160,14 +161,6 @@ def openings(region: BaseGeometry, frame: PatternFrame, pattern: Pattern | None,
             dropped += 1
         rounded.extend(out)
     return Openings(rounded, dropped)
-
-
-def _polygons(g: BaseGeometry) -> list[Polygon]:
-    if isinstance(g, Polygon):
-        return [] if g.is_empty else [g]
-    if isinstance(g, MultiPolygon):
-        return [p for p in g.geoms if not p.is_empty]
-    return [p for sub in getattr(g, "geoms", []) for p in _polygons(sub)]
 
 
 def _to_frame(frame: PatternFrame, a: float, b: float) -> Point2:
@@ -512,7 +505,7 @@ def fillet(piece: Polygon, r: float) -> list[Polygon]:
     # circles, which the two offsets blur.
     targets = _arc_targets(piece, 0.0)
     opened = piece.buffer(-r, join_style="round", quad_segs=16).buffer(r, join_style="round", quad_segs=16)
-    return [_onto_circles(p, targets) for p in _polygons(opened) if p.area > 1e-6]
+    return [_onto_circles(p, targets) for p in polygons_of(opened) if p.area > 1e-6]
 
 
 def filleted(piece: Polygon, r: float, at: Sequence[Point2] | None = None) -> Polygon | None:
@@ -621,7 +614,7 @@ def grown(g: BaseGeometry, d: float) -> BaseGeometry:
     if abs(d) < _EPS:
         return g
     out: list[BaseGeometry] = []
-    for poly in _polygons(g):
+    for poly in polygons_of(g):
         if len(poly.interiors) == 0:
             curves = fit(_ring_points(poly.exterior.coords))
             if len(curves) == 1 and isinstance(curves[0], Circle2):
@@ -631,7 +624,7 @@ def grown(g: BaseGeometry, d: float) -> BaseGeometry:
                 continue
         buffered = poly.buffer(d, join_style="mitre", mitre_limit=100.0)
         targets = _arc_targets(poly, d)
-        out += [_onto_circles(p, targets) for p in _polygons(buffered)]
+        out += [_onto_circles(p, targets) for p in polygons_of(buffered)]
     return unary_union(out) if out else Polygon()
 
 
@@ -705,9 +698,10 @@ def _snap_ring(points: list[Point2], targets: list[_Target]) -> list[Point2]:
     owner = [_target_of(p, targets) for p in points]
     if all(o is None for o in owner):
         return points
-    if all(o is not None and o == owner[0] for o in owner):
-        c, r = targets[owner[0]][0], targets[owner[0]][1]    # type: ignore[index]
-        return _circle(c, r).exterior.coords[:-1]           # type: ignore[return-value]
+    first = owner[0]
+    if first is not None and all(o == first for o in owner):
+        c, r = targets[first][0], targets[first][1]
+        return [(float(x), float(y)) for x, y in list(_circle(c, r).exterior.coords)[:-1]]
     # start at a vertex that begins a run, so no run wraps around the end
     start = next(i for i in range(n) if owner[i] != owner[i - 1])
     order = points[start:] + points[:start]

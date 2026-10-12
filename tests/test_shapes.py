@@ -1,4 +1,4 @@
-"""`Shape.rounded()`, and operations given a shape without area."""
+"""`Shape.rounded()`, `Shape.clip()`, and operations given a shape without area."""
 import math
 import re
 from collections.abc import Callable
@@ -8,19 +8,11 @@ from shapely.geometry import Point
 
 from lang import *
 from lang.core.ops import Pocket
-from lang.core.scope import registry
 from lang.emit.arcs import Arc2, Line2, fit
+from helpers import ply15
 
-ply15 = material("birch", t=15)
 #: What a quarter circle of radius 1 leaves of its square.
 CORNER = 1 - math.pi / 4
-
-
-@pytest.fixture(autouse=True)
-def fresh_registry():
-    registry.reset()
-    yield
-    registry.reset()
 
 
 def _curves(shape: Shape) -> list[str]:
@@ -93,8 +85,8 @@ def test_rounding_with_zero_or_a_negative_radius():
 def test_an_edge_too_short_for_its_arcs_is_an_error():
     # the clip's edge is 7.1 long; each 135 degree corner needs 4.1 of it
     with pytest.raises(LangError, match=r"rounded\(10\): an edge of the shape is too short"):
-        rect(depth=80, width=60).clip("top.right", top=5, right=5).rounded(10)
-    rect(depth=80, width=60).clip("top.right", top=5, right=5).rounded(8)
+        rect(depth=80, width=60).clip(back=5, right=5).rounded(10)
+    rect(depth=80, width=60).clip(back=5, right=5).rounded(8)
 
 
 def test_a_rounded_slot_cuts_and_pockets():
@@ -141,3 +133,44 @@ def test_a_board_with_an_empty_shape_is_an_error():
     with module("m", Box.from_size(width=400, depth=300, height=100)) as m:
         with pytest.raises(LangError, match=r"m\.panel: board\(\): the shape is empty"):
             board("panel", ply15, rect(depth=100, width=100).difference(rect(depth=200, width=200))).on(m.bottom)
+
+
+# -- clip ---------------------------------------------------------------------------
+
+def test_clip_names_the_corner_by_its_two_edges():
+    """In the world frame a depth x height rectangle lies in (x, z), its back
+    at high x: 380 off along the top edge and 120 down the back edge."""
+    shape = rect(depth=500, height=720).clip(top=380, back=120)
+    assert shape.area == pytest.approx(500 * 720 - 380 * 120 / 2)
+    inside = shape.geometry
+    assert not inside.contains(Point(495, 715)) and inside.contains(Point(105, 715))
+    assert inside.contains(Point(495, 595))
+
+
+def test_clip_follows_the_frame_the_shape_is_made_in():
+    """In a cabinet facing the van's right, front is +y: the cabinet's
+    front corner of a width x height rectangle is the van's right one."""
+    van = Box.from_size(width=2000, depth=1000, height=1000)
+    with module("cab", van, front=van.right):
+        shape = rect(depth=100, height=100).clip(top=10, front=10)
+    assert shape.axes == ("y", "z")
+    assert not shape.geometry.contains(Point(99, 99)) and shape.geometry.contains(Point(1, 99))
+
+
+def test_clip_on_a_raw_shape_uses_left_right_bottom_top():
+    shape = polygon([(0, 0), (40, 0), (40, 20), (0, 20)]).clip(right=10, bottom=4)
+    assert shape.area == pytest.approx(800 - 20)
+    assert not shape.geometry.contains(Point(39.5, 0.5))
+
+
+def test_clip_errors():
+    with pytest.raises(LangError, match="name the corner by its two edges"):
+        rect(depth=50, height=50).clip(top=10)
+    with pytest.raises(LangError, match="lie on one axis"):
+        rect(depth=50, height=50).clip(top=10, bottom=10)
+    with pytest.raises(LangError, match="left is not an edge of a shape in depth x height"):
+        rect(depth=50, height=50).clip(top=10, left=10)
+    with pytest.raises(LangError, match="raw shape has no plane yet"):
+        polygon([(0, 0), (40, 0), (40, 20)]).clip(front=5, top=5)
+    with pytest.raises(LangError, match="the leg must be positive"):
+        rect(depth=50, height=50).clip(top=10, back=0)

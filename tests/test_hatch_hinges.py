@@ -16,16 +16,8 @@ from lang.core.scope import registry
 from lang.emit.plan import FaceRef, HoleStep, plan_layout
 from lang.hardware.hatch_hinges import HINGE_SHAPES, HatchHinge, HingeBox
 from lib.hatch_hinges import FREE_SPACE_1_11
+from helpers import bounds, ply18
 
-
-@pytest.fixture(autouse=True)
-def fresh_registry():
-    registry.reset()
-    yield
-    registry.reset()
-
-
-ply18 = material("birch", t=18)
 
 #: The test cabinet in world terms: 320 deep (x 0..320, the front at -x),
 #: 600 wide (y 0..600) and 350 high, an 18 mm hatch over its front.
@@ -68,11 +60,6 @@ def _cabinet(hinge: HatchHinge | None = None, *, frame: str = "cabinet", hatch_t
 
 def _holes(part: Board) -> list[Hole]:
     return [op for op in part.ops if isinstance(op, Hole)]
-
-
-def _bounds(body: HardwareBodyLayout) -> tuple[list[float], list[float]]:
-    boxes = body["boxes"]
-    return ([min(b["min"][i] for b in boxes) for i in range(3)], [max(b["max"][i] for b in boxes) for i in range(3)])
 
 
 #: The Free space 1.11's boxes. The tests read their numbers from the table
@@ -240,7 +227,7 @@ def test_same_hinges_in_any_frame():
     _, van = _cabinet(frame="van")
     assert van["left"].box().lo["y"] == 0 and len(_holes(van["left"])) == 3      # the van's left is -y
     left_body = results[1][1][0]
-    assert left_body["name"] == "left" and _bounds(left_body)[1][1] == 582      # the hatch's left is +y
+    assert left_body["name"] == "left" and bounds(left_body)[1][1] == 582      # the hatch's left is +y
 
 
 def test_rotated_cabinet():
@@ -439,7 +426,7 @@ def test_example_builds(tmp_path: Path):
     assert [(h["face"], h["u"], h["v"]) for h in holes] == [("front", 312 - 37, 1782 - 102)]
     hinges = _hinges(layout["modules"][0]["hardware"])
     assert hinges["path"] == "wallcab.hinges"
-    assert _bounds(hinges["bodies"][0])[0][2] == parts["wallcab.shelf"]["box"]["max"][2] == 1782 - SHAPE.lowest
+    assert bounds(hinges["bodies"][0])[0][2] == parts["wallcab.shelf"]["box"]["max"][2] == 1782 - SHAPE.lowest
     assert (tmp_path / "scene.glb").exists()
     # the hinges overlap none of the cabinet's parts, joints and all
     (cabinet,) = registry.roots

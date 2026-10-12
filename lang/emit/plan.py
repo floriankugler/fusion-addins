@@ -436,11 +436,10 @@ def plan_layout(layout: Layout) -> Plan:
     if layout["version"] != 2:
         raise ValueError(f"layout version {layout['version']} is not supported (expected 2).")
     frame = _Frame(layout["frame"])
-    problems: list[str] = list(layout["problems"])
+    problems: list[str] = list(layout["problems"])       # every module's too
     parts: list[PartPlan] = []
     hardware: list[HardwarePlan] = []
     for module in layout["modules"]:
-        problems.extend(module["problems"])
         for part in module["parts"]:
             parts.append(plan_part(part, frame, problems))
         for item in module.get("hardware", []):

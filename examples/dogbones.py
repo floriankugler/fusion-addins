@@ -26,7 +26,7 @@ with module("panels", Box.from_size(width=600, depth=400, height=200)) as m:
         top = panel.top
         panel.cut(rect(depth=60, width=80), at=top.front.left, name="notch")
         panel.cut(polygon([(60, 0), (0, 20), (60, 40)]), at=top.back.left(150), name="vee")
-        panel.cut(rect(depth=80, width=60).clip("top.right", top=20, right=20), at=top.center, name="window")
+        panel.cut(rect(depth=80, width=60).clip(back=20, right=20), at=top.center, name="window")
         panel.pocket(rect(depth=60, width=60), at=top.front(40).right(40), depth=through, name="through")
         panel.pocket(rect(depth=120, width=20), at=top.back(60).right(150), depth=5, name="dado")
         panel.hole(d=20, at=top.back(180).right(170), depth=through, name="bolt")     # over a dado corner

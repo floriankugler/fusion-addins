@@ -1,22 +1,15 @@
+import math
 from pathlib import Path
 
 import pytest
 
 from lang import *
+from lang.core.layout import build_layout
 from lang.core.ops import Chamfer, Cut, EdgeOp, Hole, Pocket
 from lang.core.refs import Affine
 from lang.core.scope import registry
-
-
-@pytest.fixture(autouse=True)
-def fresh_registry():
-    registry.reset()
-    yield
-    registry.reset()
-
-
-ply15 = material("birch", t=15)
-ply9 = material("birch", t=9)
+from lang.emit.plan import plan_layout
+from helpers import ply15, ply9
 
 
 # -- position algebra ---------------------------------------------------------
@@ -37,7 +30,7 @@ def test_mix_of_positions_needs_weights_summing_to_one():
     assert isinstance(Pos("z", 100) + Pos("z", 200), Affine)
     with pytest.raises(LangError):
         # a bare sum of positions is not a position
-        board("x", ply15).on(Pos("z", 1) + Pos("z", 2), toward=frame.direction("top"))
+        board("x", ply15).on(Pos("z", 1) + Pos("z", 2), toward=world_frame().direction("top"))
 
 
 def test_mixing_axes_is_an_error():
@@ -312,11 +305,12 @@ def test_layout_json_roundtrip(tmp_path: Path) -> None:
     from lang.core.layout import write_layout
     cab = carcass()
     cab["left"].cut(rect(depth=60, height=100), at=cab["left"].outer.bottom.front, name="toekick")
-    cab.export("top", cab.top)
+    cab.export("worktop", cab.top)
     cab.check(no_interference)
     layout = write_layout(tmp_path / "layout.json")
     assert layout["version"] == 2
     module_layout = layout["modules"][0]
+    assert module_layout["exports"] == {"worktop": {"axis": "z", "value": 720.0}}
     assert [p["path"] for p in module_layout["parts"]] == ["cab.left", "cab.right", "cab.bottom", "cab.back"]
     left = module_layout["parts"][0]
     assert left["axes"] == {"t": "y", "u": "x", "v": "z"}
@@ -478,3 +472,223 @@ def test_a_tie_keeps_the_show_face_up():
         side.hole(d=5, depth=10, at=side.inner.center)
         side.hole(d=5, depth=10, at=side.outer.center)
     assert side.machine_face.direction == side.show_face.direction
+
+
+# -- review fixes 2026-10-12: limits ------------------------------------------------
+
+def _partitions() -> tuple[Scope, Board, Board]:
+    """Two partitions, both left of the middle of a 1000 wide box: y
+    100..115 and 300..315."""
+    with module("m", Box.from_size(width=1000, depth=400, height=700)) as m:
+        p1 = board("p1", ply15).on(m.left + 100, toward=m.right)
+        p2 = board("p2", ply15).on(m.left + 300, toward=m.right)
+    return m, p1, p2
+
+
+def test_between_two_parts_takes_the_faces_that_face_each_other():
+    """The box's middle (y 500) lies right of both partitions; the shelf
+    still runs from the first one's right face to the second one's left
+    face, not through the second one."""
+    m, p1, p2 = _partitions()
+    with m:
+        shelf = board("shelf", ply15).on(m.bottom + 300, toward=m.top).between(p1, p2)
+        check(no_interference)
+    assert (shelf.box().lo["y"], shelf.box().hi["y"]) == (115, 300)
+    assert build_layout()["problems"] == []
+
+
+def test_between_a_part_and_a_position_takes_the_face_toward_the_position():
+    m, p1, p2 = _partitions()
+    with m:
+        shelf = board("shelf", ply15).on(m.bottom + 300, toward=m.top).between(m.left, p2.gap(1))
+        reach = board("reach", ply15).on(m.bottom + 400, toward=m.top).between(p1.into(5), m.right)
+    assert (shelf.box().lo["y"], shelf.box().hi["y"]) == (0, 299)      # p2's left face, 1 away from it
+    assert (reach.box().lo["y"], reach.box().hi["y"]) == (110, 1000)   # p1's right face, 5 into it
+
+
+def test_a_box_as_a_limit_gives_both_ends_on_each_in_plane_axis():
+    drawer = Box.from_size(width=300, depth=400, height=150, origin=(20, 30, 40))
+    with module("m", Box.from_size(width=600, depth=500, height=300)):
+        side = board("side", ply15).on(drawer.left).between(drawer)
+        long = board("long", ply15).on(drawer.left).between(drawer.front, drawer.back, drawer.bottom, drawer.top)
+    assert side.box().as_dict() == long.box().as_dict()
+    assert side.box().as_dict() == {"min": [20, 30, 40], "max": [420, 45, 190]}
+
+
+def test_a_limit_that_limits_neither_in_plane_axis_is_an_error():
+    with module("m", Box.from_size(width=600, depth=400, height=700)) as m:
+        left = board("left", ply15).on(m.left)
+        parallel = board("parallel", ply15).on(m.left + 100, toward=m.right).between(left)
+        thick = board("thick", ply15).on(m.bottom + 100, toward=m.top).between(left, Pos("z", 50))
+    with pytest.raises(LangError, match="m.left is parallel to this board"):
+        parallel.box()
+    with pytest.raises(LangError, match=r"lies on the board's thickness axis \(z\)"):
+        thick.box()
+
+
+# -- review fixes: faces in another frame ---------------------------------------------
+
+def test_directions_are_equal_when_they_point_the_same_way():
+    van = Box.from_size(width=2000, depth=1000, height=1000)
+    with module("cab", van, front=van.right) as cab:
+        assert cab.frame.direction("front") == world_frame().direction("right")
+        assert cab.frame.direction("front").name == "front"
+        assert cab.frame.cross(cab.frame.direction("back"), cab.frame.direction("top")).name == "right"
+
+
+def test_show_takes_a_side_of_an_enclosing_box_in_its_own_terms():
+    """The van's right is this cabinet's front. A back shown toward it
+    (`show(van.right)`) shows its front face; machined from the other one,
+    which carries the holes, and cut out from it by default."""
+    van = Box.from_size(width=2000, depth=1000, height=1000)
+    with module("cab", van, front=van.right) as cab:
+        back = board("back", ply15).on(cab.back).show(van.right)
+        rear = back.back
+        back.hole(d=5, at=rear.top(20), depth=5).hole(d=5, at=rear.top(60), depth=5)
+    assert back.show_face.name == "front" and back.show_face.world_name == "right"
+    assert back.machine_face.name == "back"
+    assert back.face(world_frame().direction("left")).name == "back"     # named in the cabinet's frame
+
+
+# -- review fixes: depths --------------------------------------------------------------
+
+def test_a_depth_past_the_opposite_face_is_an_error():
+    with module("m", Box.from_size(width=600, depth=400, height=700)) as m:
+        left = board("left", ply15).on(m.left)
+        with pytest.raises(LangError, match="depth 40 reaches past the opposite face, 15 from"):
+            left.hole(d=5, at=left.inner.center, depth=40)
+        with pytest.raises(LangError, match="reaches past the opposite face, 400 from the front face"):
+            left.hole(d=5, at=left.front.center, depth=401)
+        with pytest.raises(LangError, match="reaches past that face"):
+            left.pocket(rect(depth=50, height=50), at=left.inner.center, depth=to(left.outer, 1))
+        left.hole(d=5, at=left.inner.center, depth=15)            # as deep as the board: fine
+        left.hole(d=5, at=left.front.bottom(50), depth=400)
+    assert len(left.ops) == 2
+
+
+def test_to_names_a_face_of_the_board_itself():
+    with module("m", Box.from_size(width=600, depth=400, height=700)) as m:
+        left = board("left", ply15).on(m.left)
+        bottom = board("bottom", ply15).on(m.bottom).between(left, m.right)
+        with pytest.raises(LangError, match=r"to\(m.left.right\) names a face of another part"):
+            bottom.pocket(rect(depth=50, width=50), at=bottom.top.center, depth=to(left.inner, -3))
+        bottom.pocket(rect(depth=50, width=50), at=bottom.top.center, depth=to(bottom.bottom, -3))
+    assert isinstance(bottom.ops[0], Pocket) and bottom.ops[0].depth == 12
+
+
+def test_through_a_narrow_face_reaches_across_the_board():
+    """The left side is 400 deep (x): a hole through its front face is 400
+    deep, in the layout as in the plan."""
+    with module("m", Box.from_size(width=600, depth=400, height=700)) as m:
+        left = board("left", ply15).on(m.left)
+        left.hole(d=8, at=left.front.bottom(50), depth=through, name="pin")
+        left.pocket(rect(width=5, height=20), at=left.back.center, depth=through, name="slot")
+    hole, slot = (op.op for op in left.ops if isinstance(op, EdgeOp))
+    assert isinstance(hole, Hole) and isinstance(slot, Pocket)
+    assert (hole.depth, hole.through, slot.depth) == (400, True, 400)
+    edge = build_layout()["modules"][0]["parts"][0]["ops"][0]
+    assert edge["kind"] == "edge" and edge["op"]["depth"] == 400
+
+
+def test_pocket_and_hole_need_their_depth():
+    with module("m", Box.from_size(width=600, depth=400, height=700)) as m:
+        left = board("left", ply15).on(m.left)
+        with pytest.raises(TypeError, match="depth"):
+            left.pocket(rect(depth=50, height=50), left.inner.center)  # type: ignore[call-arg]
+        with pytest.raises(TypeError, match="depth"):
+            left.hole(5, left.inner.center)  # type: ignore[call-arg]
+
+
+def test_fillet_takes_a_radius():
+    with module("m", Box.from_size(width=400, depth=300, height=100)) as m:
+        panel = board("panel", ply15).on(m.bottom)
+        panel.fillet(panel.front.left, radius=20)
+    assert panel.outline.area == pytest.approx(400 * 300 - (1 - math.pi / 4) * 400)
+
+
+# -- review fixes: scopes --------------------------------------------------------------
+
+def test_an_export_must_not_be_hidden_by_the_scope():
+    with module("cab", Box.from_size(width=600, depth=500, height=720)) as cab:
+        top = board("top", ply15).on(cab.top)
+        for taken in ("top", "up", "width", "interior", "mount", "parts", "_secret"):
+            with pytest.raises(LangError, match=f"export '{taken}'"):
+                cab.export(taken, top.top)
+        cab.export("worktop", top.top)
+    assert cab.worktop.position == top.top.position == Pos("z", 720)
+
+
+def test_the_interior_counts_parts_that_cover_a_side_s_middle():
+    """A foot in a corner of the bottom does not raise the interior; the
+    bottom board does."""
+    with module("cab", Box.from_size(width=600, depth=500, height=720)) as cab:
+        board("foot", ply15).on(cab.bottom).between(cab.left, cab.left + 50, cab.front, cab.front + 50)
+        assert cab.interior.lo["z"] == 0
+        board("bottom", ply15).on(cab.bottom).between(cab.left + 100, cab.right)
+        assert cab.interior.lo["z"] == 15
+
+
+def test_problems_are_listed_once():
+    """The module lists its own; the layout lists all of them once, and
+    the emitter's plan reports each once."""
+    with module("m", Box.from_size(width=600, depth=400, height=700)) as m:
+        board("a", ply15).on(m.left)
+        board("b", ply15).on(m.left + 5, toward=m.right)
+        check(no_interference)
+    layout = build_layout()
+    assert layout["problems"] == ["m.a overlaps m.b"] == layout["modules"][0]["problems"]
+    assert plan_layout(layout).problems == ["m.a overlaps m.b"]
+
+
+# -- review fixes: the world frame, spread, boxes, joins -------------------------------------
+
+def test_the_world_frame_is_read_through_a_function_and_reset_with_the_build():
+    import lang
+    assert not hasattr(lang, "frame") and "registry" not in lang.__all__
+    set_frame(Frame(front="+y", left="+x", top="+z"))
+    assert world_frame().direction("front").code == "+y"
+    assert Box.from_size(width=10, depth=20, height=30).hi == {"x": 10, "y": 20, "z": 30}
+    registry.reset()
+    assert world_frame().direction("front").code == "-x"
+
+
+def test_spread_takes_pitch_or_count():
+    with pytest.raises(LangError, match="pitch= or count=, not both"):
+        spread(Pos("z", 0), Pos("z", 100), pitch=32, count=3)
+
+
+def test_positions_are_not_numbers():
+    with pytest.raises(TypeError):
+        float(Pos("z", 12.5))  # type: ignore[arg-type]
+
+
+def test_boxes_without_a_common_region_have_no_intersection():
+    a = Box({"x": 0, "y": 0, "z": 0}, {"x": 10, "y": 10, "z": 10})
+    b = Box({"x": 20, "y": 0, "z": 0}, {"x": 30, "y": 10, "z": 10})
+    with pytest.raises(LangError, match="no region in common"):
+        a.intersection(b)
+    assert a.intersection(Box({"x": 10, "y": 0, "z": 0}, {"x": 30, "y": 10, "z": 10})).lo["x"] == 10   # touching
+
+
+def test_a_failed_join_changes_no_board():
+    """The second tenon would split the side in two; the first one has
+    grown the shelf's outline by then. Neither board keeps anything."""
+    with module("unit", Box.from_size(width=600, depth=300, height=800)) as u:
+        left = board("left", ply15).on(u.left)
+        shelf = board("shelf", ply15).on(Pos("z", 400), toward=u.top).between(left, u.right)
+        before = (shelf.outline.area, left.outline.area, list(shelf.ops), list(left.ops))
+        with pytest.raises(LangError, match="splits the board"):
+            shelf.join(left, using=tenons(width=300, at=[Pos("x", 150)]))
+    assert (shelf.outline.area, left.outline.area, shelf.ops, left.ops) == before
+    with u:
+        shelf.join(left, using=tenons(count=1, width=50))     # and it can still be joined
+    assert shelf.outline.area > before[0]
+
+
+def test_parts_of_and_polygons_of():
+    from shapely.geometry import GeometryCollection, LineString, Point as P, Polygon
+    from lang.core.geometry import parts_of, polygons_of
+    square = Polygon([(0, 0), (1, 0), (1, 1), (0, 1)])
+    mixed = GeometryCollection([square, LineString([(0, 0), (2, 2)]), P(5, 5), Polygon()])
+    assert polygons_of(mixed) == [square] and polygons_of(LineString([(0, 0), (1, 1)])) == []
+    assert len(parts_of(mixed)) == 3 and parts_of(square) == [square] and parts_of(Polygon()) == []

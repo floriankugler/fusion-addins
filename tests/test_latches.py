@@ -24,16 +24,9 @@ from lang.core.scope import registry
 from lang.emit.plan import HoleStep, PocketStep, plan_layout
 from lang.hardware.latches import LATCH_SHAPES, DoorLatch, LatchModel
 from lib import door_latches
+from helpers import ply15
 
 
-@pytest.fixture(autouse=True)
-def fresh_registry():
-    registry.reset()
-    yield
-    registry.reset()
-
-
-ply15 = material("birch", t=15)
 PREDRILL = 25.4 / 8
 
 

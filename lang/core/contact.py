@@ -20,6 +20,7 @@ from shapely.geometry import box as shapely_box
 
 from .directions import AXES, Axis
 from .errors import LangError
+from .geometry import parts_of
 
 if TYPE_CHECKING:
     from .part import Board, Face
@@ -90,8 +91,8 @@ def contacts(edge_on: Board, face_on: Board, tolerance: float = 1e-6) -> list[Co
                             f"before: make the cutout after the join, or keep material there with "
                             f"keep=[{edge_on.name}].", face_on.path)
         covered = face_on.outline.geometry.intersection(window)
-        for piece in getattr(covered, "geoms", [covered]):
-            if piece.is_empty or piece.area <= tolerance:
+        for piece in parts_of(covered):
+            if piece.area <= tolerance:
                 continue
             b = piece.bounds
             bounds = {u: (float(b[0]), float(b[2])), v: (float(b[1]), float(b[3]))}

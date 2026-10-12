@@ -13,12 +13,14 @@ a position once it is scaled so that its weights add up to one, as in
 `(a + b) / 2`.
 
 `Side` is a position with an inward direction, the face of a box. Anything
-with a `position` attribute (a `Side`, a part's `Face`) is accepted where a
-position is expected; `as_pos` does the coercion.
+with a `position` attribute (a `Side`, a part's `Face`, a master's plane)
+is accepted where a position is expected; `as_pos` does the coercion, and
+`PositionArithmetic` gives such a class the algebra above.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
 from typing import Protocol, overload, runtime_checkable
 
 from . import directions
@@ -77,9 +79,6 @@ class Pos:
     def __truediv__(self, other: Number) -> Affine:
         return Affine(self.axis, [(1.0 / other, self.value)])
 
-    def __float__(self) -> float:
-        return float(self.value)
-
     def __str__(self) -> str:
         return f"{self.axis}={self.value:g}"
 
@@ -134,6 +133,43 @@ class Affine:
 
 
 PosLike = Pos | Affine | HasPosition
+
+
+class PositionArithmetic(ABC):
+    """The position algebra for a class that stands for a position, such
+    as a part's face or a master's plane: it computes with `position`."""
+
+    @property
+    @abstractmethod
+    def position(self) -> Pos: ...
+
+    @overload
+    def __add__(self, other: Number) -> Pos: ...
+    @overload
+    def __add__(self, other: Pos | Affine | HasPosition) -> Pos | Affine: ...
+
+    def __add__(self, other: Number | Pos | Affine | HasPosition) -> Pos | Affine:
+        return self.position + other
+
+    def __radd__(self, other: Number) -> Pos:
+        return self.position + other
+
+    @overload
+    def __sub__(self, other: Number) -> Pos: ...
+    @overload
+    def __sub__(self, other: Pos | HasPosition) -> float: ...
+
+    def __sub__(self, other: Number | Pos | HasPosition) -> Pos | float:
+        return self.position - other
+
+    def __mul__(self, other: Number) -> Affine:
+        return self.position * other
+
+    def __rmul__(self, other: Number) -> Affine:
+        return self.position * other
+
+    def __truediv__(self, other: Number) -> Affine:
+        return self.position / other
 
 
 def as_pos(value: object, what: str = "position") -> Pos:
@@ -216,6 +252,8 @@ def spread(start: PosLike, end: PosLike, pitch: float | None = None, count: int 
     the span so the leftover is shared at both ends."""
     a, b = as_pos(start, "spread start"), as_pos(end, "spread end")
     _same_axis(a, b)
+    if count is not None and pitch is not None:
+        raise LangError("spread: give pitch= or count=, not both.")
     lo, hi = sorted((a.value, b.value))
     span = hi - lo
     if count is not None:
@@ -236,21 +274,33 @@ class HasName(Protocol):
     def name(self) -> str: ...
 
 
+class FaceOfPart(Protocol):
+    """A face of a part, as `to()` takes it (`lang.core.part.Face`)."""
+    @property
+    def name(self) -> str: ...
+    @property
+    def part(self) -> object: ...
+
+
 @dataclass(frozen=True)
 class ToFace:
     """Depth of a cut or hole: to the named face of the same part, plus an
-    offset (negative stops short of it)."""
+    offset (negative stops short of it). `part` is the part whose face was
+    named, None for `"inner"` and `"outer"`; the operation checks that it
+    is its own."""
     face: str
     offset: float = 0.0
+    part: object = field(default=None, compare=False)
 
 
-def to(face: HasName | InnerOuter, offset: float = 0.0) -> ToFace:
+def to(face: FaceOfPart | InnerOuter, offset: float = 0.0) -> ToFace:
     """A depth reaching a face of the same part, `to(side.outer, -3)`
     stopping 3 mm short of it. `"inner"` and `"outer"` name the face
-    without naming the part, for the chained form."""
+    without naming the part, for the chained form. A positive offset would
+    reach past the face, out of the part, and is an error where it is used."""
     if isinstance(face, str):
         return ToFace(one_of(face, InnerOuter, "to()"), offset)
-    return ToFace(face.name, offset)
+    return ToFace(face.name, offset, face.part)
 
 
 class Through:
@@ -263,7 +313,7 @@ through = Through()
 DepthSpec = Number | ToFace | Through
 
 __all__ = [
-    "Pos", "Affine", "Side", "HasPosition", "HasName", "PosLike", "Number",
+    "Pos", "Affine", "Side", "HasPosition", "HasName", "FaceOfPart", "PositionArithmetic", "PosLike", "Number",
     "DepthSpec", "ToFace", "Through", "to", "through", "spread", "as_pos",
 ]
 

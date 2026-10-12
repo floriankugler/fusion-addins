@@ -5,19 +5,11 @@ import pytest
 from lang import *
 from lang.build import run_build
 from lang.core.layout import build_layout
-from lang.core.scope import registry
 from lang.emit.plan import (Arc, ChamferStep, Circle, CircleContour, EdgeContour, FaceRef, HoleStep, Line,
                             OutlineContour, PocketStep, ShapeContour, VGrooveStep, loop_points, plan_layout)
+from helpers import ply15
 
 
-@pytest.fixture(autouse=True)
-def fresh_registry():
-    registry.reset()
-    yield
-    registry.reset()
-
-
-ply15 = material("birch", t=15)
 CAB = Box.from_size(width=600, depth=500, height=720)
 
 

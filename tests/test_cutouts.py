@@ -15,16 +15,9 @@ from lang.emit.arcs import Arc2, Line2, fit
 from lang.emit.plan import Arc, ChamferStep, Line, PocketStep, ShapeContour, pieces, plan_layout
 from lang.preview.mesh import mesh_part
 from lib import cutout_patterns as data
+from helpers import ply15
 
-ply15 = material("birch", t=15)
 CAB = Box.from_size(width=600, depth=500, height=720)
-
-
-@pytest.fixture(autouse=True)
-def fresh_registry():
-    registry.reset()
-    yield
-    registry.reset()
 
 
 def _side() -> tuple[Scope, Board]:

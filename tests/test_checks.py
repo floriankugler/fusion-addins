@@ -1,20 +1,11 @@
 """`no_interference` with hardware: bodies made of world boxes against the
 parts' material and against each other."""
-import pytest
 
 from lang import *
 from lang.core.layout_types import BoxDict, HardwareBodyLayout
-from lang.core.scope import registry
+from helpers import ply18
 
 
-@pytest.fixture(autouse=True)
-def fresh_registry():
-    registry.reset()
-    yield
-    registry.reset()
-
-
-ply18 = material("birch", t=18)
 ply10 = material("birch", t=10)
 
 

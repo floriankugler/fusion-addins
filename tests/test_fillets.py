@@ -13,19 +13,12 @@ from lang.core.scope import registry
 from lang.emit.arcs import Arc2, Line2, fit
 from lang.emit.plan import Arc, Line, plan_layout
 from lang.preview.mesh import mesh_part
+from helpers import carcass, ply15
 
-ply15 = material("birch", t=15)
 #: What a quarter circle of radius 1 leaves of its square.
 CORNER = 1 - math.pi / 4
 #: The module's box: x (depth) 0 to 300 from the front, y (width) 0 to 400 from the left, z 0 to 200.
 BOX = Box.from_size(width=400, depth=300, height=200)
-
-
-@pytest.fixture(autouse=True)
-def fresh_registry():
-    registry.reset()
-    yield
-    registry.reset()
 
 
 def _panel(box: Box = BOX) -> tuple[Scope, Board]:
@@ -175,17 +168,9 @@ def test_a_chamfer_on_a_corner_a_cut_made():
 
 # -- what else sees the new outline ----------------------------------------------------------------
 
-def _carcass() -> tuple[Scope, dict[str, Board]]:
-    with module("cab", Box.from_size(width=600, depth=500, height=720)) as cab:
-        left = board("left", ply15).on(cab.left)
-        right = board("right", ply15).on(cab.right)
-        bottom = board("bottom", ply15).on(cab.bottom).between(left, right)
-        top = board("top", ply15).on(cab.top).between(left, right)
-    return cab, {"left": left, "right": right, "bottom": bottom, "top": top}
-
 
 def test_contacts_and_joints_made_after_meet_the_rounded_corner():
-    cab, p = _carcass()
+    cab, p = carcass(back=False)
     with cab:
         p["top"].fillet([p["top"].front.left, p["top"].front.right], 30)
         p["top"].join(p["left"], p["right"], using=cabineo(count=2))
@@ -304,7 +289,7 @@ def test_a_fillet_taking_material_where_an_operation_lies_is_an_error():
 
 
 def test_a_fillet_after_a_joint_on_its_corner_is_an_error():
-    cab, p = _carcass()
+    cab, p = carcass(back=False)
     with cab:
         p["bottom"].join(p["left"], p["right"], using=cabineo(count=2))
         with pytest.raises(LangError, match=r"cab\.bottom: fillet\(60\) takes material where the hole "
