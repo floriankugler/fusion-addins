@@ -110,6 +110,11 @@ class PartLayout(TypedDict):
     grained: bool
     manual: bool
     ops: list[OpLayout]
+    #: What the build file calls each face, by world name: the direction in
+    #: the frame of the part's scope (a cabinet's own front and left), then
+    #: `inner` or `outer` for a big face when they resolve. For the preview's
+    #: labels.
+    faces: dict[str, list[str]]
 
 
 class ExportValue(TypedDict):

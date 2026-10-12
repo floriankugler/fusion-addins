@@ -40,6 +40,15 @@
   .mlabel { font: 11px/1.2 ui-monospace, Menlo, monospace; color: #2f5f8f; background: rgba(255,255,255,.72);
     padding: 0 3px; border-radius: 2px; white-space: nowrap; }
   .mlabel.contour { color: #1f5a96; }
+  .plabel { font: 600 11px/1.25 -apple-system, system-ui, sans-serif; color: #2a2620; background: rgba(255,255,255,.84);
+    padding: 1px 5px; border-radius: 3px; white-space: nowrap; box-shadow: 0 0 0 1px rgba(0,0,0,.08); }
+  .plabel .scope { font-weight: 400; color: var(--muted); }
+  .flabel { font: 10px/1.2 ui-monospace, Menlo, monospace; color: #6b4a1f; background: rgba(250,240,222,.88);
+    padding: 0 3px; border-radius: 2px; white-space: nowrap; }
+  .flabel .alias { color: #a08463; }
+  .plabel.selected, .flabel.selected { color: var(--accent); }
+  /* a big face's name sits under the part's name, which marks the same spot */
+  .labels.with-names .flabel.big { margin-top: 19px; }
 </style>
 <script type="importmap">
 { "imports": {
@@ -67,6 +76,12 @@
     </select>
   </div>
   <div class="row"><label><input type="checkbox" id="gridOn" checked> floor grid</label></div>
+
+  <h2>Labels</h2>
+  <div class="row">
+    <label><input type="checkbox" id="lNames"> part names</label>
+    <label><input type="checkbox" id="lFaces"> face names</label>
+  </div>
 
   <h2>Master</h2>
   <div id="masterInfo" class="keys">no snapshot</div>
@@ -97,6 +112,8 @@
     <div><span>display mode</span><kbd>e</kbd></div>
     <div><span>floor grid on / off</span><kbd>g</kbd></div>
     <div><span>master boxes and contours</span><kbd>m</kbd></div>
+    <div><span>part names</span><kbd>n</kbd></div>
+    <div><span>face names (directions)</span><kbd>d</kbd></div>
     <div><span>section on / off</span><kbd>s</kbd></div>
     <div><span>section axis</span><kbd>x</kbd> <kbd>y</kbd> <kbd>z</kbd></div>
     <div><span>move section (shift: coarse)</span><kbd>[</kbd> <kbd>]</kbd></div>
@@ -327,6 +344,7 @@ async function load(first) {
     });
     scene.add(root);
     buildMaster();
+    buildLabels();
     bounds = new THREE.Box3().setFromObject(root);
     if (first && !applyHash()) fit();
     applyAll();
@@ -399,12 +417,264 @@ $('mBoxes').onchange = (e) => { masterShow.boxes = e.target.checked; applyMaster
 $('mContours').onchange = (e) => { masterShow.contours = e.target.checked; applyMaster(); };
 $('mNames').onchange = (e) => { masterShow.names = e.target.checked; applyMaster(); };
 
+// -- labels: the parts' names and their faces' names ---------------------------
+//
+// A part's name is its path below the module; a face's names are the ones
+// the build file uses, in the frame of the part's scope (a cabinet's own
+// front and left), with inner or outer where they resolve. A label shows
+// while its spot is in view: on a shown part, not clipped by the section,
+// not behind another part (except when ghosted), and a face's only while
+// the face turns toward the camera.
+
+const labelGroup = new THREE.Group();
+scene.add(labelGroup);
+const labelShow = { names: false, faces: false, ...stored('labels', {}) };
+let labelsDirty = true;
+
+function setLabels(next) {
+  Object.assign(labelShow, next);
+  store('labels', labelShow);
+  $('lNames').checked = labelShow.names;
+  $('lFaces').checked = labelShow.faces;
+  buildLabels();
+}
+$('lNames').onchange = (e) => setLabels({ names: e.target.checked });
+$('lFaces').onchange = (e) => setLabels({ faces: e.target.checked });
+setLabels({});
+
+function buildLabels() {
+  for (const label of labelGroup.children) label.element.remove();
+  labelGroup.clear();
+  labelRenderer.domElement.classList.toggle('with-names', labelShow.names);
+  labelsDirty = true;
+  if (!root || !layout || !(labelShow.names || labelShow.faces)) return;
+  const names = labelNames();
+  meshes((mesh) => {
+    const path = mesh.userData.path;
+    const part = partOf(path);
+    if (!part) {   // a bought part's body: its name at the middle of its box
+      const center = new THREE.Box3().setFromObject(mesh).getCenter(new THREE.Vector3());
+      if (labelShow.names) addLabel(nameElement(names[path] ?? path), [center], mesh);
+      return;
+    }
+    const spots = labelSpots(part);
+    if (labelShow.names) addLabel(nameElement(names[path] ?? path), spots.center, mesh);
+    if (labelShow.faces) for (const face of spots.faces) {
+      addLabel(faceElement(face.names, face.big), face.points, mesh, face.normal);
+    }
+  });
+}
+
+// Each scene path, a part's or a bought part's body, below its module.
+function labelNames() {
+  const names = {};
+  for (const m of layout.modules) {
+    const paths = [...m.parts.map((p) => p.path),
+      ...(m.hardware ?? []).flatMap((item) => item.bodies.map((body) => `${item.path}.${body.name}`))];
+    for (const p of paths) names[p] = m.path && p.startsWith(m.path + '.') ? p.slice(m.path.length + 1) : p;
+  }
+  return names;
+}
+
+// A label with the spots it may sit at, the best first.
+function addLabel(el, points, mesh, normal = null) {
+  const label = new CSS2DObject(el);
+  label.position.copy(points[0]);
+  label.userData = { mesh, points, normal };
+  labelGroup.add(label);
+}
+
+function nameElement(name) {
+  const el = document.createElement('div');
+  el.className = 'plabel';
+  const dot = name.lastIndexOf('.');
+  if (dot >= 0) el.append(note(name.slice(0, dot + 1), 'scope'));
+  el.append(name.slice(dot + 1));
+  return el;
+}
+
+function faceElement(names, big) {
+  const el = document.createElement('div');
+  el.className = 'flabel' + (big ? ' big' : '');
+  el.append(names[0]);
+  for (const alias of names.slice(1)) el.append(note(' · ' + alias, 'alias'));
+  return el;
+}
+
+// Where a board's labels go, in world mm: its name at points well inside
+// its outline at mid thickness, a big face's names on the face over those
+// points, a narrow face's names in the middle of its longest straight
+// stretch. Each label has its spots in order, the best first.
+function labelSpots(part) {
+  const idx = { x: 0, y: 1, z: 2 }, axes = part.axes, b = part.box;
+  const ti = idx[axes.t];
+  const world = (u, v, t) => {
+    const p = [0, 0, 0];
+    p[idx[axes.u]] = u; p[idx[axes.v]] = v; p[ti] = t;
+    return new THREE.Vector3(...p);
+  };
+  const inside = insidePoints(part.outline);
+  const mid = (b.min[ti] + b.max[ti]) / 2;
+  const faces = [];
+  for (const [worldName, list] of Object.entries(part.faces)) {
+    const code = layout.frame[worldName];
+    const i = idx[code[1]], sign = code[0] === '+' ? 1 : -1;
+    const normal = new THREE.Vector3();
+    normal.setComponent(i, sign);
+    let points;
+    if (i === ti) {
+      points = inside.map(([u, v]) => world(u, v, sign > 0 ? b.max[ti] : b.min[ti]));
+    } else {
+      const [u, v] = edgeMiddle(part.outline[0], code[1] === axes.u ? 0 : 1, sign);
+      points = [world(u, v, mid)];
+    }
+    faces.push({ names: list, big: i === ti, points, normal });
+  }
+  return { center: inside.map(([u, v]) => world(u, v, mid)), faces };
+}
+
+// Points well inside a polygon (its exterior ring, then its holes), the
+// best first: of a grid over its bounds, the one farthest from the edges, a
+// tie going to the one nearest the middle (a long board is labelled at its
+// centre), then up to four more, each a fifth of the polygon's size away
+// from the others, for when another part hides the first (a shelf in front
+// of a side's middle).
+function insidePoints(rings) {
+  const [u0, v0, u1, v1] = ringBounds(rings);
+  const cu = (u0 + u1) / 2, cv = (v0 + v1) / 2, n = 32;
+  const flat = flatRings(rings);
+  const candidates = [];    // [u, v, clearance, score]
+  const consider = (u, v) => {
+    const c = clearance(flat, u, v);
+    candidates.push([u, v, c, c - 0.1 * Math.hypot(u - cu, v - cv)]);
+  };
+  consider(cu, cv);
+  for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) {
+    consider(u0 + (u1 - u0) * (i + 0.5) / n, v0 + (v1 - v0) * (j + 0.5) / n);
+  }
+  candidates.sort((a, b) => b[3] - a[3]);
+  const apart = 0.2 * Math.max(u1 - u0, v1 - v0);
+  const points = [candidates[0]];
+  for (const c of candidates) {
+    if (points.length === 5) break;
+    if (c[2] > 0 && points.every((p) => Math.hypot(p[0] - c[0], p[1] - c[1]) >= apart)) points.push(c);
+  }
+  return points.map(([u, v]) => [u, v]);
+}
+
+// The rings as flat coordinates with their bounds, for clearance().
+function flatRings(rings) {
+  return rings.map((ring) => {
+    const [u0, v0, u1, v1] = ringBounds([ring]);
+    return { uv: Float64Array.from(ring.flat()), u0, v0, u1, v1 };
+  });
+}
+
+// The distance from (u, v) to the nearest edge of the rings, negative
+// outside. A ring whose bounds lie farther than the nearest edge so far is
+// skipped: the point lies outside its bounds, so it does not change inside.
+function clearance(flat, u, v) {
+  let inside = false, d2 = Infinity;
+  for (const { uv, u0, v0, u1, v1 } of flat) {
+    const ou = Math.max(u0 - u, 0, u - u1), ov = Math.max(v0 - v, 0, v - v1);
+    if (ou * ou + ov * ov >= d2) continue;
+    let au = uv[uv.length - 2], av = uv[uv.length - 1];
+    for (let i = 0; i < uv.length; i += 2) {
+      const bu = uv[i], bv = uv[i + 1];
+      if ((av > v) !== (bv > v) && u < au + (v - av) * (bu - au) / (bv - av)) inside = !inside;
+      const du = bu - au, dv = bv - av, len2 = du * du + dv * dv;
+      let t = len2 ? ((u - au) * du + (v - av) * dv) / len2 : 0;
+      t = t < 0 ? 0 : t > 1 ? 1 : t;
+      const eu = u - au - t * du, ev = v - av - t * dv;
+      d2 = Math.min(d2, eu * eu + ev * ev);
+      au = bu; av = bv;
+    }
+  }
+  return inside ? Math.sqrt(d2) : -Math.sqrt(d2);
+}
+
+// Where a narrow face lies on the outline: the extreme of the ring on one
+// axis (0: u, 1: v) toward `sign`, at the middle of the longest straight
+// stretch there, or at the extreme corner when none lies there (a slanted end).
+function edgeMiddle(ring, axis, sign) {
+  const other = 1 - axis;
+  const values = ring.map((p) => p[axis]);
+  const end = sign > 0 ? Math.max(...values) : Math.min(...values);
+  const on = (p) => Math.abs(p[axis] - end) < 0.01;
+  let at = null, longest = -1;
+  for (let i = 0, k = ring.length - 1; i < ring.length; k = i++) {
+    const a = ring[k], c = ring[i];
+    if (on(a) && on(c) && Math.abs(c[other] - a[other]) > longest) {
+      longest = Math.abs(c[other] - a[other]);
+      at = (a[other] + c[other]) / 2;
+    }
+  }
+  if (at === null) {
+    const corners = ring.filter(on);
+    at = corners.reduce((sum, p) => sum + p[other], 0) / corners.length;
+  }
+  const p = [0, 0];
+  p[axis] = end; p[other] = at;
+  return p;
+}
+
+// Which labels show, and where, from the camera as it is: each label sits
+// at the first of its spots in view, or hides when none is.
+const labelRay = new THREE.Raycaster();
+function updateLabels() {
+  labelsDirty = false;
+  if (!labelGroup.children.length) return;
+  const shown = [];
+  meshes((o) => { if (o.visible) shown.push(o); });
+  for (const label of labelGroup.children) {
+    const { mesh, points, normal } = label.userData;
+    const at = mesh.visible ? points.find((p) => inView(p, mesh, normal, shown)) : undefined;
+    label.visible = at !== undefined;
+    if (at) label.position.copy(at);
+    label.element.classList.toggle('selected', mesh.userData.path === selectedPath);
+  }
+}
+
+// Whether a label's spot is in view: not clipped, on a face turned toward
+// the camera, and not behind a part. A ray from the eye to the spot that
+// meets a part first hides it; for a name, which sits inside its own part,
+// the part's own faces do not count.
+const _toEye = new THREE.Vector3();
+function inView(point, mesh, normal, shown) {
+  if (section.on && plane.distanceToPoint(point) < 0) return false;
+  _toEye.subVectors(camera.position, point);
+  const dist = _toEye.length();
+  if (normal && normal.dot(_toEye) <= 0.1 * dist) return false;
+  if (mode === 'ghost') return true;
+  labelRay.set(camera.position, _toEye.divideScalar(-dist));
+  labelRay.far = dist - 0.5;
+  return !labelRay.intersectObjects(shown, false).some((h) =>
+    (normal || h.object !== mesh) && (!section.on || plane.distanceToPoint(h.point) >= -1e-6));
+}
+
+// Called every frame: after the camera moved, or anything else changed,
+// the labels follow at most every 100 ms, since each update casts a ray
+// per label.
+const labelCamera = { eye: new THREE.Vector3(), turn: new THREE.Quaternion(), fov: 0, aspect: 0 };
+let labelsAt = 0;
+function tickLabels() {
+  if (!labelGroup.children.length) return;
+  const c = labelCamera;
+  if (!camera.position.equals(c.eye) || !camera.quaternion.equals(c.turn) || camera.fov !== c.fov || camera.aspect !== c.aspect) {
+    c.eye.copy(camera.position); c.turn.copy(camera.quaternion); c.fov = camera.fov; c.aspect = camera.aspect;
+    labelsDirty = true;
+  }
+  const now = performance.now();
+  if (labelsDirty && now - labelsAt > 100) { labelsAt = now; updateLabels(); }
+}
+
 // -- visibility, selection and display modes ------------------------------
 
 function applyAll() { applyVisibility(); applyMode(); applySection(); renderList(); showSelected(); }
 
 function applyVisibility() {
   meshes((o) => { o.visible = !hidden.has(o.userData.path); });
+  labelsDirty = true;
   applyCaps();
 }
 
@@ -470,6 +740,7 @@ function applyMode() {
     }
   });
   $('mode').value = mode;
+  labelsDirty = true;
   applyCaps();
 }
 
@@ -499,6 +770,7 @@ function select(path) {
     o.material.emissive = new THREE.Color(on ? 0xc0502c : 0x000000);
     o.material.emissiveIntensity = on ? 0.25 : 0;
   });
+  labelsDirty = true;
   showSelected();
   renderList();
   $('parts').querySelector('.node.leaf.selected')?.scrollIntoView({ block: 'nearest' });
@@ -678,6 +950,7 @@ function applySection() {
   plane.normal.copy(n);
   plane.constant = section.flip ? -at : at;
   $('secValue').textContent = section.on ? `${section.axis} = ${at.toFixed(0)}` : '';
+  labelsDirty = true;
   applyCaps();
 }
 
@@ -740,6 +1013,8 @@ window.addEventListener('keydown', (e) => {
       applyMaster();
       break;
     }
+    case 'n': setLabels({ names: !labelShow.names }); break;
+    case 'd': setLabels({ faces: !labelShow.faces }); break;
     case 's': section.on = !section.on; applySection(); break;
     case 'x': case 'y': case 'z': section.axis = e.key; section.on = true; applySection(); break;
     case '[': section.pos = Math.max(0, section.pos - step); section.on = true; applySection(); break;
@@ -767,6 +1042,7 @@ const waiting = [];
 
 // Draws a frame now, so that a screenshot taken right after a call shows it.
 function draw() {
+  updateLabels();
   renderer.render(scene, camera);
   labelRenderer.render(scene, camera);
 }
@@ -953,6 +1229,8 @@ window.preview = {
     applySection();
     draw();
   },
+  /** Part names and face names on or off: labels({names: true, faces: true}); returns both. */
+  labels: (state) => { if (state) setLabels(state); draw(); return { ...labelShow }; },
   /** Every part and bought body: [{path, label}]. */
   parts: () => listItems(),
   /** A part's operations, with the world point look() aims at: [{name, kind, at}]. */
@@ -985,6 +1263,7 @@ poll();
 // wrote, which showed as the view jumping when a motion ended.
 function animate() {
   requestAnimationFrame(animate);
+  tickLabels();
   renderer.render(scene, camera);
   labelRenderer.render(scene, camera);
 }

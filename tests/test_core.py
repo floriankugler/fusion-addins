@@ -397,6 +397,16 @@ def test_module_frame_follows_placement():
     op = layout_back["ops"][0]
     assert op["kind"] == "hole" and op["face"] == "right"   # world names in the layout
     assert not cab.frame.is_mirrored
+    # the names the build file uses, by world name, for the preview's labels
+    assert layout_back["faces"] == {"right": ["front", "inner"], "left": ["back", "outer"],
+                                    "back": ["left"], "front": ["right"], "top": ["top"], "bottom": ["bottom"]}
+
+
+def test_face_names_leave_out_inner_and_outer_when_ambiguous():
+    with module("cab", Box.from_size(width=500, depth=600, height=720)) as cab:
+        shelf = board("shelf", ply15).on(cab.bottom + 355)    # straddles the middle at 360
+    assert shelf.to_layout()["faces"]["top"] == ["top"]
+    assert all(len(names) == 1 for names in shelf.to_layout()["faces"].values())
 
 
 def test_module_frame_mirrored_and_default():

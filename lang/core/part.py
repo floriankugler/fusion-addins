@@ -1400,7 +1400,21 @@ class Board:
             "grained": self.material.grain,
             "manual": self.manual_part,
             "ops": [_op_to_layout(op) for op in self.ops],
+            "faces": self._face_names(),
         }
+
+    def _face_names(self) -> dict[str, list[str]]:
+        """Each face's names in the build file, by world name: the
+        direction in the scope's frame, and inner or outer for the big
+        faces when the board does not straddle the scope's centre."""
+        names = {directions.frame.name_of(d): [d.name] for d in self.scope.frame.directions()}
+        try:
+            inner = self._inner_outer("inner")
+        except LangError:
+            return names
+        names[inner.world_name].append("inner")
+        names[Face(self, -inner.direction).world_name].append("outer")
+        return names
 
 
 @dataclass(frozen=True)
