@@ -1092,11 +1092,15 @@ proposed]
     2026-10-12]: the hook is bent back over the frame part's own plate,
     which reaches from the panel's back face 33 back. The frame holes lie
     8 behind the panel's back face, the panel holes 19 out from the frame
-    board's face, since the tongue lies on the 4 mm plate. The panel sits
-    on the frame board's edge, or the frame boards reach past its back
-    face (a panel set in between); a gap is refused, as the plate would
-    hang over the edge. The frame board must reach 29 behind the panel
-    (the plate's flat underside; its last 4 mm are rounded).
+    board's face, since the tongue lies on the 4 mm plate. The frame
+    holes stay 8 behind the panel's back face, at the plate's front end,
+    whatever the gap [decided by Florian 2026-10-12]. The panel sits on
+    the frame board's edge or up to 3 mm in front of it [decided by
+    Florian 2026-10-12; a gap was refused before], the plate then hanging
+    over the edge by the gap and the frame holes 8 - gap from it, or the
+    frame boards reach past its back face (a panel set in between). The
+    frame board must reach 29 behind the panel (the plate's flat
+    underside; its last 4 mm are rounded).
   - `"Pacofix PF-L"`, the straight one: the hook points from the plate
     toward the panel, the tongue lies on the frame board. Frame holes 37
     behind the panel's back face (the System 32 line), panel holes 15 out
@@ -1107,23 +1111,30 @@ proposed]
   Each pair of holes is 32 apart along the edge. A panel set in between
   may stop up to 3 mm short of where the panel part's plate begins (3 mm
   short of the frame board's face for the PF-L, 7 for the PF-L-R), the
-  plate hanging over its edge. `count=` brackets (2) per frame board, the
-  outer ones `end=` (50) from the ends of the stretch panel and board
-  share, or `at=` positions along the edge, the same on every frame
-  board; numbered from the bottom or from the panel's own left. Holes per
-  part, because Euro screws usually go only into the frame board:
-  `frame_hole=` and `panel_hole=` each `"pilot"` (Ø2 x 6, the default,
-  for chipboard screws), `"euro"` (Ø5 x 11, a 6.3 x 13.5 Euro screw
-  through the 4 mm plate) or (diameter, depth). Refused before anything
-  is drilled: a frame board parallel to the panel, a gap the frame part
-  does not allow, a frame board ending before the plate does, a panel too
-  far short of the plate's start, plates off their boards or over pockets
-  (a hole under a plate is fine), brackets closer than a plate's 48, holes
-  off their face or in another hole, holes as deep as the board is thick,
-  `end` under 24. Keku's largest spacing (600) and Häfele's "no hanging
-  loads" (a ceiling panel) are notes in the layout's problems; Keku's
-  minimum of four per panel is left to the build (two frame boards with
-  two each). Each latched pair is one body of four boxes
+  plate hanging over its edge [decided by Florian 2026-10-12]. `count=`
+  brackets (2) per frame board, the outer ones `end=` (50 [decided by
+  Florian 2026-10-12]) from the ends of the stretch panel and board share,
+  or `at=` positions along the edge, the same on every frame board;
+  numbered from the bottom or from the panel's own left. Holes per part,
+  because Euro screws usually go only into the frame board: `frame_hole=`
+  and `panel_hole=` each `"pilot"` (Ø2 x 6, the default, for chipboard
+  screws), `"euro"` (Ø5 x 11, a 6.3 x 13.5 Euro screw through the 4 mm
+  plate, but never deeper than the board less 2 mm, 10 on a 12 mm board
+  [decided by Florian 2026-10-12]; a board under 11.5 then takes a
+  shorter screw) or (diameter, depth), which stays as given. Refused
+  before anything is drilled: a frame board parallel to the panel, a gap
+  the frame part does not allow, a frame board ending before the plate
+  does, a panel too far short of the plate's start, plates off their
+  boards or over pockets (a hole under a plate is fine; the part over a
+  gap hangs free), brackets closer than a plate's 48, holes off their
+  face or in another hole, holes as deep as the board is thick, `end`
+  under 24. The makers' rules are advice for the build, not checks, and
+  nothing about them appears in the build's output [decided by Florian
+  2026-10-12; they were notes in the layout's problems before]: Keku
+  asks for at most 600 between brackets and at least four per panel (two
+  frame boards with two each); Häfele rules out hanging loads, such as a
+  panel hung overhead, and gives 20 kg per pair vertically, 30 kg lying
+  horizontally. Each latched pair is one body of four boxes
   (`BRACKET_SHAPES`: frame plate, hook, panel plate, tongue), `left_1`...
   under `<panel>_brackets`. Articles, for chipboard / Euro screws: panel
   part PF 262.50.359 / .358, frame part PF-L-R 262.50.390 / .391, PF-L

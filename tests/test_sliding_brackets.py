@@ -107,12 +107,14 @@ def test_the_straight_tongue_ends_at_the_plate_and_the_bent_one_lies_on_it():
     """PF-L: the tongue lies on the frame board and reaches the plate,
     which begins 29 behind the panel (37 - 8). PF-L-R: the tongue lies on
     the frame part's plate, 4 off the board, its tip at the end of the
-    plate's flat underside (29), the hook's closed end."""
+    plate's flat underside (29), the hook's closed end; the plate begins
+    at the panel's back face and may hang 3 over the frame board's edge."""
     (plate, _), (_, tongue) = SHAPE.frame_part, SHAPE.panel_part
     assert tongue[0][0] == 0 and tongue[1][1] == SPEC.max_gap == plate[1][0] == SPEC.frame_hole_back - 8
     (plate, hook), (_, tongue) = BENT_SHAPE.frame_part, BENT_SHAPE.panel_part
     assert tongue[0] == (plate[0][1], plate[0][1] + 10) == hook[0]
-    assert tongue[1][1] == BENT.frame_plate_back[1] and BENT.max_gap == 0
+    assert tongue[1][1] == BENT.frame_plate_back[1] and plate[1][0] == BENT.frame_plate_back[0] == 0
+    assert BENT.max_gap == data.MAX_PLATE_OVERHANG == 3 and SlidingBracket().max_gap == 3
 
 
 # -- positions ----------------------------------------------------------------------------------------
@@ -225,6 +227,25 @@ def test_euro_and_custom_holes():
     assert {(d, depth) for *_, d, depth in _holes(parts["cover"])} == {(5.0, 11.0)}
 
 
+@pytest.mark.parametrize("t, depth", [(18.0, 11.0), (13.0, 11.0), (12.0, 10.0), (9.0, 7.0)])
+def test_euro_holes_stop_2_short_of_the_far_face(t: float, depth: float):
+    """Florian 2026-10-12: Euro holes are 11 deep, but never deeper than
+    the board less 2 (10 on a 12 mm board), in the frame boards and the
+    panel alike; the 18 mm sides keep 11. Explicit sizes stay as given."""
+    _, parts = _cover(SlidingBracket(PF_L, frame_hole="euro", panel_hole="euro"), cover=material("birch", t=t))
+    assert {(d, dp) for *_, d, dp in _holes(parts["cover"])} == {(5.0, depth)}
+    assert {(d, dp) for *_, d, dp in _holes(parts["left"])} == {(5.0, 11.0)}
+    registry.reset()
+    _, parts = _cover(SlidingBracket(PF_L, panel_hole=(5, 11)), cover=material("birch", t=12))
+    assert {(d, dp) for *_, d, dp in _holes(parts["cover"])} == {(5.0, 11.0)}
+
+
+def test_euro_holes_need_a_board_thicker_than_the_wall():
+    with pytest.raises(LangError, match="too thin for Euro holes"):
+        _cover(SlidingBracket(PF_L, panel_hole="euro"), cover=material("veneer", t=2))
+    assert _holes(registry.roots[0].part("left")) == []
+
+
 def test_bad_hole_settings_are_refused():
     with pytest.raises(LangError, match="expected 'pilot' or 'euro'"):
         SlidingBracket(frame_hole="m4")  # type: ignore[arg-type]
@@ -233,9 +254,10 @@ def test_bad_hole_settings_are_refused():
 
 
 def test_holes_as_deep_as_a_board_is_thick_are_refused_before_drilling():
-    """Euro holes 11 deep into a 9 mm cover: refused, and nothing drilled."""
+    """Holes 11 deep, given as such, into a 9 mm cover: refused, and
+    nothing drilled ("euro" would make them 7 deep there)."""
     with pytest.raises(LangError, match="panel_hole depth"):
-        _cover(SlidingBracket(PF_L, panel_hole="euro"), cover=material("birch", t=9))
+        _cover(SlidingBracket(PF_L, panel_hole=(5, 11)), cover=material("birch", t=9))
     left = registry.roots[0].part("left")
     assert _holes(left) == [] and registry.roots[0].hardware == []
 
@@ -328,26 +350,26 @@ def test_mount_options_are_checked():
             cab.mount(SlidingBracket(PF_L), panel=cover, frame=left.front)
 
 
-# -- notes ------------------------------------------------------------------------------------------
+# -- the makers' advice -------------------------------------------------------------------------------
 
-def test_brackets_more_than_600_apart_and_hanging_panels_are_noted():
-    """Two brackets on a 1400 mm side are 1300 apart: Keku allows 600. A
-    panel under its frame boards hangs from them, which Häfele rules out."""
+def test_the_makers_advice_is_not_checked():
+    """Florian 2026-10-12: Keku's largest spacing (600) and Häfele's "no
+    hanging loads" are advice, not checks: two brackets 1300 apart on a
+    1400 mm side, and a panel hanging under its frame boards, build
+    without a note."""
     tall = Box.from_size(width=600, depth=400, height=1400)
     with module("cab", tall) as cab:
         left = board("left", ply18).on(cab.left).between(cab.front.into(12))
         cover = board("cover", ply12).on(cab.front)
         cab.mount(SlidingBracket(PF_L), panel=cover, frame=left)
-    (problem,) = build_layout()["modules"][0]["problems"]
-    assert "1300 mm apart" in problem and "600" in problem
+    assert build_layout()["modules"][0]["problems"] == []
     registry.reset()
     with module("cab", BOX) as cab:
         battens = [board(f"batten{i}", ply18).on(side).between(cab.bottom.into(12))
                    for i, side in enumerate((cab.left, cab.right))]
         ceiling = board("ceiling", ply12).on(cab.bottom)
         cab.mount(SlidingBracket(PF_L), panel=ceiling, frame=battens)
-    problems = build_layout()["modules"][0]["problems"]
-    assert len(problems) == 1 and "hanging loads" in problems[0]
+    assert build_layout()["modules"][0]["problems"] == []
 
 
 # -- the brackets as boxes --------------------------------------------------------------------------
@@ -400,12 +422,28 @@ def test_the_bent_frame_part_sits_at_the_frame_edge():
         + [(f"bracket_right_{n}", "back", 563.0, z, 2.0, 6.0) for n, z in zip(names, zs)])
 
 
-def test_the_bent_frame_part_takes_no_gap():
-    """Its plate begins at the panel's back face, so any gap would leave it
-    hanging over the frame board's edge."""
-    with pytest.raises(LangError, match="must sit on the frame board's edge"):
-        _cover(SlidingBracket(), gap=1)
-    assert _holes(registry.roots[0].part("left")) == []
+@pytest.mark.parametrize("gap", [0.0, 1.5, 3.0])
+def test_the_bent_frame_part_takes_a_gap_up_to_3(gap: float):
+    """Florian 2026-10-12: the cover may stand up to 3 mm in front of the
+    sides' edges. The plate begins at the cover's back face, so it hangs
+    over the edge by the gap; the frame holes stay 8 behind the cover (x
+    20), 8 - gap from the edge, the panel holes 19 from the sides' faces.
+    The boxes reach into no board."""
+    cab, parts = _cover(SlidingBracket(), gap=gap)
+    left = parts["left"]
+    assert left.box().lo["x"] == 12 + gap
+    assert {(u, u - left.box().lo["x"]) for _, _, u, *_ in _holes(left)} == {(20.0, 8 - gap)}
+    assert {u for _, _, u, *_ in _holes(parts["cover"])} == {37.0, 563.0}
+    assert no_interference(cab) == []
+
+
+def test_the_bent_frame_part_refuses_a_gap_over_3():
+    """3.5 mm would leave more of the plate in the air: refused, naming
+    the gap and the limit, before anything is drilled."""
+    with pytest.raises(LangError, match=r"lies 3\.5 mm behind .*may hang 3 mm over the frame board's edge, so the gap "
+                                        r"may be at most 3 mm"):
+        _cover(SlidingBracket(), gap=3.5)
+    assert _holes(registry.roots[0].part("left")) == [] and _holes(registry.roots[0].part("cover")) == []
 
 
 def test_the_bent_frame_part_behind_a_panel_set_in_between():

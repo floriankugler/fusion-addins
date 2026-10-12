@@ -2,9 +2,9 @@
 a removable panel on frame boards, as hardware.
 
 The panel and each frame board stand square to each other, the panel's
-back face against the frame board's front edge, or the frame boards
-reaching past it with the panel set in between them (the straight frame
-part also allows a gap in front of the edge).
+back face against the frame board's front edge or a little in front of
+it, or the frame boards reaching past it with the panel set in between
+them.
 `cab.mount(SlidingBracket(), panel=cover, frame=[left, right])` hangs the
 panel on each frame board named and drills both parts as
 `lib.sliding_brackets` has them: the frame part's two holes into the
@@ -16,37 +16,38 @@ apart along the edge. Where they go depends on the frame part:
 - `"Pacofix PF-L-R"`, the bent one and the default: the frame holes 8
   behind the panel's back face, where the frame part's plate begins, the
   panel holes 19 out from the frame board's face (the tongue lies on the
-  frame part's plate). The panel's back face must lie on the frame
-  board's edge or the frame board reach past it: a gap would leave the
-  plate hanging over the edge.
+  frame part's plate). The panel's back face may stand up to 3 mm in
+  front of the frame board's edge, the plate hanging over the edge by
+  that gap and the holes 8 - gap from it.
 - `"Pacofix PF-L"`, the straight one: the frame holes 37 behind the
-  panel's back face, the System 32 line, whatever the gap, which is read
-  from the model, never given (up to 29, where the plate begins); the
-  panel holes 15 out from the frame board's face, where the tongue lies.
+  panel's back face, the System 32 line, whatever the gap (up to 29,
+  where the plate begins); the panel holes 15 out from the frame board's
+  face, where the tongue lies.
 
-The holes are `"pilot"` holes for chipboard screws (Ø2 x 6) unless
-`frame_hole=` or `panel_hole=` say `"euro"` (Ø5 x 11, for 6.3 mm Euro
-screws and the parts made for them) or give (diameter, depth). Per
-frame board `count` brackets (2) sit along the stretch the panel and the
-frame board share, the outer ones' centres `end` (50) from its ends, the
-rest evenly between, one alone in the middle; `at=` takes positions along
-the edge instead, the same on every frame board named. Brackets are
-numbered by their place along the edge: from the bottom, or from the
-panel's own left, seen standing in front of it.
+The gap is read from the model, never given. The holes are `"pilot"`
+holes for chipboard screws (Ø2 x 6) unless `frame_hole=` or
+`panel_hole=` say `"euro"` (Ø5, for 6.3 mm Euro screws and the parts
+made for them, 11 deep but 2 short of the board's far face at most: 10
+on a 12 mm board) or give (diameter, depth). Per frame board `count`
+brackets (2) sit along the stretch the panel and the frame board share,
+the outer ones' centres `end` (50) from its ends, the rest evenly
+between, one alone in the middle; `at=` takes positions along the edge
+instead, the same on every frame board named. Brackets are numbered by
+their place along the edge: from the bottom, or from the panel's own
+left, seen standing in front of it.
 
 It refuses, before it drills anything: a frame board parallel to the
 panel, a frame board whose edge lies further behind the panel's back
-face than the frame part's plate begins (0 for the PF-L-R, 29 for the
-PF-L) or that ends before the plate does (29 and 45 behind it), a panel
-that stops more than 3 mm short of where the panel part's plate begins
-(it hangs over the edge of a panel set in between), plates that do not
-lie on their boards (the outline, less the pockets made into the face)
-or overlap each other, holes that land off their face or in another hole
-or pocket, and holes as deep as a board is thick; `end` under half a
-plate (24). Keku's rule that brackets be at most 600 apart, and Häfele's
-that they carry no hanging load (a ceiling panel), become notes in the
-layout's problems; Keku's minimum of four per panel is left to the build
-(two frame boards with the default two brackets each).
+face than the gap allows (3 for the PF-L-R, 29 for the PF-L) or that
+ends before the plate does (29 and 45 behind it), a panel that stops
+more than 3 mm short of where the panel part's plate begins (it hangs
+over the edge of a panel set in between), plates that do not lie on
+their boards (the outline, less the pockets made into the face; the
+part over a gap hangs free) or overlap each other, holes that land off
+their face or in another hole or pocket, and holes as deep as a board is
+thick; `end` under half a plate (24). The makers' advice (Keku: at least
+four per panel, at most 600 apart; Häfele: no hanging loads such as
+ceiling panels) is left to the build and not checked.
 
 Each latched pair is one body of four boxes (`BRACKET_SHAPES`, measured
 on Häfele's CAD models): the frame part's plate and its hook, the panel
@@ -190,8 +191,8 @@ class SlidingBracket:
     `count` per frame board, the outer ones `end` from the ends of the
     stretch the panel and the frame board share, or one at each position
     of `at` along the edge; `frame_hole` and `panel_hole` are the holes in
-    the frame board and the panel: `"pilot"` (Ø2 x 6), `"euro"` (Ø5 x 11)
-    or (diameter, depth) in mm."""
+    the frame board and the panel: `"pilot"` (Ø2 x 6), `"euro"` (Ø5 x 11,
+    2 short of the board's far face at most) or (diameter, depth) in mm."""
 
     def __init__(self, model: BracketModel = "Pacofix PF-L-R", count: int | None = None,
                  end: float = data.DEFAULT_END_OFFSET, at: Sequence[PosLike] | None = None,
@@ -215,9 +216,10 @@ class SlidingBracket:
         self.end = float(end)
         #: Positions along the edge, the same on every frame board.
         self.at = tuple(as_pos(p, f"{self.name}(at=)") for p in at) if at is not None else None
-        #: (diameter, depth) of the holes in the frame board and in the panel.
-        self.frame_hole = _hole(self.name, "frame_hole", frame_hole)
-        self.panel_hole = _hole(self.name, "panel_hole", panel_hole)
+        #: The holes in the frame board and in the panel, as given; `"euro"`
+        #: holes take their depth from the board (`_hole_size`).
+        self.frame_hole: BracketHole = _hole(self.name, "frame_hole", frame_hole)
+        self.panel_hole: BracketHole = _hole(self.name, "panel_hole", panel_hole)
 
     @property
     def name(self) -> str:
@@ -226,9 +228,23 @@ class SlidingBracket:
     @property
     def max_gap(self) -> float:
         """The widest gap between the panel's back face and the frame
-        board's edge, where the frame part's plate begins: 0 for the
-        PF-L-R, 29 for the PF-L."""
+        board's edge: 3 for the PF-L-R, whose plate may hang that far over
+        the edge, 29 for the PF-L, where its plate begins."""
         return self.spec.max_gap
+
+    def _hole_size(self, board: Board, choice: BracketHole) -> tuple[float, float]:
+        """(diameter, depth) of a part's holes in `board`: pilot holes and
+        explicit sizes as given, Euro holes `EURO_DEPTH` deep but
+        `EURO_WALL` short of the board's far face at most."""
+        if choice == "pilot":
+            return (data.PILOT_DIAMETER, data.PILOT_DEPTH)
+        if choice == "euro":
+            try:
+                return (data.EURO_DIAMETER, data.euro_depth(board.thickness))
+            except ValueError:
+                raise LangError(f"{self.name}: {board.path} ({_mm(board.thickness)}) is too thin for Euro holes, "
+                                f"which stop {_mm(data.EURO_WALL)} short of its far face.", board.path) from None
+        return choice
 
     # -- mounting ------------------------------------------------------------------------------------
 
@@ -249,7 +265,6 @@ class SlidingBracket:
         for edge in edges:
             self._check(panel, edge)
         self._drill(panel, edges)
-        self._notes(panel, edges)
         self._place(scope, panel, edges)
 
     def _frames(self, value: object, panel: Board, path: str) -> list[tuple[Board, Face | None]]:
@@ -306,13 +321,13 @@ class SlidingBracket:
         near, far = (fb.lo[pt], fb.hi[pt]) if back.sign > 0 else (fb.hi[pt], fb.lo[pt])
         gap = (near - back_face.value) * back.sign
         if gap > spec.max_gap + TOLERANCE:
-            if spec.max_gap <= TOLERANCE:
-                raise LangError(f"{self.name}: the edge of {frame.path} lies {_mm(gap)} behind {panel.path}'s back "
-                                "face; the frame part's plate begins at the panel's back face, so the panel must sit "
-                                "on the frame board's edge.", frame.path)
+            start = spec.frame_plate_back[0]
+            begins = "at the panel's back face" if start <= TOLERANCE else f"{_mm(start)} behind it"
+            over = (f" and may hang {_mm(spec.frame_plate_overhang)} over the frame board's edge"
+                    if spec.frame_plate_overhang > TOLERANCE else "")
             raise LangError(f"{self.name}: the edge of {frame.path} lies {_mm(gap)} behind {panel.path}'s back face; "
-                            f"the frame part's plate begins {_mm(spec.max_gap)} behind it, so the gap may be at most "
-                            f"that.", frame.path)
+                            f"the frame part's plate begins {begins}{over}, so the gap may be at most "
+                            f"{_mm(spec.max_gap)}.", frame.path)
         reach = (far - back_face.value) * back.sign
         if reach < spec.frame_plate_back[1] - TOLERANCE:
             raise LangError(f"{self.name}: {frame.path} ends {_mm(reach)} behind {panel.path}'s back face; the frame "
@@ -369,8 +384,11 @@ class SlidingBracket:
         half = spec.plate_length / 2
         frame_region = _face_region(frame, edge.frame_face)
         panel_region = _face_region(panel, edge.back_face)
+        frame_hole = self._hole_size(frame, self.frame_hole)
+        panel_hole = self._hole_size(panel, self.panel_hole)
         for n, s in enumerate(edge.stations, 1):
-            b0, b1 = spec.frame_plate_back
+            # over a gap in front of the frame board the plate may hang free
+            b0, b1 = max(spec.frame_plate_back[0], edge.gap), spec.frame_plate_back[1]
             if not _covers(frame_region, frame, edge.point(0.0, b0, s - half), edge.point(0.0, b1, s + half)):
                 raise LangError(f"{self.name}: the frame part of bracket {n} does not fit on {frame.path}'s "
                                 f"{edge.frame_face.name} face ({_mm(b0)} to {_mm(b1)} behind {panel.path}'s back "
@@ -384,14 +402,14 @@ class SlidingBracket:
             for k in (-1, 1):
                 along = s + k * spec.hole_pitch / 2
                 if not _hole_fits(frame, edge.frame_face, edge.point(0.0, spec.frame_hole_back, along),
-                                  self.frame_hole[0]):
+                                  frame_hole[0]):
                     raise LangError(f"{self.name}: a hole of bracket {n} lands off {frame.path}'s "
                                     f"{edge.frame_face.name} face or in one of its holes or pockets.", frame.path)
                 if not _hole_fits(panel, edge.back_face, edge.point(spec.panel_hole_out, 0.0, along),
-                                  self.panel_hole[0]):
+                                  panel_hole[0]):
                     raise LangError(f"{self.name}: a hole of bracket {n} on {frame.path} lands off {panel.path}'s "
                                     f"{edge.back_face.name} face or in one of its holes or pockets.", panel.path)
-        for board, (_, depth), what in ((frame, self.frame_hole, "frame_hole"), (panel, self.panel_hole, "panel_hole")):
+        for board, (_, depth), what in ((frame, frame_hole, "frame_hole"), (panel, panel_hole, "panel_hole")):
             if depth >= board.thickness - TOLERANCE:
                 raise LangError(f"{self.name}: the {what} depth ({_mm(depth)}) must be less than "
                                 f"{board.path}'s thickness ({_mm(board.thickness)}).", board.path)
@@ -404,30 +422,17 @@ class SlidingBracket:
         two into the panel's back face, `bracket_<frame>_<n>a` and `b`."""
         spec = self.spec
         half = spec.hole_pitch / 2
+        panel_hole = self._hole_size(panel, self.panel_hole)
         for edge in edges:
             frame = edge.frame
+            frame_hole = self._hole_size(frame, self.frame_hole)
             for n, s in enumerate(edge.stations, 1):
                 for letter, k in (("a", -edge.order), ("b", edge.order)):
                     along = s + k * half
                     frame.add_hole(edge.frame_face, _uv(frame, edge.point(0.0, spec.frame_hole_back, along)),
-                                   *self.frame_hole, name=frame.unique_op_name(f"bracket_{panel.name}_{n}{letter}"))
+                                   *frame_hole, name=frame.unique_op_name(f"bracket_{panel.name}_{n}{letter}"))
                     panel.add_hole(edge.back_face, _uv(panel, edge.point(spec.panel_hole_out, 0.0, along)),
-                                   *self.panel_hole, name=panel.unique_op_name(f"bracket_{frame.name}_{n}{letter}"))
-
-    def _notes(self, panel: Board, edges: list[_Edge]) -> None:
-        """Keku's largest spacing and Häfele's hanging loads, as notes in
-        the layout's problems."""
-        for edge in edges:
-            values = sorted(edge.stations)
-            widest = max((b - a for a, b in zip(values, values[1:])), default=0.0)
-            if widest > data.MAX_SPACING + TOLERANCE:
-                panel.notes.append(f"{panel.path}: sliding brackets on {edge.frame.path} {_mm(widest)} apart; Keku "
-                                   f"allows at most {_mm(data.MAX_SPACING)}.")
-        up = directions.frame.direction("top")
-        back = edges[0].back_face.direction
-        if back.axis == up.axis and back.sign == up.sign:
-            panel.notes.append(f"{panel.path}: hangs from its sliding brackets; Häfele rules out hanging loads such "
-                               "as ceiling panels.")
+                                   *panel_hole, name=panel.unique_op_name(f"bracket_{frame.name}_{n}{letter}"))
 
     def _place(self, scope: Scope, panel: Board, edges: list[_Edge]) -> None:
         """Records the brackets as `<panel>_brackets`, a body per latched
@@ -447,12 +452,11 @@ class SlidingBracket:
         scope.place_hardware(name, bodies)
 
 
-def _hole(label: str, what: str, choice: BracketHole) -> tuple[float, float]:
-    """A part's holes as (diameter, depth)."""
+def _hole(label: str, what: str, choice: BracketHole) -> BracketHole:
+    """A part's holes, checked: a choice of `HoleChoice`, or (diameter,
+    depth)."""
     if isinstance(choice, str):
-        if one_of(choice, HoleChoice, f"{label}({what}=)") == "euro":
-            return (data.EURO_DIAMETER, data.EURO_DEPTH)
-        return (data.PILOT_DIAMETER, data.PILOT_DEPTH)
+        return one_of(choice, HoleChoice, f"{label}({what}=)")
     diameter, depth = choice
     if diameter <= 0 or depth <= 0:
         raise LangError(f"{label}: {what}= needs a diameter and a depth greater than zero, not {diameter:g} x "

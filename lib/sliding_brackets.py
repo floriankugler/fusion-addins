@@ -26,9 +26,11 @@ Two frame parts take the same panel part (Häfele Pacofix PF):
   last 4 rounded underneath), so the plate's front end lies at the
   panel's back face and the frame holes 8 behind it. The tongue lies on
   that plate, 4 off the frame board, so the panel holes are 19 out from
-  the frame board's face. The panel sits on the frame board's edge (no
-  gap: the plate would hang over the edge), or the frame boards reach
-  past its back face, the panel set in between them.
+  the frame board's face. The panel sits on the frame board's edge or up
+  to `MAX_PLATE_OVERHANG` (3) in front of it, the plate's front end then
+  hanging over the edge by the gap and the frame holes 8 - gap from it
+  (Florian, 2026-10-12), or the frame boards reach past its back face,
+  the panel set in between them.
 - PF-L, straight (`PACOFIX_PF_L`): the hook points from the plate toward
   the panel; the tongue lies on the frame board's face and ends at the
   plate, which is 29 to 45 behind the panel's back face, its holes 37
@@ -44,21 +46,27 @@ the panel part's `panel_hole_out` out from the frame board's face. Each
 part needs its plate on its board: the frame part `frame_plate_back`
 behind the panel's back face (where its underside is flat), the panel
 part `panel_plate_out` out from the frame board's face, both
-`plate_length` long. `max_gap` is where the frame part's plate begins.
-A panel set in between the frame boards ends a little short of the frame
-board's face; up to `MAX_PLATE_OVERHANG` of the panel part's plate may
-hang over its edge there.
+`plate_length` long. `max_gap` is where the frame part's plate begins,
+plus `frame_plate_overhang`, how much of it may hang over the frame
+board's edge (3 for the PF-L-R; none for the PF-L, whose plate begins 29
+back already). A panel set in between the frame boards
+ends a little short of the frame board's face; up to `MAX_PLATE_OVERHANG`
+of the panel part's plate may hang over its edge there.
 
 Each part takes two countersunk screws through 4.2 mm holes (countersunk
 to 8.4) in its 4 mm plate. The holes default to Ø2 x 6 mm pilots for
 chipboard screws; Euro screws (6.3 mm; the frame parts 262.50.391 and
 262.50.377, the panel part 262.50.358 are made for them) take Ø5 holes,
-`EURO_DEPTH` deep for a 6.3 x 13.5 screw through the plate. Fixed-depth
-holes are flat-bottomed.
+`EURO_DEPTH` deep for a 6.3 x 13.5 screw through the plate, but never
+deeper than the board less `EURO_WALL` (2; Florian, 2026-10-12):
+`euro_depth(thickness)`, 10 on a 12 mm board. A 13.5 screw goes 9.5 into
+the board, so a board under 11.5 takes a shorter one. Fixed-depth holes
+are flat-bottomed.
 
-Keku's rules for the pairs: at least `MIN_PER_PANEL` per panel, at most
-`MAX_SPACING` apart. Häfele: not for hanging loads (ceiling panels); a
-pair carries 20 kg vertically, 30 kg lying horizontally.
+Advice, not checked (Florian, 2026-10-12): Keku asks for at least four
+pairs per panel, at most 600 apart; Häfele rules out hanging loads
+(ceiling panels); a pair carries 20 kg vertically, 30 kg lying
+horizontally.
 
 Häfele Pacofix and Keku are the same parts: Häfele says the Pacofix
 "clicks with all Keku plastic fittings", Keku's data sheet lists its AS
@@ -117,12 +125,16 @@ class BracketSpec:
     #: Out: the panel part's plate on the panel's back face; it begins at
     #: the tongue's side, which lies on the frame board or the frame part.
     panel_plate_out: tuple[float, float]
+    #: Back: how much of the frame part's plate may hang over the frame
+    #: board's edge where the panel stands in front of it.
+    frame_plate_overhang: float
 
     @property
     def max_gap(self) -> float:
         """The widest gap between the panel's back face and the frame
-        board's edge: the frame part's plate begins there."""
-        return self.frame_plate_back[0]
+        board's edge: where the frame part's plate begins, plus what of it
+        may hang over the edge."""
+        return self.frame_plate_back[0] + self.frame_plate_overhang
 
     def in_cm(self) -> "BracketSpec":
         """This spec with every length in cm, Fusion's internal unit."""
@@ -137,7 +149,15 @@ class BracketSpec:
             plate_length=cm(self.plate_length),
             frame_plate_back=(cm(self.frame_plate_back[0]), cm(self.frame_plate_back[1])),
             panel_plate_out=(cm(self.panel_plate_out[0]), cm(self.panel_plate_out[1])),
+            frame_plate_overhang=cm(self.frame_plate_overhang),
         )
+
+
+#: How far a plate may hang over its board's edge: the panel part's over
+#: the edge of a panel set in between the frame boards that stops short of
+#: the plate's start, the PF-L-R's frame part over the edge of a frame
+#: board that the panel stands in front of (Florian, 2026-10-12).
+MAX_PLATE_OVERHANG = 3.0
 
 
 #: Häfele Pacofix PF (panel part) with the bent PF-L-R frame part.
@@ -150,6 +170,7 @@ PACOFIX_PF_L_R = BracketSpec(
     plate_length=48.0,
     frame_plate_back=(0.0, 29.0),
     panel_plate_out=(4.0, 27.0),
+    frame_plate_overhang=MAX_PLATE_OVERHANG,
 )
 
 #: Häfele Pacofix PF (panel part) with the straight PF-L frame part, the
@@ -163,6 +184,7 @@ PACOFIX_PF_L = BracketSpec(
     plate_length=48.0,
     frame_plate_back=(29.0, 45.0),
     panel_plate_out=(0.0, 23.0),
+    frame_plate_overhang=0.0,
 )
 
 #: Every bracket by name, as the language's `BracketModel` names them; the
@@ -184,6 +206,18 @@ PILOT_DEPTH = 6.0
 #: 13.5 screw through the 4 mm plate (9.5 into the board) with room to spare.
 EURO_DIAMETER = 5.0
 EURO_DEPTH = 11.0
+#: What a Euro hole leaves of the board below it, at least.
+EURO_WALL = 2.0
+
+
+def euro_depth(thickness: float) -> float:
+    """How deep a Euro hole goes into a board `thickness` thick:
+    `EURO_DEPTH`, but `EURO_WALL` short of the far face at most. Raises
+    ValueError for a board too thin to leave the wall."""
+    depth = min(EURO_DEPTH, thickness - EURO_WALL)
+    if depth <= 0:
+        raise ValueError(f"A {thickness:g} mm board is too thin for a Euro hole that leaves {EURO_WALL:g} mm.")
+    return depth
 
 # -- placement -------------------------------------------------------------------------
 
@@ -192,12 +226,6 @@ DEFAULT_COUNT = 2
 #: From the ends of the stretch the panel and the frame board share to the
 #: first and last bracket's centre. At least half a plate.
 DEFAULT_END_OFFSET = 50.0
-#: How far the panel part's plate may hang over the edge of a panel set in
-#: between the frame boards that stops short of the plate's start.
-MAX_PLATE_OVERHANG = 3.0
-#: Keku: brackets at most this far apart, at least this many per panel.
-MAX_SPACING = 600.0
-MIN_PER_PANEL = 4
 
 
 def stations(length: float, count: int, end: float = DEFAULT_END_OFFSET) -> list[float]:
@@ -229,24 +257,37 @@ def _self_check() -> None:
         assert spec.frame_hole_back - spec.frame_plate_back[0] == 8, spec.name
         assert spec.frame_plate_back[0] < spec.frame_hole_back < spec.frame_plate_back[1], spec.name
         assert spec.hole_pitch == 32 and spec.plate_length == 48, spec.name
-        assert spec.max_gap == spec.frame_plate_back[0], spec.name
+        assert spec.max_gap == spec.frame_plate_back[0] + spec.frame_plate_overhang, spec.name
+        # A gap leaves the frame holes on the board, behind the plate's
+        # front end.
+        assert 0 <= spec.frame_plate_overhang <= MAX_PLATE_OVERHANG < spec.frame_hole_back, spec.name
     # PF-L-R: the tongue lies on the 4 mm plate, which begins at the
-    # panel's back face, so there is no gap; the tongue reaches the end of
-    # the plate's flat underside (29), the hook's closed end.
-    assert bent.panel_plate_out[0] == 4 and bent.max_gap == 0 and bent.frame_plate_back[1] == TONGUE_LENGTH
+    # panel's back face, so a gap leaves up to 3 of it over the frame
+    # board's edge, the holes 8 - gap from it; the tongue reaches the end
+    # of the plate's flat underside (29), the hook's closed end.
+    assert bent.panel_plate_out[0] == 4 and bent.frame_plate_back[1] == TONGUE_LENGTH
+    assert bent.frame_plate_back[0] == 0 and bent.max_gap == MAX_PLATE_OVERHANG == 3
     # PF-L: the tongue lies on the frame board and ends where the plate
     # begins; 37 = 29 + 8 behind the panel's back face, the System 32 line.
     assert straight.panel_plate_out[0] == 0 and straight.max_gap == TONGUE_LENGTH
     assert straight.frame_hole_back == 37 and straight.frame_plate_back == (29, 45)
     cm = bent.in_cm()
     assert (cm.hole_pitch, cm.frame_hole_back, cm.panel_hole_out, cm.plate_length) == (3.2, 0.8, 1.9, 4.8)
-    assert (cm.frame_plate_back, cm.panel_plate_out) == ((0.0, 2.9), (0.4, 2.7))
+    assert (cm.frame_plate_back, cm.panel_plate_out, cm.frame_plate_overhang) == ((0.0, 2.9), (0.4, 2.7), 0.3)
     cm = straight.in_cm()
     assert (cm.hole_pitch, cm.frame_hole_back, cm.panel_hole_out, cm.plate_length) == (3.2, 3.7, 1.5, 4.8)
     assert (cm.frame_plate_back, cm.panel_plate_out) == ((2.9, 4.5), (0.0, 2.3))
     assert (cm.name, cm.title) == (straight.name, straight.title)
     # Holes and placement.
     assert 0 < PILOT_DIAMETER < EURO_DIAMETER and 0 < PILOT_DEPTH < EURO_DEPTH
+    # Euro holes: 11 deep, 2 short of the far face at most.
+    assert (euro_depth(18), euro_depth(13), euro_depth(12), euro_depth(9)) == (11, 11, 10, 7)
+    try:
+        euro_depth(EURO_WALL)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("a Euro hole in a board as thin as the wall")
     assert DEFAULT_END_OFFSET >= bent.plate_length / 2
     assert 0 < MAX_PLATE_OVERHANG < PANEL_PART_HOLE
     assert stations(500, 2) == [50, 450]
