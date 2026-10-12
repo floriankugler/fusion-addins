@@ -5,13 +5,14 @@ import pytest
 
 from lang import *
 from lang.core.layout import build_layout
-from lang.core.ops import Cut, Hole
+from lang.core.ops import Cut, Hole, Op
 from lang.core.layout_types import HardwareLayout
 from lang.core.scope import registry
 from lang.core.checks import _has_material  # type: ignore[reportPrivateUsage]
 from lang.emit.plan import HoleStep, plan_layout
-from lang.hardware.slides import BOTTOM_HEIGHT, BOX_MACHINING, INNER_FACE_OFFSET, DrawerSlide, HookHole
-from lib.drawer_slides import DYNAPRO_40, DYNAPRO_50_70, MOVENTO_760H, MOVENTO_766H, SlideModel
+from lang.hardware.slides import BOTTOM_HEIGHT, BOX_MACHINING, INNER_FACE_OFFSET, DrawerSlide, HookHole, SlideModel
+from lib import drawer_slides
+from lib.drawer_slides import DYNAPRO_40, DYNAPRO_50_70, MOVENTO_760H, MOVENTO_766H
 from helpers import bounds, ply12, ply15, ply18, ply9
 
 
@@ -66,6 +67,10 @@ def test_slide_machines_the_drawer_box():
     assert {(h.u, h.v) for h in holes} == {
         (li + 42, z1 + 15), (li + 42, z1 + 47), (li + 10, z1 + 47),
         (ri - 42, z1 + 15), (ri - 42, z1 + 47), (ri - 10, z1 + 47)}
+    # named by the side, as the cut-outs (the van's terms: the left side at y 36)
+    assert [(h.name, h.u) for h in holes] == [("hook_left_a", li + 42), ("hook_left_b", li + 42),
+                                              ("hook_left_c", li + 10), ("hook_right_a", ri - 42),
+                                              ("hook_right_b", ri - 42), ("hook_right_c", ri - 10)]
     assert DrawerSlide(DYNAPRO_40, nl=450, hook_hole=(3, 10)).hook_hole == (3, 10)
 
 
@@ -104,7 +109,8 @@ def _drawer(slide: DrawerSlide, machine: bool = True, into: str = "lrf",
     (MOVENTO_760H, (6.0, 6.75), False, "groove_floor, where cab.drawer1.floor goes into it"),
     (DYNAPRO_40, (2.0, 8.0), True, "cab.drawer1.floor"),
 ])
-def test_hook_holes_must_not_run_into_the_floor(model: SlideModel, hook: HookHole, thick: bool, into: str):
+def test_hook_holes_must_not_run_into_the_floor(model: drawer_slides.SlideModel, hook: HookHole, thick: bool,
+                                                into: str):
     """Florian 2026-10-12: a rear hook hole that would run into the floor
     where it goes into the back board, or into its groove there, is an
     error, and nothing is cut. Blum's hole (6 mm, 11 above the floor's
@@ -160,7 +166,8 @@ def test_slide_machines_a_blum_drawer_box():
 
 
 @pytest.mark.parametrize("model, diameter, count", [(DYNAPRO_40, 2.0, 6), (MOVENTO_760H, 6.0, 2)])
-def test_hook_holes_through_the_back_go_in_from_its_inner_face(model: SlideModel, diameter: float, count: int):
+def test_hook_holes_through_the_back_go_in_from_its_inner_face(model: drawer_slides.SlideModel, diameter: float,
+                                                               count: int):
     """Florian 2026-10-12: the rear hook holes may go all the way through
     the back board, `hook_hole=(d, through)`. Then they are drilled from
     the back board's inner face (front, toward the drawer's middle), so
@@ -212,6 +219,8 @@ def test_mount_predrills_the_carcass_sides():
         d.mount(slide, sides=(left, right), front=face.back)
     holes = [op for op in left.ops if isinstance(op, Hole)]
     assert len(holes) == 4 and all(h.face == "right" and h.d == 2 and h.depth == 4 for h in holes)
+    # named by the drawer, a to d from the front
+    assert [h.name for h in holes] == ["slide_drawer1_a", "slide_drawer1_b", "slide_drawer1_c", "slide_drawer1_d"]
     # a row 38 above the bay bottom, positions behind the runner's front (the face's back at x = 15)
     assert {h.v for h in holes} == {38.0}
     assert [h.u for h in holes] == [15 + p for p in slide.hole_positions()]
@@ -261,7 +270,7 @@ def test_runner_lengths_follow_the_nominal_length():
 
 
 @pytest.mark.parametrize("model", [DYNAPRO_40, MOVENTO_760H])
-def test_runners_leave_room_for_the_drawer_box(model: SlideModel):
+def test_runners_leave_room_for_the_drawer_box(model: drawer_slides.SlideModel):
     """The runner boxes touch the carcass sides, the drawer face, the floor
     and the back board, but overlap none of them: the couplings pass the
     front board through its cut-outs, the drawer members run below the
@@ -348,6 +357,132 @@ def test_one_stations_rule_in_lib():
                     lambda: door_latches.stations(160, 2, 80), lambda: sliding_brackets.stations(100, 2, 50)):
         with pytest.raises(ValueError):
             refused()
+
+
+# -- the slide's mount: plan, check everything, then drill (review findings 23, 24) ------------------------
+
+def _bay() -> tuple[Scope, Scope, dict[str, Board]]:
+    """The 600 x 500 x 300 cabinet in the van's terms with a top, its
+    drawer scope and face; no slide is mounted."""
+    with module("cab", Box.from_size(width=600, depth=500, height=300)) as cab:
+        left = board("left", ply15).on(cab.left)
+        right = board("right", ply15).on(cab.right)
+        top = board("top", ply15).on(cab.top).between(left, right)
+        with scope("drawer1", cab.interior.with_sides(top=top.bottom)) as d:
+            face = board("face", ply15).on(d.front)
+    return cab, d, {"left": left, "right": right, "top": top, "face": face}
+
+
+def _untouched(cab: Scope) -> tuple[list[tuple[str, list[Op], str]], list[HardwareLayout]]:
+    """Every board's operations and outline, and the hardware."""
+    return [(p.path, list(p.ops), p.outline.geometry.wkt) for p in cab.all_parts()], cab.all_hardware()
+
+
+@pytest.mark.parametrize("which, message", [
+    ("left, top", r"cab\.top is not a side of the drawer's bay: it does not stand across the bay's width"),
+    ("left, left", r"sides= names cab\.left twice"),
+    ("left, inner", r"cab\.left and cab\.inner both stand on the drawer's"),
+    # the drawer's own left, in the van's terms the side called right, first
+    ("deep pilot", r"the pilot depth \(20 mm\) must be less than cab\.right's thickness \(15 mm\)"),
+    ("pilot as deep as the side", r"the pilot depth \(15 mm\) must be less than cab\.right's thickness"),
+    ("in a hole", r"the pilot hole \(2 mm\) does not fit on cab\.right's left face"),
+])
+def test_a_refused_slide_drills_nothing(which: str, message: str):
+    """Everything is checked before a hole is drilled: the sides (one
+    standing across the bay on each side of it), each pilot hole on its
+    face and short of the far face. Before, (left, top) drilled the left
+    side and (left, left) drilled it twice before they failed."""
+    cab, d, parts = _bay()
+    pilot = {"deep pilot": (2.0, 20.0), "pilot as deep as the side": (2.0, 15.0)}.get(which, (2.0, 4.0))
+    slide = DrawerSlide("Dynapro 40", nl=450, pilot=pilot)
+    left, right, top = parts["left"], parts["right"], parts["top"]
+    sides = {"left, top": (left, top), "left, left": (left, left)}.get(which, (left, right))
+    if which == "left, inner":
+        with cab:
+            sides = (left, board("inner", ply15).on(left.inner, toward=cab.right))
+    if which == "in a hole":       # a shelf pin where the right side's first pilot goes (x 15 + 19, z 38)
+        right.hole(d=5, depth=10, at=right.inner.front(Pos("x", 34)).bottom(Pos("z", 38)))
+    before = _untouched(cab)
+    with pytest.raises(LangError, match=message):
+        d.mount(slide, sides=sides, front=parts["face"].back)
+    assert _untouched(cab) == before
+
+
+def test_a_partition_between_two_bays_takes_a_drawer_on_either_face():
+    """Two drawers side by side, a partition between their bays in the
+    middle of the cabinet: each slide drills the face of the partition
+    toward its own bay, found from the bay's middle, not from the
+    partition's `inner`, which is ambiguous for a board in the middle of
+    its scope."""
+    slide = DrawerSlide("Dynapro 40", nl=450)
+    box = Box.from_size(width=1000, depth=500, height=300)
+    with module("cab", box, front=box.front) as cab:
+        left = board("left", ply15).on(cab.left)
+        right = board("right", ply15).on(cab.right)
+        wall = board("wall", ply15).center(cab.center("width"))
+        with pytest.raises(LangError, match="ambiguous"):
+            _ = wall.inner                                      # what the slide used before
+        bays = [cab.interior.with_sides(left=left.inner, right=wall.left),
+                cab.interior.with_sides(left=wall.right, right=right.inner)]
+        for i, (bay, sides) in enumerate(zip(bays, ((left, wall), (wall, right))), 1):
+            with scope(f"drawer{i}", bay) as d:
+                face = board("face", ply15).on(bay.front)
+            d.mount(slide, sides=sides, front=face.back)
+    faces = {op.name: op.face for op in wall.ops if isinstance(op, Hole)}
+    # a cabinet (front=) facing -x: its left is +y, so the first bay is on the wall's +y side
+    assert {face for name, face in faces.items() if name and name.startswith("slide_drawer1_")} == {"right"}
+    assert {face for name, face in faces.items() if name and name.startswith("slide_drawer2_")} == {"left"}
+    assert len(faces) == 8
+    for i in (1, 2):
+        (runners,) = cab.child(f"drawer{i}").hardware
+        assert [b["name"] for b in runners["bodies"]] == ["left", "right"]
+    assert no_interference(cab) == []
+
+
+def test_a_drawer_runs_on_one_pair_of_slides():
+    """A second mount in the same drawer scope is refused before anything
+    is drilled (it drilled the row a second time before)."""
+    cab, d, parts = _bay()
+    d.mount(DrawerSlide("Dynapro 40", nl=450), sides=(parts["left"], parts["right"]), front=parts["face"].back)
+    before = _untouched(cab)
+    with pytest.raises(LangError, match=r"cab\.drawer1 has its runners already"):
+        d.mount(DrawerSlide("Movento 760H", nl=450), sides=(parts["left"], parts["right"]), front=parts["face"].back)
+    assert _untouched(cab) == before
+
+
+def test_slide_settings_are_checked_where_the_slide_is_made():
+    """holes= and pilot= are checked in the constructor, not halfway
+    through drilling (holes=99 was a bare ValueError from lib)."""
+    with pytest.raises(LangError, match=r"holes= must be 1 to 9, the odd holes of the runner, not 99"):
+        DrawerSlide("Dynapro 40", nl=450, holes=99)
+    with pytest.raises(LangError, match="holes= must be 1 to"):
+        DrawerSlide("Dynapro 40", nl=450, holes=0)
+    with pytest.raises(LangError, match=r"pilot= needs a diameter and a depth greater than zero, not 0 x 4"):
+        DrawerSlide("Dynapro 40", nl=450, pilot=(0, 4))
+    assert DrawerSlide("Dynapro 40", nl=450, holes=9).hole_positions()[-1] == 261
+    assert DrawerSlide("Dynapro 40", nl=450).pilot == (2.0, 4.0)
+
+
+def test_a_hook_hole_as_deep_as_the_back_is_refused():
+    """A pilot hole must stop short of the far face; `through` says it
+    goes all the way."""
+    slide = DrawerSlide("Movento 760H", nl=450, hook_hole=(6, 12))
+    with pytest.raises(LangError, match=r"the hook hole depth \(12 mm\) must be less than cab\.drawer1\.back's "
+                                        r"thickness \(12 mm\)"):
+        _drawer(slide)
+
+
+def test_slides_by_model_name():
+    """A build file names the model (review finding 43); a spec object of
+    lib's still works, for a slide of your own."""
+    from typing import get_args
+    from lang.hardware.slides import SLIDE_MODELS
+    assert get_args(SlideModel) == tuple(SLIDE_MODELS)
+    assert {m.name for m in SLIDE_MODELS.values()} == {m.name for m in drawer_slides.SLIDE_MODELS}
+    assert DrawerSlide("Dynapro 40", nl=450).model is DYNAPRO_40
+    assert DrawerSlide(MOVENTO_766H, nl=450).model is MOVENTO_766H
+    with pytest.raises(LangError, match=r"DrawerSlide\(\): expected 'Movento 760H'"):
+        DrawerSlide("Dynapro 41", nl=450)  # type: ignore[arg-type]
 
 
 # -- core helpers for hardware (review findings 25, 27) -----------------------------------------------
