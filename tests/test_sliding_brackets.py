@@ -119,12 +119,12 @@ def test_a_cover_on_the_frame_edges_gets_the_system_32_line():
     6 pilot holes everywhere."""
     _, parts = _cover(SlidingBracket(PF_L))
     zs = [34.0, 66.0, 434.0, 466.0]
-    names = ["1a", "1b", "2a", "2b"]
-    assert _holes(parts["left"]) == [(f"bracket_cover_{n}", "right", 49.0, z, 2.0, 6.0) for n, z in zip(names, zs)]
-    assert _holes(parts["right"]) == [(f"bracket_cover_{n}", "left", 49.0, z, 2.0, 6.0) for n, z in zip(names, zs)]
+    left, right = ["1a", "1b", "2a", "2b"], ["3a", "3b", "4a", "4b"]     # numbered on through the frame boards
+    assert _holes(parts["left"]) == [(f"bracket_cover_{n}", "right", 49.0, z, 2.0, 6.0) for n, z in zip(left, zs)]
+    assert _holes(parts["right"]) == [(f"bracket_cover_{n}", "left", 49.0, z, 2.0, 6.0) for n, z in zip(right, zs)]
     assert _holes(parts["cover"]) == (
-        [(f"bracket_left_{n}", "back", 33.0, z, 2.0, 6.0) for n, z in zip(names, zs)]
-        + [(f"bracket_right_{n}", "back", 567.0, z, 2.0, 6.0) for n, z in zip(names, zs)])
+        [(f"bracket_left_{n}", "back", 33.0, z, 2.0, 6.0) for n, z in zip(left, zs)]
+        + [(f"bracket_right_{n}", "back", 567.0, z, 2.0, 6.0) for n, z in zip(right, zs)])
 
 
 @pytest.mark.parametrize("gap", [0.0, 5.0, 29.0])
@@ -191,7 +191,7 @@ def test_brackets_on_horizontal_rails_are_numbered_from_the_panels_left():
         assert [(n, f, u, v) for n, f, u, v, *_ in _holes(rail)] == [
             (f"bracket_cover_{n}", "bottom", 49.0, y) for n, y in zip(["1a", "1b", "2a", "2b"], ys)]
         assert [(u, v) for _, _, u, v, *_ in _holes(cover)] == [(y, 482.0 - 15) for y in ys]
-        assert [b["name"] for b in cab.hardware[0]["bodies"]] == ["rail_1", "rail_2"]
+        assert [b["name"] for b in cab.hardware[0]["bodies"]] == ["bracket_1", "bracket_2"]
 
 
 def test_frame_takes_a_face():
@@ -288,7 +288,7 @@ def test_a_parallel_frame_board_is_refused():
 
 @pytest.mark.parametrize("kwargs, message", [
     ({"end": 20}, "at least 24"),
-    ({"count": 2, "at": []}, "not both"),
+    ({"count": 2, "at": [Pos("z", 100)]}, "give count= or at="),
     ({"count": 0}, "at least 1"),
     ({"at": []}, "empty"),
 ])
@@ -323,7 +323,7 @@ def test_a_plate_over_a_pocket_or_a_hole_in_a_hole_is_refused():
         left = board("left", ply18).on(cab.left).between(cab.front.into(12))
         cover = board("cover", ply12).on(cab.front)
         cover.hole(d=8, depth=5, at=cover.back.left(33).bottom(34))
-        with pytest.raises(LangError, match="lands off"):
+        with pytest.raises(LangError, match="the panel_hole of bracket 1 .* does not fit on cab.cover's back face"):
             cab.mount(SlidingBracket(PF_L), panel=cover, frame=left)
         assert _holes(left) == []
 
@@ -332,8 +332,8 @@ def test_mount_options_are_checked():
     with module("cab", BOX) as cab:
         left = board("left", ply18).on(cab.left).between(cab.front.into(12))
         cover = board("cover", ply12).on(cab.front)
-        with pytest.raises(LangError, match="takes panel= and frame="):
-            cab.mount(SlidingBracket(PF_L), panel=cover)
+        with pytest.raises(TypeError, match="frame"):
+            cab.mount(SlidingBracket(PF_L), panel=cover)  # type: ignore[call-arg]
         with pytest.raises(LangError, match="named twice"):
             cab.mount(SlidingBracket(PF_L), panel=cover, frame=[left, left])
         with pytest.raises(LangError, match="cannot be one of its frame boards"):
@@ -375,7 +375,7 @@ def test_brackets_are_placed_as_one_body_each():
     cab, parts = _cover(SlidingBracket(PF_L))
     (item,) = cab.hardware
     assert (item["path"], item["name"]) == ("cab.cover_brackets", "cover_brackets")
-    assert [b["name"] for b in item["bodies"]] == ["left_1", "left_2", "right_1", "right_2"]
+    assert [b["name"] for b in item["bodies"]] == ["bracket_1", "bracket_2", "bracket_3", "bracket_4"]
     for body, (out, z) in zip(item["bodies"], [((1, 18.0, 1), 50.0), ((1, 18.0, 1), 450.0),
                                                ((1, 582.0, -1), 50.0), ((1, 582.0, -1), 450.0)]):
         assert body["boxes"] == [_world(b, out, (0, 12.0, 1), z) for b in SHAPE.boxes()]
@@ -393,7 +393,7 @@ def test_a_part_in_the_brackets_space_is_reported():
         board("shelf", ply18).on(Pos("z", 40), toward=cab.top).between(left, right, cab.front.into(30))
         cover = board("cover", ply12).on(cab.front)
         cab.mount(SlidingBracket(PF_L), panel=cover, frame=[left, right])
-    assert any("cover_brackets.left_1 overlaps cab.shelf" in p for p in no_interference(cab))
+    assert any("cover_brackets.bracket_1 overlaps cab.shelf" in p for p in no_interference(cab))
 
 
 # -- the bent frame part, PF-L-R --------------------------------------------------------------------
@@ -406,12 +406,12 @@ def test_the_bent_frame_part_sits_at_the_frame_edge():
     50 from the ends, a pair 32 apart."""
     _, parts = _cover(SlidingBracket())
     zs = [34.0, 66.0, 434.0, 466.0]
-    names = ["1a", "1b", "2a", "2b"]
-    assert _holes(parts["left"]) == [(f"bracket_cover_{n}", "right", 20.0, z, 2.0, 6.0) for n, z in zip(names, zs)]
-    assert _holes(parts["right"]) == [(f"bracket_cover_{n}", "left", 20.0, z, 2.0, 6.0) for n, z in zip(names, zs)]
+    left, right = ["1a", "1b", "2a", "2b"], ["3a", "3b", "4a", "4b"]
+    assert _holes(parts["left"]) == [(f"bracket_cover_{n}", "right", 20.0, z, 2.0, 6.0) for n, z in zip(left, zs)]
+    assert _holes(parts["right"]) == [(f"bracket_cover_{n}", "left", 20.0, z, 2.0, 6.0) for n, z in zip(right, zs)]
     assert _holes(parts["cover"]) == (
-        [(f"bracket_left_{n}", "back", 37.0, z, 2.0, 6.0) for n, z in zip(names, zs)]
-        + [(f"bracket_right_{n}", "back", 563.0, z, 2.0, 6.0) for n, z in zip(names, zs)])
+        [(f"bracket_left_{n}", "back", 37.0, z, 2.0, 6.0) for n, z in zip(left, zs)]
+        + [(f"bracket_right_{n}", "back", 563.0, z, 2.0, 6.0) for n, z in zip(right, zs)])
 
 
 @pytest.mark.parametrize("gap", [0.0, 1.5, 3.0])
@@ -516,5 +516,39 @@ def test_the_example_builds_clean_and_plans_its_holes(tmp_path: Path):
     side = next(p for p in plan.parts if p.path == "seatbase.left")
     euro = [s for s in side.steps if isinstance(s, HoleStep) and (s.d, s.depth) == (5.0, 11.0)]
     assert sum(len(s.points) for s in euro) == 4
-    assert {b.name for h in plan.hardware for b in h.bodies} == {"left_1", "left_2", "right_1", "right_2"}
+    assert {b.name for h in plan.hardware for b in h.bodies} == {"bracket_1", "bracket_2", "bracket_3", "bracket_4"}
     assert (tmp_path / "scene.glb").exists()
+
+
+# -- the review's fixes (findings 25, 27) ------------------------------------------------------------------
+
+def test_a_hole_overlapping_one_made_before_is_refused():
+    """`Board.hole_fits` keeps the brackets' own rule: a hole's circle must
+    be clear of the holes made before, also where none of the points it
+    probes lies in one. A 6 mm hole beside the first frame hole (x 49, z
+    34), 2.6 mm off along and across: 3.68 between the centres, so the
+    circles overlap, while the pilot's probes lie 3.05 or more from it."""
+    with module("cab", BOX) as cab:
+        left = board("left", ply18).on(cab.left).between(cab.front.into(12))
+        cover = board("cover", ply12).on(cab.front)
+        left.hole(d=6, depth=5, at=left.right.front(Pos("x", 49 + 2.6)).bottom(Pos("z", 34 + 2.6)))
+        with pytest.raises(LangError, match=r"the frame_hole of bracket 1 \(2 mm\) does not fit on cab.left's right "
+                                            "face"):
+            cab.mount(SlidingBracket(PF_L), panel=cover, frame=left)
+    assert len(_holes(left)) == 1 and _holes(cover) == [] and cab.hardware == []
+
+
+def test_brackets_are_numbered_on_through_the_frame_boards():
+    """One number per bracket in the item, its bodies and its holes: on
+    the frame boards in the order `frame=` names them (faces too), each
+    from the bottom."""
+    with module("cab", BOX) as cab:
+        left = board("left", ply18).on(cab.left).between(cab.front.into(12))
+        right = board("right", ply18).on(cab.right).between(cab.front.into(12))
+        cover = board("cover", ply12).on(cab.front)
+        cab.mount(SlidingBracket(PF_L, count=3, end=100), panel=cover, frame=[right.left, left])
+    (item,) = cab.hardware
+    assert [b["name"] for b in item["bodies"]] == [f"bracket_{n}" for n in range(1, 7)]
+    assert [b["boxes"][0]["min"][1] for b in item["bodies"]] == [578.0] * 3 + [18.0] * 3   # the right side's first
+    assert [h[0] for h in _holes(right)][::2] == ["bracket_cover_1a", "bracket_cover_2a", "bracket_cover_3a"]
+    assert [h[0] for h in _holes(left)][::2] == ["bracket_cover_4a", "bracket_cover_5a", "bracket_cover_6a"]

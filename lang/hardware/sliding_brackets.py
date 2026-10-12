@@ -31,10 +31,11 @@ made for them, 11 deep but 2 short of the board's far face at most: 10
 on a 12 mm board) or give (diameter, depth). Per frame board `count`
 brackets (2) sit along the stretch the panel and the frame board share,
 the outer ones' centres `end` (50) from its ends, the rest evenly
-between, one alone in the middle; `at=` takes positions along the edge
-instead, the same on every frame board named. Brackets are numbered by
-their place along the edge: from the bottom, or from the panel's own
-left, seen standing in front of it.
+between, one alone in the middle (`lib.stations`); `at=` takes positions
+along the edge instead, the same on every frame board named. Brackets are
+numbered on through the frame boards in the order `frame=` names them,
+on each by their place along the edge: from the bottom, or from the
+panel's own left, seen standing in front of it.
 
 It refuses, before it drills anything: a frame board parallel to the
 panel, a frame board whose edge lies further behind the panel's back
@@ -43,41 +44,41 @@ ends before the plate does (29 and 45 behind it), a panel that stops
 more than 3 mm short of where the panel part's plate begins (it hangs
 over the edge of a panel set in between), plates that do not lie on
 their boards (the outline, less the pockets made into the face; the
-part over a gap hangs free) or overlap each other, holes that land off
-their face or in another hole or pocket, and holes as deep as a board is
-thick; `end` under half a plate (24). The makers' advice (Keku: at least
+part over a gap hangs free) or overlap each other, holes that do not fit
+on their face (`Board.hole_fits`: off it, or in another hole or pocket),
+and holes as deep as a board is thick; `end` under half a plate (24). The makers' advice (Keku: at least
 four per panel, at most 600 apart; Häfele: no hanging loads such as
 ceiling panels) is left to the build and not checked.
 
 Each latched pair is one body of four boxes (`BRACKET_SHAPES`, measured
 on Häfele's CAD models): the frame part's plate and its hook, the panel
 part's plate and its tongue, which lies under the hook. They are placed
-as `<panel>_brackets`, bodies named by the frame board and the bracket's
-number (`left_1`). Operations are named by the other board and the
-bracket: `bracket_cover_1a` and `_1b` in the frame board,
-`bracket_left_1a` in the panel.
+as `<panel>_brackets`, bodies named by the bracket's number (`bracket_1`).
+Operations are named by the other board and the bracket's number:
+`bracket_cover_1a` and `_1b` in the frame board, `bracket_left_1a` in the
+panel.
 """
 from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal, cast
+from typing import TYPE_CHECKING, Literal
 
-from shapely.geometry import Point
 from shapely.geometry import box as shapely_box
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
 
 from lib import sliding_brackets as data
 
-from ..core import directions
-from ..core.box import Box
-from ..core.directions import AXES, Axis, Direction
+from ..core.directions import AXES, Axis
 from ..core.errors import LangError, one_of
 from ..core.layout_types import BoxDict, HardwareBodyLayout
-from ..core.ops import Hole, Pocket
+from ..core.ops import Pocket
 from ..core.part import Board, Face
-from ..core.refs import PosLike, as_pos
+from ..core.refs import PosLike
+from ..joints.common import make_spacing
+from .common import (TOLERANCE, LocalBox, Point2, along, check_hole, check_hole_size, check_pilot_depth, middle, mm,
+                     numbering, uv, world_box)
 
 if TYPE_CHECKING:
     from ..core.scope import Scope
@@ -90,15 +91,10 @@ BracketModel = Literal["Pacofix PF-L-R", "Pacofix PF-L"]
 HoleChoice = Literal["pilot", "euro"]
 BracketHole = HoleChoice | tuple[float, float]
 
-#: Geometric tolerance of the checks, mm.
-TOLERANCE = 1e-3
-Point2 = tuple[float, float]
-#: Two ends of a box along one direction, mm.
-Extent = tuple[float, float]
 #: A box of a latched bracket, mm: its extents out from the frame board's
 #: face (toward the panel's middle), back from the panel's back face (away
 #: from the panel) and along the edge from the bracket's centre.
-BracketBox = tuple[Extent, Extent, Extent]
+BracketBox = LocalBox
 
 
 @dataclass(frozen=True)
@@ -162,6 +158,8 @@ class _Edge:
     along: Axis
     #: The brackets' centres along it, in the order they are numbered.
     stations: tuple[float, ...]
+    #: The number of the first of them.
+    first: int
     #: +1 or -1: the direction they are numbered in along `along`.
     order: int
     #: From the panel's back face to the frame board's edge, back; negative
@@ -180,9 +178,8 @@ class _Edge:
 
     def world_box(self, s: float, box: BracketBox) -> BoxDict:
         """A bracket box in world coordinates, the bracket centred at `s`."""
-        (o0, o1), (b0, b1), (a0, a1) = box
-        p, q = self.point(o0, b0, s + a0), self.point(o1, b1, s + a1)
-        return {"min": [min(p[a], q[a]) for a in AXES], "max": [max(p[a], q[a]) for a in AXES]}
+        f, b = self.frame_face, self.back_face
+        return world_box(((f.direction, f.value), (b.direction, b.value), (along(self.along), s)), box)
 
 
 class SlidingBracket:
@@ -194,28 +191,23 @@ class SlidingBracket:
     the frame board and the panel: `"pilot"` (Ø2 x 6), `"euro"` (Ø5 x 11,
     2 short of the board's far face at most) or (diameter, depth) in mm."""
 
-    def __init__(self, model: BracketModel = "Pacofix PF-L-R", count: int | None = None,
+    def __init__(self, model: BracketModel = "Pacofix PF-L-R", *, count: int | None = None,
                  end: float = data.DEFAULT_END_OFFSET, at: Sequence[PosLike] | None = None,
                  frame_hole: BracketHole = "pilot", panel_hole: BracketHole = "pilot"):
         self.spec = data.BRACKETS[one_of(model, BracketModel, "SlidingBracket()")]
         #: The boxes the brackets are drawn as.
         self.shape = BRACKET_SHAPES[model]
-        if count is not None and at is not None:
-            raise LangError(f"{self.name}: give count= or at=, not both.")
-        if count is not None and count < 1:
-            raise LangError(f"{self.name}: count must be at least 1, not {count}.")
+        spacing = make_spacing(self.name, data.DEFAULT_COUNT if count is None and at is None else count, end, at)
         half = self.spec.plate_length / 2
-        if at is None and count != 1 and end < half - TOLERANCE:
-            raise LangError(f"{self.name}: end must be at least {_mm(half)}, half the {_mm(self.spec.plate_length)} "
-                            f"plates, not {end:g}.")
-        if at is not None and not at:
-            raise LangError(f"{self.name}: at= is empty.")
+        if spacing.at is None and spacing.count != 1 and end < half - TOLERANCE:
+            raise LangError(f"{self.name}: end must be at least {mm(half)}, half the {mm(self.spec.plate_length)} "
+                            f"plates, not {mm(end)}.")
         #: Brackets per frame board; None with at=.
-        self.count: int | None = None if at is not None else (count if count is not None else data.DEFAULT_COUNT)
+        self.count: int | None = spacing.count
         #: From the ends of the shared stretch to the first and last bracket.
-        self.end = float(end)
+        self.end = spacing.end
         #: Positions along the edge, the same on every frame board.
-        self.at = tuple(as_pos(p, f"{self.name}(at=)") for p in at) if at is not None else None
+        self.at = spacing.at
         #: The holes in the frame board and in the panel, as given; `"euro"`
         #: holes take their depth from the board (`_hole_size`).
         self.frame_hole: BracketHole = _hole(self.name, "frame_hole", frame_hole)
@@ -242,47 +234,43 @@ class SlidingBracket:
             try:
                 return (data.EURO_DIAMETER, data.euro_depth(board.thickness))
             except ValueError:
-                raise LangError(f"{self.name}: {board.path} ({_mm(board.thickness)}) is too thin for Euro holes, "
-                                f"which stop {_mm(data.EURO_WALL)} short of its far face.", board.path) from None
+                raise LangError(f"{self.name}: {board.path} ({mm(board.thickness)}) is too thin for Euro holes, "
+                                f"which stop {mm(data.EURO_WALL)} short of its far face.", board.path) from None
         return choice
 
     # -- mounting ------------------------------------------------------------------------------------
 
-    def mount(self, scope: Scope, /, **options: object) -> None:
+    def mount(self, scope: Scope, /, *, panel: Board, frame: Board | Face | Sequence[Board | Face]) -> None:
         """`cab.mount(bracket, panel=cover, frame=[left, right])`: drills the
         panel and each frame board for the brackets and places them.
         `frame=` takes a board, a big face of one (the face the frame parts
         go on), or a list of them. Nothing is drilled unless every bracket
         fits."""
-        allowed = {"panel", "frame"}
-        if set(options) - allowed or allowed - set(options):
-            raise LangError(f"{self.name}: mount() takes panel= and frame=, got {sorted(options)}.", scope.path)
-        panel = options["panel"]
-        if not isinstance(panel, Board):
-            raise LangError(f"{self.name}: panel= must be the panel board, not {panel!r}.", scope.path)
-        frames = self._frames(options["frame"], panel, scope.path)
-        edges = [self._edge(panel, board, face) for board, face in frames]
+        edges: list[_Edge] = []
+        first = 1
+        for board, face in self._frames(frame, panel, scope.path):
+            edges.append(self._edge(panel, board, face, first))
+            first += len(edges[-1].stations)
         for edge in edges:
             self._check(panel, edge)
         self._drill(panel, edges)
         self._place(scope, panel, edges)
 
-    def _frames(self, value: object, panel: Board, path: str) -> list[tuple[Board, Face | None]]:
+    def _frames(self, value: Board | Face | Sequence[Board | Face], panel: Board,
+                path: str) -> list[tuple[Board, Face | None]]:
         """`frame=`: boards or big faces of boards, one or a list."""
-        items: list[object] = list(cast(Sequence[object], value)) if isinstance(value, (list, tuple)) else [value]
+        items: list[Board | Face] = [value] if isinstance(value, (Board, Face)) else list(value)
         if not items:
             raise LangError(f"{self.name}: frame= names no frame board.", path)
         out: list[tuple[Board, Face | None]] = []
         for item in items:
             if isinstance(item, Board):
                 out.append((item, None))
-            elif isinstance(item, Face):
+            else:
                 if not item.is_big:
                     raise LangError(f"{self.name}: {item!r} is a narrow face; name the big face of the frame board "
                                     "the frame parts go on.", item.part.path)
                 out.append((item.part, item))
-            else:
-                raise LangError(f"{self.name}: frame= takes frame boards or their faces, not {item!r}.", path)
         for i, (board, _) in enumerate(out):
             if board is panel:
                 raise LangError(f"{self.name}: the panel cannot be one of its frame boards.", panel.path)
@@ -290,31 +278,31 @@ class SlidingBracket:
                 raise LangError(f"{self.name}: {board.path} is named twice in frame=.", board.path)
         return out
 
-    def _edge(self, panel: Board, frame: Board, face: Face | None) -> _Edge:
+    def _edge(self, panel: Board, frame: Board, face: Face | None, first: int) -> _Edge:
         """Where the panel meets the frame board, and the brackets' centres
         along that edge."""
         spec = self.spec
         if frame.t_axis == panel.t_axis:
             raise LangError(f"{self.name}: {frame.path} lies parallel to {panel.path}; the panel hangs on frame "
                             "boards standing square to it.", panel.path)
-        along: Axis = next(a for a in AXES if a not in (frame.t_axis, panel.t_axis))
+        edge: Axis = next(a for a in AXES if a not in (frame.t_axis, panel.t_axis))
         pb, fb = panel.box(), frame.box()
         # back: from the panel toward the frame board
         pt = panel.t_axis
-        to_frame = _middle(fb, pt) - _middle(pb, pt)
+        to_frame = middle(fb, pt) - middle(pb, pt)
         if abs(to_frame) < TOLERANCE:
             raise LangError(f"{self.name}: {frame.path} is centred on {panel.path}'s thickness; which face of the "
                             "panel is its back face?", panel.path)
         back_face = panel.face(panel.scope.frame.direction_of(pt, 1 if to_frame > 0 else -1))
         # out: from the frame board's face toward the panel's middle
         ft = frame.t_axis
-        middle = _middle(pb, ft)
+        panel_middle = middle(pb, ft)
         if face is None:
-            if fb.lo[ft] - TOLERANCE <= middle <= fb.hi[ft] + TOLERANCE:
+            if fb.lo[ft] - TOLERANCE <= panel_middle <= fb.hi[ft] + TOLERANCE:
                 raise LangError(f"{self.name}: the middle of {panel.path} lies within {frame.path}'s thickness; "
                                 f"name the face the frame parts go on, e.g. frame={frame.name}.left.", panel.path)
-            face = frame.face(frame.scope.frame.direction_of(ft, 1 if middle > fb.hi[ft] else -1))
-        elif (middle - face.value) * face.direction.sign <= TOLERANCE:
+            face = frame.face(frame.scope.frame.direction_of(ft, 1 if panel_middle > fb.hi[ft] else -1))
+        elif (panel_middle - face.value) * face.direction.sign <= TOLERANCE:
             raise LangError(f"{self.name}: {panel.path} lies behind {frame.path}'s {face.name} face; the frame parts "
                             "go on the face toward the panel.", frame.path)
         back = back_face.direction
@@ -322,42 +310,42 @@ class SlidingBracket:
         gap = (near - back_face.value) * back.sign
         if gap > spec.max_gap + TOLERANCE:
             start = spec.frame_plate_back[0]
-            begins = "at the panel's back face" if start <= TOLERANCE else f"{_mm(start)} behind it"
-            over = (f" and may hang {_mm(spec.frame_plate_overhang)} over the frame board's edge"
+            begins = "at the panel's back face" if start <= TOLERANCE else f"{mm(start)} behind it"
+            over = (f" and may hang {mm(spec.frame_plate_overhang)} over the frame board's edge"
                     if spec.frame_plate_overhang > TOLERANCE else "")
-            raise LangError(f"{self.name}: the edge of {frame.path} lies {_mm(gap)} behind {panel.path}'s back face; "
+            raise LangError(f"{self.name}: the edge of {frame.path} lies {mm(gap)} behind {panel.path}'s back face; "
                             f"the frame part's plate begins {begins}{over}, so the gap may be at most "
-                            f"{_mm(spec.max_gap)}.", frame.path)
+                            f"{mm(spec.max_gap)}.", frame.path)
         reach = (far - back_face.value) * back.sign
         if reach < spec.frame_plate_back[1] - TOLERANCE:
-            raise LangError(f"{self.name}: {frame.path} ends {_mm(reach)} behind {panel.path}'s back face; the frame "
-                            f"part's plate reaches {_mm(spec.frame_plate_back[1])} behind it.", frame.path)
+            raise LangError(f"{self.name}: {frame.path} ends {mm(reach)} behind {panel.path}'s back face; the frame "
+                            f"part's plate reaches {mm(spec.frame_plate_back[1])} behind it.", frame.path)
         out = face.direction
         panel_near = pb.lo[ft] if out.sign > 0 else pb.hi[ft]
         clearance = (panel_near - face.value) * out.sign
         limit = spec.panel_plate_out[0] + data.MAX_PLATE_OVERHANG
         if clearance > limit + TOLERANCE:
-            raise LangError(f"{self.name}: {panel.path} ends {_mm(clearance)} short of {frame.path}'s face; the "
-                            f"panel part's plate begins {_mm(spec.panel_plate_out[0])} from that face, so the panel "
-                            f"must reach to within {_mm(limit)} of it.", panel.path)
-        lo, hi = max(pb.lo[along], fb.lo[along]), min(pb.hi[along], fb.hi[along])
+            raise LangError(f"{self.name}: {panel.path} ends {mm(clearance)} short of {frame.path}'s face; the "
+                            f"panel part's plate begins {mm(spec.panel_plate_out[0])} from that face, so the panel "
+                            f"must reach to within {mm(limit)} of it.", panel.path)
+        lo, hi = max(pb.lo[edge], fb.lo[edge]), min(pb.hi[edge], fb.hi[edge])
         if hi - lo < spec.plate_length - TOLERANCE:
-            raise LangError(f"{self.name}: {panel.path} and {frame.path} share {_mm(max(hi - lo, 0.0))} along the "
-                            f"edge; a bracket is {_mm(spec.plate_length)} long.", panel.path)
-        values = self._stations(panel, frame, along, lo, hi)
-        order = _order(back, along)
-        return _Edge(frame, face, back_face, along, tuple(values if order > 0 else values[::-1]), order, gap,
+            raise LangError(f"{self.name}: {panel.path} and {frame.path} share {mm(max(hi - lo, 0.0))} along the "
+                            f"edge; a bracket is {mm(spec.plate_length)} long.", panel.path)
+        values = self._stations(panel, frame, edge, lo, hi)
+        order = numbering(back, edge)
+        return _Edge(frame, face, back_face, edge, tuple(values if order > 0 else values[::-1]), first, order, gap,
                      clearance)
 
-    def _stations(self, panel: Board, frame: Board, along: Axis, lo: float, hi: float) -> list[float]:
+    def _stations(self, panel: Board, frame: Board, edge: Axis, lo: float, hi: float) -> list[float]:
         """The brackets' centres along the shared stretch, ascending."""
         spec = self.spec
         if self.at is not None:
             values: list[float] = []
             for pos in self.at:
-                if pos.axis != along:
+                if pos.axis != edge:
                     raise LangError(f"{self.name}: at={pos} is not on the axis the edge of {frame.path} runs "
-                                    f"along ({along}).", panel.path)
+                                    f"along ({edge}).", panel.path)
                 if not lo - TOLERANCE <= pos.value <= hi + TOLERANCE:
                     raise LangError(f"{self.name}: at={pos} lies outside the stretch {panel.path} and {frame.path} "
                                     f"share ({lo:g} to {hi:g}).", panel.path)
@@ -368,13 +356,27 @@ class SlidingBracket:
             try:
                 values = [lo + s for s in data.stations(hi - lo, self.count, self.end)]
             except ValueError:
-                raise LangError(f"{self.name}: the {_mm(hi - lo)} that {panel.path} and {frame.path} share are too "
-                                f"short for {self.count} brackets {_mm(self.end)} from the ends.", panel.path) from None
+                raise LangError(f"{self.name}: the {mm(hi - lo)} that {panel.path} and {frame.path} share are too "
+                                f"short for {self.count} brackets {mm(self.end)} from the ends.", panel.path) from None
         for a, b in zip(values, values[1:]):
             if b - a < spec.plate_length - TOLERANCE:
-                raise LangError(f"{self.name}: two brackets on {frame.path} are {_mm(b - a)} apart; their "
-                                f"{_mm(spec.plate_length)} plates would overlap.", panel.path)
+                raise LangError(f"{self.name}: two brackets on {frame.path} are {mm(b - a)} apart; their "
+                                f"{mm(spec.plate_length)} plates would overlap.", panel.path)
         return values
+
+    def _holes(self, edge: _Edge) -> list[tuple[int, str, Point2, Point2]]:
+        """Per bracket on the edge its number and its two holes, a first
+        along the numbering: the letter, the point on the frame board's
+        face and the one on the panel's back face."""
+        spec, frame, panel = self.spec, edge.frame, edge.back_face.part
+        half = spec.hole_pitch / 2
+        out: list[tuple[int, str, Point2, Point2]] = []
+        for n, s in enumerate(edge.stations, edge.first):
+            for letter, k in (("a", -edge.order), ("b", edge.order)):
+                at = s + k * half
+                out.append((n, letter, uv(frame, edge.point(0.0, spec.frame_hole_back, at)),
+                            uv(panel, edge.point(spec.panel_hole_out, 0.0, at))))
+        return out
 
     def _check(self, panel: Board, edge: _Edge) -> None:
         """The plates on their boards, the holes on their faces and less
@@ -382,37 +384,28 @@ class SlidingBracket:
         spec = self.spec
         frame = edge.frame
         half = spec.plate_length / 2
-        frame_region = _face_region(frame, edge.frame_face)
-        panel_region = _face_region(panel, edge.back_face)
+        frame_region = _plate_region(frame, edge.frame_face)
+        panel_region = _plate_region(panel, edge.back_face)
         frame_hole = self._hole_size(frame, self.frame_hole)
         panel_hole = self._hole_size(panel, self.panel_hole)
-        for n, s in enumerate(edge.stations, 1):
+        for n, s in enumerate(edge.stations, edge.first):
             # over a gap in front of the frame board the plate may hang free
             b0, b1 = max(spec.frame_plate_back[0], edge.gap), spec.frame_plate_back[1]
             if not _covers(frame_region, frame, edge.point(0.0, b0, s - half), edge.point(0.0, b1, s + half)):
                 raise LangError(f"{self.name}: the frame part of bracket {n} does not fit on {frame.path}'s "
-                                f"{edge.frame_face.name} face ({_mm(b0)} to {_mm(b1)} behind {panel.path}'s back "
-                                f"face, {_mm(spec.plate_length)} long).", frame.path)
+                                f"{edge.frame_face.name} face ({mm(b0)} to {mm(b1)} behind {panel.path}'s back "
+                                f"face, {mm(spec.plate_length)} long).", frame.path)
             # over a panel's clearance the plate may hang free
             o0, o1 = max(spec.panel_plate_out[0], edge.clearance), spec.panel_plate_out[1]
             if not _covers(panel_region, panel, edge.point(o0, 0.0, s - half), edge.point(o1, 0.0, s + half)):
                 raise LangError(f"{self.name}: the panel part of bracket {n} on {frame.path} does not fit on "
-                                f"{panel.path}'s {edge.back_face.name} face ({_mm(o1 - o0)} out from {frame.path}, "
-                                f"{_mm(spec.plate_length)} long).", panel.path)
-            for k in (-1, 1):
-                along = s + k * spec.hole_pitch / 2
-                if not _hole_fits(frame, edge.frame_face, edge.point(0.0, spec.frame_hole_back, along),
-                                  frame_hole[0]):
-                    raise LangError(f"{self.name}: a hole of bracket {n} lands off {frame.path}'s "
-                                    f"{edge.frame_face.name} face or in one of its holes or pockets.", frame.path)
-                if not _hole_fits(panel, edge.back_face, edge.point(spec.panel_hole_out, 0.0, along),
-                                  panel_hole[0]):
-                    raise LangError(f"{self.name}: a hole of bracket {n} on {frame.path} lands off {panel.path}'s "
-                                    f"{edge.back_face.name} face or in one of its holes or pockets.", panel.path)
-        for board, (_, depth), what in ((frame, frame_hole, "frame_hole"), (panel, panel_hole, "panel_hole")):
-            if depth >= board.thickness - TOLERANCE:
-                raise LangError(f"{self.name}: the {what} depth ({_mm(depth)}) must be less than "
-                                f"{board.path}'s thickness ({_mm(board.thickness)}).", board.path)
+                                f"{panel.path}'s {edge.back_face.name} face ({mm(o1 - o0)} out from {frame.path}, "
+                                f"{mm(spec.plate_length)} long).", panel.path)
+        for n, _, at_frame, at_panel in self._holes(edge):
+            check_hole(self.name, frame, edge.frame_face, at_frame, frame_hole[0], f"frame_hole of bracket {n}")
+            check_hole(self.name, panel, edge.back_face, at_panel, panel_hole[0], f"panel_hole of bracket {n}")
+        check_pilot_depth(self.name, frame, frame_hole[1], "frame_hole")
+        check_pilot_depth(self.name, panel, panel_hole[1], "panel_hole")
 
     # -- machining and placing -------------------------------------------------------------------------
 
@@ -420,36 +413,23 @@ class SlidingBracket:
         """Per bracket two holes into the frame board's face, named
         `bracket_<panel>_<n>a` and `b` (a first along the numbering), and
         two into the panel's back face, `bracket_<frame>_<n>a` and `b`."""
-        spec = self.spec
-        half = spec.hole_pitch / 2
         panel_hole = self._hole_size(panel, self.panel_hole)
         for edge in edges:
             frame = edge.frame
             frame_hole = self._hole_size(frame, self.frame_hole)
-            for n, s in enumerate(edge.stations, 1):
-                for letter, k in (("a", -edge.order), ("b", edge.order)):
-                    along = s + k * half
-                    frame.add_hole(edge.frame_face, _uv(frame, edge.point(0.0, spec.frame_hole_back, along)),
-                                   *frame_hole, name=frame.unique_op_name(f"bracket_{panel.name}_{n}{letter}"))
-                    panel.add_hole(edge.back_face, _uv(panel, edge.point(spec.panel_hole_out, 0.0, along)),
-                                   *panel_hole, name=panel.unique_op_name(f"bracket_{frame.name}_{n}{letter}"))
+            for n, letter, at_frame, at_panel in self._holes(edge):
+                frame.add_hole(edge.frame_face, at_frame, *frame_hole,
+                               name=frame.unique_op_name(f"bracket_{panel.name}_{n}{letter}"))
+                panel.add_hole(edge.back_face, at_panel, *panel_hole,
+                               name=panel.unique_op_name(f"bracket_{frame.name}_{n}{letter}"))
 
     def _place(self, scope: Scope, panel: Board, edges: list[_Edge]) -> None:
         """Records the brackets as `<panel>_brackets`, a body per latched
-        pair named by its frame board and number (`left_1`)."""
+        pair, `bracket_1`, `bracket_2`, ... in the order they are numbered."""
         boxes = self.shape.boxes()
-        bodies: list[HardwareBodyLayout] = []
-        for edge in edges:
-            for n, s in enumerate(edge.stations, 1):
-                name, k = f"{edge.frame.name}_{n}", 2
-                while any(b["name"] == name for b in bodies):     # frame boards of one name in different scopes
-                    name, k = f"{edge.frame.name}_{n}_{k}", k + 1
-                bodies.append(HardwareBodyLayout(name=name, boxes=[edge.world_box(s, b) for b in boxes]))
-        base = f"{panel.name}_brackets"
-        name, k = base, 2
-        while name in scope.parts or name in scope.children or any(i["name"] == name for i in scope.hardware):
-            name, k = f"{base}_{k}", k + 1
-        scope.place_hardware(name, bodies)
+        bodies = [HardwareBodyLayout(name=f"bracket_{n}", boxes=[edge.world_box(s, b) for b in boxes])
+                  for edge in edges for n, s in enumerate(edge.stations, edge.first)]
+        scope.place_hardware(scope.unique_hardware_name(f"{panel.name}_brackets"), bodies)
 
 
 def _hole(label: str, what: str, choice: BracketHole) -> BracketHole:
@@ -457,42 +437,10 @@ def _hole(label: str, what: str, choice: BracketHole) -> BracketHole:
     depth)."""
     if isinstance(choice, str):
         return one_of(choice, HoleChoice, f"{label}({what}=)")
-    diameter, depth = choice
-    if diameter <= 0 or depth <= 0:
-        raise LangError(f"{label}: {what}= needs a diameter and a depth greater than zero, not {diameter:g} x "
-                        f"{depth:g}.")
-    return (float(diameter), float(depth))
+    return check_hole_size(label, what, choice)
 
 
-def _mm(value: float) -> str:
-    return f"{value:.1f}".rstrip("0").rstrip(".") + " mm"
-
-
-def _middle(box: Box, axis: Axis) -> float:
-    return (box.lo[axis] + box.hi[axis]) / 2
-
-
-def _uv(board: Board, p: dict[Axis, float]) -> Point2:
-    return (p[board.u_axis], p[board.v_axis])
-
-
-def _order(back: Direction, along: Axis) -> int:
-    """Which way the brackets are numbered along the edge: from the bottom
-    up on an upright edge, else from the panel's own left to its right,
-    seen standing in front of it (its right is back x up, `back` pointing
-    from the panel to the frame board); for a panel lying flat, along the
-    world axis."""
-    up = directions.frame.direction("top")
-    if along == up.axis:
-        return up.sign
-    if back.axis == up.axis:
-        return 1
-    (bx, by, bz), (ux, uy, uz) = back.vector, up.vector
-    right = (by * uz - bz * uy, bz * ux - bx * uz, bx * uy - by * ux)
-    return 1 if right[AXES.index(along)] > 0 else -1
-
-
-def _face_region(board: Board, face: Face) -> BaseGeometry:
+def _plate_region(board: Board, face: Face) -> BaseGeometry:
     """Where a plate can bear on a big face, in the board's (u, v): the
     outline less the pockets made into the face and those through from
     the other face. Holes do not count; a plate may cover one."""
@@ -504,29 +452,6 @@ def _face_region(board: Board, face: Face) -> BaseGeometry:
 
 def _covers(region: BaseGeometry, board: Board, a: dict[Axis, float], b: dict[Axis, float]) -> bool:
     """Whether the rectangle between two corners lies on the region."""
-    (u0, v0), (u1, v1) = _uv(board, a), _uv(board, b)
+    (u0, v0), (u1, v1) = uv(board, a), uv(board, b)
     plate = shapely_box(min(u0, u1), min(v0, v1), max(u0, u1), max(v0, v1))
     return plate.difference(region.buffer(TOLERANCE)).area <= TOLERANCE
-
-
-def _hole_fits(board: Board, face: Face, p: dict[Axis, float], d: float) -> bool:
-    """Whether a hole's centre and the points its radius away along both of
-    the face's axes lie on the outline, and its circle clear of the holes
-    and pockets made into the face (or through from the other face)."""
-    u, v = _uv(board, p)
-    r = d / 2
-    outline = board.outline.geometry
-    points = [Point(u, v), Point(u - r, v), Point(u + r, v), Point(u, v - r), Point(u, v + r)]
-    if any(outline.distance(q) > TOLERANCE for q in points):
-        return False
-    for op in board.ops:
-        if not isinstance(op, (Hole, Pocket)):
-            continue
-        if op.face != face.world_name and op.depth < board.thickness - 1e-9:
-            continue
-        if isinstance(op, Hole):
-            if Point(op.u, op.v).distance(Point(u, v)) < op.d / 2 + r - TOLERANCE:
-                return False
-        elif op.shape.geometry.buffer(-TOLERANCE).intersects(Point(u, v).buffer(r, quad_segs=8)):
-            return False
-    return True
