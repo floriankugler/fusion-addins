@@ -7,24 +7,29 @@ manufacturer's drilling template is pushed up against the top), with the
 hatch modelled closed, its inner face against the carcass front or up to
 2 mm in front of it (`lib.hatch_hinges.MAX_HATCH_GAP`).
 
-Mounted on the cabinet, `cab.mount(hinge, hatch=hatch, sides=(left,
-right), top=top)` drills what the hatch_hinge add-in drills:
+`HatchHinge("Free space 1.11")` takes the model by name, or a
+`lib.hatch_hinges.HingeSpec` for one of your own. Mounted on the cabinet,
+`cab.mount(hinge, hatch=hatch, sides=(left, right), top=top)` drills what
+the hatch_hinge add-in drills:
 
 - into each side panel's inner face a column of 5 mm holes 37 behind its
   front edge, 102, 134 and 166 below the reference, `carcass_depth` deep
-  (12 by default);
+  (12 by default), named `hinge_<hatch>_a` to `_c` from the top;
 - into the hatch's inner face the pilot holes for each mounting plate's
   screws, 25 in from the side panel's inner face, 12 and 76 below the
-  reference, `pilot=(diameter, depth)` (2 x 4 by default).
+  reference, `pilot=(diameter, depth)` (2 x 4 by default), named
+  `hinge_<side panel>_a` and `_b` from the top.
 
 It checks what the add-in checks: the hatch's thickness (16 to 28 mm),
 that it is closed, the side panels' flush front edges, how far the hatch
 top reaches above the reference (the overlap A, at most the hinge's A_max
 for the hatch thickness and opening angle; it is never chosen), that the
-holes and the mounting plate fit on their boards, and that no part takes
-the closed hinge's space. And it places the hinges as boxes (`HingeShape`),
+holes and the mounting plate fit on their boards (`Board.hole_fits`), that
+the holes stop short of the boards' far faces, and that no part takes the
+closed hinge's space. And it places the hinges as boxes (`HingeShape`),
 one body per hinge named by the hatch's own left and right, seen standing
-in front of it.
+in front of it, in an item `<hatch>_hinges`. A hatch hangs on a side
+panel once.
 
 The hinge dictates around it how far the hatch top may reach
 (`max_overlap`, `highest_hatch_top`) and how far down the closed hinges
@@ -37,9 +42,10 @@ measured on Häfele's CAD model of 372.27.300 (`HINGE_SHAPES`, 2026-10-12).
 """
 from __future__ import annotations
 
+import string
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Literal, cast
+from typing import Literal
 
 from shapely.geometry import Point
 
@@ -48,14 +54,16 @@ from lib import hatch_hinges as data
 from ..core import directions
 from ..core.directions import Axis, Direction, Frame
 from ..core.errors import LangError, one_of
-from ..core.layout_types import BoxDict, HardwareBodyLayout
+from ..core.layout_types import HardwareBodyLayout
 from ..core.ops import Hole, Pocket
-from ..core.part import Board, Face
+from ..core.part import Board
 from ..core.refs import Pos, PosLike, as_pos
 from ..core.scope import Scope
+from .common import TOLERANCE, LocalBox, check_hole_size, check_pilot_depth, mm, uv, world_box
 
-#: Geometric tolerance of the checks, mm (the add-in's 1e-4 cm).
-TOLERANCE = 1e-3
+#: The hinges of `lib.hatch_hinges`, by the names a build file uses.
+HatchHingeModel = Literal["Free space 1.11"]
+HATCH_HINGE_MODELS: dict[str, data.HingeSpec] = {"Free space 1.11": data.FREE_SPACE_1_11}
 
 #: Opening angles, degrees: the full opening and the one with the limiter
 #: fitted. Which ones a model offers is in its spec.
@@ -66,7 +74,7 @@ Extent = tuple[float, float]
 #: A box in a hinge's frame: its extents inward from the side panel's
 #: inner face, back from the carcass front edge, and below the underside
 #: of the carcass top (the hinge reference).
-HingeBox = tuple[Extent, Extent, Extent]
+HingeBox = LocalBox
 
 Point3 = dict[Axis, float]
 
@@ -145,16 +153,18 @@ class _Hinge:
 
 
 class HatchHinge:
-    """A lift-up hatch hinge model with the drilling settings: `opening`
-    the angle the hinges are set to (the full one, or with the limiter;
-    it decides how far the hatch top may reach above the carcass top's
-    underside), `carcass_depth` the depth of the carcass holes (their
-    diameter is the hinge's), `pilot` the (diameter, depth) of the pilot
-    holes in the hatch, mm."""
+    """A lift-up hatch hinge model with the drilling settings: `model` a
+    name or a `lib.hatch_hinges.HingeSpec`; `opening` the angle the hinges
+    are set to (the full one, or with the limiter; it decides how far the
+    hatch top may reach above the carcass top's underside),
+    `carcass_depth` the depth of the carcass holes (their diameter is the
+    hinge's), `pilot` the (diameter, depth) of the pilot holes in the
+    hatch, mm."""
 
-    def __init__(self, spec: data.HingeSpec, opening: Opening = 107,
+    def __init__(self, model: HatchHingeModel | data.HingeSpec, *, opening: Opening = 107,
                  carcass_depth: float = data.CARCASS_HOLE_DEPTH,
                  pilot: tuple[float, float] = (data.PILOT_DIAMETER, data.PILOT_DEPTH)):
+        spec = HATCH_HINGE_MODELS[one_of(model, HatchHingeModel, "HatchHinge()")] if isinstance(model, str) else model
         one_of(opening, Opening, "HatchHinge(opening=)")
         if opening not in (spec.opening, spec.limited_opening):
             raise LangError(f"{spec.name} opens to {spec.opening} degrees, or {spec.limited_opening} with the "
@@ -163,13 +173,11 @@ class HatchHinge:
             raise LangError(f"{spec.name}: no hinge shape to draw it with.")
         if carcass_depth <= 0:
             raise LangError(f"{spec.name}: the carcass hole depth must be greater than zero.")
-        diameter, depth = pilot
-        if diameter <= 0 or depth <= 0:
-            raise LangError(f"{spec.name}: the pilot holes' diameter and depth must be greater than zero.")
+        #: The hinge's drilling data (`lib.hatch_hinges`).
         self.spec = spec
         self.opening: int = opening
         self.carcass_depth = float(carcass_depth)
-        self.pilot = (float(diameter), float(depth))
+        self.pilot = check_hole_size(spec.name, "pilot", pilot)
 
     @property
     def name(self) -> str:
@@ -197,7 +205,7 @@ class HatchHinge:
         """The highest the top edge of a hatch `hatch_thickness` thick may
         be, as a position: `max_overlap` above the underside of the carcass
         top (`top`, the board or the position of its underside)."""
-        reference, up = _reference(top, "highest_hatch_top(top=)")
+        reference, up = _reference(top, "highest_hatch_top(top=)", directions.current_frame())
         return Pos(up.axis, reference.value + up.sign * self.max_overlap(hatch_thickness))
 
     def lowest(self, top: Board | PosLike) -> Pos:
@@ -205,7 +213,7 @@ class HatchHinge:
         position: a shelf whose upper face lies at or below it stays clear
         of them. `top` is the carcass top or the position of its
         underside."""
-        reference, up = _reference(top, "lowest(top=)")
+        reference, up = _reference(top, "lowest(top=)", directions.current_frame())
         return Pos(up.axis, reference.value - up.sign * self.shape.lowest)
 
     def hinge_boxes(self, gap: float = 0.0) -> dict[str, HingeBox]:
@@ -215,40 +223,30 @@ class HatchHinge:
 
     # -- mounting -------------------------------------------------------------------------------
 
-    def mount(self, scope: Scope, /, **options: object) -> None:
+    def mount(self, scope: Scope, /, *, hatch: Board, sides: Board | Sequence[Board], top: Board | PosLike) -> None:
         """`cab.mount(hinge, hatch=hatch, sides=(left, right), top=top)`:
         drills the side panels (one or both, a hinge on each) and the
         closed hatch for the hinges, positioned from the underside of the
         carcass top `top` (the board, or the position of its underside),
-        and places the hinges."""
-        allowed = {"hatch", "sides", "top"}
-        if set(options) - allowed or allowed - set(options):
-            raise LangError(f"{self.name}: mount() takes hatch=, sides=(left, right) and top=, "
-                            f"got {sorted(options)}.", scope.path)
-        if any(item["name"] == "hinges" for item in scope.hardware):
-            raise LangError(f"{self.name}: this scope has hatch hinges already; mount the hinges of another "
-                            "hatch in a scope of its own.", scope.path)
-        hatch = options["hatch"]
-        if not isinstance(hatch, Board):
-            raise LangError(f"{self.name}: hatch= must be the hatch board.", scope.path)
-        sides = _boards(options["sides"], scope.path, self.name)
-        top = options["top"]
-        if isinstance(top, Board):
-            if top is hatch or any(top is s for s in sides):
-                raise LangError(f"{self.name}: top= must be the carcass top, not the hatch or a side panel.",
-                                scope.path)
-        reference, _ = _reference(cast(Board | PosLike, top), f"{self.name}: mount(top=)")
-        if any(s is hatch for s in sides):
+        and places the hinges. Nothing is drilled unless every hinge fits."""
+        panels = _boards(sides, scope.path, self.name)
+        if isinstance(top, Board) and (top is hatch or any(top is s for s in panels)):
+            raise LangError(f"{self.name}: top= must be the carcass top, not the hatch or a side panel.", scope.path)
+        reference, _ = _reference(top, f"{self.name}: mount(top=)", scope.frame)
+        if any(s is hatch for s in panels):
             raise LangError(f"{self.name}: the hatch cannot be one of the side panels.", hatch.path)
-        frame, hinges = self._layout(scope, hatch, sides, reference)
+        for side in panels:
+            if hatch.has_operation(f"hinge_{side.name}_a"):
+                raise LangError(f"{self.name}: {hatch.path} hangs on {side.path} already.", hatch.path)
+        frame, hinges = self._layout(scope, hatch, panels, reference)
         self._drill(frame, hatch, hinges)
-        self._place(scope, frame, hinges)
+        self._place(scope, frame, hatch, hinges)
 
     def _check_thickness(self, thickness: float, path: str | None = None) -> None:
         spec = self.spec
         if not spec.min_hatch_thickness - TOLERANCE <= thickness <= spec.max_hatch_thickness + TOLERANCE:
-            raise LangError(f"The hatch is {_mm(thickness)} thick; the {spec.name} fits hatches from "
-                            f"{_mm(spec.min_hatch_thickness)} to {_mm(spec.max_hatch_thickness)}.", path)
+            raise LangError(f"The hatch is {mm(thickness)} thick; the {spec.name} fits hatches from "
+                            f"{mm(spec.min_hatch_thickness)} to {mm(spec.max_hatch_thickness)}.", path)
 
     def _layout(self, scope: Scope, hatch: Board, sides: list[Board], reference: Pos) -> tuple[_Frame, list[_Hinge]]:
         """Where the hinges go, after the add-in's checks in its order.
@@ -276,17 +274,17 @@ class HatchHinge:
             side_back = scope.frame.direction_of(depth_axis, 1 if to_side > 0 else -1)
             if back is None:
                 back = side_back
-            elif side_back.sign != back.sign:
+            elif side_back != back:
                 raise LangError(f"{self.name}: both side panels must stand behind the hatch.", side.path)
             front = sb.hi[depth_axis] if back.sign < 0 else sb.lo[depth_axis]
             hatch_inner = hatch_box.hi[depth_axis] if back.sign > 0 else hatch_box.lo[depth_axis]
             gap = (front - hatch_inner) * back.sign
             if gap < -TOLERANCE:
-                raise LangError(f"The hatch reaches {_mm(-gap)} into the carcass at {side.path}. Model the closed "
+                raise LangError(f"The hatch reaches {mm(-gap)} into the carcass at {side.path}. Model the closed "
                                 "hatch in front of the carcass.", hatch.path)
             if gap > data.MAX_HATCH_GAP + TOLERANCE:
                 raise LangError(f"The hatch must be modelled in its closed position, against the carcass front "
-                                f"(it is {_mm(gap)} in front of {side.path}).", hatch.path)
+                                f"(it is {mm(gap)} in front of {side.path}).", hatch.path)
             # The inner face is the one toward the middle of the hatch.
             t = side.t_axis
             middle = hatch_middle[_AXES.index(t)]
@@ -295,18 +293,17 @@ class HatchHinge:
                                 "the side panels at the hatch's ends.", side.path)
             inward = scope.frame.direction_of(t, 1 if middle > sb.hi[t] else -1)
             inner = sb.hi[t] if inward.sign > 0 else sb.lo[t]
-            right = _cross(scope.frame, back, up)
             # Seen from the front, the left side panel's inner face points right.
-            which = "left" if _same(inward, right) else "right"
+            which = "left" if inward == scope.frame.cross(back, up) else "right"
             hinges.append(_Hinge(side, which, inward, inner, front, gap))
         assert back is not None
         if len(hinges) == 2:
             first, second = hinges
-            if _same(first.inward, second.inward):
+            if first.inward == second.inward:
                 raise LangError(f"{self.name}: the two side panels must be on opposite sides of the cabinet.",
                                 second.side.path)
             if abs(first.front - second.front) > TOLERANCE:
-                raise LangError(f"The front edges of the two side panels are {_mm(abs(first.front - second.front))} "
+                raise LangError(f"The front edges of the two side panels are {mm(abs(first.front - second.front))} "
                                 "apart in depth; the hatch closes against both, so they must be flush.",
                                 second.side.path)
         hinges.sort(key=lambda h: h.which)       # left, then right
@@ -316,40 +313,38 @@ class HatchHinge:
         overlap *= up.sign
         limit = spec.overlap_limit(thickness, self.limited)
         if overlap > limit + TOLERANCE:
-            hint = "" if self.limited else (f" ({_mm(spec.limited_max_overlap)} with the opening limited to "
+            hint = "" if self.limited else (f" ({mm(spec.limited_max_overlap)} with the opening limited to "
                                             f"{spec.limited_opening}°)")
-            raise LangError(f"The hatch top reaches {_mm(overlap)} above the underside of the carcass top. The "
-                            f"{spec.name} allows at most {_mm(limit)} for a {_mm(thickness)} hatch{hint}.",
+            raise LangError(f"The hatch top reaches {mm(overlap)} above the underside of the carcass top. The "
+                            f"{spec.name} allows at most {mm(limit)} for a {mm(thickness)} hatch{hint}.",
                             hatch.path)
 
-        carcass_radius = spec.carcass_hole_diameter / 2
         pilot_diameter, pilot_depth = self.pilot
-        hatch_face = _face(hatch, back)
+        hatch_face = hatch.face(back)
+        hatch_region = hatch.face_region(hatch_face)
         parts = _module_of(scope).all_parts()
         for h in hinges:
-            side_face = _face(h.side, h.inward)
-            if not _points_on_face(side_face, self._carcass_holes(frame, h), carcass_radius, (up, back)):
-                raise LangError("The carcass holes do not fit on the side panel's inner face.", h.side.path)
+            side_face = h.side.face(h.inward)
+            for p in self._carcass_holes(frame, h):
+                if not h.side.hole_fits(side_face, uv(h.side, p), spec.carcass_hole_diameter):
+                    raise LangError("The carcass holes do not fit on the side panel's inner face.", h.side.path)
             plate = [self._point(frame, h, inward, -h.gap, below)
                      for inward in spec.plate_inward for below in spec.plate_below]
-            if not _points_on_face(hatch_face, plate, 0.0, (up, h.inward)):
+            if any(hatch_region.distance(Point(uv(hatch, p))) > TOLERANCE for p in plate):
                 raise LangError(f"The hinge's mounting plate does not fit on the hatch. It covers "
-                                f"{_mm(spec.plate_below[0])} to {_mm(spec.plate_below[1])} below the underside of "
+                                f"{mm(spec.plate_below[0])} to {mm(spec.plate_below[1])} below the underside of "
                                 "the carcass top.", hatch.path)
-            if not _points_on_face(hatch_face, self._hatch_holes(frame, h), pilot_diameter / 2, (up, h.inward)):
-                raise LangError("The pilot holes do not fit on the hatch.", hatch.path)
-            if self.carcass_depth >= h.side.thickness - TOLERANCE:
-                raise LangError(f"The carcass hole depth must be less than the side panel thickness "
-                                f"({_mm(h.side.thickness)}).", h.side.path)
+            for p in self._hatch_holes(frame, h):
+                if not hatch.hole_fits(hatch_face, uv(hatch, p), pilot_diameter):
+                    raise LangError("The pilot holes do not fit on the hatch.", hatch.path)
+            check_pilot_depth(self.name, h.side, self.carcass_depth, "carcass hole")
             probes = [self._point(frame, h, *point) for point in spec.probe_points]
             obstacle = next((p for p in parts if any(_material_at(p, q) for q in probes)), None)
             if obstacle is not None:
                 raise LangError(f"The {h.which} hinge would collide with {obstacle.path}. The hinges are positioned "
                                 "from the underside of the carcass top (top=); keep other parts out of the space "
                                 "the closed hinge takes.", h.side.path)
-        if pilot_depth >= thickness - TOLERANCE:
-            raise LangError(f"The pilot hole depth must be less than the hatch thickness ({_mm(thickness)}).",
-                            hatch.path)
+        check_pilot_depth(self.name, hatch, pilot_depth, "pilot")
         return frame, hinges
 
     def _point(self, frame: _Frame, h: _Hinge, inward: float, back: float, below: float) -> Point3:
@@ -373,88 +368,59 @@ class HatchHinge:
 
     def _drill(self, frame: _Frame, hatch: Board, hinges: list[_Hinge]) -> None:
         """The carcass holes into each side panel's inner face, named
-        `hinge_1` to `hinge_3` from the top, and the pilot holes into the
-        hatch's inner face, `hinge_left_1`, `hinge_left_2`, ..."""
+        `hinge_<hatch>_a` to `_c` from the top, and the pilot holes into the
+        hatch's inner face, `hinge_<side panel>_a` and `_b`."""
         diameter, depth = self.pilot
-        hatch_face = _face(hatch, frame.back)
+        hatch_face = hatch.face(frame.back)
         for h in hinges:
-            side_face = _face(h.side, h.inward)
-            for i, p in enumerate(self._carcass_holes(frame, h), 1):
-                h.side.add_hole(side_face, _uv(h.side, p), self.spec.carcass_hole_diameter, self.carcass_depth,
-                                name=h.side.unique_op_name(f"hinge_{i}"))
-            for i, p in enumerate(self._hatch_holes(frame, h), 1):
-                hatch.add_hole(hatch_face, _uv(hatch, p), diameter, depth,
-                               name=hatch.unique_op_name(f"hinge_{h.which}_{i}"))
+            side_face = h.side.face(h.inward)
+            for letter, p in zip(string.ascii_lowercase, self._carcass_holes(frame, h)):
+                h.side.add_hole(side_face, uv(h.side, p), self.spec.carcass_hole_diameter, self.carcass_depth,
+                                name=h.side.unique_op_name(f"hinge_{hatch.name}_{letter}"))
+            for letter, p in zip(string.ascii_lowercase, self._hatch_holes(frame, h)):
+                hatch.add_hole(hatch_face, uv(hatch, p), diameter, depth, name=f"hinge_{h.side.name}_{letter}")
 
-    def _place(self, scope: Scope, frame: _Frame, hinges: list[_Hinge]) -> None:
-        """Records the hinges as boxes, a body per hinge named by the hatch's
-        own left and right, seen standing in front of it (also in a module
-        written without front=, whose left is the hatch's right)."""
+    def _place(self, scope: Scope, frame: _Frame, hatch: Board, hinges: list[_Hinge]) -> None:
+        """Records the hinges as boxes in `<hatch>_hinges`, a body per hinge
+        named by the hatch's own left and right, seen standing in front of
+        it (also in a module written without front=, whose left is the
+        hatch's right)."""
         bodies: list[HardwareBodyLayout] = []
         for h in hinges:
             starts = ((h.inward, h.inner), (frame.back, h.front), (-frame.up, frame.reference))
-            boxes = [_world_box(starts, box) for box in self.hinge_boxes(h.gap).values()]
+            boxes = [world_box(starts, box) for box in self.hinge_boxes(h.gap).values()]
             bodies.append(HardwareBodyLayout(name=h.which, boxes=boxes))
-        scope.place_hardware("hinges", bodies)
+        scope.place_hardware(scope.unique_hardware_name(f"{hatch.name}_hinges"), bodies)
 
 
 _AXES: tuple[Axis, Axis, Axis] = ("x", "y", "z")
 
 
-def _mm(value: float) -> str:
-    """A length for messages, as the add-in writes it: `24.5 mm`, `18 mm`."""
-    return f"{value:.1f}".rstrip("0").rstrip(".") + " mm"
-
-
-def _boards(value: object, path: str, name: str) -> list[Board]:
+def _boards(value: Board | Sequence[Board], path: str, name: str) -> list[Board]:
     """`sides=`: one side panel, or one or two in a tuple or list."""
-    items: list[object] = [value] if isinstance(value, Board) else (
-        list(cast(Sequence[object], value)) if isinstance(value, (tuple, list)) else [])
-    if not 1 <= len(items) <= 2 or not all(isinstance(b, Board) for b in items):
+    boards = [value] if isinstance(value, Board) else list(value)
+    if not 1 <= len(boards) <= 2:
         raise LangError(f"{name}: sides= must be the side panel that carries a hinge, or both side panels.", path)
-    boards = cast(list[Board], items)
     if len(boards) == 2 and boards[0] is boards[1]:
         raise LangError(f"{name}: name two different side panels.", path)
     return boards
 
 
-def _reference(top: Board | PosLike, what: str) -> tuple[Pos, Direction]:
+def _reference(top: Board | PosLike, what: str, frame: Frame) -> tuple[Pos, Direction]:
     """The hinge reference's height and the up direction: the underside of
-    the carcass top board, or a position given for it."""
+    the carcass top board (up in the board's frame), or a position given
+    for it (up in `frame`, the mount's scope's or, outside a mount, the
+    frame names resolve in)."""
     if isinstance(top, Board):
         up = top.scope.frame.direction("top")
         if top.t_axis != up.axis:
             raise LangError(f"{what} must be the carcass top, lying flat, or the height of its underside.", top.path)
-        return _face(top, -up).position, up
-    up = directions.current_frame().direction("top")
+        return top.face(-up).position, up
+    up = frame.direction("top")
     pos = as_pos(top, what)
     if pos.axis != up.axis:
         raise LangError(f"{what}: {pos} is not a height; give the carcass top or the height of its underside.")
     return pos, up
-
-
-def _face(board: Board, direction: Direction) -> Face:
-    """The board's face pointing along `direction`, named in the board's
-    own frame."""
-    return board.face(board.scope.frame.direction_of(direction.axis, direction.sign))
-
-
-def _same(a: Direction, b: Direction) -> bool:
-    """Whether two directions point the same way, whatever frames name them."""
-    return a.axis == b.axis and a.sign == b.sign
-
-
-def _cross(frame: Frame, a: Direction, b: Direction) -> Direction:
-    """The direction of a x b, for two perpendicular directions."""
-    (ax, ay, az), (bx, by, bz) = a.vector, b.vector
-    v = (ay * bz - az * by, az * bx - ax * bz, ax * by - ay * bx)
-    i = next(k for k in range(3) if v[k])
-    return frame.direction_of(_AXES[i], v[i])
-
-
-def _uv(board: Board, p: Point3) -> tuple[float, float]:
-    """A world point in the frame of the board's outline."""
-    return (p[board.u_axis], p[board.v_axis])
 
 
 def _module_of(scope: Scope) -> Scope:
@@ -463,40 +429,6 @@ def _module_of(scope: Scope) -> Scope:
     while not s.is_module and s.parent is not None:
         s = s.parent
     return s
-
-
-def _in_op(board: Board, face: Face, uv: tuple[float, float]) -> bool:
-    """Whether the point lies inside a pocket or hole made from `face`."""
-    point = Point(*uv)
-    for op in board.ops:
-        if isinstance(op, Pocket) and op.face == face.world_name:
-            if op.shape.geometry.buffer(-TOLERANCE).contains(point):
-                return True
-        elif isinstance(op, Hole) and op.face == face.world_name:
-            if point.distance(Point(op.u, op.v)) < op.d / 2 - TOLERANCE:
-                return True
-    return False
-
-
-def _points_on_face(face: Face, centres: list[Point3], radius: float, directions_: tuple[Direction, Direction]) -> bool:
-    """True when every centre, and its rim along both directions when
-    `radius` is set, lies on the face: inside the board's outline and not
-    in a pocket or hole made from that face (the add-in's isPointOnFace)."""
-    board = face.part
-    outline = board.outline.geometry
-    offsets = [(0.0, 0.0)]
-    if radius > 0:
-        offsets += [(radius, 0.0), (-radius, 0.0), (0.0, radius), (0.0, -radius)]
-    first, second = directions_
-    for centre in centres:
-        for a, b in offsets:
-            p = dict(centre)
-            p[first.axis] += first.sign * a
-            p[second.axis] += second.sign * b
-            uv = _uv(board, p)
-            if outline.distance(Point(*uv)) > TOLERANCE or _in_op(board, face, uv):
-                return False
-    return True
 
 
 def _material_at(part: Board, p: Point3) -> bool:
@@ -513,7 +445,7 @@ def _material_at(part: Board, p: Point3) -> bool:
     for op in part.ops:
         if not isinstance(op, (Pocket, Hole)):
             continue
-        face = directions.frame.direction(op.face)
+        face = directions.world_frame().direction(op.face)
         lo, hi = (b.hi[t] - op.depth, b.hi[t]) if face.sign > 0 else (b.lo[t], b.lo[t] + op.depth)
         if not lo - TOLERANCE <= p[t] <= hi + TOLERANCE:
             continue
@@ -523,14 +455,3 @@ def _material_at(part: Board, p: Point3) -> bool:
         elif point.distance(Point(op.u, op.v)) <= op.d / 2 + TOLERANCE:
             return False
     return True
-
-
-def _world_box(starts: tuple[tuple[Direction, float], ...], box: HingeBox) -> BoxDict:
-    """A hinge box in world coordinates: each of its extents measured
-    along a direction from a world position."""
-    lo, hi = [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]
-    for (direction, start), (a, b) in zip(starts, box):
-        ends = sorted((start + direction.sign * a, start + direction.sign * b))
-        i = _AXES.index(direction.axis)
-        lo[i], hi[i] = ends
-    return {"min": lo, "max": hi}

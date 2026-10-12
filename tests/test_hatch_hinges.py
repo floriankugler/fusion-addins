@@ -3,6 +3,7 @@ hatch_hinge add-in: the positions are worked out by hand from the add-in's
 code and the Free space 1.11 data (lib/hatch_hinges.py), the checks are
 the add-in's."""
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -14,7 +15,7 @@ from lang.core.layout_types import HardwareBodyLayout, HardwareLayout
 from lang.core.ops import Hole
 from lang.core.scope import registry
 from lang.emit.plan import FaceRef, HoleStep, plan_layout
-from lang.hardware.hatch_hinges import HINGE_SHAPES, HatchHinge, HingeBox
+from lang.hardware.hatch_hinges import HINGE_SHAPES, HatchHinge, HatchHingeModel, HingeBox
 from lib.hatch_hinges import FREE_SPACE_1_11
 from helpers import bounds, ply18
 
@@ -34,7 +35,7 @@ def _cabinet(hinge: HatchHinge | None = None, *, frame: str = "cabinet", hatch_t
     "cabinet" (front=box.front), "van" (no front=, the van's terms) or
     "mirrored"; `options` replace the mount's."""
     box = Box.from_size(width=600, depth=320, height=height)
-    hinge = hinge or HatchHinge(FREE_SPACE_1_11)
+    hinge = hinge or HatchHinge("Free space 1.11")
     if frame == "van":
         cab = module("cab", box)
     else:
@@ -52,7 +53,7 @@ def _cabinet(hinge: HatchHinge | None = None, *, frame: str = "cabinet", hatch_t
             parts["shelf"] = (board("shelf", ply18).on(Pos("z", shelf_at), toward=cab.top)
                               .between(left, right, carcass, cab.back))
         if mount:
-            mount_options: dict[str, object] = {"hatch": hatch, "sides": (left, right), "top": top}
+            mount_options: dict[str, Any] = {"hatch": hatch, "sides": (left, right), "top": top}
             mount_options.update(options)
             cab.mount(hinge, **mount_options)
     return cab, parts
@@ -100,25 +101,27 @@ def test_mount_drills_the_side_panels_and_the_hatch():
     """In the cabinet frame left is +y: the left side panel at y 582..600,
     its inner face at 582. The carcass front is the hatch's inner face, x =
     18; the top's underside, the reference, z = 332. Carcass holes: 5 x 12,
-    37 behind the front edge, 102, 134 and 166 below the reference; pilot
-    holes in the hatch's inner face: 2 x 4, 25 in from each side panel's
-    inner face, 12 and 76 below the reference."""
+    37 behind the front edge, 102, 134 and 166 below the reference, named
+    by the hatch, a to c from the top; pilot holes in the hatch's inner
+    face: 2 x 4, 25 in from each side panel's inner face, 12 and 76 below
+    the reference, named by the side panel."""
     _, parts = _cabinet()
     for name, face in (("left", "left"), ("right", "right")):     # inner faces: -y and +y
         holes = _holes(parts[name])
         assert [(h.name, h.face, h.u, h.v, h.d, h.depth) for h in holes] == [
-            ("hinge_1", face, 55, 230, 5, 12), ("hinge_2", face, 55, 198, 5, 12), ("hinge_3", face, 55, 166, 5, 12)]
+            ("hinge_hatch_a", face, 55, 230, 5, 12), ("hinge_hatch_b", face, 55, 198, 5, 12),
+            ("hinge_hatch_c", face, 55, 166, 5, 12)]
     holes = _holes(parts["hatch"])
     assert [(h.name, h.face, h.u, h.v, h.d, h.depth) for h in holes] == [
-        ("hinge_left_1", "back", 557, 320, 2, 4), ("hinge_left_2", "back", 557, 256, 2, 4),
-        ("hinge_right_1", "back", 43, 320, 2, 4), ("hinge_right_2", "back", 43, 256, 2, 4)]
-    assert parts["left"].hinge_1.top.value == 232.5            # named operations, as positions
+        ("hinge_left_a", "back", 557, 320, 2, 4), ("hinge_left_b", "back", 557, 256, 2, 4),
+        ("hinge_right_a", "back", 43, 320, 2, 4), ("hinge_right_b", "back", 43, 256, 2, 4)]
+    assert parts["left"].hinge_hatch_a.top.value == 232.5      # named operations, as positions
 
 
 def test_settings_and_a_gap_move_the_holes():
     """A 1.5 mm gap: the carcass front is at x 19.5, the hatch's inner face
     stays at 18. Carcass depth and pilot holes follow the settings."""
-    hinge = HatchHinge(FREE_SPACE_1_11, carcass_depth=10, pilot=(2.5, 5))
+    hinge = HatchHinge("Free space 1.11", carcass_depth=10, pilot=(2.5, 5))
     _, parts = _cabinet(hinge, gap=1.5)
     assert {(h.u, h.depth, h.d) for h in _holes(parts["left"])} == {(19.5 + 37, 10, 5)}
     assert {(h.u, h.v, h.d, h.depth) for h in _holes(parts["hatch"])} == {
@@ -137,9 +140,9 @@ def test_top_as_the_height_of_its_underside():
 def test_one_hinge():
     """sides= may name the one side panel that carries a hinge."""
     cab, parts = _cabinet(mount=False)
-    cab.mount(HatchHinge(FREE_SPACE_1_11), hatch=parts["hatch"], sides=parts["right"], top=parts["top"])
+    cab.mount(HatchHinge("Free space 1.11"), hatch=parts["hatch"], sides=parts["right"], top=parts["top"])
     assert len(_holes(parts["right"])) == 3 and _holes(parts["left"]) == []
-    assert [h.name for h in _holes(parts["hatch"])] == ["hinge_right_1", "hinge_right_2"]
+    assert [h.name for h in _holes(parts["hatch"])] == ["hinge_right_a", "hinge_right_b"]
     (hinges,) = cab.hardware
     assert [b["name"] for b in hinges["bodies"]] == ["right"]
 
@@ -148,10 +151,10 @@ def test_what_the_hinge_dictates():
     """A_max from the manual's table, linear in between (19: 23.5, 22:
     22.5), 37 with the limiter; the highest hatch top above the top's
     underside; the closed hinge's lowest point."""
-    hinge = HatchHinge(FREE_SPACE_1_11)
+    hinge = HatchHinge("Free space 1.11")
     assert hinge.max_overlap(18) == 24
     assert hinge.max_overlap(20) == pytest.approx(23.5 - 1 / 3)
-    assert HatchHinge(FREE_SPACE_1_11, opening=90).max_overlap(18) == 37
+    assert HatchHinge("Free space 1.11", opening=90).max_overlap(18) == 37
     with pytest.raises(LangError, match="fits hatches from 16 mm to 28 mm"):
         hinge.max_overlap(30)
     _, parts = _cabinet(mount=False)
@@ -168,7 +171,7 @@ def test_hinges_are_boxes_against_the_side_panels():
     face, also across a gap."""
     cab, _ = _cabinet()
     (hinges,) = cab.hardware
-    assert hinges["path"] == "cab.hinges" and [b["name"] for b in hinges["bodies"]] == ["left", "right"]
+    assert hinges["path"] == "cab.hatch_hinges" and [b["name"] for b in hinges["bodies"]] == ["left", "right"]
     left, right = hinges["bodies"]
     assert _drawn(left) == _expected(LEFT_INWARD, BACK, DOWN)
     assert _drawn(right) == _expected(RIGHT_INWARD, BACK, DOWN)
@@ -186,7 +189,7 @@ def test_probe_points_lie_in_or_at_the_boxes():
     STEP): all but one lie inside. (25, 1, 3), 1 behind the carcass front
     and 3 below the reference, lies 2 mm above the plate's box, which
     starts 5 below: the boxes leave that corner of the hinge out."""
-    boxes = HatchHinge(FREE_SPACE_1_11).hinge_boxes(gap=0.3)
+    boxes = HatchHinge("Free space 1.11").hinge_boxes(gap=0.3)
 
     def distance(point: tuple[float, float, float], box: HingeBox) -> float:
         return sum((c - min(max(c, lo), hi)) ** 2 for c, (lo, hi) in zip(point, box)) ** 0.5
@@ -198,7 +201,7 @@ def test_probe_points_lie_in_or_at_the_boxes():
 def test_hinge_boxes_leave_room_for_the_cabinet():
     """The boxes touch the side panels, the hatch and a shelf right below
     them, but overlap none of them."""
-    hinge = HatchHinge(FREE_SPACE_1_11)
+    hinge = HatchHinge("Free space 1.11")
     cab, parts = _cabinet(hinge, shelf_at=332 - SHAPE.lowest - 18)
     for body in cab.hardware[0]["bodies"]:
         for b in body["boxes"]:
@@ -208,16 +211,25 @@ def test_hinge_boxes_leave_room_for_the_cabinet():
 
 
 def _physical(cab: Scope, parts: dict[str, Board]) -> tuple[set[tuple[object, ...]], list[HardwareBodyLayout]]:
-    """Every hole by the board's box, and the hinge bodies."""
-    holes: set[tuple[object, ...]] = {(tuple(p.box().as_dict()["min"]), h.name, h.face, h.u, h.v, h.d, h.depth)
-                                      for p in parts.values() for h in _holes(p)}
+    """Every hole by the board's box (its name with the board names
+    replaced by where the boards are), and the hinge bodies."""
+    where = {p.name: str(p.box().as_dict()["min"]) for p in parts.values()}
+    holes: set[tuple[object, ...]] = set()
+    for p in parts.values():
+        for h in _holes(p):
+            name = h.name or ""
+            for board_name, place in where.items():
+                name = name.replace(f"_{board_name}_", f"_{place}_")
+            holes.add((tuple(p.box().as_dict()["min"]), name, h.face, h.u, h.v, h.d, h.depth))
     return holes, cab.hardware[0]["bodies"]
 
 
 def test_same_hinges_in_any_frame():
     """A module in the van's terms (its left is -y, the hatch's right), a
     cabinet (front=) and a mirrored cabinet drill the same holes and place
-    the same hinges, named by the hatch's own left and right."""
+    the same hinges, named by the hatch's own left and right. The hatch's
+    holes are named by the side panels, which are called left and right
+    the other way round in the van's terms."""
     results: list[tuple[set[tuple[object, ...]], list[HardwareBodyLayout]]] = []
     for frame in ("cabinet", "van", "mirrored"):
         registry.reset()
@@ -226,6 +238,7 @@ def test_same_hinges_in_any_frame():
     registry.reset()
     _, van = _cabinet(frame="van")
     assert van["left"].box().lo["y"] == 0 and len(_holes(van["left"])) == 3      # the van's left is -y
+    assert {(h.name, h.u) for h in _holes(van["hatch"])} >= {("hinge_left_a", 43), ("hinge_right_a", 557)}
     left_body = results[1][1][0]
     assert left_body["name"] == "left" and bounds(left_body)[1][1] == 582      # the hatch's left is +y
 
@@ -241,13 +254,13 @@ def test_rotated_cabinet():
         right = board("right", ply18).on(cab.right).between(cab.front.into(18), cab.back)
         top = board("top", ply18).on(cab.top).between(left, right, cab.front.into(18), cab.back)
         hatch = board("hatch", ply18).on(cab.front)
-        cab.mount(HatchHinge(FREE_SPACE_1_11), hatch=hatch, sides=(left, right), top=top)
+        cab.mount(HatchHinge("Free space 1.11"), hatch=hatch, sides=(left, right), top=top)
     assert left.box().lo["x"] == 582
     assert [(h.face, h.u, h.v) for h in _holes(left)] == [("front", 265, 230), ("front", 265, 198),
                                                           ("front", 265, 166)]
     assert {(h.name, h.face, h.u, h.v) for h in _holes(hatch)} == {
-        ("hinge_left_1", "left", 557, 320), ("hinge_left_2", "left", 557, 256),
-        ("hinge_right_1", "left", 43, 320), ("hinge_right_2", "left", 43, 256)}
+        ("hinge_left_a", "left", 557, 320), ("hinge_left_b", "left", 557, 256),
+        ("hinge_right_a", "left", 43, 320), ("hinge_right_b", "left", 43, 256)}
     (hinges,) = cab.hardware
     assert _drawn(hinges["bodies"][0]) == _expected((0, 582.0, -1), (1, 302.0, -1), DOWN)
 
@@ -269,7 +282,7 @@ def test_overlap_is_checked_never_chosen():
                                         r"opening limited to 90°\)\."):
         _cabinet(top_t=25)
     registry.reset()
-    _cabinet(HatchHinge(FREE_SPACE_1_11, opening=90), top_t=25)
+    _cabinet(HatchHinge("Free space 1.11", opening=90), top_t=25)
     registry.reset()
     with pytest.raises(LangError, match="allows at most 23.2 mm for a 20 mm hatch"):    # interpolated
         _cabinet(hatch_t=20, top_t=24)
@@ -303,30 +316,32 @@ def test_holes_must_fit_on_their_boards():
     left = parts["left"]
     left.hole(d=5, depth=10, at=left.inner.front(37).bottom(Pos("z", 198)))
     with pytest.raises(LangError, match="carcass holes do not fit"):
-        cab.mount(HatchHinge(FREE_SPACE_1_11), hatch=parts["hatch"], sides=(left, parts["right"]), top=parts["top"])
+        cab.mount(HatchHinge("Free space 1.11"), hatch=parts["hatch"], sides=(left, parts["right"]), top=parts["top"])
     registry.reset()
     cab, parts = _cabinet(mount=False)
     hatch = parts["hatch"]
     hatch.hole(d=6, depth=5, at=hatch.inner.left(Pos("y", 557)).bottom(Pos("z", 320)))
     with pytest.raises(LangError, match="pilot holes do not fit"):
-        cab.mount(HatchHinge(FREE_SPACE_1_11), hatch=hatch, sides=(parts["left"], parts["right"]), top=parts["top"])
+        cab.mount(HatchHinge("Free space 1.11"), hatch=hatch, sides=(parts["left"], parts["right"]), top=parts["top"])
     registry.reset()
     with pytest.raises(LangError, match="carcass holes do not fit"):
         _cabinet(height=180)
 
 
 def test_hole_depths_must_stay_inside_the_boards():
-    with pytest.raises(LangError, match=r"less than the side panel thickness \(18 mm\)"):
-        _cabinet(HatchHinge(FREE_SPACE_1_11, carcass_depth=18))
+    with pytest.raises(LangError, match=r"the carcass hole depth \(18 mm\) must be less than cab.left's thickness "
+                                        r"\(18 mm\)"):
+        _cabinet(HatchHinge("Free space 1.11", carcass_depth=18))
     registry.reset()
-    with pytest.raises(LangError, match=r"less than the hatch thickness \(18 mm\)"):
-        _cabinet(HatchHinge(FREE_SPACE_1_11, pilot=(2, 18)))
+    with pytest.raises(LangError, match=r"the pilot depth \(18 mm\) must be less than cab.hatch's thickness "
+                                        r"\(18 mm\)"):
+        _cabinet(HatchHinge("Free space 1.11", pilot=(2, 18)))
     with pytest.raises(LangError, match="greater than zero"):
-        HatchHinge(FREE_SPACE_1_11, carcass_depth=0)
+        HatchHinge("Free space 1.11", carcass_depth=0)
     with pytest.raises(LangError, match="greater than zero"):
-        HatchHinge(FREE_SPACE_1_11, pilot=(0, 4))
+        HatchHinge("Free space 1.11", pilot=(0, 4))
     with pytest.raises(LangError, match="expected 107 or 90, not 95"):
-        HatchHinge(FREE_SPACE_1_11, opening=95)  # type: ignore[arg-type]
+        HatchHinge("Free space 1.11", opening=95)  # type: ignore[arg-type]
 
 
 def test_nothing_may_take_the_hinges_space():
@@ -345,12 +360,10 @@ def test_nothing_may_take_the_hinges_space():
 
 def test_mount_refuses_what_it_cannot_take():
     cab, parts = _cabinet(mount=False)
-    hinge = HatchHinge(FREE_SPACE_1_11)
+    hinge = HatchHinge("Free space 1.11")
     hatch, left, right, top = parts["hatch"], parts["left"], parts["right"], parts["top"]
+    options: dict[str, Any]
     for options, message in (
-        ({"hatch": hatch, "sides": (left, right)}, "takes hatch=, sides=.* and top="),
-        ({"hatch": hatch, "sides": (left, right), "top": top, "front": hatch}, "takes hatch="),
-        ({"hatch": left.inner, "sides": (left, right), "top": top}, "hatch= must be the hatch board"),
         ({"hatch": hatch, "sides": (left, left), "top": top}, "two different side panels"),
         ({"hatch": hatch, "sides": (left, right, top), "top": top}, "sides= must be"),
         ({"hatch": hatch, "sides": (left, hatch), "top": top}, "cannot be one of the side panels"),
@@ -361,10 +374,17 @@ def test_mount_refuses_what_it_cannot_take():
     ):
         with pytest.raises(LangError, match=message):
             cab.mount(hinge, **options)
+    # the keywords are mount's own, checked by the type checker too (typing_checks.py)
+    with pytest.raises(TypeError, match="top"):
+        cab.mount(hinge, hatch=hatch, sides=(left, right))  # type: ignore[call-arg]
+    with pytest.raises(TypeError, match="front"):
+        cab.mount(hinge, hatch=hatch, sides=(left, right), top=top, front=hatch)  # type: ignore[call-arg]
     assert all(_holes(p) == [] for p in parts.values()) and cab.hardware == []   # a refused mount changes nothing
     cab.mount(hinge, hatch=hatch, sides=(left, right), top=top)
-    with pytest.raises(LangError, match="hatch hinges already"):
+    before = [list(p.ops) for p in parts.values()]
+    with pytest.raises(LangError, match="cab.hatch hangs on cab.left already"):
         cab.mount(hinge, hatch=hatch, sides=(left, right), top=top)
+    assert [list(p.ops) for p in parts.values()] == before and len(cab.hardware) == 1
     registry.reset()
     cab, parts = _cabinet(mount=False)
     left = parts["left"]
@@ -388,7 +408,7 @@ def test_layout_plans_the_holes_and_the_hinges():
     assert isinstance(hatch, HoleStep) and hatch.face == FaceRef("x", 1, 18.0) and (hatch.d, hatch.depth) == (2, 4)
     assert hatch.points == [(18, 557, 320), (18, 557, 256), (18, 43, 320), (18, 43, 256)]
     (hinges,) = plan.hardware
-    assert (hinges.path, hinges.component, hinges.name) == ("cab.hinges", ("cab",), "hinges")
+    assert (hinges.path, hinges.component, hinges.name) == ("cab.hatch_hinges", ("cab",), "hatch_hinges")
     assert [b.name for b in hinges.bodies] == ["left", "right"]
     assert len(hinges.bodies[0].boxes) == len(SHAPE.boxes(0.0))
 
@@ -422,10 +442,10 @@ def test_example_builds(tmp_path: Path):
     layout = run_build(example, tmp_path, scene=True)
     assert layout["problems"] == [] and layout["modules"][0]["problems"] == []
     parts = {p["path"]: p for p in layout["modules"][0]["parts"]}
-    holes = [op for op in parts["wallcab.left"]["ops"] if op["kind"] == "hole" and op["name"] == "hinge_1"]
+    holes = [op for op in parts["wallcab.left"]["ops"] if op["kind"] == "hole" and op["name"] == "hinge_hatch_a"]
     assert [(h["face"], h["u"], h["v"]) for h in holes] == [("front", 312 - 37, 1782 - 102)]
     hinges = _hinges(layout["modules"][0]["hardware"])
-    assert hinges["path"] == "wallcab.hinges"
+    assert hinges["path"] == "wallcab.hatch_hinges"
     assert bounds(hinges["bodies"][0])[0][2] == parts["wallcab.shelf"]["box"]["max"][2] == 1782 - SHAPE.lowest
     assert (tmp_path / "scene.glb").exists()
     # the hinges overlap none of the cabinet's parts, joints and all
@@ -435,3 +455,53 @@ def test_example_builds(tmp_path: Path):
             box = Box(dict(zip("xyz", b["min"])), dict(zip("xyz", b["max"])))  # type: ignore[arg-type]
             for part in cabinet.all_parts():
                 assert not (box.overlaps(part.box()) and _has_material(part, box.intersection(part.box()))), part
+
+
+# -- the review's fixes (findings 27, 30, 43) --------------------------------------------------------------
+
+def test_the_model_by_name_or_spec():
+    from typing import get_args
+    from lang.hardware.hatch_hinges import HATCH_HINGE_MODELS
+    assert get_args(HatchHingeModel) == tuple(HATCH_HINGE_MODELS)
+    assert HatchHinge("Free space 1.11").spec is FREE_SPACE_1_11
+    assert HatchHinge(FREE_SPACE_1_11).spec is FREE_SPACE_1_11          # a spec of your own
+    with pytest.raises(LangError, match=r"HatchHinge\(\): expected 'Free space 1.11'"):
+        HatchHinge("Free space 1.12")  # type: ignore[arg-type]
+    with pytest.raises(TypeError):
+        HatchHinge("Free space 1.11", 90)  # type: ignore[misc]            # settings are keyword-only
+
+
+def test_a_height_is_read_in_the_mounts_frame():
+    """`top=` as a position is a height in the frame of the scope the
+    hinges are mounted in, not in whatever frame is current when `mount`
+    runs (after the `with` block, the world's)."""
+    from lang.hardware.hatch_hinges import _reference  # type: ignore[reportPrivateUsage]
+    lying = Frame(front="-x", left="-z", top="+y")
+    with pytest.raises(LangError, match="is not a height"):
+        _reference(Pos("z", 332), "top=", lying)
+    assert _reference(Pos("y", 332), "top=", lying)[1].axis == "y"
+    cab, parts = _cabinet(mount=False)
+    cab.mount(HatchHinge("Free space 1.11"), hatch=parts["hatch"], sides=(parts["left"], parts["right"]),
+              top=Pos("z", 332))                                           # outside the module's block
+    assert [h.v for h in _holes(parts["left"])] == [230, 198, 166]
+
+
+def test_two_hatches_in_one_cabinet():
+    """Two hatches side by side over a partition: each hangs on its side
+    panels, the partition carrying a hinge of each on its two faces; the
+    items are named by the hatches (a second hatch in one scope was
+    refused before)."""
+    box = Box.from_size(width=1000, depth=320, height=350)
+    with module("cab", box, front=box.front) as cab:
+        carcass = cab.front.into(18)
+        left = board("left", ply18).on(cab.left).between(carcass, cab.back)
+        right = board("right", ply18).on(cab.right).between(carcass, cab.back)
+        wall = board("wall", ply18).center(cab.center("width")).between(carcass, cab.back)
+        top = board("top", ply18).on(cab.top).between(left, right, carcass, cab.back)
+        halves = [(cab.left, cab.center("width") + 1), (cab.center("width") - 1, cab.right)]
+        hatches = [board(name, ply18).on(cab.front).between(a, b) for name, (a, b) in zip(("one", "two"), halves)]
+        for hatch, sides in zip(hatches, ((left, wall), (wall, right))):
+            cab.mount(HatchHinge("Free space 1.11"), hatch=hatch, sides=sides, top=top)
+    assert [item["name"] for item in cab.hardware] == ["one_hinges", "two_hinges"]
+    assert {(h.name, h.face) for h in _holes(wall)} == {
+        (f"hinge_{n}_{c}", f) for n, f in (("one", "right"), ("two", "left")) for c in "abc"}
