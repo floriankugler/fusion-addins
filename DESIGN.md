@@ -105,7 +105,8 @@ proposed]
   `between`, `center`, `inset`, `grain`, `show`, `manual`. Setting one twice is
   an error. The result never depends on the order they were written in.
 - **Operation modifiers are ordered.** `cut`, `pocket`, `hole`, `chamfer`,
-  `miter`. A cut changes the outline for everything after it; a chamfer on a
+  `fillet`, `miter`. A cut changes the outline for everything after it, and
+  so does a fillet (or chamfer) on a corner of the outline; a chamfer on a
   pocket must follow the pocket. The order on the page is the order in the
   layout.
 - **Every modifier returns the part itself, and the part is mutable.** A later
@@ -379,6 +380,14 @@ proposed]
   accept `chamfer=` as sugar for a chamfer along their own contour.
   The constructor takes no chamfer; a build-wide default such as "1 mm on the
   outline of every show face" is a rule in `rules.py`.
+  An edge through the board, where two narrow faces meet
+  (`panel.front.left` on a board lying flat), is a corner of the outline,
+  so its chamfer cuts the corner off the outline, `size` along both edges,
+  as `fillet()` below rounds one [implemented 2026-10-12]. It used to be a
+  Fusion chamfer on that edge: the solid came out right, but
+  contacts, crossings and `no_interference` saw the square corner, and
+  where a cut had taken the corner the preview cut nothing and the emitter
+  only reported that it found no edge. `.chamfer()` takes a list too.
 - **Roundovers** are not modeled. [decided]
   They can be a note on an edge that shows up on labels and work lists. [proposed]
 - Corner radii are properties of the 2D shape, so a pocket's inside corner equals
@@ -394,6 +403,40 @@ proposed]
   shape without area (it used to do nothing, silently).
   Anything that does not fit the flat model goes through the escape hatches
   below; that flags the part as no longer plain flat work. [proposed]
+- **Fillets** [implemented 2026-10-12; `lang/core/corners.py`,
+  `Board.fillet`]: `board.fillet(what, r)` rounds corners of a board's
+  outline, through its thickness, as the router cutting the outline leaves
+  them; Florian asked for it the same day ("Not the long edges running
+  around the top face of the board, but to change the shape of the
+  board."). `what` is a corner named as the edge where two narrow faces
+  meet (`panel.front.left` on a board lying flat, `side.front.bottom` on
+  one standing), a named through cut (`panel.notch`: every corner it made
+  in the outline, the inside one too), a big face's outline
+  (`panel.top.outline`: every corner of the outer boundary, not those of
+  its holes), or a list of them, which are rounded together. A convex
+  corner loses material, a concave one gains it; the arcs are exact and
+  tangent to their edges, lines or arcs, worked out as `rounded()` works
+  them out. Chosen while implementing:
+  - It changes the outline at once, as a cut does, not when the board is
+    finished as `dogbones()` does: everything after it meets the rounded
+    corner, contacts and the joints made on them (a connector keeps to the
+    shorter contact), crossings, `no_interference`, cutouts, dog bones (a
+    rounded inside corner gets none). Nothing new reaches the layout: the
+    preview extrudes the outline, and the emitter recovers its arcs (see
+    "Arcs" under Backend), so Fusion gets one cylindrical face per corner
+    and no fillet feature.
+  - Errors: an edge along a big face (`panel.front.top`, a roundover,
+    which stays unmodeled; chamfer it); a corner the outline no longer has
+    (a cut, a joint or an earlier fillet took it; the corners a cut made
+    are named by the cut); a radius too large for the edges at a corner,
+    or for two neighbours together; an arc running into a through cut; and
+    an arc taking material where an operation made before it lies, such as
+    a joint's holes at that corner. So a corner where a joint goes is
+    rounded before the join, which then keeps clear of it.
+  `examples/operations.py` rounds a corner of a board lying flat, one of
+  a standing board and the corners of a notch, and cuts a corner off. The
+  emit plan has them as true arcs, tangent to their edges (tested); not
+  compiled in Fusion yet.
 - **Polygons** [proposed]: clip a rectangle's corner; trim by reference planes with
   `between`; walk an outline step by step; a raw point list as escape hatch.
 
@@ -1438,6 +1481,7 @@ with board("left", ply15, rect(depth=500, height=720)) as side:
     side.chamfer(side.outer.outline, 1)                   # the show face's outer contour
     side.chamfer(side.front.inner, 1)                     # one edge, named by its two faces
     side.chamfer(side.toekick, 1)                         # the contour a named cut made
+    side.fillet(side.back.top, 20)                        # a corner of the outline, rounded through the board
     for z in spread(side.bottom + 100, side.top - 100, pitch=32):
         side.hole(d=5, depth=10, at=side.inner.front(37).bottom(z))   # a shelf-pin column
 
