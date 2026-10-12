@@ -17,10 +17,10 @@ ordered operation like the others, so it goes after the joins whose holes
 it must spare, and an operation made later inside one of its openings is
 an error.
 
-Dog bones (`side.dogbones()`, see `dogbones.py`) are the exception to the
-order: they wait until the board is finished (`finish()`, when the layout
-is built) and go into the inside corners it has then, including those of
-operations and joints written after the call.
+Dog bones (`side.dogbones()`, see `dogbones.py`) are an ordered operation
+too: they go into the inside corners the board has where the call is
+written, so a board relieves its corners after the cuts and joins that
+make them.
 
 Faces and edges are properties named by direction (`side.front`,
 `side.front.inner`), so editors can complete them; project aliases go
@@ -119,10 +119,6 @@ class Board:
         self._cutouts: list[tuple[str, BaseGeometry]] = []
         #: Notes for the layout's problems, such as cutout pieces left out.
         self.notes: list[str] = []
-        #: The dog bones asked for, put into the corners when the board is finished.
-        self._dogbones: list[dogbone_geometry.Request] = []
-        #: The operations and outline the last `finish()` left.
-        self._finished: tuple[int, Shape | None] | None = None
 
     # -- identity ----------------------------------------------------------------------
 
@@ -1122,12 +1118,14 @@ class Board:
         pockets, as when the add-in is given a face), or of the outline's
         outer boundary (`side.outer.outline`).
 
-        The corners are found when the board is finished, as the layout is
-        built, so this also covers the corners that joints and operations
-        made after the call add; an operation named in `at=` must exist
-        when it is named. Corners relieved already (by a joint's own dog
-        bones, a hole over them) and rounded ones get none; see
-        `lang.core.dogbones`."""
+        Like every operation it acts where it is written: it relieves the
+        corners the board has at the call, so it goes after the cuts and
+        joins whose corners it should relieve [decided by Florian
+        2026-10-12]; corners made later get none. Corners relieved already
+        (by a joint's own dog bones, a hole over them, an earlier call) and
+        rounded ones get none; see `lang.core.dogbones`. When a relief
+        cannot be made (it would split the board), the board is left as it
+        was."""
         if tool <= 0:
             raise LangError(f"dogbones(): tool must be positive, got {tool:g}.", self.path)
         if relief < 0:
@@ -1138,8 +1136,32 @@ class Board:
             if not items:
                 raise LangError("dogbones(): at= is empty.", self.path)
             targets = tuple(self._dogbone_target(item) for item in items)
-        self._dogbones.append(dogbone_geometry.Request(float(tool), float(relief), targets))
+        request = dogbone_geometry.Request(float(tool), float(relief), targets)
+        saved = self._state()
+        try:
+            self._relieve(request)
+        except BaseException:
+            self._restore(saved)
+            raise
         return self
+
+    def _relieve(self, request: dogbone_geometry.Request) -> None:
+        """Cuts the reliefs a `dogbones()` call asks for into the corners
+        the board has now: through cuts where a corner is one of the
+        outline, else pockets as deep as what lies beside the corner."""
+        for relief in dogbone_geometry.reliefs(self, request):
+            shape = relief.shape
+            for _, opening in self._cutouts:
+                # A cutout's sharp corner: its opening is empty already.
+                shape = shape.difference(Shape(opening))
+            if shape.area <= 1e-9:
+                continue
+            name = self.unique_op_name(relief.name)
+            if relief.face is None:
+                self.add_cut(shape, name=name)
+            else:
+                face = next(f for f in self.big_faces() if f.world_name == relief.face)
+                self.add_pocket(face, shape, through if relief.depth is None else relief.depth, name=name)
 
     def _dogbone_target(self, item: object) -> dogbone_geometry.Target:
         if isinstance(item, str):
@@ -1324,12 +1346,11 @@ class Board:
         """What operations and joins change, for `join()` to restore; it
         resolves the placement, which a join needs anyway."""
         return _BoardState(list(self.ops), dict(self._named_ops), self.outline, list(self._cutouts),
-                           list(self.notes), list(self._dogbones), self._finished)
+                           list(self.notes))
 
     def _restore(self, state: _BoardState) -> None:
         self.ops, self._named_ops, self._outline = list(state.ops), dict(state.named_ops), state.outline
-        self._cutouts, self.notes, self._dogbones = list(state.cutouts), list(state.notes), list(state.dogbones)
-        self._finished = state.finished
+        self._cutouts, self.notes = list(state.cutouts), list(state.notes)
 
     # -- block form -------------------------------------------------------------------------------
 
@@ -1341,31 +1362,7 @@ class Board:
 
     # -- layout ---------------------------------------------------------------------------------------
 
-    def finish(self) -> None:
-        """Makes what waits for the board's final shape: the dog bones
-        asked for with `dogbones()`, in the inside corners it has now. The
-        layout step calls it; it does nothing more until the board changes
-        again."""
-        if not self._dogbones or self._finished == (len(self.ops), self._outline):
-            return
-        for request in self._dogbones:
-            for relief in dogbone_geometry.reliefs(self, request):
-                shape = relief.shape
-                for _, opening in self._cutouts:
-                    # A cutout's sharp corner: its opening is empty already.
-                    shape = shape.difference(Shape(opening))
-                if shape.area <= 1e-9:
-                    continue
-                name = self.unique_op_name(relief.name)
-                if relief.face is None:
-                    self.add_cut(shape, name=name)
-                else:
-                    face = next(f for f in self.big_faces() if f.world_name == relief.face)
-                    self.add_pocket(face, shape, through if relief.depth is None else relief.depth, name=name)
-        self._finished = (len(self.ops), self._outline)
-
     def to_layout(self) -> PartLayout:
-        self.finish()
         b = self.box()
         return {
             "path": self.path,
@@ -1464,8 +1461,6 @@ class _BoardState:
     outline: Shape | None
     cutouts: list[tuple[str, BaseGeometry]]
     notes: list[str]
-    dogbones: list[dogbone_geometry.Request]
-    finished: tuple[int, Shape | None] | None
 
 
 def board(name: str, material: Material, shape: Shape | None = None) -> Board:

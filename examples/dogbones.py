@@ -2,9 +2,9 @@
 radius in every inside corner, so each gets a round relief, here for a
 6 mm cutter, 0.1 mm wider.
 
-The panel has every kind of inside corner. It asks for its dog bones first:
-they are put into the corners it has when the layout is built, so the
-operations after the call get theirs too. A notch at its front left corner,
+The panel has every kind of inside corner, and asks for its dog bones
+last: like every operation the call relieves the corners the board has
+where it is written. A notch at its front left corner,
 a V notch in its back edge (an acute corner), a window with one corner
 clipped (three square corners and two obtuse ones), a through pocket, a
 dado 5 deep, a recess 4 deep with a well 10 deep in it (the well's reliefs
@@ -23,7 +23,6 @@ from stock import ply15
 
 with module("panels", Box.from_size(width=600, depth=400, height=200)) as m:
     with board("panel", ply15).on(m.bottom).show(m.top) as panel:
-        panel.dogbones()
         top = panel.top
         panel.cut(rect(depth=60, width=80), at=top.front.left, name="notch")
         panel.cut(polygon([(60, 0), (0, 20), (60, 40)]), at=top.back.left(150), name="vee")
@@ -36,6 +35,7 @@ with module("panels", Box.from_size(width=600, depth=400, height=200)) as m:
         panel.pocket(rect(depth=60, width=40), at=panel.bottom.back(40).right(40), depth=6, name="below")
         panel.cut(rect(depth=80, width=12).rounded(6), at=top.front(60).right(200), name="slot")
         panel.cut(rect(depth=60, width=60).rounded(10), at=top.back(60).left(250), name="rounded")
+        panel.dogbones()                    # every inside corner made above
 
     with board("shelf", ply15).on(m.top).show(m.top) as shelf:
         shelf.cut(rect(depth=50, width=100), at=shelf.top.back.right, name="cable")

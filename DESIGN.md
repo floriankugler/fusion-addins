@@ -439,8 +439,7 @@ proposed]
   corner loses material, a concave one gains it; the arcs are exact and
   tangent to their edges, lines or arcs, worked out as `rounded()` works
   them out. Chosen while implementing:
-  - It changes the outline at once, as a cut does, not when the board is
-    finished as `dogbones()` does: everything after it meets the rounded
+  - It changes the outline at once, as a cut does: everything after it meets the rounded
     corner, contacts and the joints made on them (a connector keeps to the
     shorter contact), crossings, `no_interference`, cutouts, dog bones (a
     rounded inside corner gets none). Nothing new reaches the layout: the
@@ -1066,10 +1065,13 @@ proposed]
     list. `at=` takes objects only [decided by Florian 2026-10-12]: the
     operation itself, never its name as a string, which is an error saying
     to write `side.toekick` instead; so an operation a later join makes is
-    named after that join. It is resolved when the board is finished (`Board.finish`,
-    called by `to_layout`), not when called, so it also covers the corners
-    that joints and operations written after it make; it is the one
-    operation that ignores the order on the page. Reliefs go in as
+    named after that join. It acts where it is written, like every
+    operation: it relieves the corners the board has at the call, so it
+    goes after the cuts and joins whose corners it should relieve, and
+    corners made later get none [decided by Florian 2026-10-12, replacing
+    the first version, which waited until the board was finished and so
+    ignored the order on the page]; a relief that cannot be made (one that
+    would split the board) leaves the board as it was. Reliefs go in as
     operations named after the operation the corner belongs to (the last
     whose contour runs through it), `toekick_dogbones`, or `dogbones` for
     the outline's own corners: a through cut where the corner is one of

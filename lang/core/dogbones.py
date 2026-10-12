@@ -12,10 +12,10 @@ corners put such reliefs into their own cuts (tenons, half laps);
 `hidden_relief` is their other kind, along one edge where the joint's
 other board covers it.
 
-`board.dogbones()` puts one into every inside corner of a board, or of the
-operations `at=` names, once the board is finished (`Board.finish`, when
-the layout is built), so it also covers the corners joints make after the
-call. `corners` finds them: where two straight edges of the material meet
+`board.dogbones()` puts one into every inside corner the board has where
+the call is written, or into those of the operations `at=` names; corners
+made later get none, so the call goes after the cuts and joins whose
+corners it should relieve. `corners` finds them: where two straight edges of the material meet
 and the material goes around the corner by more than half a turn, seen
 from either big face, at any angle. Straight means a line of the outline
 or a shape as the emitter draws it: runs that stand for an arc

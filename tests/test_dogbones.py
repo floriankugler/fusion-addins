@@ -149,30 +149,37 @@ def test_an_islands_corners_are_not_inside_corners():
 
 # -- board.dogbones() ----------------------------------------------------------------------------
 
-def test_dogbones_go_into_the_corners_the_board_has_when_the_layout_is_built():
+def test_dogbones_go_into_the_corners_the_board_has_at_the_call():
+    """Florian 2026-10-12: dogbones() acts where it is written, like every
+    operation: the notch cut before it is relieved at once, the one cut
+    after it is not."""
     m, panel = _panel()
     with m:
-        panel.dogbones()
         panel.cut(rect(depth=60, width=80), at=panel.top.front.left, name="notch")
-        assert _dogbones(panel) == []                   # nothing yet
+        panel.dogbones()
+        assert [op.name for op in _dogbones(panel)] == ["notch_dogbones"]        # at once
+        panel.cut(rect(depth=60, width=80), at=panel.top.back.left, name="later")
         layout = build_layout()
     assert [op.name for op in _dogbones(panel)] == ["notch_dogbones"]
     # through the corner at (60, 80): the relief's centre lies on the diagonal into the notch
     assert has_material(panel, (60.03, 80.03), (60 - O, 80 - O), (61, 82)) == [False, False, True]
+    assert has_material(panel, (340 - 0.03, 80 + 0.03)) == [True]               # the later notch's corner stays
     ops = layout["modules"][0]["parts"][0]["ops"]
-    assert [op.get("name") for op in ops] == ["notch", "notch_dogbones"]
-    build_layout()                                      # once only
+    assert [op.get("name") for op in ops] == ["notch", "notch_dogbones", "later"]
+    build_layout()                                      # the layout adds nothing
     assert len(_dogbones(panel)) == 1
     plan = plan_layout(build_layout())
     assert [round(c.radius, 6) for loop in plan.parts[0].body.loops for c in loop if isinstance(c, Arc)] == [R]
 
 
-def test_dogbones_cover_a_joint_made_after_the_call():
+def test_dogbones_relieve_a_joint_made_before_the_call_only():
     with module("grid", Box.from_size(width=600, depth=1000, height=30)) as g:
         cross = board("cross", ply15).center(Pos("x", 200))
         long = board("long", ply15).center(Pos("y", 300))
-        long.dogbones()
+        long.dogbones()                                 # no corners yet
+        assert _dogbones(long) == []
         long.join(cross, using=half_lap(toward=g.top, dogbones=None))
+        long.dogbones()
     build_layout()
     assert [op.name for op in _dogbones(long)] == ["lap_cross_dogbones"]
     assert _dogbones(cross) == []
@@ -214,9 +221,9 @@ def test_no_doubles_with_a_joints_own_dog_bones():
         # two boards standing on edge, crossing in a half lap above the shelves
         across = board("across", ply15).center(Pos("x", 150)).between(Pos("z", 600), Pos("z", 640), left, right)
         along = board("along", ply15).center(Pos("y", 300)).between(Pos("z", 600), Pos("z", 640))
+        across.join(along, using=half_lap(toward=u.top))
         across.dogbones()
         along.dogbones()
-        across.join(along, using=half_lap(toward=u.top))
     build_layout()
     assert [getattr(op, "name") for op in across.ops] == ["lap_along"]
     assert [getattr(op, "name") for op in along.ops] == ["lap_across"]
@@ -242,8 +249,8 @@ def test_a_relief_takes_only_its_own_corners_material():
 def test_a_sharp_cutout_gets_dog_bones_in_its_corners():
     m, panel = _panel()
     with m:
-        panel.dogbones()
         panel.cutout(panel.top, radius=0)
+        panel.dogbones()
     build_layout()
     (relief,) = _dogbones(panel)
     assert relief.name == "cutout_dogbones" and isinstance(relief, Cut)
@@ -287,7 +294,7 @@ def test_dogbones_at_takes_operations_not_their_names():
             panel.dogbones(at=[panel.outer.outline, "notch"])  # type: ignore[list-item]
         with pytest.raises(LangError, match="takes operations, big faces or an outline"):
             panel.dogbones(at=[42])  # type: ignore[list-item]
-    assert panel._dogbones == []  # type: ignore[reportPrivateUsage]
+    assert _dogbones(panel) == []
 
 
 def test_a_relief_that_would_split_the_board_is_an_error():
@@ -296,9 +303,10 @@ def test_a_relief_that_would_split_the_board_is_an_error():
         top = panel.top
         # a notch that leaves a strip half a millimetre wide beside it
         panel.cut(rect(depth=60, width=599.5), at=top.front.left, name="notch")
-        panel.dogbones(at=panel.notch)
-    with pytest.raises(LangError, match="splits the board"):
-        build_layout()
+        before = (list(panel.ops), panel.outline.area)
+        with pytest.raises(LangError, match="splits the board"):
+            panel.dogbones(at=panel.notch)
+    assert (panel.ops, panel.outline.area) == before        # none of its reliefs stays
 
 
 # -- half laps ------------------------------------------------------------------------------------
@@ -374,13 +382,13 @@ def test_the_example_builds_with_every_kind_of_corner(tmp_path: Path):
 
 def _box_jointed(joint: object) -> tuple[Board, Board]:
     """test_box_joints' corner: a (15 thick, y 0..15) met by b (12 thick,
-    x 0..12), b growing the fingers, both asking for dog bones first."""
+    x 0..12), b growing the fingers, both asking for dog bones after."""
     with module("pair", Box.from_size(width=200, depth=200, height=150)) as m:
         a = board("a", ply15).on(m.left).between(Pos("x", 0), m.back, m.bottom, m.top)
         b = board("b", material("birch", t=12)).on(Pos("x", 0), toward=m.back).between(a, m.right)
+        b.join(a, using=joint)  # type: ignore[arg-type]
         a.dogbones()
         b.dogbones()
-        b.join(a, using=joint)  # type: ignore[arg-type]
     build_layout()
     return a, b
 
