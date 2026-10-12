@@ -233,10 +233,12 @@ class Emitter:
         extent = adsk.fusion.DistanceExtentDefinition.create(
             adsk.core.ValueInput.createByReal(part.body.thickness * MM))
         inp.setOneSideExtent(extent, self._direction_toward(profile, direction))
-        extrude = extrudes.add(inp)
+        try:
+            extrude = extrudes.add(inp)
+        finally:
+            self._drop_faces(comp, added)
         body = extrude.bodies.item(0)
         body.name = part.path
-        self._drop_faces(comp, added)
         self.report.features += 1
         return body
 
@@ -284,6 +286,14 @@ class Emitter:
                 comp.features.removeFeatures.add(b)
             else:
                 b.deleteMe()
+
+    @staticmethod
+    def _reach(body: adsk.fusion.BRepBody, face: FaceRef) -> float:
+        """How far (mm) the body reaches past the plane of `face`, into it."""
+        bb = body.boundingBox
+        if face.sign > 0:
+            return face.value - _coord(bb.minPoint, face.axis) / MM
+        return _coord(bb.maxPoint, face.axis) / MM - face.value
 
     @staticmethod
     def _normal(face: adsk.fusion.BRepFace) -> Vec:
@@ -392,16 +402,19 @@ class Emitter:
         extrudes = comp.features.extrudeFeatures
         profile_input: adsk.core.Base = profiles[0] if len(profiles) == 1 else _collection(list(profiles))
         inp = extrudes.createInput(profile_input, _CUT)
-        if step.depth is None:
-            # Through all, limited to this body by participantBodies.
-            extent: adsk.fusion.ExtentDefinition = adsk.fusion.ThroughAllExtentDefinition.create()
-        else:
-            extent = adsk.fusion.DistanceExtentDefinition.create(
-                adsk.core.ValueInput.createByReal(step.depth * MM))
+        # Through: as far as the body reaches past the face and a millimetre
+        # more, limited to this body by participantBodies. Fusion's
+        # through-all extent finds no target body, or stops short, once
+        # other components' bodies are in the document (a fuzz batch,
+        # 2026-10-12).
+        depth = self._reach(body, step.face) + 1.0 if step.depth is None else step.depth
+        extent = adsk.fusion.DistanceExtentDefinition.create(adsk.core.ValueInput.createByReal(depth * MM))
         inp.setOneSideExtent(extent, self._direction_toward(profiles[0], step.face.into))
         inp.participantBodies = [body]
-        extrudes.add(inp)
-        self._drop_faces(comp, added)
+        try:
+            extrudes.add(inp)
+        finally:
+            self._drop_faces(comp, added)
         self.report.features += 1
 
     def _holes(self, comp: adsk.fusion.Component, body: adsk.fusion.BRepBody, step: HoleStep,
@@ -461,8 +474,10 @@ class Emitter:
         extent = adsk.fusion.DistanceExtentDefinition.create(adsk.core.ValueInput.createByReal(length * MM))
         inp.setOneSideExtent(extent, self._direction_toward(profile, along))
         inp.participantBodies = [body]
-        extrudes.add(inp)
-        self._drop_faces(comp, added)
+        try:
+            extrudes.add(inp)
+        finally:
+            self._drop_faces(comp, added)
         self.report.features += 1
 
     def _chamfer(self, comp: adsk.fusion.Component, body: adsk.fusion.BRepBody, step: ChamferStep,
