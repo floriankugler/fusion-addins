@@ -197,7 +197,11 @@ class SlidingBracket:
         self.spec = data.BRACKETS[one_of(model, BracketModel, "SlidingBracket()")]
         #: The boxes the brackets are drawn as.
         self.shape = BRACKET_SHAPES[model]
-        spacing = make_spacing(self.name, data.DEFAULT_COUNT if count is None and at is None else count, end, at)
+        # end= has a default here, so it is checked below, not by make_spacing
+        spacing = make_spacing(self.name, data.DEFAULT_COUNT if count is None and at is None else count, at,
+                               default_end=end)
+        if end < 0:
+            raise LangError(f"{self.name}: end must not be negative.")
         half = self.spec.plate_length / 2
         if spacing.at is None and spacing.count != 1 and end < half - TOLERANCE:
             raise LangError(f"{self.name}: end must be at least {mm(half)}, half the {mm(self.spec.plate_length)} "

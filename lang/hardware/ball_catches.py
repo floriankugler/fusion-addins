@@ -230,8 +230,10 @@ class BallCatch:
             if not at:
                 raise LangError(f"{self.name}: at= is empty.")
         else:
-            count = make_spacing(self.name, count if count is not None else data.DEFAULT_COUNT, end, None).count
+            count = make_spacing(self.name, count if count is not None else data.DEFAULT_COUNT, None).count
             assert count is not None
+            if end < 0:
+                raise LangError(f"{self.name}: end must not be negative.")
             half = self.spec.holder_width / 2
             if (count + 1) // 2 > 1 and end < half - TOLERANCE:
                 raise LangError(f"{self.name}: end must be at least {mm(half)}: the {mm(self.spec.holder_width)} "

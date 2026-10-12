@@ -221,7 +221,7 @@ class DoorLatch:
                  pilot: tuple[float, float] = (data.PREDRILL_DIAMETER, data.PREDRILL_DEPTH)):
         self.model: LatchModel = one_of(model, LatchModel, "DoorLatch()")
         self.pattern = data.LATCHES[model]
-        make_spacing(model, count, end, None)
+        make_spacing(model, count, None)
         if count > 1 and end <= 0:
             raise LangError(f"{model}: end= must be greater than zero, not {end:g}.")
         diameter, depth = check_hole_size(model, "pilot", pilot)
