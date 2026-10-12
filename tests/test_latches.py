@@ -115,8 +115,8 @@ def test_everlock_on_an_overlay_drawer_face():
                             "everlock_top_1": (300, 675, 25, "back", 15, True)}
     assert _holes(parts["top"]) == {"everlock_face_1a": (25, 314, PREDRILL, "bottom", 3, False),
                                     "everlock_face_1b": (25, 286, PREDRILL, "bottom", 3, False)}
-    # the boxes go into the drawer's scope
-    assert [h["path"] for h in d.hardware] == ["cab.drawer1.latches"]
+    # the boxes go into the drawer's scope, named by the face
+    assert [h["path"] for h in d.hardware] == ["cab.drawer1.face_latches"]
 
 
 def test_ll66_beside_the_cabinetmakers_right_and_left():
@@ -186,7 +186,7 @@ def test_the_latch_and_its_strike_as_boxes():
     keeper under the top (z 705) behind the door."""
     cab, parts = _inset_door(DoorLatch("Pull Lock 44"))
     (item,) = cab.hardware
-    assert item["path"] == "cab.latches"
+    assert item["path"] == "cab.door_latches"
     (body,) = item["bodies"]
     assert body["name"] == "latch_1"
     boxes = body["boxes"]
@@ -223,15 +223,17 @@ def test_refused_as_the_add_in_refuses():
     cases: list[tuple[LatchModel, float]] = [("Everlock", 16), ("Pull Lock 44", 19), ("LL-66", 20)]
     for model, too_large in cases:
         with pytest.raises(LangError, match="too large"):
-            DoorLatch(model, predrill=(too_large, 3))
-        DoorLatch(model, predrill=(too_large - 0.1, 3))
+            DoorLatch(model, pilot=(too_large, 3))
+        DoorLatch(model, pilot=(too_large - 0.1, 3))
     with pytest.raises(LangError):
         DoorLatch("Everlock", count=0)
     with pytest.raises(LangError):
         DoorLatch("Everlock", count=2, end=0)
     DoorLatch("Everlock", count=1, end=0)                  # one latch: the end offset is not used
     with pytest.raises(LangError):
-        DoorLatch("Everlock", predrill=(3, 0))
+        DoorLatch("Everlock", pilot=(3, 0))
+    with pytest.raises(TypeError):
+        DoorLatch("Everlock", 2)  # type: ignore[misc]           # count is keyword-only
     with pytest.raises(LangError, match="too short"):
         _inset_door(DoorLatch("Everlock", count=2, end=283))   # 566 <= 2 x 283
 
@@ -245,13 +247,13 @@ def test_refuses_latches_that_do_not_fit_and_changes_nothing():
         # 10 to 58 below the carcass face, does not lie on it
         low = board("low", ply15).on(cab.front).between(parts["left"], parts["right"], cab.bottom.into(300),
                                                         cab.top.into(45))
-        with pytest.raises(LangError, match="does not lie on"):
+        with pytest.raises(LangError, match="does not fit on cab.low's back face"):
             cab.mount(DoorLatch("Pull Lock 44"), door=low, carcass=parts["top"])
         assert low.ops == [] and parts["top"].ops == [] and cab.hardware == []
         # a door narrower than the Everlock's pilot columns
         narrow = board("narrow", ply15).on(cab.front).between(cab.left.into(100), cab.left.into(140),
                                                               cab.bottom.into(300), cab.top.into(17))
-        with pytest.raises(LangError, match="does not lie on"):
+        with pytest.raises(LangError, match="does not fit on cab.narrow's back face"):
             cab.mount(DoorLatch("Everlock"), door=narrow, carcass=parts["top"])
         # the LL-66's station centre must lie on the door too: a notch between its pilots
         notched = board("notched", ply15).on(cab.front).between(cab.left.into(200), cab.left.into(400),
@@ -265,10 +267,10 @@ def test_refuses_latches_that_do_not_fit_and_changes_nothing():
             cab.mount(DoorLatch("Everlock"), door=low, carcass=low)
         with pytest.raises(LangError, match="narrow face"):
             cab.mount(DoorLatch("Everlock"), door=low, carcass=parts["top"].front)
-        with pytest.raises(LangError, match="takes door= and carcass="):
-            cab.mount(DoorLatch("Everlock"), door=low)
-        with pytest.raises(LangError, match="takes door= and carcass="):
-            cab.mount(DoorLatch("Everlock"), door=low, carcass=parts["top"], count=2)
+        with pytest.raises(TypeError, match="carcass"):
+            cab.mount(DoorLatch("Everlock"), door=low)  # type: ignore[call-arg]
+        with pytest.raises(TypeError, match="count"):
+            cab.mount(DoorLatch("Everlock"), door=low, carcass=parts["top"], count=2)  # type: ignore[call-arg]
         # a shelf across the middle of a tall door: which face?
         shelf = board("shelf", ply15).center(cab.center("height")).between(parts["left"], parts["right"], back)
         tall = board("tall", ply15).on(cab.front.gap(15), toward=cab.back)
@@ -285,7 +287,7 @@ def test_layout_plan_and_preview():
     _inset_door(DoorLatch("Pull Lock 44"))
     layout = build_layout()
     (module_layout,) = layout["modules"]
-    assert [h["path"] for h in module_layout["hardware"]] == ["cab.latches"]
+    assert [h["path"] for h in module_layout["hardware"]] == ["cab.door_latches"]
     plan = plan_layout(layout)
     assert plan.problems == []
     door = next(p for p in plan.parts if p.path == "cab.door")
@@ -300,7 +302,7 @@ def test_layout_plan_and_preview():
 
     from lang.preview.mesh import build_scene
     scene = build_scene(layout)
-    names = {node.rsplit(".", 1)[1] for node in scene.graph.nodes_geometry if "latches" in node}
+    names = {node.rsplit(".", 1)[1] for node in scene.graph.nodes_geometry if "door_latches" in node}
     assert names == {"latch_1"}
     door_mesh = scene.geometry["cab.door"]
     assert door_mesh.is_volume
@@ -312,11 +314,53 @@ def test_example_builds_and_its_drawer_boxes_clear_the_latches(tmp_path: Path):
     assert layout["problems"] == [] and plan_layout(layout).problems == []
     cab = registry.roots[0]
     parts = cab.all_parts()
-    latches = [h for h in cab.all_hardware() if h["name"] == "latches"]
-    assert [h["path"] for h in latches] == ["locker.latches", "locker.drawer1.latches", "locker.drawer2.latches"]
+    latches = [h for h in cab.all_hardware() if h["name"].endswith("_latches")]
+    assert [h["path"] for h in latches] == ["locker.door_latches", "locker.drawer1.face_latches",
+                                            "locker.drawer2.face_latches"]
     for item in latches:
         for body in item["bodies"]:
             for b in body["boxes"]:
                 assert not [p.path for p in parts if _overlaps(p, b["min"], b["max"])], body["name"]
     door = cab.part("door")
     assert len([op for op in door.ops if isinstance(op, Hole)]) == 2 and len(_pockets(door)) == 2
+
+
+# -- the review's fixes (findings 25, 31) --------------------------------------------------------------------
+
+def test_thresholds_have_a_tolerance():
+    """A door a hair thicker than the 10 mm the counterbore leaves gets no
+    counterbore of a hair's depth; a carcass board whose face lies at the
+    door's middle, give or take a hair, is as ambiguous as one across it."""
+    _, parts = _inset_door(DoorLatch("Pull Lock 44"), thickness=10 + 1e-7)
+    assert _pockets(parts["door"]) == {}
+    registry.reset()
+    box = Box.from_size(width=600, depth=500, height=720)
+    with module("cab", box) as cab:
+        carcass = _carcass(cab)
+        door = board("door", ply15).on(cab.front.gap(15), toward=cab.back)        # z 0..720, its middle at 360
+        shelf = board("shelf", ply15).on(Pos("z", 360 + 1e-7), toward=cab.top).between(carcass["left"],
+                                                                                       carcass["right"])
+        with pytest.raises(LangError, match="lies across the middle of the door"):
+            cab.mount(DoorLatch("Everlock"), door=door, carcass=shelf)
+
+
+def test_a_pilot_in_a_pocket_made_before_is_refused():
+    """`Board.hole_fits` sees the operations made before (the add-in's
+    probes do): a pilot hole of the strike in a pocket of the top."""
+    box = Box.from_size(width=600, depth=500, height=720)
+    with module("cab", box) as cab:
+        parts = _carcass(cab)
+        door = board("door", ply15).on(cab.front).between(parts["left"], parts["right"], parts["bottom"],
+                                                          parts["top"]).inset(2)
+        top = parts["top"]
+        # the strike's pair at x 29, y 290.5 and 309.5 under the top
+        top.pocket(rect(depth=10, width=10), at=top.bottom.front(Pos("x", 24)).left(Pos("y", 305)), depth=3)
+        with pytest.raises(LangError, match=r"the hole 'pull_lock_door_1a' \(3.2 mm\) does not fit on cab.top's "
+                                            "bottom face"):
+            cab.mount(DoorLatch("Pull Lock 44"), door=door, carcass=top)
+    assert not [op for op in door.ops + top.ops if isinstance(op, Hole)]
+
+
+def test_pilot_depth_short_of_the_far_face():
+    with pytest.raises(LangError, match=r"the pilot depth \(15 mm\) must be less than cab.door's thickness"):
+        _inset_door(DoorLatch("Everlock", pilot=(3, 15)))

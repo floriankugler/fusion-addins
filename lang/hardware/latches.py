@@ -28,28 +28,29 @@ where the lock sits (its drawing measures the keeper from the bezel).
 "Below" is on the door, square to its edge, from the plane of the carcass
 face away from the carcass board, "behind" on the carcass face from the
 plane of the door's inner or front face, so an inset and an overlay door
-get the same latch relative to the carcass. Pilot holes are
-`predrill` (diameter, depth), by default 1/8" x 3 mm. One latch sits in the
-middle of the door's edge (the door's extent along it), more run from
-`end=` from its ends, evenly spaced; they are numbered from the door's own
-left, seen standing in front of it, or from the bottom on an upright edge.
+get the same latch relative to the carcass. Pilot holes are `pilot`
+(diameter, depth), by default 1/8" x 3 mm. One latch sits in the middle
+of the door's edge (the door's extent along it), more run from `end=`
+from its ends, evenly spaced; they are numbered from the door's own left,
+seen standing in front of it, or from the bottom on an upright edge.
 
-Refused as the add-in refuses: a pre-drill not smaller than the pattern's
+Refused as the add-in refuses: a pilot not smaller than the pattern's
 narrowest pilot spacing (Everlock 16, Pull Lock 19, LL-66 20), several
 latches on an edge no longer than twice `end=`, a carcass board parallel
-to the door, and holes that do not lie on their face: each hole's centre
-and the four points its radius away along and across the edge must be on
-the door's or the carcass board's outline (the add-in probes its faces
-the same way, including a pilot-sized circle at each LL-66 station's
-centre). Pockets and holes made before are not taken into account.
+to the door, and holes that do not fit on their face (`Board.hole_fits`:
+each hole's centre and the four points its radius away along and across
+the edge must lie on the door's or the carcass board's face, outside the
+holes and pockets made before; the add-in probes its faces the same way,
+including a pilot-sized circle at each LL-66 station's centre); and pilot
+holes as deep as a board is thick.
 
 Mounted, a latch also places itself, closed, as boxes: the part on the
 door and its strike on the carcass board, which interlock when closed, as
-one body per latch (`latch_1`, ...). Their sizes are one table,
-`LATCH_SHAPES`, separate from the drilling data, measured from the
-latches' drawings and Sugatsune's CAD model. `reach` is how far the part
-behind the door's front reaches from the carcass face, which a drawer box
-behind a latched face keeps clear of.
+one body per latch (`latch_1`, ...) in an item `<door>_latches`. Their
+sizes are one table, `LATCH_SHAPES`, separate from the drilling data,
+measured from the latches' drawings and Sugatsune's CAD model. `reach` is
+how far the part behind the door's front reaches from the carcass face,
+which a drawer box behind a latched face keeps clear of.
 
 Operations are named by latch, the other board and the latch's number:
 `pull_lock_top_1` and `pull_lock_top_1_counterbore` in the door,
@@ -61,17 +62,18 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
-from shapely.geometry import Point
-
 from lib import door_latches as data
 
-from ..core import directions
-from ..core.directions import AXES, Axis, Direction
+from ..core.directions import AXES, Axis
 from ..core.errors import LangError, one_of
+from ..core.faces import Face
 from ..core.layout_types import BoxDict, HardwareBodyLayout
-from ..core.part import Board, Face
+from ..core.part import Board
 from ..core.refs import through, to
 from ..core.shapes import circle
+from ..joints.common import make_spacing
+from .common import (TOLERANCE, LocalBox, Point2, along, check_hole, check_hole_size, check_pilot_depth, middle,
+                     mm, numbering, uv, world_box)
 
 if TYPE_CHECKING:
     from ..core.scope import Scope
@@ -80,14 +82,12 @@ if TYPE_CHECKING:
 LatchModel = Literal["Everlock", "Pull Lock 44", "LL-66"]
 #: The latch in operation names.
 _OP_NAMES: dict[str, str] = {"Everlock": "everlock", "Pull Lock 44": "pull_lock", "LL-66": "ll66"}
-EPS = 1e-6
-Point2 = tuple[float, float]
 #: Two ends of a box along one direction, mm.
 Extent = tuple[float, float]
 #: A box relative to a latch: along the door's edge from the station,
 #: below the carcass face (toward the door's middle) and behind the door's
 #: inner face (negative: into the door and past its front).
-LatchBox = tuple[Extent, Extent, Extent]
+LatchBox = LocalBox
 
 
 @dataclass(frozen=True)
@@ -183,26 +183,18 @@ class _Where:
     def on_door(self, s: float, along: float, below: float) -> Point2:
         """A point on the door's inner face, in its (u, v)."""
         down = self.face.direction
-        return _uv(self.door, {self.along: s + along, down.axis: self.face.value + down.sign * below})
+        return uv(self.door, {self.along: s + along, down.axis: self.face.value + down.sign * below})
 
     def on_carcass(self, s: float, along: float, behind: float) -> Point2:
         """A point on the carcass face, in its (u, v)."""
         back = self.inner.direction
-        return _uv(self.carcass, {self.along: s + along, back.axis: self.inner.value + back.sign * behind})
+        return uv(self.carcass, {self.along: s + along, back.axis: self.inner.value + back.sign * behind})
 
     def world_box(self, s: float, box: LatchBox) -> BoxDict:
-        """A latch box in world coordinates."""
-        def span(start: float, direction: Direction, extent: Extent) -> Extent:
-            a, b = start + direction.sign * extent[0], start + direction.sign * extent[1]
-            return (min(a, b), max(a, b))
-
-        along, below, behind = box
-        ranges: dict[Axis, Extent] = {
-            self.along: (s + along[0], s + along[1]),
-            self.face.axis: span(self.face.value, self.face.direction, below),
-            self.inner.axis: span(self.inner.value, self.inner.direction, behind),
-        }
-        return {"min": [ranges[a][0] for a in AXES], "max": [ranges[a][1] for a in AXES]}
+        """A latch box in world coordinates: along the edge from the
+        station, below the carcass face, behind the door's inner face."""
+        return world_box(((along(self.along), s), (self.face.direction, self.face.value),
+                          (self.inner.direction, self.inner.value)), box)
 
 
 @dataclass(frozen=True)
@@ -222,27 +214,23 @@ class _Hole:
 class DoorLatch:
     """A latch model with the add-in's settings: `count` latches along the
     door's edge, one in the middle or the outer ones `end` from its ends
-    (100 mm by default), and `predrill`, the (diameter, depth) of the pilot
+    (100 mm by default), and `pilot`, the (diameter, depth) of the pilot
     holes for the screws of the body and the strike (1/8" x 3 mm)."""
 
-    def __init__(self, model: LatchModel, count: int = 1, end: float = data.END_OFFSET,
-                 predrill: tuple[float, float] = (data.PREDRILL_DIAMETER, data.PREDRILL_DEPTH)):
+    def __init__(self, model: LatchModel, *, count: int = 1, end: float = data.END_OFFSET,
+                 pilot: tuple[float, float] = (data.PREDRILL_DIAMETER, data.PREDRILL_DEPTH)):
         self.model: LatchModel = one_of(model, LatchModel, "DoorLatch()")
         self.pattern = data.LATCHES[model]
-        if count < 1:
-            raise LangError(f"{model}: there must be at least one latch, not count={count}.")
+        make_spacing(model, count, end, None)
         if count > 1 and end <= 0:
             raise LangError(f"{model}: end= must be greater than zero, not {end:g}.")
-        diameter, depth = predrill
-        if diameter <= 0 or depth <= 0:
-            raise LangError(f"{model}: the pre-drill's diameter and depth must be greater than zero, "
-                            f"not {diameter:g} x {depth:g}.")
+        diameter, depth = check_hole_size(model, "pilot", pilot)
         if diameter >= self.pattern.max_predrill:
-            raise LangError(f"{model}: a {diameter:g} mm pre-drill is too large for the latch's drilling pattern; "
-                            f"it must be smaller than {self.pattern.max_predrill:g}.")
+            raise LangError(f"{model}: a {mm(diameter)} pilot is too large for the latch's drilling pattern; "
+                            f"it must be smaller than {mm(self.pattern.max_predrill)}.")
         self.count = count
-        self.end = end
-        self.predrill = (float(diameter), float(depth))
+        self.end = float(end)
+        self.pilot = (diameter, depth)
 
     @property
     def name(self) -> str:
@@ -254,36 +242,28 @@ class DoorLatch:
 
     @property
     def reach(self) -> float:
-        """How far from the carcass face the latch takes room on the door,
-        mm (its boxes' far end behind the door's front, `LATCH_SHAPES`:
-        Everlock 60, Pull Lock 50.9, LL-66 24.6): a drawer box behind a
-        latched face stays that far
-        from the board the latch catches on, e.g. its top at
+        """How far below the carcass face the latch takes room on the door,
+        mm: the farthest its boxes behind the door's front reach, leaving
+        out what stands proud of the front (`LatchShape.reach`; Everlock 60,
+        Pull Lock 50.9, LL-66 24.6). A drawer box behind a latched face
+        stays that far from the board the latch catches on, e.g. its top at
         `shelf.bottom.gap(latch.reach)`."""
         return self.shape.reach
 
-    def mount(self, scope: Scope, /, **options: object) -> None:
+    def mount(self, scope: Scope, /, *, door: Board, carcass: Board | Face) -> None:
         """`cab.mount(latch, door=door, carcass=top)`: drills the door and
         the carcass board for the latches and places them as boxes in the
         scope. `carcass=` is a board, the latch going against its big face
-        toward the door's middle, or that face itself (`shelf.top`)."""
-        unknown = set(options) - {"door", "carcass"}
-        if unknown or "door" not in options or "carcass" not in options:
-            raise LangError(f"{self.name}: mount() takes door= and carcass=, got {sorted(options)}.", scope.path)
-        door, carcass = options["door"], options["carcass"]
-        if not isinstance(door, Board):
-            raise LangError(f"{self.name}: door= must be a board, not {door!r}.", scope.path)
-        if not isinstance(carcass, (Board, Face)):
-            raise LangError(f"{self.name}: carcass= must be a board or one of its faces, not {carcass!r}.",
-                            scope.path)
+        toward the door's middle, or that face itself (`shelf.top`).
+        Nothing is drilled unless every hole fits."""
         where = self._where(door, carcass)
         holes = self._holes(where)
+        check_pilot_depth(self.name, door, self.pilot[1], "pilot")
+        check_pilot_depth(self.name, where.carcass, self.pilot[1], "pilot")
         for hole in holes:                       # check everything before machining anything
-            if not _fits(hole.board, hole.point, hole.d):
-                raise LangError(f"{self.name}: the hole {hole.name!r} ({hole.d:g} mm) does not lie on "
-                                f"{hole.board.path}'s {hole.face.name} face.", hole.board.path)
+            check_hole(self.name, hole.board, hole.face, hole.point, hole.d, f"hole {hole.name!r}")
         for anchor in self._anchors(where):
-            if not _fits(door, anchor, self.predrill[0]):
+            if not door.hole_fits(where.inner, anchor, self.pilot[0]):
                 raise LangError(f"{self.name}: the latch does not fit on {door.path}'s {where.inner.name} face.",
                                 door.path)
         for hole in holes:
@@ -307,40 +287,40 @@ class DoorLatch:
         if c == t:
             raise LangError(f"{self.name}: {board.path} lies parallel to the door; the latch needs a carcass board "
                             "square to it, beside one of its edges.", door.path)
-        along: Axis = next(a for a in AXES if a not in (t, c))
+        edge: Axis = next(a for a in AXES if a not in (t, c))
         if isinstance(carcass, Face):
             if not carcass.is_big:
                 raise LangError(f"{self.name}: {carcass!r} is a narrow face; name a big face of the carcass board.",
                                 door.path)
             face = carcass
         else:
-            middle = (db.lo[c] + db.hi[c]) / 2
-            if cb.lo[c] < middle < cb.hi[c]:
+            door_middle = middle(db, c)
+            if cb.lo[c] - TOLERANCE <= door_middle <= cb.hi[c] + TOLERANCE:
                 raise LangError(f"{self.name}: {board.path} lies across the middle of the door; name the face the "
                                 f"latch goes against, e.g. carcass={board.name}.bottom.", door.path)
-            face = Face(board, board.scope.frame.direction_of(c, 1 if middle > cb.hi[c] else -1))
+            face = board.face(board.scope.frame.direction_of(c, 1 if door_middle > cb.hi[c] else -1))
         # the door's inner face: toward the carcass board
-        mine, theirs = (db.lo[t] + db.hi[t]) / 2, (cb.lo[t] + cb.hi[t]) / 2
-        if abs(theirs - mine) < EPS:
+        mine, theirs = middle(db, t), middle(cb, t)
+        if abs(theirs - mine) < TOLERANCE:
             raise LangError(f"{self.name}: {board.path} is centred on the door's thickness; which face is the "
                             "door's inner face?", door.path)
-        inner = Face(door, door.scope.frame.direction_of(t, 1 if theirs > mine else -1))
-        length = db.hi[along] - db.lo[along]
+        inner = door.face(door.scope.frame.direction_of(t, 1 if theirs > mine else -1))
+        length = db.hi[edge] - db.lo[edge]
         try:
-            stations = [db.lo[along] + s for s in data.stations(length, self.count, self.end)]
+            stations = [db.lo[edge] + s for s in data.stations(length, self.count, self.end)]
         except ValueError:
-            raise LangError(f"{self.name}: the door's edge ({length:g} mm) is too short for {self.count} latches "
-                            f"{self.end:g} from its ends.", door.path) from None
-        if _order(inner.direction, along) < 0:
+            raise LangError(f"{self.name}: the door's edge ({mm(length)}) is too short for {self.count} latches "
+                            f"{mm(self.end)} from its ends.", door.path) from None
+        if numbering(inner.direction, edge) < 0:
             stations.reverse()
-        return _Where(door, inner, board, face, along, tuple(stations))
+        return _Where(door, inner, board, face, edge, tuple(stations))
 
     def _holes(self, where: _Where) -> list[_Hole]:
         """Every hole the latches need, in the add-in's order: the door's
         pilot holes, its main holes, the counterbores, the carcass pilots."""
-        pattern, (pd, pdepth) = self.pattern, self.predrill
+        pattern, (pd, pdepth) = self.pattern, self.pilot
         kind = _OP_NAMES[self.model]
-        sign = _order(where.inner.direction, where.along)
+        sign = numbering(where.inner.direction, where.along)
         door, carcass = where.door, where.carcass
         pilots: list[_Hole] = []
         mains: list[_Hole] = []
@@ -358,7 +338,7 @@ class DoorLatch:
                 point = where.on_door(s, h.along, h.below)
                 if h.kind == "through":
                     mains.append(_Hole(door, where.inner, point, h.diameter, base, "through"))
-                elif h.remaining is not None and door.thickness > h.remaining:
+                elif h.remaining is not None and door.thickness > h.remaining + TOLERANCE:
                     counterbores.append(_Hole(door, where.inner, point, h.diameter, base + "_counterbore",
                                               "counterbore", h.remaining))
             pair = sorted(pattern.carcass_holes(door.thickness), key=lambda p: p[0] * sign)
@@ -373,41 +353,10 @@ class DoorLatch:
         return [where.on_door(s, 0.0, self.pattern.station_inset) for s in where.stations]
 
     def _place(self, scope: Scope, where: _Where) -> None:
-        """The latches, closed, as boxes: each latch and its strike one body."""
+        """The latches, closed, as boxes in `<door>_latches`: each latch and
+        its strike one body, `latch_1`, `latch_2`, ..."""
         t = where.door.thickness
         boxes = self.shape.latch_boxes(t) + self.shape.strike_boxes(t)
         bodies = [HardwareBodyLayout(name=f"latch_{i}", boxes=[where.world_box(s, b) for b in boxes])
                   for i, s in enumerate(where.stations, 1)]
-        name, n = "latches", 2
-        while (name in scope.parts or name in scope.children
-               or any(item["name"] == name for item in scope.hardware)):
-            name, n = f"latches_{n}", n + 1
-        scope.place_hardware(name, bodies)
-
-
-def _uv(board: Board, coords: dict[Axis, float]) -> Point2:
-    return (coords[board.u_axis], coords[board.v_axis])
-
-
-def _fits(board: Board, point: Point2, d: float) -> bool:
-    """Whether a hole's centre and the points its radius away along both
-    of the face's axes lie on the board's outline."""
-    r = d / 2
-    u, v = point
-    outline = board.outline.geometry
-    return all(outline.distance(Point(p)) <= EPS for p in ((u, v), (u - r, v), (u + r, v), (u, v - r), (u, v + r)))
-
-
-def _order(back: Direction, along: Axis) -> int:
-    """Which way the latches are numbered along the edge's axis: from the
-    door's own left to its right, seen standing in front of it (its right
-    is back x up, `back` pointing from the door to the carcass), from the
-    bottom up on an upright edge, else along the world axis."""
-    up = directions.frame.direction("top")
-    if up.axis == along:
-        return up.sign
-    if back.axis == up.axis:                  # a door lying flat
-        return 1
-    (bx, by, bz), (ux, uy, uz) = back.vector, up.vector
-    right = (by * uz - bz * uy, bz * ux - bx * uz, bx * uy - by * ux)
-    return 1 if right[AXES.index(along)] > 0 else -1
+        scope.place_hardware(scope.unique_hardware_name(f"{where.door.name}_latches"), bodies)
