@@ -1,24 +1,32 @@
-"""Sliding brackets (Häfele Pacofix PF / PF-L, the same part as Keku AS)
-that hold a removable panel on frame boards, as hardware.
+"""Sliding brackets (Häfele Pacofix, the same parts as Keku AS) that hold
+a removable panel on frame boards, as hardware.
 
 The panel and each frame board stand square to each other, the panel's
-back face against the frame board's front edge, a gap in front of it, or
-the frame boards reaching past it with the panel set in between them.
+back face against the frame board's front edge, or the frame boards
+reaching past it with the panel set in between them (the straight frame
+part also allows a gap in front of the edge).
 `cab.mount(SlidingBracket(), panel=cover, frame=[left, right])` hangs the
 panel on each frame board named and drills both parts as
-`lib.sliding_brackets` has them:
+`lib.sliding_brackets` has them: the frame part's two holes into the
+frame board's inner face (the big face toward the panel's middle, or the
+face named: `frame=[partition.left]`), the panel part's two holes into
+the panel's back face (the big face toward the frame board), each pair 32
+apart along the edge. Where they go depends on the frame part:
 
-- into the frame board's inner face (the big face toward the panel's
-  middle, or the face named: `frame=[partition.left]`) the frame part's
-  two holes, 32 apart along the edge, 37 behind the panel's back face (the
-  big face toward the frame board), whatever the gap: it is read from the
-  model, never given;
-- into the panel's back face the panel part's two holes, 32 apart, 15
-  out from the frame board's face, where the tongue lies.
+- `"Pacofix PF-L-R"`, the bent one and the default: the frame holes 8
+  behind the panel's back face, where the frame part's plate begins, the
+  panel holes 19 out from the frame board's face (the tongue lies on the
+  frame part's plate). The panel's back face must lie on the frame
+  board's edge or the frame board reach past it: a gap would leave the
+  plate hanging over the edge.
+- `"Pacofix PF-L"`, the straight one: the frame holes 37 behind the
+  panel's back face, the System 32 line, whatever the gap, which is read
+  from the model, never given (up to 29, where the plate begins); the
+  panel holes 15 out from the frame board's face, where the tongue lies.
 
 The holes are `"pilot"` holes for chipboard screws (Ø2 x 6) unless
 `frame_hole=` or `panel_hole=` say `"euro"` (Ø5 x 11, for 6.3 mm Euro
-screws and the frame part made for them) or give (diameter, depth). Per
+screws and the parts made for them) or give (diameter, depth). Per
 frame board `count` brackets (2) sit along the stretch the panel and the
 frame board share, the outer ones' centres `end` (50) from its ends, the
 rest evenly between, one alone in the middle; `at=` takes positions along
@@ -27,17 +35,18 @@ numbered by their place along the edge: from the bottom, or from the
 panel's own left, seen standing in front of it.
 
 It refuses, before it drills anything: a frame board parallel to the
-panel, a frame board whose edge lies more than 29 behind the panel's
-back face or that ends before the frame part's plate does (45 behind
-it), a panel that stops more than 3 mm short of the frame board's face
-(the tongue lies on that face), plates that do not lie on their boards
-(the outline, less the pockets made into the face) or overlap each
-other, holes that land off their face or in another hole or pocket, and
-holes as deep as a board is thick; `end` under half a plate (24).
-Keku's rule that brackets be at most 600 apart, and Häfele's that they
-carry no hanging load (a ceiling panel), become notes in the layout's
-problems; Keku's minimum of four per panel is left to the build (two
-frame boards with the default two brackets each).
+panel, a frame board whose edge lies further behind the panel's back
+face than the frame part's plate begins (0 for the PF-L-R, 29 for the
+PF-L) or that ends before the plate does (29 and 45 behind it), a panel
+that stops more than 3 mm short of where the panel part's plate begins
+(it hangs over the edge of a panel set in between), plates that do not
+lie on their boards (the outline, less the pockets made into the face)
+or overlap each other, holes that land off their face or in another hole
+or pocket, and holes as deep as a board is thick; `end` under half a
+plate (24). Keku's rule that brackets be at most 600 apart, and Häfele's
+that they carry no hanging load (a ceiling panel), become notes in the
+layout's problems; Keku's minimum of four per panel is left to the build
+(two frame boards with the default two brackets each).
 
 Each latched pair is one body of four boxes (`BRACKET_SHAPES`, measured
 on Häfele's CAD models): the frame part's plate and its hook, the panel
@@ -72,8 +81,9 @@ from ..core.refs import PosLike, as_pos
 if TYPE_CHECKING:
     from ..core.scope import Scope
 
-#: The brackets of `lib.sliding_brackets`, by name.
-BracketModel = Literal["Pacofix PF-L"]
+#: The brackets of `lib.sliding_brackets`, by name: the frame part, bent or
+#: straight, with the panel part PF.
+BracketModel = Literal["Pacofix PF-L-R", "Pacofix PF-L"]
 #: The holes of one part: for chipboard screws or for Euro screws, as
 #: `lib.sliding_brackets` sizes them, or (diameter, depth) in mm.
 HoleChoice = Literal["pilot", "euro"]
@@ -99,23 +109,35 @@ class BracketShape:
     #: On the frame board's face: the plate, and the hook with its spine.
     frame_part: tuple[BracketBox, ...]
     #: On the panel's back face: the plate, and the tongue on the frame
-    #: board's face.
+    #: board's face or on the frame part's plate.
     panel_part: tuple[BracketBox, ...]
 
     def boxes(self) -> list[BracketBox]:
         return [*self.frame_part, *self.panel_part]
 
 
-#: Per model. Pacofix PF / PF-L measured on Häfele's CAD models (glTF,
-#: 2026-10-12) of the panel part 262.50.359 and the frame part 262.50.368,
-#: fitted together latched: the frame part's plate 4 thick, 16 across its
-#: holes, 48 long; its hook 16 wide, from the plate's top up to 10.2 off
-#: the board and from the plate to 28 in front of its holes, its lip
-#: dipping to 4.5 inside the tongue's channel (the box covers the spine
-#: that ramps up along the plate); the panel part's plate 23 out from the
-#: frame board's face, 4 thick, 48 long; its tongue 10 off the frame
-#: board, 22.1 wide, 29 back to the frame part's plate.
+#: Per model, measured on Häfele's CAD models (glTF, 2026-10-12) of the
+#: panel part 262.50.359 and the frame parts 262.50.390 (PF-L-R) and
+#: 262.50.368 (PF-L), fitted together latched. The panel part: its plate
+#: 23 out from the tongue's side, 4 thick, 48 long; its tongue 10 high,
+#: 22.1 wide, 29 back from the panel. PF-L-R: the plate 4 thick from the
+#: panel's back face to 33 behind it (the last 4 rounded underneath, its
+#: far corners cut off), 48 long; the hook bent back over it, 16 wide,
+#: 10.05 to 14 off the board, from its closed end at 33 to its free end
+#: 9.1 behind the panel; the tongue lies on the plate, 4 to 14 off the
+#: board, its tip in the hook's closed end. PF-L: the plate 4 thick, 16
+#: across its holes, 48 long; its hook 16 wide, from the plate's top up to
+#: 10.2 off the board and from the plate to 28 in front of its holes, its
+#: lip dipping to 4.5 inside the tongue's channel (the box covers the
+#: spine that ramps up along the plate); the tongue on the frame board's
+#: face, back to the frame part's plate.
 BRACKET_SHAPES: dict[str, BracketShape] = {
+    data.PACOFIX_PF_L_R.name: BracketShape(
+        frame_part=(((0.0, 4.0), (0.0, 33.0), (-24.0, 24.0)),        # plate
+                    ((4.0, 14.0), (9.1, 33.0), (-8.0, 8.0))),        # bent hook
+        panel_part=(((4.0, 27.0), (0.0, 4.0), (-24.0, 24.0)),        # plate
+                    ((4.0, 14.0), (4.0, 29.0), (-11.05, 11.05))),    # tongue
+    ),
     data.PACOFIX_PF_L.name: BracketShape(
         frame_part=(((0.0, 4.0), (29.0, 45.0), (-24.0, 24.0)),       # plate
                     ((4.0, 10.2), (9.0, 45.0), (-8.0, 8.0))),        # hook and spine
@@ -163,14 +185,15 @@ class _Edge:
 
 
 class SlidingBracket:
-    """Sliding brackets of one model with their placement and holes:
+    """Sliding brackets of one model (the bent PF-L-R frame part unless
+    `model` says `"Pacofix PF-L"`) with their placement and holes:
     `count` per frame board, the outer ones `end` from the ends of the
     stretch the panel and the frame board share, or one at each position
     of `at` along the edge; `frame_hole` and `panel_hole` are the holes in
     the frame board and the panel: `"pilot"` (Ø2 x 6), `"euro"` (Ø5 x 11)
     or (diameter, depth) in mm."""
 
-    def __init__(self, model: BracketModel = "Pacofix PF-L", count: int | None = None,
+    def __init__(self, model: BracketModel = "Pacofix PF-L-R", count: int | None = None,
                  end: float = data.DEFAULT_END_OFFSET, at: Sequence[PosLike] | None = None,
                  frame_hole: BracketHole = "pilot", panel_hole: BracketHole = "pilot"):
         self.spec = data.BRACKETS[one_of(model, BracketModel, "SlidingBracket()")]
@@ -203,7 +226,8 @@ class SlidingBracket:
     @property
     def max_gap(self) -> float:
         """The widest gap between the panel's back face and the frame
-        board's edge (29), where the frame part's plate begins."""
+        board's edge, where the frame part's plate begins: 0 for the
+        PF-L-R, 29 for the PF-L."""
         return self.spec.max_gap
 
     # -- mounting ------------------------------------------------------------------------------------
@@ -282,6 +306,10 @@ class SlidingBracket:
         near, far = (fb.lo[pt], fb.hi[pt]) if back.sign > 0 else (fb.hi[pt], fb.lo[pt])
         gap = (near - back_face.value) * back.sign
         if gap > spec.max_gap + TOLERANCE:
+            if spec.max_gap <= TOLERANCE:
+                raise LangError(f"{self.name}: the edge of {frame.path} lies {_mm(gap)} behind {panel.path}'s back "
+                                "face; the frame part's plate begins at the panel's back face, so the panel must sit "
+                                "on the frame board's edge.", frame.path)
             raise LangError(f"{self.name}: the edge of {frame.path} lies {_mm(gap)} behind {panel.path}'s back face; "
                             f"the frame part's plate begins {_mm(spec.max_gap)} behind it, so the gap may be at most "
                             f"that.", frame.path)
@@ -292,10 +320,11 @@ class SlidingBracket:
         out = face.direction
         panel_near = pb.lo[ft] if out.sign > 0 else pb.hi[ft]
         clearance = (panel_near - face.value) * out.sign
-        if clearance > data.MAX_PANEL_CLEARANCE + TOLERANCE:
+        limit = spec.panel_plate_out[0] + data.MAX_PLATE_OVERHANG
+        if clearance > limit + TOLERANCE:
             raise LangError(f"{self.name}: {panel.path} ends {_mm(clearance)} short of {frame.path}'s face; the "
-                            "tongue of the panel part lies on that face, so the panel must reach to within "
-                            f"{_mm(data.MAX_PANEL_CLEARANCE)} of it.", panel.path)
+                            f"panel part's plate begins {_mm(spec.panel_plate_out[0])} from that face, so the panel "
+                            f"must reach to within {_mm(limit)} of it.", panel.path)
         lo, hi = max(pb.lo[along], fb.lo[along]), min(pb.hi[along], fb.hi[along])
         if hi - lo < spec.plate_length - TOLERANCE:
             raise LangError(f"{self.name}: {panel.path} and {frame.path} share {_mm(max(hi - lo, 0.0))} along the "

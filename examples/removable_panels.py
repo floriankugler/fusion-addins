@@ -1,23 +1,22 @@
 """A seat base with two removable panels on sliding brackets (Häfele
-Pacofix PF / PF-L, the same part as Keku AS).
+Pacofix, the same parts as Keku AS).
 
 The sides are the frame boards. The front cover lies over their front
-edges with a 3 mm gap (room for a felt strip): the brackets read the gap
-from the model and drill the sides 37 behind the cover's back face, 34
-behind their edges. The rear panel is set in between the sides, top and
-bottom, flush with their back edges and 1.5 mm clear of them; its
-brackets drill the sides 37 in front of it. Each panel hangs on two
-brackets per side, Keku's minimum of four, and comes off square to
-itself. The cover's frame parts are screwed to the sides with Euro
-screws, the rest with chipboard screws into pilot holes. Top and bottom
-are joined to the sides with Cabineos. Built on its own, the base stands
-across the vehicle behind the cab and opens toward the rear."""
+edges on the bent frame part PF-L-R, the default: its plate begins at
+the cover's back face, so the sides' holes lie 8 behind it and the
+cover's 19 in from the sides' faces. The rear panel is set in between
+the sides, top and bottom, flush with their back edges and 1.5 mm clear
+of them, on the straight frame part PF-L: its holes lie on the sides'
+System 32 line, 37 in front of the panel, and take Euro screws. Each
+panel hangs on two brackets per side, Keku's minimum of four, and comes
+off square to itself. Top and bottom are joined to the sides with
+Cabineos. Built on its own, the base stands across the vehicle behind
+the cab and opens toward the rear."""
 from lang import *
 from lang.hardware.sliding_brackets import SlidingBracket
 
 ply18 = material("birch", t=18, sheet=(2500, 1250))
 ply12 = material("birch", t=12, sheet=(2500, 1250))
-GAP = 3          # between the cover and the sides' front edges
 CLEARANCE = 1.5  # around the rear panel
 
 
@@ -26,7 +25,7 @@ def seat_base(name: str, box: Box, front: Side | None = None) -> Scope:
     removable cover over the front and a removable panel set in at the
     back."""
     with module(name, box, front=front) as cab:
-        behind = cab.front.into(ply12.t + GAP)     # the sides' front edges
+        behind = cab.front.into(ply12.t)          # the sides' front edges, against the cover
         left = board("left", ply18).on(cab.left).between(behind)
         right = board("right", ply18).on(cab.right).between(behind)
         top = board("top", ply18).on(cab.top).between(left, right, behind)
@@ -37,10 +36,11 @@ def seat_base(name: str, box: Box, front: Side | None = None) -> Scope:
         cover = board("cover", ply12).on(cab.front)
         rear = (board("rear", ply12).on(cab.back)
                 .between(left.gap(CLEARANCE), right.gap(CLEARANCE), bottom.gap(CLEARANCE), top.gap(CLEARANCE)))
-        # Euro screws into the sides on the cover's System 32 line, two
-        # brackets per side 50 from the ends; the rear panel on pilot holes
-        cab.mount(SlidingBracket(frame_hole="euro"), panel=cover, frame=[left, right])
-        cab.mount(SlidingBracket(), panel=rear, frame=[left, right])
+        # two brackets per side, 50 from the ends; pilot holes for the bent
+        # frame parts at the sides' front edges, Euro screws on the rear
+        # panel's System 32 line
+        cab.mount(SlidingBracket(), panel=cover, frame=[left, right])
+        cab.mount(SlidingBracket("Pacofix PF-L", frame_hole="euro"), panel=rear, frame=[left, right])
         check(no_interference, fits_sheet)
     return cab
 

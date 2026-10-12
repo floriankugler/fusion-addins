@@ -1068,53 +1068,72 @@ proposed]
   locks and two latched drawers.
 - **Sliding brackets** (`lang/hardware/sliding_brackets.py`) [decided by
   Florian and implemented 2026-10-12; no add-in yet, the data is in
-  `lib/sliding_brackets.py` for one]: Häfele Pacofix PF / PF-L, the same
-  part as Keku AS (Häfele: it "clicks with all Keku plastic fittings";
-  Keku lists the AS parts under Häfele's numbers), holding a removable
-  panel on frame boards standing square to it: `cab.mount(SlidingBracket(),
+  `lib/sliding_brackets.py` for one]: Häfele Pacofix, the same parts as
+  Keku AS (Häfele: they "click with all Keku plastic fittings"; Keku
+  lists its parts under Häfele's numbers), holding a removable panel on
+  frame boards standing square to it: `cab.mount(SlidingBracket(),
   panel=cover, frame=[left, right])`, like the hinges. The frame part goes
   on each frame board's inner face (toward the panel's middle, or the face
-  named, `frame=[wall.left]`), the panel part on the panel's back face
-  (toward the frame boards), its tongue on the frame board's face under
-  the frame part's hook; the panel comes off square to itself. Per bracket
-  two holes 32 apart in each board: the frame board's 37 behind the
-  panel's back face, the panel's 15 out from the frame board's face. The
-  gap is read from the model, never given: the frame holes depend on the
-  panel's back face only, so a gap moves them toward the frame board's
-  edge (37 - gap, up to 29, where the frame part's plate begins), and a
-  panel set in between the frame boards gets them 37 in front of it, its
-  edge up to 3 mm short of the frame board's face with the panel part's
-  plate hanging over. `count=` brackets (2) per frame board, the outer
-  ones `end=` (50) from the ends of the stretch panel and board share, or
-  `at=` positions along the edge, the same on every frame board;
-  numbered from the bottom or from the panel's own left. Holes per part,
-  because Euro screws usually go only into the frame board's System 32
-  line: `frame_hole=` and `panel_hole=` each `"pilot"` (Ø2 x 6, the
-  default, for chipboard screws), `"euro"` (Ø5 x 11, a 6.3 x 13.5 Euro
-  screw through the 4 mm plate; the frame part for Euro screws is
-  262.50.377) or (diameter, depth). Refused before anything is drilled: a
-  frame board parallel to the panel, a gap over 29, a frame board ending
-  before the plate does (45 behind the panel), a panel more than 3 mm
-  short of the frame board's face, plates off their boards or over
-  pockets (a hole under a plate is fine), brackets closer than a plate's
-  48, holes off their face or in another hole, holes as deep as the board
-  is thick, `end` under 24. Keku's largest spacing (600) and Häfele's "no
-  hanging loads" (a ceiling panel) are notes in the layout's problems;
-  Keku's minimum of four per panel is left to the build (two frame boards
-  with two each). Each latched pair is one body of four boxes
+  named, `frame=[wall.left]`), the panel part (PF) on the panel's back
+  face (toward the frame boards), its tongue under the frame part's hook;
+  the panel comes off square to itself. Two frame parts, both on the
+  frame board's inner face, are the models:
+  - `"Pacofix PF-L-R"`, the bent one, the default [Florian uses it,
+    2026-10-12]: the hook is bent back over the frame part's own plate,
+    which reaches from the panel's back face 33 back. The frame holes lie
+    8 behind the panel's back face, the panel holes 19 out from the frame
+    board's face, since the tongue lies on the 4 mm plate. The panel sits
+    on the frame board's edge, or the frame boards reach past its back
+    face (a panel set in between); a gap is refused, as the plate would
+    hang over the edge. The frame board must reach 29 behind the panel
+    (the plate's flat underside; its last 4 mm are rounded).
+  - `"Pacofix PF-L"`, the straight one: the hook points from the plate
+    toward the panel, the tongue lies on the frame board. Frame holes 37
+    behind the panel's back face (the System 32 line), panel holes 15 out
+    from the frame board's face. The gap is read from the model, never
+    given: the frame holes depend on the panel's back face only, so a gap
+    moves them toward the frame board's edge (37 - gap, up to 29, where
+    the plate begins); the frame board must reach 45 behind the panel.
+  Each pair of holes is 32 apart along the edge. A panel set in between
+  may stop up to 3 mm short of where the panel part's plate begins (3 mm
+  short of the frame board's face for the PF-L, 7 for the PF-L-R), the
+  plate hanging over its edge. `count=` brackets (2) per frame board, the
+  outer ones `end=` (50) from the ends of the stretch panel and board
+  share, or `at=` positions along the edge, the same on every frame
+  board; numbered from the bottom or from the panel's own left. Holes per
+  part, because Euro screws usually go only into the frame board:
+  `frame_hole=` and `panel_hole=` each `"pilot"` (Ø2 x 6, the default,
+  for chipboard screws), `"euro"` (Ø5 x 11, a 6.3 x 13.5 Euro screw
+  through the 4 mm plate) or (diameter, depth). Refused before anything
+  is drilled: a frame board parallel to the panel, a gap the frame part
+  does not allow, a frame board ending before the plate does, a panel too
+  far short of the plate's start, plates off their boards or over pockets
+  (a hole under a plate is fine), brackets closer than a plate's 48, holes
+  off their face or in another hole, holes as deep as the board is thick,
+  `end` under 24. Keku's largest spacing (600) and Häfele's "no hanging
+  loads" (a ceiling panel) are notes in the layout's problems; Keku's
+  minimum of four per panel is left to the build (two frame boards with
+  two each). Each latched pair is one body of four boxes
   (`BRACKET_SHAPES`: frame plate, hook, panel plate, tongue), `left_1`...
-  under `<panel>_brackets`. Measured on Häfele's CAD models (glTF) of the
-  panel part 262.50.359 and the frame part 262.50.368, fitted together
-  latched: the tongue's tip against the frame part's plate, the hook's
-  tapered sides 0.1 to 0.2 mm clear of the tongue's tapered channel, the
-  lip's back flank on the tongue's ramp; that confirms the 37 of Häfele's
-  mounting drawing and the 15 (the tongue's side lies on the frame
-  board's face). `examples/removable_panels.py`: a seat base with a cover
-  3 mm in front of its sides, on Euro screws in the sides, and a rear
-  panel set in between them. Left out for now: snapping the frame holes
-  to an existing System 32 row, the bent PF-L-R frame part, Häfele's 1.5
-  mm spacer plate under the panel part (the frame holes then 38.5), the
-  hang-in fittings for panels parallel to the frame (SF/EH).
+  under `<panel>_brackets`. Articles, for chipboard / Euro screws: panel
+  part PF 262.50.359 / .358, frame part PF-L-R 262.50.390 / .391, PF-L
+  262.50.368 / .377; sets 262.50.380 (PF with PF-L-R) and 262.50.313
+  (PF with PF-L). Measured on Häfele's CAD models (glTF) of 262.50.359,
+  262.50.390 and 262.50.368, fitted together latched. PF-L: the tongue's
+  tip against the plate, the hook's tapered sides 0.1 to 0.2 mm clear of
+  the tongue's tapered channel, the lip's back flank on the tongue's ramp;
+  that confirms the 37 of Häfele's mounting drawing and the 15. PF-L-R:
+  the lip's back flank lies on the ramp all along with the panel's back
+  face 8.15 to 8.2 in front of the holes (8 taken, the plate's front
+  end), the hook's sides 0.2 clear, its roof on the channel's floor, the
+  tongue's walls as high as the roof; the tongue's square bottom corner
+  meets the hook's rounded closed end there by about 1 mm in the model.
+  `examples/removable_panels.py`: a seat base with a cover on its sides'
+  edges (PF-L-R) and a rear panel set in between them (PF-L, Euro screws
+  on the sides' System 32 line). Left out for now: snapping the frame
+  holes to an existing System 32 row, Häfele's 1.5 mm spacer plate under
+  the panel part (the PF-L's frame holes then 38.5), the hang-in fittings
+  for panels parallel to the frame (SF/EH).
 - Open from these [2026-10-12]: the hatch hinge's probe points miss a
   shelf 64 to 82 below the top, which the hardware boxes now catch
   through `no_interference`; the small `_world_box` helpers each hardware
@@ -1865,8 +1884,8 @@ Still to do (listed by Florian 2026-10-11, roughly in his order of weight):
   angle to the board's edges.
 - ~~**Hardware** beyond the slides~~: done 2026-10-12 (concealed
   hinges, hatch hinges, ball catches, door latches, and sliding brackets
-  for removable panels, which have no add-in yet; see "Joints and
-  hardware"). Open: whatever else the van needs.
+  for removable panels, bent and straight, which have no add-in yet; see
+  "Joints and hardware"). Open: whatever else the van needs.
 - ~~**Complete the slides**~~: done 2026-10-12 (Blum drawer-box
   machining; runners as boxes for every model and length).
 - **Joints**: ~~box joints~~ (done 2026-10-12, see "Box joints" under
