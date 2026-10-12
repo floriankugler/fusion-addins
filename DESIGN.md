@@ -2229,6 +2229,42 @@ compile as before, every body one solid within 0.03 % of the preview.
 Open, for Florian: geometry that touches itself at a point, has hairline
 spikes or sub-micrometre edges: refuse, clean or tolerate.
 
+Round 1b, the same day, as proposed to Florian (openings touching at a
+point refused, a cut circle tangent to an edge kept as Fusion builds it;
+hairline spikes still open: the fuzz checks skip them). Fixed, each with a
+regression test: `grown` offsets the lines and arcs exactly as Fusion's
+sketch offset does (arcs run on along their circles, corners keep the full
+distance), and where that does not hold (a curve vanishes, pieces merge)
+mitres with its arcs put back, repairing mitred offsets that cross
+themselves and leaving out slivers and specks of holes; `fit` meets curves
+that touch where they touch (the cutouts example's 30 flats are gone),
+moves a junction only where every arc at it keeps its way (a small circle
+touching a large one from inside), and no longer takes a line running into
+an arc tangentially for one of its chords (it bent the line up to a
+sagitta). The language refuses holes, pockets and V-grooves wholly off the
+board, a hole whose centre is off its face or in a hole or pocket made
+into that face before, a cut that takes the board away from an operation
+made before, through pockets and holes that split the board, a cut that
+leaves only what they take, cutout openings that touch the outline or each
+other at a point, and openings that touch themselves at a point, through
+or not (Fusion: cover failed to make a surface); an operation refused for
+its name is no longer kept. The preview meshes rim chamfers that fold
+(short edges at an inside corner) in slabs instead of dropping them, which
+was the large-chamfer difference, and its tools stop at their depth (they
+went 5 um past: a few cm3 on a large pocket). In Fusion: the eleven
+examples compile with no problems, every body within 0.03 % of the
+preview; 80 fuzz boards differ only by the preview's polygons against true
+arcs (up to 0.08 %) and where Fusion fails a rim chamfer. Open: those
+chamfers, along the edges of 0.04 to 0.3 mm a cutout's mitred fallback
+leaves, or larger than a fillet's radius; where extended curves do not
+meet, Fusion bridges them with a line and `grown` drops the shorter curve
+(up to 5.6 mm apart at such a corner); chamfers far under a hundredth of a
+millimetre are accepted (Fusion fails on them); a notch whose corner lies
+within the polygon's sagitta of a large arc (0.014 mm inside a corner
+rounded 496) opens onto the outline as polygons but would be a hole on the
+true arcs, and `fit` draws that ring crossing itself. Joints and hardware
+are next.
+
 1. `core`: the position algebra, box, board with `on`, `between` and `center`,
    scopes and paths, and layout JSON output with world transforms. With unit
    tests. [done]

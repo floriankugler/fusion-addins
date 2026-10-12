@@ -157,7 +157,7 @@ Native-feature add-ins (`connectors_native`, `tenons_native`, `box_joint`, `cuto
 - Every pytest run includes a small fixed budget (profile `fast`, set in `tests/conftest.py`, about 2 s). Many random examples on demand: `.venv/bin/python -m pytest tests/fuzz --hypothesis-profile=long` (minutes; failures are kept in `.hypothesis/` and tried first next time). To survey instead of stopping at the first failure: `.venv/bin/python tests/fuzz/explore.py <check> <count>` (checks: `arcs`, `fillets`, `chamfers`, `offsets`, `cutouts`) prints each kind of problem found with its smallest example.
 - New code in the language comes with fuzz tests where its inputs vary (geometry, placements, joint and hardware parameters), not only hand-picked tests [Florian, 2026-10-12].
 - A bug a fuzz test finds gets a plain regression test in the normal test file of the code it is in, named for the behaviour and saying in its docstring that fuzzing found it, and checked to fail without the fix; the fuzz test alone would find it again only by chance [Florian, 2026-10-12].
-- Problems that are known and open are marked in the fuzz checks (`boards.KNOWN`, `fuzzing.degenerate`, the `assume` in `test_fuzz_cutouts.py`) with the date and what is open; remove the mark when it is decided.
+- Problems that are known and open are marked in the fuzz checks (`boards.KNOWN`, `fuzzing.degenerate`, which the checks skip) with the date and what is open; remove the mark when it is decided.
 
 ## Commit & Pull Request Guidelines
 
