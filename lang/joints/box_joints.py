@@ -97,8 +97,7 @@ class BoxJoint(ContactJoint):
         bit and its ends land on the contact's."""
         n, m = self.fingers, self.margin
         if 2 * m >= c.length - EPS:
-            raise LangError(f"box_joint: margin={m:g} leaves no room for the fingers on the {c.length:g} mm "
-                            f"joint with {c.face_on.path}.", c.edge_on.path)
+            raise LangError(f"margin={m:g} leaves no room for the fingers on the {c.length:g} mm joint.")
         w = (c.length - 2 * m) / n
         return [c.lo + m + k * w if 2 * k <= n else c.hi - m - (n - k) * w for k in range(n + 1)]
 
@@ -109,18 +108,15 @@ class BoxJoint(ContactJoint):
         along, r = self.clearance[0], self.radius
         if r > 0:
             if w - along < 2 * r + EPS:
-                raise LangError(f"box_joint: {self.fingers} fingers on the {c.length:g} mm joint with {a.path} are "
-                                f"{w:g} mm wide, too narrow for the corner reliefs: each must be wider than the tool "
-                                f"({self.tool:g}) plus the clearance along the joint ({along:g}). Use fewer fingers "
-                                "or a smaller tool.", b.path)
+                raise LangError(f"{self.fingers} fingers on the {c.length:g} mm joint are {w:g} mm wide, too narrow "
+                                f"for the corner reliefs: each must be wider than the tool ({self.tool:g}) plus the "
+                                f"clearance along the joint ({along:g}). Use fewer fingers or a smaller tool.")
             for part in (a, b):
                 if part.thickness <= r + EPS:
-                    raise LangError(f"box_joint: {part.path} is {part.thickness:g} thick, not thicker than the "
-                                    f"tool's radius ({r:g}): the grooves along its fingers would take all of it.",
-                                    b.path)
+                    raise LangError(f"{part.path} is {part.thickness:g} thick, not thicker than the tool's radius "
+                                    f"({r:g}): the grooves along its fingers would take all of it.")
         elif w - along <= EPS:
-            raise LangError(f"box_joint: the clearance along the joint ({along:g}) leaves nothing of the {w:g} mm "
-                            "fingers.", b.path)
+            raise LangError(f"the clearance along the joint ({along:g}) leaves nothing of the {w:g} mm fingers.")
 
     def place(self, c: Contact, stations: list[float]) -> None:
         corner = _Corner(c)
@@ -188,20 +184,20 @@ class _Corner:
         bb = b.box()
         x, z = self.x_axis, self.z_axis
         if c.lo > bb.lo[z] + EPS or c.hi < bb.hi[z] - EPS:
-            raise LangError(f"box_joint: this board's end meets {a.path} from {z}={c.lo:g} to {c.hi:g}, not across "
-                            f"its whole width ({bb.lo[z]:g} to {bb.hi[z]:g}): the joint runs along the whole end, "
-                            f"which {a.path} must cover. Cut-outs at the joint go after the join.", b.path)
+            raise LangError(f"the end of {b.path} meets {a.path} from {z}={c.lo:g} to {c.hi:g}, not across its whole "
+                            f"width ({bb.lo[z]:g} to {bb.hi[z]:g}): the joint runs along the whole end, which "
+                            f"{a.path} must cover. Cut-outs at the joint go after the join.")
         overlap = self._a_region((bb.lo[x], bb.hi[x]))
         if a.outline.geometry.intersection(overlap).area < overlap.area - EPS:
-            raise LangError(f"box_joint: {a.path} does not cover this board's end at the corner; its end must lie "
-                            "in the plane of this board's outer face.", b.path)
+            raise LangError(f"{a.path} does not cover the end of {b.path} at the corner; its end must lie in the "
+                            f"plane of {b.path}'s outer face.")
         flush = [side for side in (-1, 1)
                  if a.outline.geometry.intersection(self._a_region(
                      (bb.hi[x], _FAR) if side > 0 else (-_FAR, bb.lo[x]))).area <= EPS]
         if len(flush) != 1:
-            raise LangError(f"box_joint: the corner is not flush: the end of {a.path} must lie in the plane of one "
-                            f"of this board's big faces, its outer face, "
-                            f"{'not reach past both' if not flush else 'not end at both'}.", b.path)
+            raise LangError(f"the corner is not flush: the end of {a.path} must lie in the plane of one of "
+                            f"{b.path}'s big faces, its outer face, "
+                            f"{'not reach past both' if not flush else 'not end at both'}.")
         #: Which of b's big faces is the outer one, flush with a's end.
         side = flush[0]
         self.x0 = bb.hi[x] if side > 0 else bb.lo[x]
@@ -215,7 +211,7 @@ class _Corner:
         corner = {self.y_axis: (min(tips, c.plane), max(tips, c.plane)), z: (c.lo, c.hi)}
         if b.outline.geometry.intersection(shapely_box(corner[u][0], corner[v][0], corner[u][1],
                                                        corner[v][1])).area > EPS:
-            raise LangError(f"box_joint: this board already reaches into {a.path} at the corner.", b.path)
+            raise LangError(f"{b.path} already reaches into {a.path} at the corner.")
 
     def _a_region(self, xs: tuple[float, float]) -> Polygon:
         """The rectangle of a's outline frame from xs[0] to xs[1] across b

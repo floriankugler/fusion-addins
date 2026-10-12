@@ -77,18 +77,16 @@ class Screws(SpacedJoint):
         if self.tenons is not None:
             p = placement_of(self.tenons, c)
             if self.offset is not None and 2 * self.offset >= p.width - EPS:
-                raise LangError(f"screws: offset={self.offset:g} must be less than half the {p.width:g} mm "
-                                "tenons.", e.path)
+                raise LangError(f"offset={self.offset:g} must be less than half the {p.width:g} mm tenons.")
             self._open_face(c, p)
             if self.sink >= e.thickness - EPS:
-                raise LangError(f"screws: the countersink is deeper than {e.path} is thick.", e.path)
+                raise LangError(f"the countersink is deeper than {e.path} is thick.")
             return
         if self.sink >= f.thickness - EPS:
-            raise LangError(f"screws: the countersink is deeper than {f.path} is thick.", e.path)
+            raise LangError(f"the countersink is deeper than {f.path} is thick.")
         for s in stations:
             if not c.lo - EPS <= s <= c.hi + EPS:
-                raise LangError(f"screws: a screw at {c.axis}={s:g} lies outside the contact with {f.path} "
-                                f"({c.lo:g} to {c.hi:g}).", e.path)
+                raise LangError(f"a screw at {c.axis}={s:g} lies outside the contact ({c.lo:g} to {c.hi:g}).")
 
     def place(self, c: Contact, stations: list[float]) -> None:
         g = ContactGeometry(c)
@@ -115,9 +113,8 @@ class Screws(SpacedJoint):
         open_sides = [sign for sign, value in ((-1, b.lo[t]), (1, b.hi[t]))
                       if not f.outline.geometry.contains(Point(g.on_face(p.centres[0], value + sign * _OPEN_PROBE)))]
         if not open_sides:
-            raise LangError(f"screws: the tenons in {f.path} are closed in on both sides; a screw through a tenon "
-                            f"needs its mortise to run out of {f.path}'s edge, so that the tenon's face lies open.",
-                            e.path)
+            raise LangError(f"the tenons in {f.path} are closed in on both sides; a screw through a tenon needs its "
+                            f"mortise to run out of {f.path}'s edge, so that the tenon's face lies open.")
         # Open on both sides: drill from the face that is not shown.
         sign = open_sides[0] if len(open_sides) == 1 else -e.show_face.direction.sign
         return face_toward(e, sign, t)

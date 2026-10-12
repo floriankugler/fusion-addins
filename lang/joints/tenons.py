@@ -76,8 +76,7 @@ class Tenons(ContactJoint):
         """What these tenons made between the two boards."""
         found = [p for p in self.made if {id(p.contact.edge_on), id(p.contact.face_on)} == {id(part), id(other)}]
         if not found:
-            raise LangError(f"gaps=: {part.path} and {other.path} are not joined with these tenons; join them "
-                            "with the tenons first.", part.path)
+            raise LangError("the two are not joined with the tenons given; join them with the tenons first.")
         return found
 
     def width_on(self, c: Contact) -> float:
@@ -93,39 +92,35 @@ class Tenons(ContactJoint):
     def stations(self, c: Contact) -> list[float]:
         """The tenons' centres along the contact."""
         if self.at is not None:
-            return Spacing(None, 0.0, self.at).stations(self.label, c)
+            return Spacing(None, 0.0, self.at).stations(c)
         assert self.count is not None
         if self.count == 1:
             return [(c.lo + c.hi) / 2]
         w = self.width_on(c)
         if w <= EPS or c.length - 2 * self.margin - w <= EPS:
-            raise LangError(f"tenons: margin={self.margin:g} leaves no room for {self.count} tenons "
-                            f"{w:g} wide on the {c.length:g} mm contact with {c.face_on.path}.",
-                            c.edge_on.path)
-        return Spacing(self.count, self.margin + w / 2, None).stations(self.label, c)
+            raise LangError(f"margin={self.margin:g} leaves no room for {self.count} tenons {w:g} wide on the "
+                            f"{c.length:g} mm contact ({c.axis} {c.lo:g} to {c.hi:g}).")
+        return Spacing(self.count, self.margin + w / 2, None).stations(c)
 
     def check(self, c: Contact, stations: list[float]) -> None:
         e, f = c.edge_on, c.face_on
         w = self.width_on(c)
         if self.remaining >= f.thickness - EPS:
-            raise LangError(f"tenons: remaining={self.remaining:g} leaves no tenon in {f.path} "
-                            f"({f.thickness:g} thick).", e.path)
+            raise LangError(f"remaining={self.remaining:g} leaves no tenon in {f.path} ({f.thickness:g} thick).")
         if stations[0] - w / 2 < c.lo - EPS or stations[-1] + w / 2 > c.hi + EPS:
-            raise LangError(f"tenons: a {w:g} mm tenon reaches past the contact with {f.path} "
-                            f"({c.lo:g} to {c.hi:g}).", e.path)
+            raise LangError(f"a {w:g} mm tenon reaches past the contact ({c.lo:g} to {c.hi:g}).")
         if any(b - a < w - EPS for a, b in zip(stations, stations[1:])):
-            raise LangError(f"tenons: the {w:g} mm tenons overlap.", e.path)
+            raise LangError(f"the {w:g} mm tenons overlap.")
         if self.dogbones == "hidden":
             r = self.radius
             if w <= 2 * r:
-                raise LangError(f"tenons: hidden dog bones cut {r:g} into each end of a tenon; the tenons must "
-                                f"be wider than {2 * r:g}.", e.path)
+                raise LangError(f"hidden dog bones cut {r:g} into each end of a tenon; the tenons must be wider "
+                                f"than {2 * r:g}.")
             if e.thickness + self.clearance[1] < r:
-                raise LangError("tenons: hidden dog bones would reach past the far side of the mortise; "
-                                "use a smaller tool.", e.path)
+                raise LangError("hidden dog bones would reach past the far side of the mortise; use a smaller tool.")
             if f.thickness - self.remaining < r:
-                raise LangError("tenons: hidden dog bones would reach past the end of the tenon; use a smaller "
-                                "tool or less remaining.", e.path)
+                raise LangError("hidden dog bones would reach past the end of the tenon; use a smaller tool or less "
+                                "remaining.")
 
     def place(self, c: Contact, stations: list[float]) -> None:
         g = ContactGeometry(c)

@@ -64,7 +64,7 @@ from ..core.dogbones import DogBones, corner_relief, hidden_relief
 from ..core.errors import LangError, one_of
 from ..core.part import Board, Face
 from ..core.shapes import Shape, box_shape
-from .common import EPS, PROBE, Point2, find_contacts
+from .common import EPS, PROBE, Point2, find_contacts, other_of, reported
 
 
 @dataclass(frozen=True)
@@ -85,13 +85,15 @@ class Groove:
         for _, found in find_contacts(self.label, part, partners):
             for c in found:
                 panels.setdefault(id(c.edge_on), []).append(c)
-        plans = [self._plan(contacts) for contacts in panels.values()]
+        plans = [self._plan(part, contacts) for contacts in panels.values()]
         for plan in plans:
-            plan.apply()
+            plan.apply(part)
 
     # -- one panel and the boards it goes into -----------------------------------------------
 
-    def _plan(self, contacts: list[Contact]) -> _Plan:
+    def _plan(self, part: Board, contacts: list[Contact]) -> _Plan:
+        """What the join does to one panel; its errors are reported on
+        `part`, the board whose join() was called (`reported`)."""
         panel = contacts[0].edge_on
         old = panel.outline
         plan = _Plan(panel)
@@ -106,29 +108,32 @@ class Groove:
                 continue
             for i, c in enumerate(moved):
                 if c is not None:
-                    self._check_edge(panel, c, ring[i], ring[(i + 1) % n])
+                    with reported(self.label, part, other_of(c, part)):
+                        self._check_edge(panel, c, ring[i], ring[(i + 1) % n])
             corners = [self._corner(ring, moved, i) for i in range(n)]
             grown.append(Polygon(corners, [list(r.coords) for r in orient(poly, 1.0).interiors]))
             for i, c in enumerate(moved):
                 if c is None:
                     continue
                 before = moved[i - 1]
-                plan.add(self._groove(c, corners[i], corners[(i + 1) % n], before is not None,
-                                      moved[(i + 1) % n] is not None))
+                with reported(self.label, part, other_of(c, part)):
+                    plan.add(self._groove(c, corners[i], corners[(i + 1) % n], before is not None,
+                                          moved[(i + 1) % n] is not None))
                 if before is not None and _convex(_direction(ring, i - 1), _direction(ring, i)):
                     chamfered.append(corner_geometry.Named(
                         corners[i], f"the corner in {before.face_on.path} and {c.face_on.path}"))
-        geometry = unary_union(grown)
-        if not geometry.is_valid or geometry.area < old.area - EPS:
-            raise LangError("groove: moving the edges into the grooves leaves no proper outline.", panel.path)
-        shape = Shape(geometry, old.axes)
-        if self.chamfer > 0 and chamfered:
-            # cut off as chamfer() cuts off a corner of the outline
-            clipped = corner_geometry.clip_corners(shape, chamfered, self.chamfer, panel.path)
-            if shape.difference(clipped).intersection(old).area > EPS:
-                raise LangError(f"groove: a {self.chamfer:g} mm chamfer reaches out of the grooves at this panel's "
-                                f"corners, where it shows; at most twice the depth ({2 * self.depth:g}).", panel.path)
-            shape = clipped
+        with reported(self.label, part, None if part is panel else panel):
+            geometry = unary_union(grown)
+            if not geometry.is_valid or geometry.area < old.area - EPS:
+                raise LangError(f"moving the edges of {panel.path} into the grooves leaves no proper outline.")
+            shape = Shape(geometry, old.axes)
+            if self.chamfer > 0 and chamfered:
+                # cut off as chamfer() cuts off a corner of the outline
+                clipped = corner_geometry.clip_corners(shape, chamfered, self.chamfer, panel.path)
+                if shape.difference(clipped).intersection(old).area > EPS:
+                    raise LangError(f"a {self.chamfer:g} mm chamfer reaches out of the grooves at {panel.path}'s "
+                                    f"corners, where it shows; at most twice the depth ({2 * self.depth:g}).")
+                shape = clipped
         plan.outline = shape
         return plan
 
@@ -139,15 +144,13 @@ class Groove:
         b, i = panel.box(), _index(panel, c.axis)
         lo, hi = sorted((p[i], q[i]))
         if lo < b.lo[c.axis] - EPS or hi > b.hi[c.axis] + EPS:
-            raise LangError(f"groove: the edge on {board.path} reaches past the panel's box ({c.axis} "
+            raise LangError(f"the edge of {panel.path} on {board.path} reaches past {panel.path}'s box ({c.axis} "
                             f"{b.lo[c.axis]:g} to {b.hi[c.axis]:g}) into a board an earlier join set it into; "
-                            f"name the boards at its corners in one join, so that the corner goes into both.",
-                            panel.path)
+                            f"name the boards at its corners in one join, so that the corner goes into both.")
         clearance = self.clearance[0]
         if self.depth + clearance >= board.thickness - EPS:
-            raise LangError(f"groove: a groove {self.depth:g} deep, {clearance:g} beyond the panel's edge, would go "
-                            f"through {board.path} ({board.thickness:g} thick) and show on its far face.",
-                            panel.path)
+            raise LangError(f"a groove {self.depth:g} deep, {clearance:g} beyond the panel's edge, would go through "
+                            f"{board.path} ({board.thickness:g} thick) and show on its far face.")
 
     def _corner(self, ring: list[Point2], moved: list[Contact | None], i: int) -> Point2:
         """Vertex i once the edges into the boards have moved: where the
@@ -205,22 +208,20 @@ class Groove:
         """The dog bone in the groove's corner at its end `s_a` and edge
         `s_w`; the end runs across the groove, the edge along it."""
         if self.tool > width + EPS:
-            raise LangError(f"groove: the groove for {panel.path} is {width:g} wide, narrower than the "
-                            f"{self.tool:g} mm tool its dog bones are for; give a smaller tool= or dogbones=None.",
-                            board.path)
+            raise LangError(f"the groove for {panel.path} is {width:g} wide, narrower than the {self.tool:g} mm "
+                            "tool its dog bones are for; give a smaller tool= or dogbones=None.")
         point = frame.point(*corner)
         across = frame.direction(0.0, -s_w)          # along the end, into the groove
         back = frame.direction(-s_a, 0.0)            # along the edge, back into the groove
         if self.dogbones == "hidden":
             r = (self.tool + self.relief) / 2
             if width < 2 * r - EPS:
-                raise LangError(f"groove: hidden dog bones are {2 * r:g} across, wider than the "
-                                f"{width:g} mm groove for {panel.path}; use corner dog bones or a smaller tool.",
-                                board.path)
+                raise LangError(f"hidden dog bones are {2 * r:g} across, wider than the {width:g} mm groove for "
+                                f"{panel.path}; use corner dog bones or a smaller tool.")
             a, w = corner
             if not board.outline.geometry.contains(Point(frame.point(a + s_a * (r + PROBE), w - s_w * r))):
-                raise LangError(f"groove: hidden dog bones would break out of {board.path} past the end of the "
-                                f"groove for {panel.path}; use corner dog bones or a smaller tool.", board.path)
+                raise LangError(f"hidden dog bones would break out of {board.path} past the end of the groove for "
+                                f"{panel.path}; use corner dog bones or a smaller tool.")
             return hidden_relief(point, across, self.tool, self.relief)
         return corner_relief(point, across, back, self.tool, self.relief)
 
@@ -252,13 +253,17 @@ class _Plan:
                 return
         self.cuts.append(cut)
 
-    def apply(self) -> None:
+    def apply(self, part: Board) -> None:
+        """Changes the panel and the boards; errors are reported on `part`,
+        the board whose join() was called."""
         panel = self.panel
         assert self.outline is not None
-        panel.add_to_outline(self.outline)
+        with reported(Groove.label, part, None if part is panel else panel):
+            panel.add_to_outline(self.outline)
         for cut in self.cuts:
             board = cut.board
-            board.add_pocket(cut.face, cut.shape, cut.depth, name=board.unique_op_name(f"groove_{panel.name}"))
+            with reported(Groove.label, part, board if part is panel else panel):
+                board.add_pocket(cut.face, cut.shape, cut.depth, name=board.unique_op_name(f"groove_{panel.name}"))
             board.notes.extend(cut.notes)
 
 

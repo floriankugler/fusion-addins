@@ -346,7 +346,7 @@ def test_half_lap_dog_bone_errors():
     with g:
         with pytest.raises(LangError, match="wider than the notch"):
             long.join(cross, using=half_lap(toward=g.top, dogbones="hidden", tool=16))
-        with pytest.raises(LangError, match="break out of the board"):
+        with pytest.raises(LangError, match="would break out of grid.long below its notch"):
             long.join(cross, using=half_lap(toward=g.top, at=g.bottom + 2, dogbones="hidden"))
     assert long.ops == [] and cross.ops == []
     with pytest.raises(LangError, match="dogbones"):

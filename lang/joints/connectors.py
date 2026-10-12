@@ -45,8 +45,8 @@ from ..core.errors import LangError, one_of
 from ..core.part import Board, Face
 from ..core.refs import DepthSpec, PosLike, through, to
 from ..core.shapes import circle, slot_shape
-from .common import (EPS, ContactGeometry, FaceChoice, SpacedJoint, Spacing, big_face, check_gaps, face_choice,
-                     hidden_face, make_spacing, opposite_face, start_index)
+from .common import (EPS, ContactGeometry, FaceChoice, SpacedJoint, Spacing, check_gaps, face_choice, hidden_face,
+                     make_spacing, opposite_face, pick_face, start_index)
 from .tenons import Tenons
 
 DominoSize = Literal["4x20", "5x30", "6x40", "8x36", "8x40", "8x50", "8x80", "8x100", "10x50", "10x80",
@@ -95,7 +95,7 @@ class Domino(SpacedJoint):
 
     def _reference(self, e: Board) -> Face:
         """The face the machine's fence rests on, which carries the marks."""
-        return big_face(self.label, e, self.face, e.show_face)
+        return pick_face(e, self.face, e.show_face)
 
     def _centre(self, g: ContactGeometry) -> float:
         if self.fence is None:
@@ -104,30 +104,26 @@ class Domino(SpacedJoint):
 
     def check(self, c: Contact, stations: list[float]) -> None:
         e, f = c.edge_on, c.face_on
+        self._reference(e)
         h = self.slot_height
         if h >= e.thickness - EPS:
-            raise LangError(f"domino: the {h:g} mm high slot is not thinner than this board ({e.thickness:g}).",
-                            e.path)
+            raise LangError(f"the {h:g} mm high slot is not thinner than {e.path} ({e.thickness:g}).")
         centre = self._centre(ContactGeometry(c))
         b, t = e.box(), c.across
         if centre - h / 2 < b.lo[t] - EPS or centre + h / 2 > b.hi[t] + EPS:
-            raise LangError(f"domino: at fence={self.fence} the slot does not fit within {e.path}'s "
-                            "thickness.", e.path)
+            raise LangError(f"at fence={self.fence} the slot does not fit within {e.path}'s thickness.")
         if self.marks is not None and self.mark_depth >= e.thickness - EPS:
-            raise LangError(f"domino: mark_depth={self.mark_depth:g} is not less than {e.path}'s thickness.",
-                            e.path)
+            raise LangError(f"mark_depth={self.mark_depth:g} is not less than {e.path}'s thickness.")
         if self.remaining is None:
             depth = self.size.length / 2 + data.DOMINO_DEPTH_OFFSET
             if depth >= f.thickness - EPS:
-                raise LangError(f"domino: a {self.size.key} needs a {depth:g} mm deep slot, {f.path} is "
-                                f"{f.thickness:g} thick; pick a shorter Domino or give remaining=.", e.path)
+                raise LangError(f"a {self.size.key} needs a {depth:g} mm deep slot, {f.path} is "
+                                f"{f.thickness:g} thick; pick a shorter Domino or give remaining=.")
         elif self.remaining >= f.thickness - EPS:
-            raise LangError(f"domino: remaining={self.remaining:g} leaves no slot in {f.path} "
-                            f"({f.thickness:g} thick).", e.path)
+            raise LangError(f"remaining={self.remaining:g} leaves no slot in {f.path} ({f.thickness:g} thick).")
         for s in stations:
             if s - self.slot_length / 2 < c.lo - EPS or s + self.slot_length / 2 > c.hi + EPS:
-                raise LangError(f"domino: the slot at {c.axis}={s:g} reaches past the contact with {f.path} "
-                                f"({c.lo:g} to {c.hi:g}).", e.path)
+                raise LangError(f"the slot at {c.axis}={s:g} reaches past the contact ({c.lo:g} to {c.hi:g}).")
 
     def place(self, c: Contact, stations: list[float]) -> None:
         g = ContactGeometry(c)
@@ -209,16 +205,17 @@ class Clamex(SpacedJoint):
     label: ClassVar[str] = "clamex"
 
     def check(self, c: Contact, stations: list[float]) -> None:
-        f = c.face_on
+        e, f = c.edge_on, c.face_on
+        pick_face(e, self.face, hidden_face(e))
         check_gaps(self.label, self.spacing, c, data.CLAMEX_MIN_GAP)
         if not self.through and data.CLAMEX_GUIDE_DEPTH >= f.thickness - EPS:
-            raise LangError(f"clamex: the {data.CLAMEX_GUIDE_DEPTH:g} mm guide holes go through {f.path}; "
-                            "give through=True.", c.edge_on.path)
+            raise LangError(f"the {data.CLAMEX_GUIDE_DEPTH:g} mm guide holes go through {f.path}; "
+                            "give through=True.")
 
     def place(self, c: Contact, stations: list[float]) -> None:
         g = ContactGeometry(c)
         e, f = c.edge_on, c.face_on
-        access = big_face(self.label, e, self.face, hidden_face(e))
+        access = pick_face(e, self.face, hidden_face(e))
         centres, width = self.model.access_centers, self.model.access_width
         guide_depth: DepthSpec = through if self.through else data.CLAMEX_GUIDE_DEPTH
         for i, s in enumerate(stations, 1):
@@ -270,18 +267,18 @@ class Cabineo(SpacedJoint):
 
     def check(self, c: Contact, stations: list[float]) -> None:
         e, f = c.edge_on, c.face_on
+        pick_face(e, self.face, hidden_face(e))
         check_gaps(self.label, self.spacing, c, data.CABINEO_MIN_GAP)
         if self.access_depth >= e.thickness - EPS:
-            raise LangError(f"cabineo: the {self.access_depth:g} mm deep pocket goes through this board "
-                            f"({e.thickness:g} thick).", e.path)
+            raise LangError(f"the {self.access_depth:g} mm deep pocket goes through {e.path} "
+                            f"({e.thickness:g} thick).")
         if not self.through and self.guide.depth >= f.thickness - EPS:
-            raise LangError(f"cabineo: the {self.guide.depth:g} mm deep hole goes through {f.path}; "
-                            "give through=True.", e.path)
+            raise LangError(f"the {self.guide.depth:g} mm deep hole goes through {f.path}; give through=True.")
 
     def place(self, c: Contact, stations: list[float]) -> None:
         g = ContactGeometry(c)
         e, f = c.edge_on, c.face_on
-        access = big_face(self.label, e, self.face, hidden_face(e))
+        access = pick_face(e, self.face, hidden_face(e))
         centres = data.CABINEO_ACCESS_CENTERS
         offset = data.CABINEO_FLUSH_GUIDE_OFFSET if self.surface == "flush" else data.CABINEO_GUIDE_OFFSET
         across = g.inside(access, offset)

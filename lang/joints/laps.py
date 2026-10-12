@@ -21,6 +21,7 @@ end) gets none.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import ClassVar
 
 from shapely.geometry import Point
 
@@ -32,7 +33,7 @@ from ..core.errors import LangError, one_of
 from ..core.part import Board
 from ..core.refs import PosLike, Side, as_pos
 from ..core.shapes import Shape, box_shape
-from .common import PROBE, Point2
+from .common import PROBE, Point2, reported
 
 #: How far a notch reaches past the board's edge, so it opens cleanly.
 _PAST = 1.0
@@ -46,6 +47,7 @@ class HalfLap:
     dogbones: DogBones | None = "corner"
     tool: float = 6.0
     relief: float = 0.1
+    label: ClassVar[str] = "half_lap"
 
     @property
     def radius(self) -> float:
@@ -57,12 +59,13 @@ class HalfLap:
         # board is cut, each against the outline the notches before it leave.
         laps: list[tuple[Board, Crossing, float]] = []
         for other in partners:
-            c = crossing(part, other)
-            if c is None:
-                raise LangError(f"half_lap: {other.path} does not cross this board.", part.path)
-            laps.append((other, c, self._split(part, other, c)))
+            with reported(self.label, part, other):
+                c = crossing(part, other)
+                if c is None:
+                    raise LangError("the two do not cross.")
+                laps.append((other, c, self._split(c)))
         outlines: dict[int, Shape] = {}
-        notches: list[tuple[Board, Shape, str]] = []
+        notches: list[tuple[Board, Board, Shape, str]] = []
         for other, c, split in laps:
             d = self.toward
             pb, ob = part.box(), other.box()
@@ -73,20 +76,21 @@ class HalfLap:
             theirs = (low, split) if d.sign > 0 else (split, high)
             for board, across, span, opens in ((part, other, mine, d.sign), (other, part, theirs, -d.sign)):
                 outline = outlines.get(id(board), board.outline)
-                shape = self._notch(board, across, c.axis, span, split, opens, outline)
+                with reported(self.label, part, other):
+                    shape = self._notch(board, across, c.axis, span, split, opens, outline)
                 outlines[id(board)] = outline.difference(shape)
-                notches.append((board, shape, f"lap_{across.name}"))
-        for board, shape, name in notches:
-            board.add_cut(shape, name=board.unique_op_name(name))
+                notches.append((other, board, shape, f"lap_{across.name}"))
+        for other, board, shape, name in notches:
+            with reported(self.label, part, other):
+                board.add_cut(shape, name=board.unique_op_name(name))
 
-    def _split(self, part: Board, other: Board, c: Crossing) -> float:
+    def _split(self, c: Crossing) -> float:
         if self.toward.axis != c.axis:
-            raise LangError(f"half_lap: toward={self.toward.name} does not run along the line where it meets "
-                            f"{other.path} ({c.axis}).", part.path)
+            raise LangError(f"toward={self.toward.name} does not run along the line where the two meet ({c.axis}).")
         split = self.at if self.at is not None else (c.lo + c.hi) / 2
         if not c.lo < split < c.hi:
-            raise LangError(f"half_lap: the split at {c.axis}={split:g} lies outside the height it shares "
-                            f"with {other.path} ({c.lo:g} to {c.hi:g}).", part.path)
+            raise LangError(f"the split at {c.axis}={split:g} lies outside the height the two share "
+                            f"({c.lo:g} to {c.hi:g}).")
         return split
 
     def _region(self, part: Board, other: Board, axis: Axis, span: tuple[float, float]) -> Box:
@@ -117,8 +121,8 @@ class HalfLap:
         width = box.hi[w] - box.lo[w]
         r = self.radius
         if self.dogbones == "hidden" and width < 2 * r - 1e-9:
-            raise LangError(f"half_lap: hidden dog bones are {2 * r:g} across, wider than the notch for "
-                            f"{other.path} ({width:g}); use corner dog bones or a smaller tool.", part.path)
+            raise LangError(f"hidden dog bones are {2 * r:g} across, wider than the notch in {part.path} "
+                            f"({width:g}); use corner dog bones or a smaller tool.")
         material = outline.geometry
         up = at(0.0, float(opens))                       # along the notch's sides, toward its opening
         for edge, inward in ((box.lo[w], 1.0), (box.hi[w], -1.0)):
@@ -134,8 +138,8 @@ class HalfLap:
                 continue
             relief = hidden_relief(corner, floor, self.tool, self.relief)
             if not material.contains(Point(at(edge + inward * r, split - opens * (r + PROBE)))):
-                raise LangError(f"half_lap: hidden dog bones would break out of the board below the notch for "
-                                f"{other.path}; use corner dog bones or a smaller tool.", part.path)
+                raise LangError(f"hidden dog bones would break out of {part.path} below its notch; use corner dog "
+                                "bones or a smaller tool.")
             notch = notch.union(relief)
         return notch
 

@@ -184,7 +184,7 @@ def test_cabineo_defaults_to_the_hidden_face_and_its_variants():
 def test_cabineo_needs_a_board_thicker_than_its_pocket():
     cab, p = carcass()
     with cab:
-        with pytest.raises(LangError, match="10.5 mm deep pocket goes through this board"):
+        with pytest.raises(LangError, match=r"10\.5 mm deep pocket goes through cab\.back \(9 thick\)"):
             p["back"].join(p["left"], using=cabineo(count=2))
 
 
@@ -220,9 +220,9 @@ def test_spacing_and_join_errors():
     cab, p = carcass()
     left, right, bottom = p["left"], p["right"], p["bottom"]
     with cab:
-        with pytest.raises(LangError, match="cab.right does not touch this board"):
+        with pytest.raises(LangError, match=r"^cab\.left: domino with cab\.right: the two do not touch"):
             left.join(right, using=domino("4x20", count=2))
-        with pytest.raises(LangError, match="cab.right does not touch"):    # bottom is fine, right is not
+        with pytest.raises(LangError, match="cabineo with cab.right: the two do not touch"):   # bottom is fine
             left.join(bottom, right, using=cabineo(count=2))
         with pytest.raises(LangError, match="not on the axis the contact"):
             bottom.join(left, using=cabineo(at=[Pos("y", 100)]))
@@ -240,6 +240,22 @@ def test_spacing_and_join_errors():
         cabineo()
     # a failed join leaves every board untouched
     assert all(part.ops == [] for part in p.values())
+
+
+def test_errors_are_reported_on_the_board_whose_join_was_called():
+    """One rule for every joint: the error's path is the receiver, its
+    message names the joint and the other board, whichever of the two
+    meets the other edge-on."""
+    cab, p = carcass()
+    with cab:
+        with pytest.raises(LangError) as from_back:
+            p["back"].join(p["left"], using=cabineo(count=2))
+        with pytest.raises(LangError) as from_side:
+            p["left"].join(p["back"], using=cabineo(count=2))
+    assert (from_back.value.path, from_side.value.path) == ("cab.back", "cab.left")
+    message = "the 10.5 mm deep pocket goes through cab.back (9 thick)."
+    assert str(from_back.value) == f"cab.back: cabineo with cab.left: {message}"
+    assert str(from_side.value) == f"cab.left: cabineo with cab.back: {message}"
 
 
 def test_the_preview_cuts_the_marks():

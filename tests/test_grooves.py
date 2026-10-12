@@ -225,8 +225,9 @@ def test_dados_for_shelves_from_the_side():
 
 def test_a_groove_through_the_board_is_an_error():
     m, p = _box()
-    with m, pytest.raises(LangError, match=r"box.floor: groove: a groove 12 deep, 0 beyond the panel's edge, would go "
-                                           r"through box.left \(12 thick\) and show on its far face"):
+    with m, pytest.raises(LangError, match=r"^box\.floor: groove with box\.left: a groove 12 deep, 0 beyond the "
+                                           r"panel's edge, would go through box\.left \(12 thick\) and show on its far "
+                                           r"face"):
         p["floor"].join(p["l"], using=groove(12))
     assert p["l"].ops == [] and p["floor"].outline.area == pytest.approx(176 * 276)
 
@@ -242,11 +243,23 @@ def test_the_panel_may_be_joined_from_a_board():
     assert _groove(p["l"]).shape.bounds == pytest.approx((12 - R, 10, 188 + R, 19))
 
 
+def test_errors_are_reported_on_the_board_whose_join_was_called():
+    m, p = _box()
+    with m:
+        with pytest.raises(LangError, match=r"^box\.left: groove with box\.floor: a groove 12 deep, 0 beyond the "
+                                            r"panel's edge, would go through box\.left"):
+            p["l"].join(p["floor"], using=groove(12))
+        with pytest.raises(LangError, match=r"^box\.left: groove with box\.floor: the groove for box\.floor is 9 wide, "
+                                            r"narrower than the 10 mm tool"):
+            p["l"].join(p["floor"], using=groove(5, tool=10))
+    assert p["l"].ops == [] and p["floor"].outline.area == pytest.approx(176 * 276)
+
+
 def test_boards_at_a_corner_go_into_one_join():
     m, p = _box()
     with m:
         p["floor"].join(p["l"], using=groove(5))
-        with pytest.raises(LangError, match="reaches past the panel's box .* name the boards at its corners in one "
+        with pytest.raises(LangError, match="reaches past box.floor's box .* name the boards at its corners in one "
                                             "join"):
             p["floor"].join(p["f"], using=groove(5))
     assert p["f"].ops == []
@@ -256,7 +269,7 @@ def test_a_board_the_panel_does_not_meet_is_an_error():
     m, p = _box()
     with m:
         shelf = board("shelf", ply12).on(Pos("z", 60), toward=m.top).between(p["l"], p["r"], p["f"], p["k"])
-        with pytest.raises(LangError, match="groove: box.shelf does not touch this board"):
+        with pytest.raises(LangError, match="groove with box.shelf: the two do not touch"):
             p["floor"].join(p["l"], shelf, using=groove(5))
     assert p["l"].ops == [] and p["floor"].outline.area == pytest.approx(176 * 276)
 
@@ -347,8 +360,8 @@ def test_hidden_dog_bones_where_the_floor_lies_across_the_end_of_a_finger(tmp_pa
     hidden dog bone at its upper corner would reach down past the finger's
     end into the joint's gap. The default refuses it; corner dog bones fit
     (see above)."""
-    with pytest.raises(LangError, match=r"drawercab\.drawer2\.front: groove: hidden dog bones would break out of "
-                                        r"drawercab\.drawer2\.front"):
+    with pytest.raises(LangError, match=r"^drawercab\.drawer2\.floor: groove with drawercab\.drawer2\.front: hidden dog "
+                                        r"bones would break out of drawercab\.drawer2\.front past the end of the groove"):
         _cabinet(tmp_path, 9)
 
 

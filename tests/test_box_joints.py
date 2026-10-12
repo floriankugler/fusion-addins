@@ -260,7 +260,7 @@ def test_box_joint_errors():
             b.join(a, using=box_joint(margin=75))
         with pytest.raises(LangError, match="leaves nothing of the 6 mm fingers"):
             b.join(a, using=box_joint(25, tool=0, clearance=(6, 0)))
-        with pytest.raises(LangError, match="does not touch"):
+        with pytest.raises(LangError, match=r"^pair\.b: box_joint with pair\.c: the two do not touch"):
             b.join(board("c", ply15).on(Pos("x", 100), toward=m.back), using=box_joint())
     assert a.ops == [] and b.ops == []
     with pytest.raises(LangError, match="pair.a is 2.5 thick, not thicker than the tool's radius"):
@@ -274,7 +274,7 @@ def test_box_joint_errors():
 @pytest.mark.parametrize("make, message", [
     (lambda: _pair(a_from=-20), "not flush: the end of pair.a must lie in the plane"),     # a reaches past b
     (lambda: _pair(a_from=-20, b_at=50), "not reach past both"),                           # a T, not a corner
-    (lambda: _pair(a_from=5), "does not cover this board's end"),                          # a ends inside b
+    (lambda: _pair(a_from=5), "pair.a does not cover the end of pair.b"),                  # a ends inside b
     (lambda: _pair(a_height=100), "not across its whole width"),                           # b is wider than a
 ])
 def test_the_corner_must_be_a_flush_corner(make: Any, message: str):
@@ -283,6 +283,14 @@ def test_the_corner_must_be_a_flush_corner(make: Any, message: str):
         with pytest.raises(LangError, match=message):
             b.join(a, using=box_joint())
     assert a.ops == [] and b.ops == []
+
+
+def test_errors_are_reported_on_the_board_whose_join_was_called():
+    m, a, b = _pair(a_from=5)
+    with m:
+        with pytest.raises(LangError, match=r"^pair\.a: box_joint with pair\.b: pair\.a does not cover the end of "
+                                            r"pair\.b"):
+            a.join(b, using=box_joint())
 
 
 def test_cut_outs_at_the_joint_go_after_it():

@@ -118,10 +118,16 @@ def test_tenon_errors():
             shelf.join(left, using=tenons(count=1, width=6, dogbones="hidden"))
         with pytest.raises(LangError, match="leaves no room"):
             shelf.join(left, using=tenons(count=2, width=250, margin=30))
-        with pytest.raises(LangError, match="does not touch"):
+        with pytest.raises(LangError, match=r"^unit\.left: tenons with unit\.right: the two do not touch"):
             left.join(right, using=tenons(count=1, width=50))
-        with pytest.raises(LangError, match="splits the board"):
+        # an error core raises about the other board keeps its path in the message
+        with pytest.raises(LangError, match=r"^unit\.shelf: tenons with unit\.left: unit\.left: the cut "
+                                            r"mortise_shelf_1 splits the board in pieces"):
             shelf.join(left, using=tenons(width=300, at=[Pos("x", 150)]))
+        # on the board whose join() was called, naming the other
+        with pytest.raises(LangError, match=r"^unit\.left: tenons with unit\.shelf: remaining=15 leaves no tenon in "
+                                            r"unit\.left \(15 thick\)\.$"):
+            left.join(shelf, using=tenons(count=1, width=50, remaining=15))
     for message, make in (("give width=, or even=True", lambda: tenons(count=2)),
                           ("works the width out", lambda: tenons(count=2, width=50, even=True)),
                           ("two tenons or more", lambda: tenons(count=1, even=True)),

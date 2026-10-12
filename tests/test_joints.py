@@ -72,7 +72,7 @@ def test_half_lap_errors():
         with pytest.raises(LangError, match="outside the height"):
             long.join(a, using=half_lap(toward=g.top, at=g.top + 5))
         other = board("other", ply15).center(Pos("x", 900)).between(Pos("y", 0), Pos("y", 100))
-        with pytest.raises(LangError, match="cross0 does not cross|other does not cross"):
+        with pytest.raises(LangError, match=r"^grid\.long: half_lap with grid\.other: the two do not cross"):
             long.join(a, other, using=half_lap(toward=g.top))
         with pytest.raises(LangError, match="name the boards"):
             long.join(using=half_lap(toward=g.top))
@@ -80,6 +80,10 @@ def test_half_lap_errors():
             long.join(a, [a], using=half_lap(toward=g.top))
         with pytest.raises(LangError, match="to itself"):
             long.join(long, using=half_lap(toward=g.top))
+        # from the other board: on it, naming the long one
+        with pytest.raises(LangError, match=r"^grid\.cross0: half_lap with grid\.long: hidden dog bones are 16\.1 "
+                                            r"across, wider than the notch in grid\.cross0 \(15\)"):
+            a.join(long, using=half_lap(toward=g.top, dogbones="hidden", tool=16))
     assert long.ops == [] and a.ops == []                 # nothing is cut when a join fails
     with pytest.raises(LangError, match="at=.* is not on the axis"):
         half_lap(toward=world_frame().direction("top"), at=Pos("x", 3))

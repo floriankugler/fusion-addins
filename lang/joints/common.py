@@ -7,13 +7,18 @@ per contact; `SpacedJoint` for those at the stations of a `Spacing`): it
 finds every contact, asks the joint for its stations along each, lets it
 check them all and only then machine them.
 
+Every error of a join is reported on the board whose `join()` was called,
+the message naming the joint and the other board (`reported`):
+`cab.bottom: domino with cab.left: ...`.
+
 A tenon joint records what it made along each contact (`TenonPlacement`),
 so that connectors and screws joined afterwards can sit in the gaps
 between the tenons (`gaps=`) along the contact as it was before.
 """
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Generator, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import ClassVar, Protocol
 
@@ -33,6 +38,35 @@ EPS = 1e-6
 #: How far from a corner the probes for material lie, mm.
 PROBE = 0.01
 Point2 = tuple[float, float]
+
+
+# -- errors ------------------------------------------------------------------------------------
+
+class JointError(LangError):
+    """An error of a join, as `reported` raises it."""
+
+
+@contextmanager
+def reported(label: str, part: Board, other: Board | None = None) -> Generator[None]:
+    """Reports every error raised inside as the join's: on `part`, the
+    board whose `join()` was called, the message starting with the joint's
+    `label` and the other board the error concerns, `other`
+    (`domino with cab.left: ...`). The joints raise their errors without a
+    path; an error that names another board, from core, keeps its path in
+    the message."""
+    try:
+        yield
+    except JointError:
+        raise
+    except LangError as err:
+        head = label if other is None else f"{label} with {other.path}"
+        message = err.message if err.path in (None, part.path) else f"{err.path}: {err.message}"
+        raise JointError(f"{head}: {message}", part.path) from err
+
+
+def other_of(c: Contact, part: Board) -> Board:
+    """The board of a contact that is not `part`."""
+    return c.face_on if c.edge_on is part else c.edge_on
 
 
 # -- tenons joined before ----------------------------------------------------------------------
@@ -97,29 +131,26 @@ class Spacing:
             return [p.contact for p in self.gaps.placements(part, other)]
         return touching(part, other)
 
-    def stations(self, label: str, c: Contact) -> list[float]:
+    def stations(self, c: Contact) -> list[float]:
         """The positions along the contact, ascending."""
-        path, other = c.edge_on.path, c.face_on.path
         if self.gaps is not None:
             return [(a + b) / 2 for a, b in placement_of(self.gaps, c).gaps()]
         if self.at is not None:
             values: list[float] = []
             for pos in self.at:
                 if pos.axis != c.axis:
-                    raise LangError(f"{label}: at={pos} is not on the axis the contact with {other} runs "
-                                    f"along ({c.axis}).", path)
+                    raise LangError(f"at={pos} is not on the axis the contact runs along ({c.axis}).")
                 if not c.lo - EPS <= pos.value <= c.hi + EPS:
-                    raise LangError(f"{label}: at={pos} lies outside the contact with {other} "
-                                    f"({c.lo:g} to {c.hi:g}).", path)
+                    raise LangError(f"at={pos} lies outside the contact ({c.axis} {c.lo:g} to {c.hi:g}).")
                 values.append(pos.value)
             values.sort()
             if any(b - a <= EPS for a, b in zip(values, values[1:])):
-                raise LangError(f"{label}: two positions in at= coincide.", path)
+                raise LangError("two positions in at= coincide.")
             return values
         assert self.count is not None
         if self.count > 1 and 2 * self.end >= c.length - EPS:
-            raise LangError(f"{label}: end={self.end:g} leaves no room for {self.count} connectors on the "
-                            f"{c.length:g} mm contact with {other}.", path)
+            raise LangError(f"end={self.end:g} leaves no room for count={self.count} on the {c.length:g} mm contact "
+                            f"({c.axis} {c.lo:g} to {c.hi:g}).")
         return [c.lo + s for s in data.stations(c.length, self.count, self.end)]
 
 
@@ -129,8 +160,8 @@ def check_gaps(label: str, spacing: Spacing, c: Contact, minimum: float) -> None
         return
     for lo, hi in placement_of(spacing.gaps, c).gaps():
         if hi - lo < minimum - EPS:
-            raise LangError(f"{label}: the {hi - lo:g} mm gap from {c.axis}={lo:g} to {hi:g} is narrower than the "
-                            f"{minimum:g} mm a {label} needs.", c.edge_on.path)
+            raise LangError(f"the {hi - lo:g} mm gap from {c.axis}={lo:g} to {hi:g} is narrower than the "
+                            f"{minimum:g} mm a {label} needs.")
 
 
 def make_spacing(label: str, count: int | None, end: float, at: Sequence[PosLike] | None,
@@ -214,15 +245,27 @@ def face_choice(label: str, choice: FaceChoice) -> FaceChoice:
     return choice
 
 
-def big_face(label: str, part: Board, choice: FaceChoice, default: Face) -> Face:
+def pick_face(part: Board, choice: FaceChoice, default: Face) -> Face:
+    """The big face of `part` that `choice` names, or `default`; an error
+    without a path (see `reported`) when it names a narrow face."""
     if choice is None:
         return default
     if isinstance(choice, str):
         return part.face(choice)
     d = choice.outward if isinstance(choice, Side) else choice
     if d.axis != part.t_axis:
-        raise LangError(f"{label}: face={d.name} is not a big face of this board.", part.path)
+        raise LangError(f"face={d.name} is not a big face of {part.path}.")
     return face_toward(part, d.sign, d.axis)
+
+
+def big_face(label: str, part: Board, choice: FaceChoice, default: Face) -> Face:
+    """`pick_face`, its error on `part`."""
+    try:
+        return pick_face(part, choice, default)
+    except LangError as err:
+        if err.path is not None:
+            raise
+        raise LangError(f"{label}: {err.message}", part.path) from None
 
 
 def hidden_face(part: Board) -> Face:
@@ -238,10 +281,10 @@ def find_contacts(label: str, part: Board, partners: list[Board],
     gives them; an error for a board that does not touch it."""
     found: list[tuple[Board, list[Contact]]] = []
     for other in partners:
-        here = find(part, other)
-        if not here:
-            raise LangError(f"{label}: {other.path} does not touch this board with an end or edge on a face.",
-                            part.path)
+        with reported(label, part, other):
+            here = find(part, other)
+            if not here:
+                raise LangError("the two do not touch: neither meets the other with an end or edge on its face.")
         found.append((other, here))
     return found
 
@@ -280,18 +323,24 @@ class SpacedJoint(ContactJoint):
         return self.spacing.contacts_with(part, other)
 
     def stations(self, c: Contact) -> list[float]:
-        return self.spacing.stations(self.label, c)
+        return self.spacing.stations(c)
 
 
 def join_contacts(joint: ContactJoint, part: Board, partners: list[Board]) -> None:
     """Finds the contacts with the boards named, either one edge-on, checks
-    every one, then machines them."""
-    found = [c for _, here in find_contacts(joint.label, part, partners, joint.contacts_with) for c in here]
-    planned = [(c, joint.stations(c)) for c in found]
-    for c, stations in planned:
-        joint.check(c, stations)
-    for c, stations in planned:
-        joint.place(c, stations)
+    every one, then machines them. Errors are reported on `part`, naming
+    the other board (`reported`)."""
+    label = joint.label
+    planned: list[tuple[Board, Contact, list[float]]] = []
+    for other, found in find_contacts(label, part, partners, joint.contacts_with):
+        with reported(label, part, other):
+            planned.extend((other, c, joint.stations(c)) for c in found)
+    for other, c, stations in planned:
+        with reported(label, part, other):
+            joint.check(c, stations)
+    for other, c, stations in planned:
+        with reported(label, part, other):
+            joint.place(c, stations)
 
 
 def union_all(shapes: Sequence[Shape]) -> Shape:

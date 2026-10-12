@@ -87,14 +87,14 @@ def test_gap_and_tenon_screw_errors():
     u, left, right, shelf = _unit()
     t = tenons(count=2, width=50)
     with u:
-        with pytest.raises(LangError, match="not joined with these tenons"):
+        with pytest.raises(LangError, match="screws with unit.left: the two are not joined with the tenons given"):
             shelf.join(left, using=screws(gaps=t))
         shelf.join(left, using=t)
         with pytest.raises(LangError, match="closed in on both sides"):
             shelf.join(left, using=screws(tenons=t))
         with pytest.raises(LangError, match="less than half the 50 mm tenons"):
             shelf.join(left, using=screws(tenons=t, offset=25))
-        with pytest.raises(LangError, match="not joined with these tenons"):
+        with pytest.raises(LangError, match="cabineo with unit.right: the two are not joined with the tenons given"):
             shelf.join(right, using=cabineo(gaps=t))
     for message, make in (("give one of count=, at=, gaps= or tenons=", lambda: screws()),
                           ("give one of count=, at=, gaps= or tenons=", lambda: screws(count=2, gaps=t)),
