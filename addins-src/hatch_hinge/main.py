@@ -5,7 +5,7 @@ from typing import cast
 import adsk.core
 import adsk.fusion
 
-from lib import addin, edge_sketch, hole_features, inputs, ui_placement, utils
+from lib import addin, edge_sketch, hatch_hinges, hole_features, inputs, ui_placement, utils
 from lib.fusionbootstrap.runtime import RuntimeInfo
 
 
@@ -15,7 +15,7 @@ _addin: addin.Addin | None = None
 TOLERANCE = 1e-4
 # How far in front of the carcass the closed hatch may be modelled, in cm.
 # The hinges' depth adjustment takes up a small gap.
-MAX_HATCH_GAP = 0.2
+MAX_HATCH_GAP = hatch_hinges.MAX_HATCH_GAP / 10
 
 
 def _mm(value_cm: float) -> str:
@@ -28,110 +28,11 @@ def _format_mm(value_cm: float) -> str:
     return f"{value_cm * 10:.1f}".rstrip("0").rstrip(".") + " mm"
 
 
-@dataclass(frozen=True)
-class HingeSpec:
-    """Drilling data of a lift-up hatch hinge, in cm.
-
-    Everything is measured from the hinge reference: the level of the
-    underside of the carcass top, where it meets the inner front edge of
-    the side panel (the manufacturer's drilling template is pushed up
-    against the underside of the top). "Below" runs down from that level,
-    "back" into the carcass from its front edge, and "inward" into the
-    cabinet from the side panel's inner face.
-    """
-
-    name: str
-    carcass_hole_diameter: float
-    carcass_hole_back: float
-    carcass_first_hole_below: float
-    carcass_hole_pitch: float
-    carcass_hole_count: int
-    hatch_hole_inward: float
-    hatch_first_hole_below: float
-    hatch_hole_pitch: float
-    hatch_hole_count: int
-    #: (hatch thickness, overlap) pairs, ascending: how far the hatch top
-    #: may reach above the hinge reference before the hatch hits the
-    #: carcass while opening fully. Interpolated linearly in between; the
-    #: thickness range is the supported one.
-    max_overlap: tuple[tuple[float, float], ...]
-    #: The same limit with the opening limited to 90 degrees.
-    limited_max_overlap: float
-    #: Footprint of the mounting plate on the hatch (inward range, below
-    #: range). It must lie on the hatch.
-    plate_inward: tuple[float, float]
-    plate_below: tuple[float, float]
-    #: Points inside the closed hinge (inward, back, below). No other body
-    #: may contain them.
-    probe_points: tuple[tuple[float, float, float], ...]
-
-    @property
-    def min_hatch_thickness(self) -> float:
-        return self.max_overlap[0][0]
-
-    @property
-    def max_hatch_thickness(self) -> float:
-        return self.max_overlap[-1][0]
-
-    def overlap_limit(self, hatch_thickness: float, limited: bool) -> float:
-        if limited:
-            return self.limited_max_overlap
-        table = self.max_overlap
-        if hatch_thickness <= table[0][0]:
-            return table[0][1]
-        for (thickness0, overlap0), (thickness1, overlap1) in zip(
-            table,
-            table[1:],
-        ):
-            if hatch_thickness <= thickness1:
-                fraction = (hatch_thickness - thickness0) / (
-                    thickness1 - thickness0
-                )
-                return overlap0 + (overlap1 - overlap0) * fraction
-        return table[-1][1]
-
-
-# Häfele Free space 1.11 (372.27.xxx, every spring strength drills the
-# same), from the installation manual, checked against Häfele's STEP model
-# (372.27.300): closed, the hinge stops 1.8 mm below the carcass top, its
-# plate slots sit 90 and 26 mm above the top carcass hole, and at 90 degrees
-# the hatch clears the carcass front up to a 38 mm overlap. The STEP centres
-# the plate 24.15 mm from the side panel; the manual's 25 mm is used, the
-# hinge's +-1.5 mm side adjustment covers the difference. Plate footprint
-# and probe points come from the STEP model.
-FREE_SPACE_1_11 = HingeSpec(
-    name="Häfele Free space 1.11",
-    carcass_hole_diameter=0.5,
-    carcass_hole_back=3.7,
-    carcass_first_hole_below=10.2,
-    carcass_hole_pitch=3.2,
-    carcass_hole_count=3,
-    hatch_hole_inward=2.5,
-    hatch_first_hole_below=1.2,
-    hatch_hole_pitch=6.4,
-    hatch_hole_count=2,
-    max_overlap=(
-        (1.6, 2.45),
-        (1.8, 2.4),
-        (1.9, 2.35),
-        (2.2, 2.25),
-        (2.4, 2.2),
-        (2.6, 2.15),
-        (2.8, 2.1),
-    ),
-    limited_max_overlap=3.7,
-    plate_inward=(1.55, 3.45),
-    plate_below=(0.5, 8.3),
-    probe_points=(
-        (1.6, 3.7, 0.3),
-        (2.5, 0.1, 0.3),
-        (1.3, 2.5, 0.6),
-        (1.2, 2.5, 4.2),
-        (1.2, 2.5, 8.2),
-        (1.2, 2.5, 15.2),
-        (3.0, 0.3, 6.2),
-    ),
-)
+# The hinges' drilling data (mm) and its sources live in
+# lib/hatch_hinges.py, shared with the modeling language; the add-in works
+# with the specs in cm.
+HingeSpec = hatch_hinges.HingeSpec
+FREE_SPACE_1_11 = hatch_hinges.FREE_SPACE_1_11.in_cm()
 
 
 def run(context, runtime_info: RuntimeInfo):
@@ -226,7 +127,7 @@ class HatchHingeInputs(inputs.Inputs):
         self.carcass_depth = inputs.FloatInput(
             id="carcass_depth",
             name="Carcass Hole Depth",
-            default_value=1.2,
+            default_value=hatch_hinges.CARCASS_HOLE_DEPTH / 10,
             tool_tip="Depth of the 5 mm holes in the side panels.",
             units=units,
         )
@@ -234,7 +135,7 @@ class HatchHingeInputs(inputs.Inputs):
         self.pilot_diameter = inputs.FloatInput(
             id="pilot_diameter",
             name="Hatch Pilot Diameter",
-            default_value=0.2,
+            default_value=hatch_hinges.PILOT_DIAMETER / 10,
             tool_tip="Diameter of the pilot holes for the mounting plate screws.",
             units=units,
         )
@@ -242,7 +143,7 @@ class HatchHingeInputs(inputs.Inputs):
         self.pilot_depth = inputs.FloatInput(
             id="pilot_depth",
             name="Hatch Pilot Depth",
-            default_value=0.4,
+            default_value=hatch_hinges.PILOT_DEPTH / 10,
             tool_tip="Depth of the pilot holes in the hatch.",
             units=units,
         )
