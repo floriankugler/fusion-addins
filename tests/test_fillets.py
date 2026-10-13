@@ -3,7 +3,7 @@
 import math
 
 import pytest
-from shapely.geometry import Point, Polygon
+from shapely.geometry import Point, Polygon, box
 
 from lang import *
 from lang.core.contact import contacts
@@ -406,3 +406,52 @@ def test_a_chamfer_must_be_smaller_than_what_it_bevels():
         panel.chamfer(panel.top.outline, 14)
 
 
+def test_a_chamfer_must_be_smaller_than_the_wall_it_bevels():
+    """Found compiling fuzz boards in Fusion: a 13 mm chamfer along an edge
+    of a 24 mm board, whose wall a pocket from the other face had lowered
+    to 4.4 mm all along, could not be cut. Where a pocket, hole or V-groove
+    from the other face runs out under a chamfer's rim, the wall there is
+    the thickness less its depth, and the chamfer must be smaller; one
+    through the board leaves no wall (the chamfer stops at it), and one
+    that stops short of the rim leaves the wall whole."""
+    m, panel = _panel()                                         # 15 thick, front at x = 0, left at y = 0
+    with m:
+        panel.add_pocket(panel.bottom, Shape(box(-5, 30, 40, 70)), 12, name="tray")    # runs out at the front
+        with pytest.raises(LangError, match=r"^m\.panel: chamfer: 4 mm along the edge front\.top must be smaller "
+                                            r"than the wall it bevels: the pocket 'tray' from the other face leaves "
+                                            r"3 of it\.$"):
+            panel.chamfer(panel.front.top, 4)
+        with pytest.raises(LangError, match="along the top face's outline must be smaller than the wall"):
+            panel.chamfer(panel.top.outline, 3)
+        with pytest.raises(LangError, match="along the hole 'pin' must be smaller than the wall"):
+            panel.add_hole(panel.top, (40, 50), 10, 5, name="pin", chamfer=4)      # its rim over the tray's
+        panel.add_cut(Shape(box(100, 150, 200, 250)), name="window")
+        panel.add_vgroove(panel.bottom, (195, 100), (195, 300), 12)                     # under the window's back
+        with pytest.raises(LangError, match="along the cut 'window' must be smaller than the wall it bevels: a "
+                                            "vgroove"):
+            panel.chamfer(panel.window, 4)
+        panel.chamfer(panel.front.top, 2.9)                    # smaller than the 3 left
+        panel.add_pocket(panel.bottom, Shape(box(100, -5, 140, 20)), through)          # leaves no wall
+        panel.chamfer(panel.left.top, 4)
+        panel.add_pocket(panel.bottom, Shape(box(100, 380, 140, 395)), 12)             # stops short of the rim
+        panel.chamfer(panel.right.top, 4)
+    assert [op.what for op in panel.ops if isinstance(op, Chamfer)] == ["front.top", "left.top", "right.top"]
+
+
+def test_a_chamfer_along_an_edge_that_is_gone_is_refused():
+    """Found in Fusion, checking the chamfer fuzzing's finding: corners
+    rounded with half the board's width take all of the edge between them,
+    and a chamfer along it was accepted; Fusion found no edge to chamfer and
+    the preview bevelled the rounded end. A cut can take an edge away as
+    well."""
+    with module("m", Box.from_size(width=30, depth=100, height=50)) as m:
+        panel = board("panel", ply15).on(m.bottom).show(m.top)
+        panel.fillet([panel.front.left, panel.front.right], 15)
+        with pytest.raises(LangError, match=r"^m\.panel: chamfer: nothing is left of the edge front\.top; what was "
+                                            r"made before took it all\.$"):
+            panel.chamfer(panel.front.top, 2)
+        panel.add_cut(Shape(box(90, -1, 101, 31)))
+        with pytest.raises(LangError, match="nothing is left of the edge back.top"):
+            panel.chamfer(panel.back.top, 2)
+        panel.chamfer(panel.left.top, 2)
+    assert [op.what for op in panel.ops if isinstance(op, Chamfer)] == ["left.top"]

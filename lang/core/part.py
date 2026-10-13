@@ -57,7 +57,7 @@ from .contours import Contour, ContourLimit, ContourLimits, as_contour_limit
 from .directions import AXES, Axis, Direction, ExtentName, InnerOuter
 from .errors import LangError, one_of
 from .faces import Anchor, Edge, Face, Operation, Outline
-from .geometry import clean, parts_of, polygons_of
+from .geometry import NARROWEST, clean, parts_of, polygons_of
 from .layout_types import (ChamferLayout, CutLayout, EdgeOpLayout, HoleLayout, OpLayout,
                            PartLayout, PocketLayout, Rings, VGrooveLayout)
 from .material import Material
@@ -625,6 +625,11 @@ class Board:
             self._check_chamfer(inner.size if isinstance(inner, Chamfer) else inner.chamfer, "chamfer")
         if isinstance(inner, (Cut, Pocket, Hole)) and inner.chamfer > 0:
             self._check_chamfer_depth(inner.chamfer, self._depth_of(inner), self._label(inner, name))
+            if not isinstance(op, EdgeOp):
+                face = self.show_face.world_name if isinstance(inner, Cut) else inner.face
+                rim = (inner.shape.geometry if isinstance(inner, (Cut, Pocket))
+                       else cutout_geometry.circle_geometry((inner.u, inner.v), inner.d / 2)).boundary
+                self._check_chamfer_wall(inner.chamfer, rim, face, self._label(inner, name))
         if self._cutouts and not isinstance(op, Chamfer):
             footprint = self._footprint(op)
             for cutout, opening in self._cutouts:
@@ -652,6 +657,33 @@ class Board:
         """How deep an operation goes into the face it is cut from: a cut
         and a hole or pocket through, the board's thickness."""
         return self.thickness if isinstance(op, Cut) else min(op.depth, self.thickness)
+
+    def _edge_rim(self, edge: Edge) -> BaseGeometry:
+        """Where an edge of a big face runs, in the outline's frame: the
+        outline's boundary along the edge's narrow face."""
+        narrow = (edge.b if edge.a.is_big else edge.a).direction
+        b = self.box()
+        value = b.hi[narrow.axis] if narrow.sign > 0 else b.lo[narrow.axis]
+        line = (LineString([(value, -1e9), (value, 1e9)]) if narrow.axis == self.u_axis
+                else LineString([(-1e9, value), (1e9, value)]))
+        return self.outline.geometry.boundary.intersection(line.buffer(1e-6))
+
+    def _check_chamfer_wall(self, size: float, rim: BaseGeometry, face: str, what: str) -> None:
+        """An error for a chamfer along `rim` on the big face `face` as deep
+        as the wall it bevels, or deeper, where a pocket, hole or V-groove
+        from the other face runs out under the rim and leaves the wall only
+        the thickness less its depth high (one through the board leaves no
+        wall there: the chamfer stops at it) [found compiling fuzz boards in
+        Fusion, 2026-10-13: a 13 mm chamfer along an edge whose wall a pocket
+        from the other face had lowered to 4.4 could not be cut]."""
+        rim = rim.intersection(self.outline.geometry)
+        for op in self.ops:
+            if isinstance(op, (Pocket, Hole, VGroove)) and op.face != face \
+                    and self.thickness - size - 1e-9 <= op.depth < self.thickness - 1e-9 \
+                    and self._footprint(op).intersection(rim).length > 1e-6:
+                raise LangError(f"chamfer: {size:g} mm along {what} must be smaller than the wall it bevels: "
+                                f"{self._label(op, op.name)} from the other face leaves {self.thickness - op.depth:g} "
+                                f"of it.", self.path)
 
     def _check_chamfer_depth(self, size: float, depth: float, what: str) -> None:
         """An error for a chamfer as deep as what it bevels, or deeper:
@@ -936,12 +968,19 @@ class Board:
         if isinstance(what, Edge):
             if what.part is not self:
                 raise LangError(f"chamfer(): {what!r} is not an edge of this board.", self.path)
+            if self._edge_rim(what).length <= NARROWEST:
+                raise LangError(f"chamfer: nothing is left of the edge {what.name}; what was made before took it "
+                                f"all.", self.path)
             self._check_chamfer_depth(size, self.thickness, f"the edge {what.name}")
+            big = what.a if what.a.is_big else what.b
+            self._check_chamfer_wall(size, self._edge_rim(what), big.world_name, f"the edge {what.name}")
             self._record(Chamfer(what.world_name, size, what.a.world_name), None)
         elif isinstance(what, Outline):
             if what.face.part is not self:
                 raise LangError(f"chamfer(): {what.face!r} is not a face of this board.", self.path)
             self._check_chamfer_depth(size, self.thickness, "the board (its outline)")
+            self._check_chamfer_wall(size, self.outline.geometry.boundary, what.face.world_name,
+                                      f"the {what.face.name} face's outline")
             self._record(Chamfer("outline", size, what.face.world_name), None)
         elif isinstance(what, VGroove):
             raise LangError("chamfer(): a V-groove has no rim to chamfer; its flanks are 45 degrees already.",
@@ -953,6 +992,8 @@ class Board:
             depth = what.op.depth if isinstance(what, EdgeOp) else self._depth_of(what)
             self._check_chamfer_depth(size, depth, self._label(what, name))
             face = self.show_face.world_name if isinstance(what, Cut) else what.face
+            if not isinstance(what, EdgeOp):
+                self._check_chamfer_wall(size, self._footprint(what).boundary, face, self._label(what, name))
             self._record(Chamfer(name, size, face), None)
         else:
             raise LangError(f"chamfer() takes edges, outlines and operations themselves, not {what!r}.", self.path)
