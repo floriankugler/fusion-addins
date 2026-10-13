@@ -312,9 +312,9 @@ def test_settings_the_add_ins_dialog_refuses(make: Any, message: str):
 #: module `cab` (BOX in the van's terms, its left side 15 thick behind a
 #: 12 mm door), and the reason it gives.
 REFUSED: list[tuple[str, str]] = [
-    # the door's edge must leave room for end=, then for two hinges more than 42 apart
+    # the door's edge must leave room for end=, then for two hinges more than 42 apart (and 56.2, below)
     ("short door", "the door's hinged edge (120 mm) is too short for hinges 60 mm from its ends."),
-    ("door for one hinge", "too short for 2 hinges more than 42 mm apart"),
+    ("door for one hinge", "too short for 2 hinges at least 56.2 mm apart"),
     # the door holes must land on the door, the carcass holes on the carcass board
     ("narrow door", "the door hole (10 mm) does not fit on cab.door's back face"),
     ("shallow carcass", "the pilot hole (3.2 mm) does not fit on cab.strip's left face"),
@@ -435,3 +435,24 @@ def test_the_plus_3_hinge_stands_on_the_plate_the_lib_says():
     assert raised == 3
     assert HINGE_SHAPES["Blum CLIP top 110 Thin +3"] == HINGE_SHAPES["Blum CLIP top 110 Thin +0"].raised(raised)
     assert HINGE_SHAPES["Blum CLIP top 110 Thin +3"].plate[0] == (0.0, 11.5)
+
+
+def test_hinges_closer_than_their_plates_are_long_are_refused():
+    """Found by fuzzing: hinges 42 to 56.2 mm apart pass the add-in's rule,
+    whose hole pairs then just clear each other, but their mounting plates,
+    56.2 long, meet; the layout check reported it. Refused [Florian,
+    2026-10-13]: 50 apart is refused, 56.2 apart fits."""
+    for height, fits in ((170, False), (176.2, True)):       # 60 from the ends: 50 and 56.2 apart
+        registry.reset()
+        with module("cab", BOX) as cab:
+            side = board("side", ply15).on(cab.left).between(cab.front.into(12))
+            door = board("door", ply12).on(cab.front).between(cab.bottom, cab.bottom + height)
+            if fits:
+                cab.mount(ConcealedHinge(), door=door, carcass=side)
+                assert build_layout()["problems"] == []
+                continue
+            with pytest.raises(LangError, match=r"^cab\.door: Blum CLIP top 110 Thin \+0: the door's hinged edge "
+                                                r"\(170 mm\) is too short for 2 hinges at least 56\.2 mm apart, 60 mm "
+                                                r"from its ends: their mounting plates would meet\.$"):
+                cab.mount(ConcealedHinge(), door=door, carcass=side)
+            assert door.ops == [] and side.ops == [] and cab.hardware == []

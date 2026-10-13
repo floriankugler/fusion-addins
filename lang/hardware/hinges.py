@@ -28,8 +28,9 @@ the door's middle lies within).
   van's terms number them alike: bodies `hinge_1`, `hinge_2`, ...
 
 Refused as the add-in refuses: an end distance under 27 mm (its dialog's
-smallest), hinges 42 mm apart or closer (their hole pairs would meet), a
-door and carcass board that are one board, and holes that do not fit on
+smallest), hinges closer than their mounting plates are long, 56.2 mm (the
+add-in refuses 42 or closer, where their hole pairs meet; the plates meet
+before, Florian 2026-10-13), a door and carcass board that are one board, and holes that do not fit on
 their face (`Board.hole_fits`: off the board, over its edge, or in a hole
 or pocket made before), or as deep as the board is thick. The add-in's
 edges are boards here, so the door and the carcass board must stand
@@ -90,6 +91,13 @@ class HingeShape:
 
     def boxes(self) -> dict[str, HingeBox]:
         return {"cup": self.cup, "arm": self.arm, "clip": self.clip, "plate": self.plate}
+
+    @property
+    def length(self) -> float:
+        """How long the hinge is along the edge, centred on its centre: the
+        mounting plate's 56.2 for the CLIP top. Two hinges closer than this
+        meet."""
+        return 2 * max(max(abs(a), abs(b)) for _, _, (a, b) in self.boxes().values())
 
     def raised(self, height: float) -> HingeShape:
         """The hinge on a plate `height` higher: the plate that much taller,
@@ -264,10 +272,13 @@ class ConcealedHinge:
             raise LangError(f"{self.name}: the door's hinged edge ({mm(length)}) is too short for hinges "
                             f"{mm(self.end)} from its ends.", door.path)
         values = [lo + s for s in spread(length, self.count, self.end)]
-        if values[1] - values[0] <= 2 * data.HINGE_HALF_EXTENT + TOLERANCE:
+        # (the add-in's rule is the hole pairs', 42; their mounting plates meet up to 56.2 [found by
+        # fuzzing, refused by Florian 2026-10-13])
+        apart = max(2 * data.HINGE_HALF_EXTENT, HINGE_SHAPES[self.name].length)
+        if values[1] - values[0] < apart - TOLERANCE:
             raise LangError(f"{self.name}: the door's hinged edge ({mm(length)}) is too short for {self.count} "
-                            f"hinges more than {mm(2 * data.HINGE_HALF_EXTENT)} apart, {mm(self.end)} from its "
-                            "ends.", door.path)
+                            f"hinges at least {mm(apart)} apart, {mm(self.end)} from its ends: their mounting "
+                            "plates would meet.", door.path)
         return [Pos(m.along, v) for v in (values if m.order > 0 else values[::-1])]
 
     def _holes(self, m: _Meeting, stations: list[Pos]) -> tuple[list[_Hole], list[_Hole]]:
