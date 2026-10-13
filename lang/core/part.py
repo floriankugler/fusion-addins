@@ -1231,9 +1231,9 @@ class Board:
                                     self.path)
 
     def _check_pinched(self, pieces: list[Polygon]) -> None:
-        """An error for an opening that touches itself at a point, within a
-        micrometre: snapped to a micrometre it falls in pieces or gains a
-        hole. Fusion makes no surface of such a profile [found by fuzzing, a
+        """An error for an opening that touches itself at a point, within
+        `_PINCH` (a nanometre): snapped to that grid it falls in pieces or
+        gains a hole. Fusion makes no surface of such a profile [found by fuzzing, a
         pocket cutout pinched by the material kept around a pocket, 1e-14
         across: "Cover failed to make a surface", 2026-10-12]."""
         u, v = self.u_axis, self.v_axis

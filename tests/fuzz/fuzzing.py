@@ -375,7 +375,7 @@ def fit_problems(ring: Sequence[Point2], circles: Sequence[Circle] | None, slack
     vertices on a circle drawn as a fan of lines. Without `circles` (a
     layout's rings, whose circles are not known), only whether the curves
     join up and the drawn ring does not cross itself.
-    Lines shorter than a micrometre are fine: the emitter leaves them out."""
+    Lines shorter than a nanometre (1e-6 mm) are fine: the emitter leaves them out."""
     problems: list[str] = []
     curves = fit(ring)
     if not curves:
@@ -400,7 +400,7 @@ def fit_problems(ring: Sequence[Point2], circles: Sequence[Circle] | None, slack
 
 
 def degenerate(ring: Sequence[Point2]) -> bool:
-    """Whether the ring passes a point twice, give or take a micrometre,
+    """Whether the ring passes a point twice, give or take a nanometre,
     turns back on itself, or is a sliver: a hairline spike a boolean left
     (a circle added and taken away again), which no drawing of it can keep
     apart. Open (2026-10-12): whether the
@@ -426,6 +426,15 @@ def degenerate(ring: Sequence[Point2]) -> bool:
         if abs(math.atan2(ax * by - ay * bx, ax * bx + ay * by)) > math.radians(178):
             return True
     return False
+
+
+def hairline(poly: Polygon) -> bool:
+    """Whether two rings of the polygon come within a nanometre of each
+    other: a wall of no thickness, which a boolean leaves where a band is
+    cut across a shape exactly as tall as it (a hole whose edges lie on the
+    outline's, instead of two pieces). Open (2026-10-12), as `degenerate`."""
+    rings = [poly.exterior, *poly.interiors]
+    return any(a.distance(b) < 1e-6 for i, a in enumerate(rings) for b in rings[i + 1:])
 
 
 def _covered(p: Point2, center: Point2, radius: float, curves: Sequence[Curve2]) -> bool:
