@@ -417,7 +417,15 @@ proposed]
   only reported that it found no edge. `.chamfer()` takes a list too.
   A chamfer is 0 (none) or at least 0.01 mm (`ops.MIN_CHAMFER`), however it
   is made [Florian, 2026-10-13]: Fusion failed on fuzz boards' chamfers of
-  6e-5 mm.
+  6e-5 mm. A list is chamfered whole or not at all. A chamfer must be
+  smaller than the depth of what it bevels (a pocket's or a hole's depth,
+  the thickness for an edge, an outline or a cut's rim), and smaller than
+  the wall it bevels where a pocket, hole or V-groove from the other face
+  runs out under its rim and leaves the wall the thickness less its depth
+  (one through the board leaves no wall there, and the chamfer stops at
+  it). A chamfer along an edge that is gone (corners rounded with half the
+  board's width, a cut across all of it) is an error. [found by fuzzing
+  and in Fusion, 2026-10-13; see the status at the end]
 - **Roundovers** are not modeled. [decided]
   They can be a note on an edge that shows up on labels and work lists. [proposed]
 - Corner radii are properties of the 2D shape, so a pocket's inside corner equals
@@ -1136,7 +1144,9 @@ proposed]
   (`tool=0`) gets them in its notches and gaps. A floor's corner next to
   a higher island is not an inside corner (its wall goes up). Holes count
   as round regions; V-grooves, chamfers and operations on narrow faces do
-  not count. A corner through the board is relieved once, from the face
+  not count, and neither does a vertex with an edge shorter than 0.01 mm
+  (nothing narrower is meant). Reliefs come in the order of the operations
+  they belong to, then by face and depth, however the board lies. A corner through the board is relieved once, from the face
   on which it starts deepest. A relief that splits the board is an error
   (`_cut_through`); a relief at a sharp cutout corner (`radius=0`) leaves
   the opening out of its shape, so the cutout's check for operations in
@@ -2423,6 +2433,56 @@ refused a bay exactly deep enough where its depth rounded 1e-14 short at a
 far origin; it is compared within the tolerance now. The Fusion batch
 check builds hardware too (`fusion_batch.py hardware`): 36 cabinets, 198
 parts and 36 hardware items, every body as the preview's, no problems.
+
+2026-10-13, fuzzing `dogbones()` and `chamfer()` (`tests/fuzz/corners.py`):
+the board fuzz's boards (outlines, holes, pockets, cuts, notches,
+V-grooves, rounded corners) given dog bones (any tool and relief, `at=`
+or not), chamfers on corners through the board, or rim chamfers along
+edges, outlines and operations, each built twice, lying two ways at two
+places, must come out the same in the board's own frame (differences
+narrower than 0.01 mm all over are noise: where three boundaries meet
+within that, another frame settles it either way). Dog bones leave no
+inside corner they saw unrelieved, each as deep as its wall, each relief
+within its disc; a corner chamfer cuts off its triangle and nothing else;
+rim chamfers take no more than their size along the rims; a refusal
+changes nothing. Found and fixed: a list of chamfers with a refused item
+kept the items before it; a corner rounded or chamfered on the outline
+redrew all of it and moved the vertices of the arcs elsewhere (they stay
+now); dog bones with relief 0 left corners unrelieved (the circle through
+the corner, drawn on whole degrees, missed it by its sagitta); vertices
+with an edge under 0.01 mm got reliefs, and slivers and spikes the
+booleans left in a level made corners; reliefs came in another order when
+the board lay otherwise; chamfers as deep as what they bevel or deeper,
+and a through pocket that took all of the board, were accepted. The
+Fusion batch (`fusion_batch.py corners`) then failed two of 45 boards
+(each drawn twice): the same V-groove made twice, the second finding
+nothing to cut, and a 13 mm chamfer along a short edge between rounded
+corners, whose wall a pocket from the other face had lowered to 4.4 mm
+all along. Now refused: a pocket or V-groove wholly in what was cut from
+its face before, as deep, or through; and a chamfer deeper than the wall
+where something from the other face runs out under its rim. Tried by hand
+in Fusion first: it chamfers over a pocket from the other face near the
+rim but not under it (allowed), over one that lowers the wall in part
+(refused too, the simpler rule), over openings through the board (allowed:
+it stops at them), along edges between rounded corners at any size, but
+not along a cut's side lowered all along. That also showed a chamfer
+along an edge that rounded corners had taken away entirely accepted
+(Fusion found no edge, the preview bevelled the round), now an error.
+Then two batches of 42 boards each: no problems, every body as the
+preview's. The long run found the check's own slip (a cut's chamfer is on
+the show face, by default the second big face lying flat and the first on
+the back; the check shows the first now) and, checking the hardware, a
+top between two sides with no room built at one place, 3.5e-15 mm wide
+from rounding, and refused at another: a board narrower than 0.01 mm is
+an error now. Again: `clean` left a spike 0.07 mm out and back to a point
+1e-12 from where it left (it took only spikes under a nanometre where
+the points either side coincide), and the vertex beside it made a 43
+degree corner at one place of the board only; such a spike goes now,
+however long. And a through relief, kept to its own level, can take the
+corner of a shallower pocket beside it down with it: that corner,
+relieved as deep as it was, is there again, deeper, a corner the call
+made, which a second `dogbones()` relieves (left so: the reliefs are the
+corners' at the call).
 
 1. `core`: the position algebra, box, board with `on`, `between` and `center`,
    scopes and paths, and layout JSON output with world transforms. With unit
