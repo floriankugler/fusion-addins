@@ -252,6 +252,27 @@ def test_pocket_depth_to_face():
         left.pocket(rect(depth=10, height=10), at=left.inner.center, depth=to(left.front))
 
 
+def test_a_board_with_no_room_is_refused_wherever_the_module_lies():
+    """Found by fuzzing the hardware: a top between two 20 mm sides in a
+    40 mm box has no room, but with the box from 0.84 its extent came out
+    20.84 to 20.840000000000003 and the board was built, 3.5e-15 mm wide.
+    No board narrower than 0.01 mm is meant."""
+    ply20 = material("birch", t=20)
+    for name, y in (("at0", 0.0), ("at084", 0.84)):
+        with module(name, Box.from_size(width=40, depth=300, height=400, origin=(0, y, 0))) as m:
+            left = board("left", ply20).on(m.left)
+            right = board("right", ply20).on(m.right)
+            top = board("top", ply15).on(m.top).between(left, right)
+        with pytest.raises(LangError, match=r"top: extent on y is not positive"):
+            top.box()
+    with module("narrow", Box.from_size(width=40.005, depth=300, height=400)) as m:
+        left = board("left", ply20).on(m.left)
+        right = board("right", ply20).on(m.right)
+        top = board("top", ply15).on(m.top).between(left, right)
+    with pytest.raises(LangError, match=r"top: extent on y is 0\.005 mm, less than 0\.01 \(20 to 20\.005\)\.$"):
+        top.box()
+
+
 def test_shapes_name_their_plane():
     cab = carcass()
     left, bottom = cab["left"], cab["bottom"]

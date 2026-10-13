@@ -310,8 +310,12 @@ class Board:
             a, b = self._extent(axis, scope_box, shape, contours, used)
             a += self._inset
             b -= self._inset
-            if b <= a:
-                raise LangError(f"extent on {axis} is not positive ({a:g} to {b:g}).", self.path)
+            if b - a < NARROWEST:
+                # (no board narrower than 0.01 mm is meant, and one of nothing between two
+                # sides came out 3.5e-15 wide at some places, 20.84 to 20.840000000000003
+                # [found by fuzzing the hardware, 2026-10-13])
+                size = "not positive" if b - a <= 1e-9 else f"{b - a:g} mm, less than {NARROWEST:g}"
+                raise LangError(f"extent on {axis} is {size} ({a:g} to {b:g}).", self.path)
             lo[axis], hi[axis] = a, b
         self._check_limits_used(used, t_axis)
         if shape is not None:
