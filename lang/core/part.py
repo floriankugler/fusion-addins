@@ -121,6 +121,10 @@ class Board:
         self._named_ops: dict[str, Op] = {}
         #: The openings of the cutouts made so far, by operation name.
         self._cutouts: list[tuple[str, BaseGeometry]] = []
+        #: The operations joins made: a join may go across them (screws in
+        #: the tenons' gaps, a drawer's floor past a box joint's reliefs),
+        #: not across others (`taken_in`).
+        self._joined: list[Op] = []
         #: Notes for the layout's problems, such as cutout pieces left out.
         self.notes: list[str] = []
 
@@ -1275,6 +1279,27 @@ class Board:
                 return name
         return None
 
+    def taken_in(self, area: BaseGeometry, face: Face | None = None, end: Face | None = None) -> str | None:
+        """An operation no join made that took this board's material in
+        `area` (in the outline's frame), described, or None: with `face`, a
+        big face, what it took from that face (`_taken_from`); with `end`, a
+        narrow face, a pocket, hole or V-groove from either big face or an
+        operation into `end`."""
+        for op in self.ops:
+            if any(o is op for o in self._joined):
+                continue
+            if face is not None:
+                taken = self._taken_from(face, [op])
+            elif isinstance(op, EdgeOp):
+                taken = [self._footprint(op)] if end is not None and op.face == end.world_name else []
+            else:
+                taken = [self._footprint(op)] if isinstance(op, (Pocket, Hole, VGroove)) else []
+            if any(g.intersection(area).area > 1e-6 for g in taken):
+                inner = op.op if isinstance(op, EdgeOp) else op
+                name = None if isinstance(inner, Chamfer) else inner.name
+                return f"the {inner.kind} {name!r}" if name else f"a {inner.kind}"
+        return None
+
     def dogbones(self, tool: float = 6.0, relief: float = 0.1,
                  at: DogBoneTarget | Sequence[DogBoneTarget] | None = None) -> Self:
         """Dog bones in every inside corner of the board, as the
@@ -1509,17 +1534,19 @@ class Board:
             for board, state in saved:
                 board._restore(state)
             raise
+        for board, state in saved:
+            board._joined += [op for op in board.ops if not any(op is o for o in state.ops)]
         return self
 
     def _state(self) -> _BoardState:
         """What operations and joins change, for `join()` to restore; it
         resolves the placement, which a join needs anyway."""
         return _BoardState(list(self.ops), dict(self._named_ops), self.outline, list(self._cutouts),
-                           list(self.notes))
+                           list(self.notes), list(self._joined))
 
     def _restore(self, state: _BoardState) -> None:
         self.ops, self._named_ops, self._outline = list(state.ops), dict(state.named_ops), state.outline
-        self._cutouts, self.notes = list(state.cutouts), list(state.notes)
+        self._cutouts, self.notes, self._joined = list(state.cutouts), list(state.notes), list(state.joined)
 
     # -- block form -------------------------------------------------------------------------------
 
@@ -1630,6 +1657,7 @@ class _BoardState:
     outline: Shape | None
     cutouts: list[tuple[str, BaseGeometry]]
     notes: list[str]
+    joined: list[Op]
 
 
 def board(name: str, material: Material, shape: Shape | None = None) -> Board:

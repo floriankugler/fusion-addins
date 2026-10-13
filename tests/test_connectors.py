@@ -58,6 +58,35 @@ def test_a_notched_end_meets_in_two_places():
     assert [(c.lo, c.hi) for c in found] == [(0, 200), (300, 500)]
 
 
+
+def test_a_board_meeting_another_across_a_pocket_made_before_is_an_error():
+    """Found in the Fusion batch check of the fuzzed joints: a 6 mm side
+    pocketed 4.5 deep where a shelf meets it; screws in the tenons' gaps
+    went through the 1.5 mm the pocket left, their countersink through
+    that, which Fusion could not cut, and bridged the pocket. A board may
+    not meet another across a pocket, hole or V-groove made before, in the
+    face it lies on or in its own end [Florian, 2026-10-13]; one made by a
+    join, or after it, is fine."""
+    from shapely.geometry import box
+    cab, p = carcass()
+    left, right, bottom, top = p["left"], p["right"], p["bottom"], p["top"]
+    with cab:
+        left.add_pocket(left.inner, Shape(box(200, 0, 300, 10)), 5, name="recess")
+        right.hole(5, at=right.inner.front(250).bottom(7.5), depth=through, name="through")
+        top.add_pocket(top.bottom, Shape(box(200, 15, 300, 40)), 5, name="groove")    # out through its left end
+        before = state(left, right, bottom, top)
+        with pytest.raises(LangError, match=r"cab\.left: cab\.bottom meets this board across the pocket 'recess', "
+                                            r"which was made before: make it after the join\."):
+            bottom.join(left, using=domino("4x20", count=2))
+        with pytest.raises(LangError, match=r"cab\.right: cab\.bottom meets this board across the hole 'through'"):
+            bottom.join(right, using=domino("4x20", count=2))
+        with pytest.raises(LangError, match=r"^cab\.top: domino with cab\.left: this board meets cab\.left with its "
+                                            r"end across the pocket 'groove'"):
+            top.join(left, using=domino("4x20", count=2))
+        assert state(left, right, bottom, top) == before
+        top.join(right, using=domino("4x20", count=2))
+        right.pocket(rect(depth=50, height=10), at=right.inner.top, depth=5)       # after the join
+
 def _divider() -> tuple[Scope, dict[str, Board]]:
     """The carcass with a divider between the bottom and the top, its lower
     end notched 100 deep in the middle: it meets the bottom twice, x 0..200

@@ -9,8 +9,13 @@ it. That is exact for the outlines (through cuts included); pockets are not
 taken into account. An end interrupted by a notch meets the other board in
 several places, one contact each. A board meeting the other across an
 opening of a cutout made before is an error: the cutout should have kept
-material there. A contact narrower than `geometry.NARROWEST` either way
-is none: nothing so narrow is meant, it is what a boolean left.
+material there. So is one meeting it across a pocket, hole or V-groove
+made before, in the face it lies on or in its own end, unless a join
+made it: joins go across each other's, as screws in the tenons' gaps do
+and a drawer's floor in its groove past a box joint's reliefs [Florian,
+2026-10-13]. A contact narrower than
+`geometry.NARROWEST` either way is none: nothing so narrow is meant, it
+is what a boolean left.
 """
 from __future__ import annotations
 
@@ -103,6 +108,21 @@ def contacts(edge_on: Board, face_on: Board, tolerance: float = 1e-6) -> list[Co
                 # away, it would share material with the board [found by
                 # fuzzing, 2026-10-13])
                 continue
+            taken = face_on.taken_in(piece, face=face)
+            if taken is not None:
+                # (screws in a tenons' gap went through what a pocket there
+                # left of a 6 mm side, 1.5 mm, their countersink through
+                # that [found in the Fusion batch check, 2026-10-13])
+                raise LangError(f"{edge_on.path} meets this board across {taken}, which was made before: make "
+                                "it after the join.", face_on.path)
+            # the edge-on board's end, a hair deep: what reaches it there
+            depth = (plane - NARROWEST, plane) if sign > 0 else (plane, plane + NARROWEST)
+            strip = {axis: bounds[axis], normal: depth}
+            eu, ev = edge_on.u_axis, edge_on.v_axis
+            taken = edge_on.taken_in(shapely_box(strip[eu][0], strip[ev][0], strip[eu][1], strip[ev][1]), end=end)
+            if taken is not None:
+                raise LangError(f"this board meets {face_on.path} with its end across {taken}, which was made "
+                                "before: make it after the join.", edge_on.path)
             found.append(Contact(edge_on, face_on, end, face, axis, bounds[axis][0], bounds[axis][1],
                                  bounds[across][0], bounds[across][1]))
     found.sort(key=lambda c: c.lo)
