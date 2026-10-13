@@ -423,8 +423,10 @@ def _curve(piece: _Piece, at: Callable[[int], Point2], n: int) -> Curve2:
     if piece.j - piece.i >= n:
         return Circle2(center, radius)
     mid = at((piece.i + piece.j) // 2)
-    # The circle through the arc's ends and middle is the best estimate.
-    better = _circumcircle(a, mid, b)
+    # The circle through the arc's ends and middle is the best estimate;
+    # an arc that ends where it starts (a ring touching itself there) has
+    # two points for it, and keeps the circle it was grown on.
+    better = _circumcircle(a, mid, b) if math.dist(a, b) > TOLERANCE else None
     if better is not None:
         center, radius = better
     return Arc2(a, mid, b, center, radius)

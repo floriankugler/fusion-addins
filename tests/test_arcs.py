@@ -263,3 +263,19 @@ def test_a_line_running_into_an_arc_tangentially_is_no_chord_of_it():
     shape = orient(notched, 1.0)
     curves = _joined_and_simple([(float(x), float(y)) for x, y in list(shape.exterior.coords)[:-1]])
     assert Line2((150, 100), (146, 100)) in curves
+
+
+def test_an_arc_that_ends_where_it_starts_keeps_its_circle():
+    """Found by fuzzing: a disc with a disc half its size taken out where
+    it touches the rim from inside, and a disc in the middle added; the
+    ring passes the point they touch at twice, and the big circle's arc
+    runs from it all the way round back to it. Its circle, estimated
+    through its ends and middle, which are two points, came out with a
+    radius of 2.3 instead of 2."""
+    from shapely.geometry.polygon import orient
+    from lang.core.cutouts import circle_geometry
+    shape = circle_geometry((0, 0), 2).difference(circle_geometry((0, 1), 1)).union(circle_geometry((0, 0), 1))
+    assert isinstance(shape, Polygon)
+    ring = [(float(x), float(y)) for x, y in list(orient(shape, 1.0).exterior.coords)[:-1]]
+    radii = sorted(round(c.radius, 9) for c in fit(ring) if isinstance(c, Arc2))
+    assert radii == [1.0, 1.0, 1.0, 2.0]
