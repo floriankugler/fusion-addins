@@ -2391,6 +2391,35 @@ the pair check meanwhile tenons the tool could not cut (gaps and tenons
 narrower than it), now errors too; the fuzz checks look for both from the
 outside.
 
+2026-10-13, fuzzing the hardware (`tests/fuzz/hardware.py`): random
+cabinets in the examples' shapes (a carcass and an overlay or inset door,
+a removable panel over the edges or set in, a lift-up hatch, a floor or
+back panel with an inspection opening, a drawer bay) with concealed
+hinges, latches, sliding brackets, hatch hinges, ball catches or slides,
+their sizes and settings drawn from their ranges and a little beyond. Each
+is built twice, facing two sides of its box (`cabinet(front=)`) at two
+places, and what the hardware drills and places, measured from the
+cabinet's own front, left and bottom, must come out the same; a refusal
+must be one both ways and change nothing; every hole lies on its face,
+clear of what was there and of the mount's other holes, a blind one short
+of the far face; nothing bought reaches into the boards it is mounted on
+(`no_interference`; hardware meeting itself or a third board is the
+build's spacing, which the check reports); stations are `lib.stations`'.
+Found: three mounts checked each hole against what was there before but
+not against their other holes, so latches close together, ball catches
+facing each other across a narrow opening and the two hatch hinges in a
+narrow cabinet drilled into each other, or were refused by the core
+halfway with the first holes drilled; each now refuses before it drills
+(latches or catches whose holes meet, hatch hinges whose mounting plates
+meet). Open, for Florian: the Pull Lock 44's pawl box lies 20.4 to 33
+behind the door's front, 2.5 mm outside the counterbore, so on a door
+thicker than 20.4 it reaches into the door (marked known); hinges 42 to 56
+mm apart pass the add-in's rule but their 56 mm plates meet, which the
+check reports (refuse them?); ball catches are numbered along the
+opening's outline as the world has it, not from the left or the bottom as
+the other hardware (number them alike?). The Fusion batch check builds
+hardware too (`fusion_batch.py hardware`).
+
 1. `core`: the position algebra, box, board with `on`, `between` and `center`,
    scopes and paths, and layout JSON output with world transforms. With unit
    tests. [done]
