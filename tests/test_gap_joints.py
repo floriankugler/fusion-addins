@@ -37,6 +37,29 @@ def test_screws_through_the_side_into_the_end():
     assert shelf.ops == [] and len(_holes(right, "screw_shelf_")) == 3
 
 
+
+def test_a_countersink_must_lie_on_the_face_it_is_sunk_into():
+    """Found in the Fusion batch check of the fuzzed joints: 4 mm screws
+    into a 4 mm divider flush with the side's front edge; their
+    countersinks, 8.4 across, reached 2.2 past that edge, and Fusion could
+    not cut them. A countersink reaching past its board's edge is an
+    error; without one, or 10 in from the edge, the screws are fine."""
+    with module("unit", Box.from_size(width=600, depth=300, height=800)) as u:
+        left = board("left", ply15).on(u.left)
+        thin = material("birch", t=4)
+        flush = board("flush", thin).on(Pos("x", 0), toward=u.back).between(left, Pos("y", 300), Pos("z", 100),
+                                                                              Pos("z", 300))
+        before = [list(left.ops), list(flush.ops)]
+        with pytest.raises(LangError, match=r"^unit\.flush: screws with unit\.left: at z=150, the countersink "
+                                            r"\(8\.4 mm across\) would not lie on unit\.left's left face: it reaches "
+                                            r"past its edge"):
+            flush.join(left, using=screws(count=2, end=50, countersink=True))
+        assert [list(left.ops), list(flush.ops)] == before
+        flush.join(left, using=screws(count=2, end=50))
+        inset = board("inset", thin).on(Pos("x", 10), toward=u.back).between(left, Pos("y", 300), Pos("z", 400),
+                                                                               Pos("z", 600))
+        inset.join(left, using=screws(count=2, end=50, countersink=True))
+
 def test_screws_and_cabineos_in_the_gaps_between_tenons():
     u, left, _, shelf = _unit()
     t = tenons(count=2, width=50, margin=50)      # tenons 50..100 and 200..250: gaps 50, 100, 50

@@ -17,7 +17,10 @@ top flush with the sides' top: the tenon board is drilled from that open
 face, and the screw is driven on into the other board.
 
 As the tenons_native add-in's screws: 4 mm, 12 from the tenons' edges, a
-90 degree countersink twice the screw plus 0.4 wide.
+90 degree countersink twice the screw plus 0.4 wide. A countersink must
+lie on the face it is sunk into, as hardware's holes do (`Board.hole_fits`):
+one reaching past the board's edge, or into what was cut there, is an
+error.
 """
 from __future__ import annotations
 
@@ -33,8 +36,8 @@ from ..core.contact import Contact
 from ..core.errors import LangError
 from ..core.part import Board, Face
 from ..core.refs import PosLike, through
-from .common import (EPS, ContactGeometry, Naming, SpacedJoint, Spacing, TenonPlacement, TenonSource, check_across,
-                     check_along, face_toward, make_spacing, opposite_face, placement_of)
+from .common import (EPS, ContactGeometry, Naming, Point2, SpacedJoint, Spacing, TenonPlacement, TenonSource,
+                     check_across, check_along, face_toward, make_spacing, opposite_face, placement_of)
 from .tenons import Tenons
 
 #: How far beyond the tenon board's face the other board is probed for
@@ -78,16 +81,33 @@ class Screws(SpacedJoint):
             p = placement_of(self.tenons, c)
             if self.offset is not None and 2 * self.offset >= p.width - EPS:
                 raise LangError(f"offset={self.offset:g} must be less than half the {p.width:g} mm tenons.")
-            self._open_face(c, p)
+            face = self._open_face(c, p)
             if self.sink >= e.thickness - EPS:
                 raise LangError(f"the countersink is deeper than {e.path} is thick.")
+            g = ContactGeometry(c)
+            self._check_sinks(c, e, face, [(s, g.on_board(s, -p.length / 2)) for s in stations])
             return
         if self.sink >= f.thickness - EPS:
             raise LangError(f"the countersink is deeper than {f.path} is thick.")
         r = self.d / 2
         check_along(c, "the screw", [(s - r, s + r) for s in stations])
-        middle = ContactGeometry(c).middle
-        check_across(c, "the screw", middle - r, middle + r)
+        g = ContactGeometry(c)
+        check_across(c, "the screw", g.middle - r, g.middle + r)
+        self._check_sinks(c, f, opposite_face(c.face), [(s, g.on_face(s, g.middle)) for s in stations])
+
+    def _check_sinks(self, c: Contact, board: Board, face: Face, at: list[tuple[float, Point2]]) -> None:
+        """Each countersink lies on the face it is sunk into [found in the
+        Fusion batch check, 2026-10-13: 4 mm screws into a 4 mm shelf flush
+        with the side's edge, their countersinks 2.2 past it, which Fusion
+        could not cut]."""
+        if self.sink <= 0:
+            return
+        wide = self.d + 2 * self.sink
+        for s, point in at:
+            if not board.hole_fits(face, point, wide):
+                raise LangError(f"at {c.axis}={s:g}, the countersink ({wide:g} mm across) would not lie on "
+                                f"{board.path}'s {face.name} face: it reaches past its edge or into what was cut "
+                                "there.")
 
     def place(self, c: Contact, stations: list[float], naming: Naming) -> None:
         g = ContactGeometry(c)
