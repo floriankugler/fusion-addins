@@ -414,6 +414,9 @@ proposed]
   contacts, crossings and `no_interference` saw the square corner, and
   where a cut had taken the corner the preview cut nothing and the emitter
   only reported that it found no edge. `.chamfer()` takes a list too.
+  A chamfer is 0 (none) or at least 0.01 mm (`ops.MIN_CHAMFER`), however it
+  is made [Florian, 2026-10-13]: Fusion failed on fuzz boards' chamfers of
+  6e-5 mm.
 - **Roundovers** are not modeled. [decided]
   They can be a note on an edge that shows up on labels and work lists. [proposed]
 - Corner radii are properties of the 2D shape, so a pocket's inside corner equals
@@ -2258,8 +2261,7 @@ arcs (up to 0.08 %) and where Fusion fails a rim chamfer. Open: those
 chamfers, along the edges of 0.04 to 0.3 mm a cutout's mitred fallback
 leaves, or larger than a fillet's radius; where extended curves do not
 meet, Fusion bridges them with a line and `grown` drops the shorter curve
-(up to 5.6 mm apart at such a corner); chamfers far under a hundredth of a
-millimetre are accepted (Fusion fails on them); a notch whose corner lies
+(up to 5.6 mm apart at such a corner); a notch whose corner lies
 within the polygon's sagitta of a large arc (0.014 mm inside a corner
 rounded 496) opens onto the outline as polygons but would be a hole on the
 true arcs, and `fit` draws that ring crossing itself. Joints and hardware

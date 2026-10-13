@@ -31,7 +31,7 @@ from fuzzing import floats, fresh, fit_problems, rings_of, sizes
 from lang import Board, Box, LangError, Shape, board, cross, material, module, through, to, triangles
 from lang.core.geometry import polygons_of
 from lang.core.layout import build_layout
-from lang.core.ops import Cut, Pocket
+from lang.core.ops import MIN_CHAMFER, Cut, Pocket
 from lang.core.shapes import slot_shape
 from lang.emit.plan import plan_layout
 from lang.preview.mesh import mesh_part
@@ -131,7 +131,7 @@ def cutout_calls(draw: st.DrawFn, size: tuple[float, float], t: float) -> Cutout
     return CutoutCall(draw(st.one_of(st.none(), st.integers(0, 1))), pattern,
                       draw(st.one_of(st.just(20.0), sizes(0, 40))), draw(st.one_of(st.just(20.0), sizes(0, 40))),
                       draw(st.one_of(st.just(8.0), st.just(0.0), sizes(0, 15))), depth,
-                      draw(st.one_of(st.just(0.0), st.just(1.0), floats(0.1, 3))), keep)
+                      draw(st.one_of(st.just(0.0), st.just(1.0), floats(0.1, 3), st.just(MIN_CHAMFER / 2))), keep)
 
 
 @st.composite

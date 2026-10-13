@@ -785,3 +785,27 @@ def test_an_operation_refused_for_its_name_is_not_kept():
         with pytest.raises(LangError, match="used twice"):
             panel.hole(d=5, at=panel.top.front(100), depth=5, name="a")
     assert len(panel.ops) == 1
+
+
+def test_a_chamfer_under_a_hundredth_of_a_millimetre_is_an_error():
+    """Found compiling fuzz boards in Fusion: chamfers of 6e-5 and 2e-8 mm
+    were accepted, and Fusion failed on them. Every way to make a chamfer
+    refuses one under `MIN_CHAMFER`; 0 is none, and a refused cutout
+    leaves nothing behind."""
+    from lang.core.ops import MIN_CHAMFER
+    tiny = MIN_CHAMFER / 2
+    with module("m", Box.from_size(width=400, depth=300, height=100)) as m:
+        panel = board("panel", ply15).on(m.bottom)
+        for make in (lambda: panel.hole(d=8, at=panel.top.front(50).left(50), depth=5, chamfer=tiny),
+                     lambda: panel.pocket(rect(depth=20, width=20), at=panel.top.center, depth=5, chamfer=tiny),
+                     lambda: panel.cut(rect(depth=20, width=20), at=panel.top.center, chamfer=tiny),
+                     lambda: panel.hole(d=8, at=panel.front.left(100), depth=20, chamfer=tiny),
+                     lambda: panel.chamfer(panel.top.outline, tiny),
+                     lambda: panel.chamfer(panel.front.left, tiny),
+                     lambda: panel.cutout(depth=5, chamfer=tiny)):
+            with pytest.raises(LangError, match="too small to make"):
+                make()
+        assert panel.ops == [] and panel.outline.area == pytest.approx(400 * 300)
+        panel.hole(d=8, at=panel.top.front(50).left(50), depth=5, chamfer=MIN_CHAMFER)
+        panel.chamfer(panel.top.outline, 0.5)
+    assert [op.kind for op in panel.ops] == ["hole", "chamfer"]

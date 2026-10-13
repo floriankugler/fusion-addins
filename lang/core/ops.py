@@ -13,6 +13,11 @@ from typing import Literal
 
 from .shapes import Shape
 
+#: The smallest chamfer (mm) an operation takes, besides 0 for none: Fusion
+#: fails on far smaller ones (6e-5 mm, compiling fuzz boards 2026-10-12),
+#: and a hundredth of a millimetre is less than any tool leaves anyway.
+MIN_CHAMFER = 0.01
+
 
 @dataclass
 class Cut:

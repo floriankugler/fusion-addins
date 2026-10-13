@@ -61,7 +61,7 @@ from .geometry import parts_of, polygons_of
 from .layout_types import (ChamferLayout, CutLayout, EdgeOpLayout, HoleLayout, OpLayout,
                            PartLayout, PocketLayout, Rings, VGrooveLayout)
 from .material import Material
-from .ops import Chamfer, Cut, EdgeOp, Hole, Op, Pocket, VGroove
+from .ops import MIN_CHAMFER, Chamfer, Cut, EdgeOp, Hole, Op, Pocket, VGroove
 from .refs import Affine, DepthSpec, HasPosition, Pos, PosLike, Side, Through, ToFace, as_pos, through
 from .shapes import Shape, box_shape
 
@@ -616,6 +616,9 @@ class Board:
     def _record(self, op: Op, name: str | None) -> None:
         if name and name in self._named_ops:
             raise LangError(f"operation name {name!r} used twice.", self.path)
+        inner = op.op if isinstance(op, EdgeOp) else op
+        if isinstance(inner, (Cut, Pocket, Hole, Chamfer)):
+            self._check_chamfer(inner.size if isinstance(inner, Chamfer) else inner.chamfer, "chamfer")
         if self._cutouts and not isinstance(op, Chamfer):
             footprint = self._footprint(op)
             for cutout, opening in self._cutouts:
@@ -629,6 +632,15 @@ class Board:
         self.ops.append(op)
         if name:
             self._named_ops[name] = op
+
+    def _check_chamfer(self, size: float, what: str) -> None:
+        """An error for a chamfer that is negative, or more than none but
+        under `MIN_CHAMFER`."""
+        if size < 0:
+            raise LangError(f"{what}: the size must not be negative, got {size:g}.", self.path)
+        if 0 < size < MIN_CHAMFER:
+            raise LangError(f"{what}: {size:g} is less than {MIN_CHAMFER:g} mm, too small to make; leave it out, "
+                            "or make it at least that.", self.path)
 
     @staticmethod
     def _label(op: Op, name: str | None) -> str:
@@ -867,6 +879,7 @@ class Board:
         if corners:
             if size <= 0:
                 raise LangError(f"chamfer(): the size must be positive, got {size:g}.", self.path)
+            self._check_chamfer(size, "chamfer()")
             named = self._outline_corners(corners, "chamfer")
             self._reshape(corner_geometry.clip_corners(self.outline, named, float(size), self.path),
                           f"chamfer({size:g})")
@@ -1058,6 +1071,7 @@ class Board:
         for label, value in (("border", border), ("around", around), ("radius", radius), ("chamfer", chamfer)):
             if value < 0:
                 raise LangError(f"cutout(): {label} must not be negative, got {value:g}.", self.path)
+        self._check_chamfer(chamfer, "cutout(): chamfer")      # before the opening is recorded
         face, region = self._cutout_face(what, at)
         d, spec, thru = self._depth(face, depth)
         if chamfer > 0 and chamfer >= d - 1e-9:
