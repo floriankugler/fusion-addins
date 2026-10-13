@@ -2357,7 +2357,15 @@ circle too, and leave a line 6e-12 long, or not, as the rounding chose;
 such a vertex now stays. And `clean` left a geometry a move had rounded
 into a crossing (two crescents nearly touching, in a figure of eight)
 invalid; it makes it valid now. The Fusion batch check builds joints too
-(`fusion_batch.py joints`); its first run waits for Fusion.
+(`fusion_batch.py joints`): 50 cases, five of every kind of pair, corner,
+crossing and frame, 132 parts, every body as the preview's. Fusion found
+one thing: screws in the tenons' gaps of a 6 mm side with a pocket where
+the shelf meets it go through the 1.5 mm the pocket leaves, and their 1.7
+mm countersink reaches through that, so Fusion cannot cut it (the emitter
+reports it, the rest builds). Contacts do not see pockets, so a joint over
+one bridges the void (open, for Florian: refuse a join across a pocket
+made before, as across a cutout's opening, or check a countersink against
+the material at its hole).
 
 1. `core`: the position algebra, box, board with `on`, `between` and `center`,
    scopes and paths, and layout JSON output with world transforms. With unit
