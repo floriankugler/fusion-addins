@@ -738,13 +738,17 @@ class Board:
 
     def _check_through(self, op: Op, name: str | None) -> None:
         """An error for a pocket or hole through the board that, with those
-        made before, splits the board in pieces, as a through cut may not
-        [found by fuzzing, 2026-10-12]."""
+        made before, splits the board in pieces or leaves nothing of it, as
+        a through cut may not [found by fuzzing, 2026-10-12]."""
         new = self._through_footprint(op)
         if new is None:
             return
         taken = [g for g in (self._through_footprint(o) for o in self.ops) if g is not None] + [new]
         rest = self.outline.geometry.difference(unary_union(taken))
+        if rest.area <= 1e-6:
+            # [found by fuzzing, 2026-10-13: a circle wider than the board, through it, left nothing,
+            # which a cut may not either]
+            raise LangError(f"{self._label(op, name)} goes through the board and leaves nothing of it.", self.path)
         if len([p for p in parts_of(rest) if p.area > 1e-6]) > len(self.outline.polygons()):
             raise LangError(f"{self._label(op, name)} goes through the board and splits it in pieces.", self.path)
 

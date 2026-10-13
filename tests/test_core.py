@@ -764,6 +764,19 @@ def test_a_pocket_through_the_board_may_not_split_it():
     assert len(panel.ops) == 1
 
 
+def test_a_pocket_through_the_board_may_not_leave_nothing_of_it():
+    """Found by fuzzing dog bones: a circle pocket through a 53 mm square
+    board, wider than the board, took all of it, which a cut may not, and
+    the preview could not mesh what was left."""
+    with module("m", Box.from_size(width=53, depth=53, height=100)) as m:
+        panel = board("panel", ply15).on(m.bottom)
+        with pytest.raises(LangError, match=r"^m\.panel: a pocket goes through the board and leaves nothing of it\.$"):
+            panel.pocket(circle(119), at=panel.top.center, depth=through)
+        with pytest.raises(LangError, match="the hole 'big' goes through the board and leaves nothing of it"):
+            panel.hole(d=80, at=panel.top.center, depth=through, name="big")
+    assert panel.ops == []
+
+
 def test_a_cut_may_not_leave_only_what_through_pockets_take():
     """Found by fuzzing cutouts: with border 0 a cutout took all of a board
     but the corner a through pocket had already taken, which left a board
