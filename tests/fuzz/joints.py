@@ -7,8 +7,8 @@ meets it edge-on, the shelf: lying flat or standing, its end on the
 side's face, of any size and thickness, anywhere along and across the
 side, also hanging over its edges (the contact is what the side covers),
 optionally between two sides. The side may have rounded corners and a
-pocket where the shelf meets it; the shelf's end may be notched, which
-parts its contact. The joint is a Domino, Clamex, Cabineo, screws or
+pocket where the shelf meets it or beside it, the shelf a pocket out
+through its end; the shelf's end may be notched, which parts its contact. The joint is a Domino, Clamex, Cabineo, screws or
 tenons with settings drawn from their ranges and a little beyond, made
 from either board, and after tenons optionally a second joint in their
 gaps or through them.
@@ -18,7 +18,9 @@ hardware"): no other error than a LangError; a refused join changes no
 board; a join from the side equals the join from the shelf; an accepted
 one plans, draws and meshes, leaves every board in one piece, lets no two
 boards share material, cuts no blind pocket or hole as deep as its board,
-and a connector's operations lie within its contact.
+and a connector's operations lie within its contact. A join across a
+pocket made before, in the side's face or the shelf's end where they meet,
+is refused, and only such a one [Florian, 2026-10-13].
 """
 from __future__ import annotations
 
@@ -29,15 +31,17 @@ from pathlib import Path
 from typing import Any, Literal
 
 from hypothesis import strategies as st
+from shapely.geometry import LineString
 from shapely.geometry import box as shapely_box
 
-from boards import KNOWN, _pipeline_problems  # pyright: ignore[reportPrivateUsage]
+from boards import _pipeline_problems  # pyright: ignore[reportPrivateUsage]
 from fuzzing import floats, fresh, sizes
 from lang import Box, LangError, Pos, Shape, board, material, module
 from lang.core.contact import Contact
 from lang.core.crossing import crossing
 from lang.core.cutouts import circle_geometry
-from lang.core.directions import Axis, Direction, current_frame
+from lang.core.directions import Direction, current_frame
+from lang.core.geometry import NARROWEST, parts_of, polygons_of
 from lang.core.layout import build_layout
 from lang.core.ops import Cut, EdgeOp, Hole, Op, Pocket, VGroove
 from lang.core.part import Board
@@ -88,6 +92,9 @@ class PairCase:
     after: JointSpec | None
     from_side: bool                         # the join made from the side, else from the shelf
     again: bool = False                     # join the pair once more with the same kind of joint
+    pocket_shift: float = 0.0               # the side's pocket moved across, in shelf thicknesses
+    end_pocket: tuple[float, float, float] | None = None    # in the shelf's face, out through its end at
+                                                            # the side: along, width, depth fractions
 
 
 # -- strategies --------------------------------------------------------------------------------
@@ -209,7 +216,9 @@ def pair_cases(draw: st.DrawFn) -> PairCase:
         rounded=draw(st.one_of(st.just(0.0), floats(0.0, 0.45))),
         pocket=draw(st.one_of(st.none(), st.tuples(floats(0, 1), floats(0.02, 0.5), floats(0.1, 0.9)))),
         notch=draw(st.one_of(st.none(), st.tuples(floats(0, 1), floats(0.02, 0.6), sizes(1, 60)))),
-        joint=joint, after=after, from_side=draw(st.booleans()), again=draw(st.booleans()))
+        joint=joint, after=after, from_side=draw(st.booleans()), again=draw(st.booleans()),
+        pocket_shift=draw(st.one_of(st.just(0.0), st.just(1.5), st.just(-1.5), floats(-3, 3))),
+        end_pocket=draw(st.one_of(st.none(), st.none(), st.tuples(floats(0, 1), floats(0.02, 0.5), floats(0.1, 0.9)))))
 
 
 # -- building -----------------------------------------------------------------------------------
@@ -271,9 +280,21 @@ def build(case: PairCase, name: str = "m") -> Built:
                 {"x": (lo + hi) / 2, "z": start + case.shelf_t / 2}
             along_axis = "z" if case.standing else "x"
             centre[along_axis] = lo + at * (hi - lo)
-            half = {along_axis: w * (hi - lo) / 2, ("x" if case.standing else "z"): case.shelf_t}
+            across_axis = "x" if case.standing else "z"
+            centre[across_axis] += case.pocket_shift * case.shelf_t
+            half = {along_axis: w * (hi - lo) / 2, across_axis: case.shelf_t}
             box = shapely_box(centre[u] - half[u], centre[v] - half[v], centre[u] + half[u], centre[v] + half[v])
-            side.add_pocket(face, Shape(box), max(0.1, d * case.side_t))
+            side.add_pocket(face, Shape(box), max(0.1, d * case.side_t), name="recess")
+        if case.end_pocket is not None:
+            at, w, d = case.end_pocket
+            along_axis = "z" if case.standing else "x"
+            mid = lo + at * (hi - lo)
+            spans = {along_axis: (mid - w * (hi - lo) / 2, mid + w * (hi - lo) / 2),
+                     "y": (case.side_t, case.side_t + min(20.0, case.reach / 3))}
+            u, v = shelf.u_axis, shelf.v_axis
+            shelf.add_pocket(face_toward(shelf, 1, shelf.t_axis),
+                             Shape(shapely_box(spans[u][0], spans[v][0], spans[u][1], spans[v][1])),
+                             max(0.1, d * case.shelf_t), name="end_recess")
         if case.notch is not None:
             at, w, d = case.notch
             u, v = shelf.u_axis, shelf.v_axis
@@ -330,7 +351,11 @@ def _join(b: Built, spec: JointSpec, from_side: bool, first: Any = None) -> Any:
     """Makes the joint from the side(s), one join each, or from the shelf;
     the joint. A refusal raises `Refused`, which says whether that join
     (not the ones before it) changed nothing."""
-    joint = make_joint(spec, touching(b.shelf, b.side), first)
+    try:
+        found = touching(b.shelf, b.side)
+    except LangError:
+        found = []              # (refused across a pocket: so is the join, below)
+    joint = make_joint(spec, found, first)
     sides = [s for s in (b.side, b.other) if s is not None]
     calls = [(s, [b.shelf]) for s in sides] if from_side else [(b.shelf, sides)]
     for receiver, partners in calls:
@@ -365,7 +390,27 @@ def run_pair(case: PairCase) -> list[str]:
 def _run_pair(case: PairCase) -> list[str]:
     b = build(case)
     pieces = {x.path: len(x.outline.polygons()) for x in b.boards}
-    contacts = touching(b.shelf, b.side) + (touching(b.shelf, b.other) if b.other is not None else [])
+    across = _across_made_before(case, b)
+    if across is not False:
+        # A join across a pocket made before is refused, and changes nothing.
+        before = _state(b.boards)
+        try:
+            _join(b, case.joint, case.from_side)
+        except Refused as refused:
+            if not refused.clean:
+                return [f"a {case.joint.kind} refused across a pocket changed a board: {refused.error}"]
+            if across and "which was made before" not in str(refused.error):
+                return [f"a {case.joint.kind} across a pocket made before is refused otherwise: {refused.error}"]
+            return []
+        except LangError:
+            return []           # the joint's own settings refused
+        return [f"a {case.joint.kind} across a pocket made before is accepted"] if across else []
+    try:
+        contacts = touching(b.shelf, b.side) + (touching(b.shelf, b.other) if b.other is not None else [])
+    except LangError as e:
+        if "which was made before" in str(e):
+            return [f"refused across a pocket where none lies in the contact: {e}"]
+        raise
     before = _state(b.boards)
     joints: list[Any] = []
     for spec, from_side in [(case.joint, case.from_side)] + ([(case.after, not case.from_side)] if case.after else []):
@@ -409,6 +454,46 @@ def _run_pair(case: PairCase) -> list[str]:
         problems += _tenon_problems(case, b, contacts, meshes)
     return problems + _symmetry_problems(case, b)      # last: it builds the pair again
 
+
+def _across_made_before(case: PairCase, b: Built) -> bool | None:
+    """Whether the case's pockets, made before the join, lie where the
+    shelf meets the side, worked out from the outside: the side's in its
+    face over a contact (the shelf's end on the side's material, pieces
+    narrower than NARROWEST either way left out), the shelf's in its end
+    there, `NARROWEST` deep; None when it is too near to tell."""
+    if case.pocket is None and case.end_pocket is None:
+        return False
+    along_i = 1 if case.standing else 0         # the contact's axis in the side's (x, z) frame
+    start = _IN + case.across * ((case.side_size[0] if case.standing else case.side_size[1]) - case.shelf_t)
+    sv = (b.shelf.u_axis, b.shelf.v_axis).index("y")
+
+    def shelf_point(y: float, a: float) -> tuple[float, float]:
+        return (y, a) if sv == 0 else (a, y)
+
+    # the shelf's end: where its outline has material just past y = side_t
+    line = LineString([shelf_point(case.side_t + 1e-6, -1e9), shelf_point(case.side_t + 1e-6, 1e9)])
+    spans = [(float(g.bounds[1 - sv]), float(g.bounds[3 - sv]))
+             for g in parts_of(b.shelf.outline.geometry.intersection(line)) if g.length > 0]
+    areas: list[float] = []
+    side_pockets = [op.shape.geometry for op in b.side.ops if isinstance(op, Pocket) and op.name == "recess"]
+    end_pockets = [op.shape.geometry for op in b.shelf.ops if isinstance(op, Pocket) and op.name == "end_recess"]
+    for a0, a1 in spans:
+        lo, hi = [0.0, 0.0], [0.0, 0.0]
+        lo[along_i], hi[along_i] = a0, a1
+        lo[1 - along_i], hi[1 - along_i] = start, start + case.shelf_t
+        window = shapely_box(lo[0], lo[1], hi[0], hi[1])
+        for piece in polygons_of(b.side.outline.geometry.intersection(window)):
+            x0, z0, x1, z1 = piece.bounds
+            if min(x1 - x0, z1 - z0) < NARROWEST:
+                continue
+            areas += [g.intersection(piece).area for g in side_pockets]
+            p0 = shelf_point(case.side_t, piece.bounds[along_i])
+            p1 = shelf_point(case.side_t + NARROWEST, piece.bounds[along_i + 2])
+            strip = shapely_box(p0[0], p0[1], p1[0], p1[1])
+            areas += [g.intersection(strip).area for g in end_pockets]
+    if any(1e-7 < a < 1e-5 for a in areas):
+        return None
+    return any(a >= 1e-5 for a in areas)
 
 #: What a join reports on purpose, which the layout lists as its problems.
 _NOTES = ("where it shows unless something covers it",)
@@ -683,6 +768,21 @@ def _lap(case: CrossCase, a: Board) -> Any:
                     relief=case.relief)
 
 
+def _ending_inside(b: Built) -> list[str]:
+    """Where a board of the crossing ends inside the other, short of its
+    far face, which a half lap refuses [Florian, 2026-10-13]."""
+    found: list[str] = []
+    for other in (b.side, b.other):
+        if other is None or crossing(b.shelf, other) is None:
+            continue
+        for one, two in ((b.shelf, other), (other, b.shelf)):
+            t = two.t_axis
+            band, reach = two.box(), one.box()
+            short = max(0.0, reach.lo[t] - band.lo[t]) + max(0.0, band.hi[t] - reach.hi[t])
+            if short > 1e-6:
+                found.append(f"{one.path} ends inside {two.path}, {short:.3g} short of its far face")
+    return found
+
 def run_cross(case: CrossCase) -> list[str]:
     """What is wrong with a half lap of the case's crossing boards (made
     from `a`, its notches toward `toward`)."""
@@ -690,7 +790,15 @@ def run_cross(case: CrossCase) -> list[str]:
         return build_cross(case, name)
 
     def join(b: Built, _: bool) -> None:
-        b.shelf.join(*[x for x in (b.side, b.other) if x is not None], using=_lap(case, b.shelf))
+        inside = _ending_inside(b)
+        try:
+            b.shelf.join(*[x for x in (b.side, b.other) if x is not None], using=_lap(case, b.shelf))
+        except LangError as e:
+            if "ends inside" in str(e) and not inside:
+                raise AssertionError(f"a lap refused where no board ends inside the other: {e}") from e
+            raise
+        if inside:
+            raise AssertionError(f"a lap accepted where {inside[0]}")
 
     def fill(b: Built, meshes: dict[str, Any]) -> list[str]:
         problems: list[str] = []
@@ -704,15 +812,6 @@ def run_cross(case: CrossCase) -> list[str]:
             # Where both boxes are: a board may end inside the other.
             lo = [max(ab.lo["x"], ob.lo["x"]), max(ab.lo["y"], ob.lo["y"]), cross[0]]
             hi = [min(ab.hi["x"], ob.hi["x"]), min(ab.hi["y"], ob.hi["y"]), cross[1]]
-            pairs: list[tuple[Board, Board, Axis]] = [(b.shelf, other, "y"), (other, b.shelf, "x")]
-            for one, two, axis in pairs:
-                band, reach = two.box(), one.box()
-                short = max(0.0, reach.lo[axis] - band.lo[axis]) + max(0.0, band.hi[axis] - reach.hi[axis])
-                if short > 1e-6:
-                    # Open (2026-10-13): refuse such a lap, or notch the other board only as deep as
-                    # this one reaches? Florian's to decide.
-                    problems.append(f"{KNOWN} {one.path} ends inside {two.path}, {short:.3g} short of its far "
-                                    f"face: the lap's notch through {two.path} is left open there")
             r = (case.tool + case.relief) / 2 if case.dogbones is not None else 0.0
             allowed = case.clearance * (case.a_t + case.b_t) * (cross[1] - cross[0]) \
                 + 4 * math.pi * r * r * max(case.a_t, case.b_t)
