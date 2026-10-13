@@ -706,6 +706,14 @@ class Board:
             return None
         if self._footprint(op).intersection(outline).area <= 1e-6:
             return "lies off the board: none of it is on the board's outline."
+        if isinstance(op, (Pocket, VGroove)):
+            # [found compiling fuzz boards in Fusion, 2026-10-13: a V-groove made twice, the second
+            # had nothing to cut ("No target body found")]
+            deep = [self._footprint(o) for o in before if isinstance(o, (Pocket, Hole, VGroove))
+                    and ((o.face == op.face and o.depth >= op.depth - 1e-9) or o.depth >= self.thickness - 1e-9)]
+            if deep and self._footprint(op).intersection(outline).difference(unary_union(deep)).area <= 1e-6:
+                return ("lies wholly in what was cut from that face before, as deep or through: it has nothing to "
+                        "cut.")
         if isinstance(op, Hole):
             # Fusion's hole feature starts at its centre, on the face.
             face = self.face(directions.frame.direction(op.face))

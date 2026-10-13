@@ -2,6 +2,7 @@ import math
 from pathlib import Path
 
 import pytest
+from shapely.geometry import Point
 
 from lang import *
 from lang.core.layout import build_layout
@@ -80,8 +81,8 @@ def test_split_runs_from_the_frames_own_side():
 
 # -- placement ----------------------------------------------------------------
 
-def carcass():
-    with module("cab", Box.from_size(width=600, depth=500, height=720)) as cab:
+def carcass(name: str = "cab"):
+    with module(name, Box.from_size(width=600, depth=500, height=720)) as cab:
         left = board("left", ply15).on(cab.left)
         right = board("right", ply15).on(cab.right)
         bottom = board("bottom", ply15).on(cab.bottom).between(left, right)
@@ -258,9 +259,10 @@ def test_shapes_name_their_plane():
     with pytest.raises(LangError):
         left.pocket(rect(width=10, height=10), at=left.inner.center, depth=3)
     # the same rect reads the same whichever way its extents were given
+    other = carcass("other")["bottom"]
     bottom.pocket(rect(width=20, depth=100), at=bottom.top.front.left, depth=3)
-    bottom.pocket(rect(depth=100, width=20), at=bottom.top.front.left, depth=3)
-    a, b = bottom.ops[-2:]
+    other.pocket(rect(depth=100, width=20), at=other.top.front.left, depth=3)
+    a, b = bottom.ops[-1], other.ops[-1]
     assert isinstance(a, Pocket) and isinstance(b, Pocket)
     assert a.shape.bounds == b.shape.bounds == (0.0, 15.0, 100.0, 35.0)
     with pytest.raises(LangError):
@@ -775,6 +777,32 @@ def test_a_pocket_through_the_board_may_not_leave_nothing_of_it():
         with pytest.raises(LangError, match="the hole 'big' goes through the board and leaves nothing of it"):
             panel.hole(d=80, at=panel.top.center, depth=through, name="big")
     assert panel.ops == []
+
+
+def test_a_pocket_or_groove_with_nothing_left_to_cut_is_refused():
+    """Found compiling fuzz boards in Fusion: the same V-groove made twice
+    was accepted, and Fusion found nothing for the second one to cut. A
+    pocket or V-groove wholly in what was cut from its face before, as deep,
+    or in a pocket or hole through the board, has nothing to cut; one
+    deeper, from the other face or partly beside it still cuts."""
+    with module("m", Box.from_size(width=400, depth=300, height=100)) as m:
+        panel = board("panel", ply15).on(m.bottom)
+        top, bottom = panel.top, panel.bottom
+        panel.add_vgroove(top, (50, 50), (250, 50), 3, name="groove")
+        with pytest.raises(LangError, match=r"^m\.panel: the vgroove 'again' lies wholly in what was cut from that "
+                                            r"face before, as deep or through: it has nothing to cut\.$"):
+            panel.add_vgroove(top, (50, 50), (250, 50), 3, name="again")
+        panel.add_vgroove(top, (60, 50), (240, 50), 4)                      # deeper
+        panel.add_pocket(top, Shape(Point(150, 200).buffer(50)), 6, name="dish")
+        with pytest.raises(LangError, match="^m\\.panel: a pocket lies wholly in what was cut"):
+            panel.add_pocket(top, Shape(Point(150, 200).buffer(20)), 6)
+        panel.add_pocket(top, Shape(Point(150, 200).buffer(20)), 8)         # deeper
+        panel.add_pocket(bottom, Shape(Point(150, 200).buffer(20)), 4)      # from the other face
+        panel.add_pocket(top, Shape(Point(150, 140).buffer(20)), 4)         # partly beside the dish
+        panel.add_hole(top, (250, 300), 30, through, name="bore")
+        with pytest.raises(LangError, match="nothing to cut"):
+            panel.add_pocket(bottom, Shape(Point(250, 300).buffer(10)), 2)  # in the hole through
+    assert len(panel.ops) == 7
 
 
 def test_a_cut_may_not_leave_only_what_through_pockets_take():
