@@ -2519,31 +2519,32 @@ Added by Florian 2026-10-13:
       "smootherstep"), reaches radius 122 in the same gap, as the eased S
       at ease 0.5 does, but its weight means nothing on the board and the
       radius comes out instead of being given.
-    - Two turns in opposite directions have their kerfs in opposite
-      faces, so a kerfed S is machined from both sides, which the
-      one-side check reports; bending plywood avoids it.
   - The flat pattern is a plain board: the outline unrolled along the
     neutral layer, the legs' operations moved into it, the kerfs pockets
-    from the inside of each turn, so the emitter's flat side needs nothing
-    new. The neutral layer is the skin for kerfs and the middle for
+    from one face, so the emitter's flat side needs nothing new. The neutral layer is the skin for kerfs and the middle for
     bending plywood; on a right angle at outer radius 80 in 12 mm plywood
     the two differ by about 8 mm in length, so it is a stated value,
     calibrated with a test bend.
-  - Kerfs are flat-bottomed slots [Florian], closely spaced, each closing
-    only part way when the board is bent [Florian]: slots that close
-    fully at the radius are too few, since a slot is no narrower than its
-    cutter, and the wide webs between them stay straight, so the curve is
-    not smooth. `kerfs=slots(width=3, skin=2, pitch=6)` spreads them at
-    the pitch over the stretch that curves; each closes as far as the
-    curve is tight there. The one check is that none has to close more
-    than its width at the tightest radius (12 mm plywood, 2 mm skin, 3 mm
-    slots, outer radius 80: pitch at most 21.5 mm). Without kerfs the
-    material's minimum radius is checked.
+  - Kerfs are flat-bottomed slots [Florian], all in one face, whichever
+    way each turn bends, since the board bends both ways with them there
+    [Florian]; the face is the one it is machined from, the inner face by
+    default, so an S needs no flipping either. They are closely spaced,
+    each closing only part way where a turn bends toward their face
+    [Florian]: slots that close fully at the radius are too few, since a
+    slot is no narrower than its cutter, and the wide webs between them
+    stay straight, so the curve is not smooth. `kerfs=slots(width=3,
+    skin=2, pitch=6)` spreads them at the pitch over the stretches that
+    curve; on a turn toward their face each closes as far as the curve is
+    tight there, on one away from it each opens. The one check is that
+    none has to close more than its width at the tightest radius of a turn
+    toward their face (12 mm plywood, 2 mm skin, 3 mm slots, outer radius
+    80: pitch at most 21.5 mm). Without kerfs the material's minimum
+    radius is checked.
   - Fusion gets two bodies: the bent one for the assembly and the checks
     (its section extruded along the bend axis, the legs' operations as
     now, no kerfs), and the flat one, which Multi Arrange and Auto Setup
     take. The preview bends the flat mesh along the neutral layer, which
-    closes the kerfs as far as the wood does.
+    closes or opens the kerfs as far as the wood does.
   - Corners of a flat board's outline get the same eased turn,
     `fillet(corner, r, ease=)`, ease 0 being today's arc. Considered: a
     conic, Fusion's sketch Conic Curve (`SketchConicCurves.add(start, end,
