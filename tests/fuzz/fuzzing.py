@@ -518,7 +518,7 @@ def recipe_problems(recipe: Recipe) -> list[str]:
     problems = [p for ring in rings for p in fit_problems(ring, circles, slack)]
     if recipe.grow is not None:
         return problems
-    truth = recipe.truth()
+    truth = unary_union(polygons_of(recipe.truth()))       # (its areas: a boolean may leave lines too)
     true_rings = rings_of(truth)
     if len(true_rings) != len(rings) or any(degenerate(r) for r in rings + true_rings):
         # Shapes that touch (a circle in a square that holds it exactly) or
