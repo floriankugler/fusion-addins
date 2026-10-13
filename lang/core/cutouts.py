@@ -520,20 +520,53 @@ def _fillet_ring(ring: Sequence[Point2], r: float, at: Sequence[Point2] | None =
         end = s.param(after[1]) if after else s.length()
         if start < -1e-7 or end > s.length() + 1e-7 or end < start - 1e-7:
             return None
+    starts = _starts(ring, segs)
     out: list[Point2] = []
     for k, s in enumerate(segs):
         before, after = fillets[k - 1], fillets[k]
-        p = before[2] if before else s.a
+        p = before[2] if before else ring[starts[k]] if k in starts else s.a
         q = after[1] if after else s.b
         if s.param(q) < s.param(p):
             # the fillets at both ends use the segment up, give or take
             # rounding (a slot's end): they meet halfway
             p = q = ((p[0] + q[0]) / 2, (p[1] + q[1]) / 2)
-        out += s.points(p, q)
+        own = _own(ring, starts, k, len(segs)) if before is None and after is None else None
+        out += own if own is not None else s.points(p, q)
         if after is not None:
             centre, _, b, ccw = after
             out += _arc_points(centre, r, q, b, ccw)[:-1]
     return _deduplicated(out)
+
+
+#: How far (mm) a segment's end may lie from the ring's vertex it stands
+#: for: `fit` moves a vertex where a boolean cut a circle's polygon onto the
+#: circle, up to the polygon's sagitta.
+_KEEP = 0.05
+
+
+def _starts(ring: Sequence[Point2], segs: Sequence[_Seg]) -> dict[int, int]:
+    """For each segment, the index of the ring's vertex its start stands
+    for, where one lies within `_KEEP`. A line or arc no corner change
+    touches keeps the ring's own vertices, and one touched at its other end
+    starts from its own vertex, instead of being drawn again, which would
+    move an arc's vertices onto the whole degrees and its ends onto the
+    circle [found by fuzzing, 2026-10-13: chamfering one corner of a board
+    moved a notch's arc elsewhere on its outline]."""
+    out: dict[int, int] = {}
+    for k, s in enumerate(segs):
+        i = min(range(len(ring)), key=lambda m: (ring[m][0] - s.a[0]) ** 2 + (ring[m][1] - s.a[1]) ** 2)
+        if math.dist(ring[i], s.a) <= _KEEP:
+            out[k] = i
+    return out
+
+
+def _own(ring: Sequence[Point2], starts: dict[int, int], k: int, count: int) -> list[Point2] | None:
+    """Segment k's own vertices, from its start up to its end (excluded),
+    when both ends stand for vertices of the ring."""
+    i, j = starts.get(k), starts.get((k + 1) % count)
+    if i is None or j is None or i == j:
+        return None
+    return [ring[(i + m) % len(ring)] for m in range((j - i) % len(ring))]
 
 
 def _deduplicated(points: list[Point2]) -> list[Point2]:
@@ -696,14 +729,16 @@ def _chamfer_ring(ring: Sequence[Point2], d: float, at: Sequence[Point2]) -> lis
         end = s.param(after[0]) if after else s.length()
         if end < start - 1e-7:
             return None
+    starts = _starts(ring, segs)
     out: list[Point2] = []
     for k, s in enumerate(segs):
         before, after = cuts[k - 1], cuts[k]
-        p = before[1] if before else s.a
+        p = before[1] if before else ring[starts[k]] if k in starts else s.a
         q = after[0] if after else s.b
         if s.param(q) < s.param(p):
             p = q = ((p[0] + q[0]) / 2, (p[1] + q[1]) / 2)     # two cuts use the edge up
-        out += s.points(p, q)
+        own = _own(ring, starts, k, len(segs)) if before is None and after is None else None
+        out += own if own is not None else s.points(p, q)
         if after is not None:
             out.append(q)            # the cut runs from here to the next segment's start
     return _deduplicated(out)

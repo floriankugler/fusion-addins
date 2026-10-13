@@ -3,7 +3,7 @@
 import math
 
 import pytest
-from shapely.geometry import Point
+from shapely.geometry import Point, Polygon
 
 from lang import *
 from lang.core.contact import contacts
@@ -358,5 +358,28 @@ def test_a_refused_chamfer_list_changes_nothing():
         with pytest.raises(LangError, match="a V-groove has no rim to chamfer"):
             panel.chamfer([panel.top.outline, panel.front.right, panel.groove], 1)
         assert (panel.outline.geometry.wkt, list(panel.ops)) == before
+
+
+@pytest.mark.parametrize("how", ["chamfer", "fillet"])
+def test_a_corner_changed_leaves_the_rest_of_the_outline_as_it_was(how: str):
+    """Found by fuzzing: chamfering one corner of a board drew its whole
+    outline again from its lines and arcs, so a notch's arc elsewhere,
+    drawn every 2.8 degrees, came out on the whole degrees, 0.004 mm2 more
+    board. The lines and arcs the change does not touch keep their
+    vertices."""
+    m, panel = _panel()
+    with m:
+        panel.add_cut(Shape(Point(0, 30).buffer(50, quad_segs=32)), name="notch")
+        before = panel.outline.geometry
+        if how == "chamfer":
+            panel.chamfer(panel.back.right, 20)
+        else:
+            panel.fillet(panel.back.right, 20)
+    after = panel.outline.geometry
+    changed = before.symmetric_difference(after)
+    assert changed.bounds[0] >= 300 - 20 - 1e-9 and changed.bounds[1] >= 400 - 20 - 1e-9     # at the corner only
+    assert isinstance(before, Polygon) and isinstance(after, Polygon)
+    kept = [p for p in before.exterior.coords if p[0] < 100]                                 # the notch's arc
+    assert all(p in set(after.exterior.coords) for p in kept)
 
 
