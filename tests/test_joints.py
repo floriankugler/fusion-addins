@@ -79,6 +79,23 @@ def test_a_lap_that_fails_on_the_other_board_cuts_neither():
     assert state(long, a) == before
 
 
+
+def test_a_board_ending_inside_the_other_is_no_half_lap():
+    """Found fuzzing the joints: a board ending inside the one it crosses,
+    short of its far face, had the other's notch cut through that one's
+    whole thickness, which stayed open beyond its end. It is an error
+    [Florian, 2026-10-13]."""
+    with module("grid", Box.from_size(width=600, depth=1000, height=30)) as g:
+        cross = board("cross", ply15).center(Pos("x", 200)).between(Pos("y", 0), Pos("y", 305))
+        long = board("long", ply15).center(Pos("y", 300))        # y 292.5..307.5
+        before = state(long, cross)
+        with pytest.raises(LangError, match=r"^grid\.long: half_lap with grid\.cross: grid\.cross ends inside "
+                                            r"grid\.long, 2\.5 short of its far face"):
+            long.join(cross, using=half_lap(toward=g.top))
+        assert state(long, cross) == before
+        flush = board("flush", ply15).center(Pos("x", 500)).between(Pos("y", 0), Pos("y", 307.5))
+        long.join(flush, using=half_lap(toward=g.top))           # to the far face is fine
+
 def test_half_lap_errors():
     g, (a,), long = _grid()
     before = state(long, a)

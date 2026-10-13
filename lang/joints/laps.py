@@ -18,6 +18,10 @@ side and bulging past the floor into the part of the crossing that stays
 this board's, where the other board covers it on both faces; None for
 none. A corner without material around it (a notch flush with the board's
 end) gets none.
+
+Each board must reach through the other's thickness: one ending inside
+the other, short of its far face, would leave the notch cut through the
+other open there, and is an error [Florian, 2026-10-13].
 """
 from __future__ import annotations
 
@@ -34,7 +38,7 @@ from ..core.errors import LangError, one_of
 from ..core.part import Board
 from ..core.refs import PosLike, Side, as_pos
 from ..core.shapes import Shape, box_shape
-from .common import PROBE, Names, Point2, hidden_far_side, hidden_fits, hidden_width, reported
+from .common import EPS, PROBE, Names, Point2, hidden_far_side, hidden_fits, hidden_width, reported
 
 #: How far a notch reaches past the board's edge, so it opens cleanly.
 _PAST = 1.0
@@ -66,6 +70,7 @@ class HalfLap:
                 c = crossing(part, other)
                 if c is None:
                     raise LangError("the two do not cross.")
+                _reaching_through(part, other)
                 laps.append((other, c, self._split(c)))
         outlines: dict[int, Shape] = {}
         notches: list[tuple[Board, Board, Shape, Board]] = []
@@ -150,6 +155,19 @@ class HalfLap:
                                 "bones or a smaller tool.")
             notch = notch.union(relief)
         return notch
+
+
+def _reaching_through(a: Board, b: Board) -> None:
+    """An error when either board ends inside the other, short of its far
+    face [found fuzzing the joints, 2026-10-13]."""
+    for one, two in ((a, b), (b, a)):
+        t = two.t_axis
+        reach, band = one.box(), two.box()
+        short = max(0.0, reach.lo[t] - band.lo[t]) + max(0.0, band.hi[t] - reach.hi[t])
+        if short > EPS:
+            raise LangError(f"{one.path} ends inside {two.path}, {short:g} short of its far face, and the notch "
+                            f"through {two.path} would be open there: let {one.path} reach through it, or join the "
+                            "two another way.")
 
 
 def half_lap(toward: Side | Direction, *, split: PosLike | None = None, clearance: float = 0.0,
