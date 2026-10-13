@@ -2280,20 +2280,41 @@ with nothing to clean comes back unchanged, and every example's plan is
 the same. In Fusion an uncleaned spike made the whole body fail
 (ASM_WIRE_SELF_INTERSECTS2). A circle cut on a rounded corner's own arc,
 refused before as splitting the board, takes the corner now, and a band
-cut across a shape exactly as tall parts it in two. Still open: `circle()`
-draws 32 segments a quarter, the fillets and the cutouts' circles a vertex
-every whole degree, so one arc drawn both ways leaves crescents as thick
-as the coarser drawing's sagitta, too thick to clean from a radius of
-about 200 mm (such a cut is still refused as splitting the board); drawing
-every circle as the cutouts do would make them coincide. A chamfer is 0 or
-at least 0.01 mm. The Fusion batch check is in `tests/fuzz` (AGENTS.md).
-Its first run: the eleven examples without a difference; of 40 fuzz
-boards, the rim chamfers Fusion refused on two (one of them drawn three
-times): one along a cutout's fallback edges of 0.06 mm (open, above), and
-one where a pocket cutout with no border runs out of the board: its rim
-along the board's edge does not exist, and Fusion refuses the whole
-contour, inside the face too, which the preview chamfers (to fix: chamfer
-only the rim inside the face).
+cut across a shape exactly as tall parts it in two. A chamfer is 0 or at
+least 0.01 mm. The Fusion batch check is in `tests/fuzz` (AGENTS.md). Its
+first run: the eleven examples without a difference; of 40 fuzz boards,
+the rim chamfers Fusion refused on two (one of them drawn three times):
+one along a cutout's fallback edges of 0.06 mm (open, above), and one
+where a pocket cutout's triangles, with no border and sharp corners,
+reached from edge to edge (below).
+
+The same day, every circle and arc drawn alike [Florian]: `circle()` drew
+32 segments a quarter, slot ends 8, the fillets and the cutouts' circles a
+vertex every whole degree, so one arc drawn two ways left crescents as
+thick as the coarser drawing's sagitta, too thick to clean from a radius
+of about 200 mm (a circle cut on a rounded corner's own arc was refused as
+splitting the board). Now every circle has its vertices on the whole
+degrees about its centre (`cutouts.circle_geometry`), and every arc its
+ends plus the whole degrees between them, none nearer an end than 0.6
+degrees (`fit` takes a step under half a degree for a sample of a curve,
+and one of exactly that fell either side of it); arcs under 5 degrees keep
+even steps. Two drawings of one circle coincide but for a sliver at an
+arc's end, between whole degrees, up to r (1 - cos 0.5 degrees) thick
+(0.019 mm at a radius of 500), harmless while something joins it to the
+rest (open). Every example's plan has the same lines, arcs and circles,
+and compiles in Fusion without a difference; the preview meshes more
+triangles (the van builds in 1.9 s, 1.4 before). The chamfer the batch
+check found refused was no missing rim: a pocket cutout's triangles, with
+no border and sharp corners, reached from edge to edge, each apex on the
+far edge, and the material either side met at that point only; Fusion
+chamfers no rim through such a vertex (non-manifold). Pocket cutouts are
+checked for openings touching the outline or each other at a point now, as
+through ones were. And an inset that dropped a curve where a notch meets a
+rounded corner came 0.17 mm nearer the outline than the border, inside the
+1 % of the offset `grown`'s self-check allowed: it allows the polygons'
+chord errors and 0.02 mm now, and such an inset falls back to the mitred
+one. Left open in Fusion: chamfers along a cutout's fallback edges of 0.06
+to 0.34 mm.
 
 1. `core`: the position algebra, box, board with `on`, `between` and `center`,
    scopes and paths, and layout JSON output with world transforms. With unit
