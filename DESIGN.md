@@ -2440,6 +2440,26 @@ Still to do (listed by Florian 2026-10-11, roughly in his order of weight):
 - Arcs from the snapshot's contours (open question 16). (The preview's
   other chamfers are done, 2026-10-11.)
 
+Added by Florian 2026-10-13:
+
+- **Runs**: water hoses, cable runs, ducts and keep-outs, not looked at
+  yet. Proposed so far, not implemented: "Runs: tubes, ducts and
+  keep-outs" under Decisions (`tube`, `duct`, `keepout`, waypoint paths,
+  `along(face, gap)`, pass-throughs cut where a run crosses a board,
+  ports across modules).
+- **Cutouts limited to an area by references**: a cutout kept to part of
+  a board, its bounds given by other faces, edges and boards (as
+  `between()` places a board), not only by a region shape placed with
+  `at=` as now (the add-in's Bounding Box Points).
+- **External components**: devices installed in the cabinets, such as
+  electrical parts and appliances (not connectors, slides or other
+  joinery hardware), to plan the room they need: imported from STEP or
+  other CAD data, or given as outlines or boxes. Related so far: the
+  joinery hardware is drawn as boxes in the layout's `hardware` list and
+  checked for overlaps (CAD files were dropped for it on 2026-10-12),
+  runs' `keepout`, and hand-modeled bodies as inputs (rung 3 under
+  "Hand-made geometry and escape hatches").
+
 (Operations, the half lap, the connectors and the tenons are done; the
 assembly experiment from question 2 was dropped as a priority on
 2026-10-11, since assembling module documents is easy by hand.)
