@@ -235,12 +235,17 @@ def _touching_line(circle: tuple[Point2, float], p: Point2, q: Point2) -> Point2
 def _short_of(target: Point2 | None, x: Point2, other: Point2) -> Point2 | None:
     """`target`, a point on the line from the vertex `x` to `other`, when it
     lies short of `other`: a vertex moved past the line's other end would
-    turn the line back on itself."""
+    turn the line back on itself, and one moved onto it, where `other`
+    lies on the circle too, would leave a line of no length (within
+    `TOLERANCE`: the crossing is found to about 1e-11 mm, and whether it
+    fell short or past was the rounding's choice [found by fuzzing,
+    2026-10-13])."""
     if target is None:
         return None
     dx, dy = other[0] - x[0], other[1] - x[1]
     length2 = dx * dx + dy * dy
-    if length2 == 0 or ((target[0] - x[0]) * dx + (target[1] - x[1]) * dy) / length2 >= 1 - 1e-9:
+    if length2 == 0 or ((target[0] - x[0]) * dx + (target[1] - x[1]) * dy) / length2 >= 1 - 1e-9 \
+            or math.dist(target, other) <= TOLERANCE:
         return None
     return target
 

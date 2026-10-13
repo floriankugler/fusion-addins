@@ -279,3 +279,25 @@ def test_an_arc_that_ends_where_it_starts_keeps_its_circle():
     ring = [(float(x), float(y)) for x, y in list(orient(shape, 1.0).exterior.coords)[:-1]]
     radii = sorted(round(c.radius, 9) for c in fit(ring) if isinstance(c, Arc2))
     assert radii == [1.0, 1.0, 1.0, 2.0]
+
+
+def test_an_arc_end_moved_onto_the_next_vertex_leaves_no_line_of_no_length():
+    """Found by fuzzing: a board rounded 21.75 with a slot 3 wide cut
+    across it near its top, out through both sides, and offset 4, which
+    closes the slot again. Where the halves meet, a vertex lies 0.001
+    inside the corner's circle, between the arc's end and a vertex on the
+    circle. Moved onto the circle along the line it continues in, it went
+    onto that vertex, short of it by the crossing's rounding, and left a
+    line 6e-12 long; the ring moved 1 mm up kept the vertex, as the
+    other side does."""
+    from shapely import affinity
+    from lang.core.cutouts import filleted, grown
+    from lang.core.geometry import clean, polygons_of
+    board = filleted(box(-58, -59.25, 58, 59.25), 21.75)
+    slot = filleted(affinity.rotate(box(-1.5, -17.5, 1.5, 99.5), 90, origin=(0, 41)), 0.75)
+    assert board is not None and slot is not None
+    (shape,) = polygons_of(clean(grown(clean(board.difference(slot)), 4.0)))
+    ring = [(float(x), float(y)) for x, y in list(shape.exterior.coords)[:-1]]
+    curves = fit(ring)
+    assert min(math.dist(c.a, c.b) for c in curves if isinstance(c, Line2)) > 1e-4
+    assert len(fit([(x, y + 1) for x, y in ring])) == len(curves)
