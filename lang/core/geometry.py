@@ -54,7 +54,9 @@ def clean(g: BaseGeometry) -> BaseGeometry:
     length: the crescents between two drawings of one arc, hairlines); and
     walls of no width, where a hole runs along another ring for more than
     `NARROWEST` (a band cut across a shape exactly as tall leaves one piece
-    held by two such walls instead of two pieces): they are opened.
+    held by two such walls instead of two pieces): they are opened. An
+    invalid geometry is made valid first, its shells united and its holes
+    taken out (a move rounds where two rings nearly touch into a crossing).
 
     Every other vertex stays where it is: arcs are recovered from vertices
     that lie on their circle within 1e-7 mm (`lang.emit.arcs`), and snapping
@@ -64,6 +66,12 @@ def clean(g: BaseGeometry) -> BaseGeometry:
     if g.is_empty:
         return g
     changed = False
+    if not g.is_valid:
+        # (64 crescents between a circle and a polygon drawn in it, two
+        # nearly touching where their vertices nearly coincide: moved 11
+        # down, the rounding crossed them in a figure of eight [found by
+        # fuzzing, 2026-10-13])
+        g, changed = shapely.make_valid(g, method="structure", keep_collapsed=False), True
     if isinstance(g, Polygon):
         polygons: list[Polygon] = [g]
     elif isinstance(g, MultiPolygon):

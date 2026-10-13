@@ -98,3 +98,17 @@ def test_a_collection_is_cleaned_to_its_areas():
     lost = Point(0, 34).buffer(1.0)
     left = Point(0, 0).buffer(34.5).union(lost).difference(lost).intersection(lost)
     assert clean(left).is_empty and Shape(left).is_empty()
+
+
+def test_a_ring_a_move_rounds_into_a_crossing_is_made_valid():
+    """Found by fuzzing: a circle with a polygon of 64 sides drawn in it
+    taken out leaves 64 crescents, two of which nearly touch where the
+    drawings' vertices nearly coincide. Moved 11 down, the rounding
+    crossed them in a figure of eight, which clean left as it was, invalid.
+    Cleaned, they are the crescents again."""
+    crescents = circle_geometry((-4, 4), 14).difference(Point(-4, 4).buffer(14, quad_segs=16))
+    moved = affinity.translate(crescents, 0, -11)
+    assert crescents.is_valid and not moved.is_valid
+    cleaned = clean(moved)
+    assert cleaned.is_valid
+    assert cleaned.symmetric_difference(affinity.translate(clean(crescents), 0, -11)).area < 1e-9
