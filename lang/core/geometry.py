@@ -150,7 +150,10 @@ def _without_spikes(ring: LinearRing) -> list[tuple[float, float]] | None:
         repeated = np.hypot(come[:, 0], come[:, 1]) <= SAME_POINT
         span = np.hypot(across[:, 0], across[:, 1])
         off = np.abs(across[:, 0] * come[:, 1] - across[:, 1] * come[:, 0]) / np.maximum(span, 1e-300)
-        off = np.where(span > SAME_POINT, off, np.hypot(come[:, 0], come[:, 1]))
+        # (where the points either side coincide the ring runs out and back the same way:
+        # a spike of any length [found by fuzzing dog bones, 2026-10-13: one 0.07 mm out,
+        # its base points 1e-12 apart, made a corner at one place of the board only])
+        off = np.where(span > SAME_POINT, off, 0.0)
         spike = ((come * go).sum(axis=1) < 0) & (off <= SAME_POINT)
         drop = repeated | spike
         if not drop.any():

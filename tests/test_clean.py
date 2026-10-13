@@ -61,6 +61,20 @@ def test_a_shape_added_and_taken_away_again_leaves_no_spike():
     assert [hi[0] - lo[0], hi[1] - lo[1]] == pytest.approx([100, notched.bounds[3]])
 
 
+def test_a_spike_out_and_back_to_the_same_point_goes_whatever_its_length():
+    """Found by fuzzing dog bones: a level's ring ran 0.07 mm out and back
+    to a point 1e-12 from where it left, and the vertex beside the spike
+    was taken for a 43 degree inside corner, at one place of the board
+    only. With the points either side of a vertex the same, the ring runs
+    out and back along itself: a spike, however long."""
+    for length in (0.07, 5.0):
+        ring = [(0, 0), (10, 0), (10, 10), (5, 10), (5 + length * 0.6, 10 + length * 0.8), (5 - 1e-12, 10), (0, 10)]
+        spiked = Polygon(ring)
+        assert spiked.is_valid
+        (cleaned,) = polygons_of(clean(spiked))
+        assert list(cleaned.exterior.coords) == [(0, 0), (10, 0), (10, 10), (5, 10), (0, 10), (0, 0)]
+
+
 def test_a_band_cut_across_a_shape_exactly_as_tall_parts_it():
     """Found by fuzzing: both turned 1.16 degrees, the cut left the shape
     whole with the band as a hole whose edges lay on the outline's, 2e-15
