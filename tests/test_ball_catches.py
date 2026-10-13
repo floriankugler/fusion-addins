@@ -487,3 +487,20 @@ def test_the_exact_inset_lives_with_the_cutouts():
     square = rect(width=100, depth=100).polygons()[0]
     assert inset(square, 10).bounds == pytest.approx((10, 10, 90, 90))            # sharp corners stay sharp
     assert inset(square, 10).area == pytest.approx(80 * 80)
+
+
+def test_catches_whose_holes_meet_are_refused_and_change_nothing():
+    """Found by fuzzing: in an opening 20 mm deep the hatch is 15, and the
+    balls on its front and back edges, 9.4 in from each, faced each other
+    1.2 apart; each hole was checked against what was there before, not
+    against the others, and they were drilled into each other."""
+    catch = BallCatch(gap=2.5)
+    with module("floor", BOX) as f:
+        panel = board("panel", ply15).on(f.bottom).show(f.top)
+        panel.cut(rect(width=400, depth=20), at=panel.top.center, name="opening")
+        hatch = catch.hatch("hatch", panel.opening)
+        with pytest.raises(LangError, match=r"^floor\.panel: GN 450 ball catch: catches 1 and 3 are too close: their "
+                                            r"pilot holes in floor\.hatch meet\."):
+            f.mount(catch, opening=panel.opening, edge=panel.opening.front, hatch=hatch)
+        assert _holes(panel) == {} and _holes(hatch) == {} and f.hardware == []
+        f.mount(BallCatch(count=1, gap=2.5), opening=panel.opening, edge=panel.opening.front, hatch=hatch)  # one alone

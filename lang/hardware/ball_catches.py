@@ -38,7 +38,8 @@ less than half the holder's width (14 mm) from the end of its straight
 edge or less than a holder's width from its neighbour, a holder without
 its 28 x 15 mm of panel beside the opening or a ball without its 14 x 15
 mm of hatch beside the slot, pilot holes that do not fit on their faces
-(`Board.hole_fits`) and pilot holes as deep as a board is thick.
+(`Board.hole_fits`) and pilot holes as deep as a board is thick; and,
+beyond the add-in, catches so close that their pilot holes meet.
 
 The catches are placed too, one body of boxes per catch (`CATCH_SHAPES`,
 measured on Ganter's CAD model), `catch_1`, ... in an item
@@ -342,7 +343,21 @@ class BallCatch:
                                 f"{mm(spec.max_gap)}.", panel.path)
             self._check_fit(panel, catch_face, hatch, hatch_face, side, gap, region, hatch_region)
             gaps.append(gap)
+        self._check_apart(catches, panel, hatch)
         return _Plan(panel, hatch, catch_face, hatch_face, sides, gaps)
+
+    def _check_apart(self, catches: list[_Catch], panel: Board, hatch: Board) -> None:
+        """No two catches' holes meet: each is checked against what was
+        there before, not against the others [found by fuzzing,
+        2026-10-13: in an opening 20 mm tall, the balls on its two edges
+        faced each other 1.2 apart]."""
+        d = self.pilot[0]
+        for i, a in enumerate(catches):
+            for b in catches[i + 1:]:
+                for board, p, q in ((panel, a.holder, b.holder), (hatch, a.ball, b.ball)):
+                    if math.dist(p, q) < d - TOLERANCE:
+                        raise LangError(f"{self.name}: catches {a.number} and {b.number} are too close: their "
+                                        f"pilot holes in {board.path} meet.", panel.path)
 
     def _opening_cut(self, opening: Operation) -> Cut:
         """The opening's cut: a through cut, one piece, a hole inside the
