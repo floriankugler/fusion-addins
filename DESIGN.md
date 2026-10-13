@@ -2316,6 +2316,49 @@ chord errors and 0.02 mm now, and such an inset falls back to the mitred
 one. Left open in Fusion: chamfers along a cutout's fallback edges of 0.06
 to 0.34 mm.
 
+2026-10-13, fuzzing the joints (`tests/fuzz/joints.py`): random pairs for
+every joint, a side and a shelf meeting it edge-on (flat or standing,
+anywhere along and across the side, hanging over its edges, between two
+sides, the side rounded or pocketed, the shelf's end notched) for Dominos,
+Clamex, Cabineos, screws, tenons, joints in the tenons' gaps and dados; a
+flush corner for box joints; crossing dividers for half laps; a drawer
+box's floor for grooves, into any of its four boards in one join or
+several. Each join must keep what the joints promise: a refusal changes no
+board, either board's join gives the same, a second join of a pair with
+the same kind is refused, no board comes apart, no two share material, no
+blind pocket or hole is as deep as its board, connectors and screws sit at
+the stations `lib/stations` gives (or `at=`) and within their contact,
+tenons stop at the side's outer face (or `remaining=` short of it), and
+tenons and mortises, box joints and half laps fill their joint but for the
+clearances and dog bones. In tens of thousands of cases, about half of
+them joined, the joints keep all of it but for two. A shelf's end notched
+to 7 um short of its edge keeps a fin as wide; a dado set the fin 4 deep
+into the side, but cleaned the groove for it away as what a boolean
+leaves, and the two shared it: a contact narrower than 0.01 mm either way
+is now none, the fin stays where it is (`clean` cannot take such fins out
+as it takes out pieces as narrow: an opening would also cut the tips where
+a circle meets a line tangentially, as the examples' do). And a half lap
+where one board ends inside the other, short of its far face, cuts the
+other's notch through its whole thickness and leaves it open there (open,
+for Florian: refuse, or notch only as deep as the board reaches). Found on
+the way, outside the joints: the exact inset of round 1b could lose a
+whole region (a slot through a rounded corner, its walls turned over at
+the border, took the inset's corner beside it, so a cross was laid out 17
+mm narrower and its openings ran into the bands); `grown`'s self-check and
+the offsets fuzz check now also require an inset to hold the shape shrunk
+by 1.25 times the inset with mitred corners (mitred as Fusion's offset:
+where a tab narrower than twice the inset turns over, it joins the tab's
+neighbours straight across, up to 1.41 times the inset in), and an outward
+offset to hold the shape grown round by 0.75 times the offset. And an arc
+that ends where it starts (a ring touching itself) kept a circle estimated
+through two points. An arc's end moved onto its circle along the line it
+continues in could land on the line's other end, where that lies on the
+circle too, and leave a line 6e-12 long, or not, as the rounding chose;
+such a vertex now stays. And `clean` left a geometry a move had rounded
+into a crossing (two crescents nearly touching, in a figure of eight)
+invalid; it makes it valid now. The Fusion batch check builds joints too
+(`fusion_batch.py joints`); its first run waits for Fusion.
+
 1. `core`: the position algebra, box, board with `on`, `between` and `center`,
    scopes and paths, and layout JSON output with world transforms. With unit
    tests. [done]
