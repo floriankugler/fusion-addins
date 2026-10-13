@@ -18,7 +18,7 @@ import math
 import traceback
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from hypothesis import strategies as st
 from shapely import affinity
@@ -421,9 +421,10 @@ def _footprint_of(b: Board, f: Feature) -> BaseGeometry | None:
     return None
 
 
-def _pipeline_problems() -> list[str]:
+def _pipeline_problems(meshes: dict[str, Any] | None = None) -> list[str]:
     """The layout plans without problems, its loops join up and do not
-    cross themselves, and every part meshes watertight."""
+    cross themselves, and every part meshes watertight; each part's mesh
+    goes into `meshes`, by path, when given."""
     problems: list[str] = []
     layout = build_layout()
     plan = plan_layout(layout)
@@ -436,6 +437,8 @@ def _pipeline_problems() -> list[str]:
                     problems += [f"loop: {p}" for p in fit_problems([(q[0], q[1]) for q in ring], None)]
             reported: list[str] = []
             mesh = mesh_part(part, layout["frame"], reported.append)
+            if meshes is not None:
+                meshes[part["path"]] = mesh
             meshing = [f"mesh: {r}" for r in reported]
             if mesh is not None and not mesh.is_watertight:
                 meshing.append("mesh: the part's mesh is not watertight")

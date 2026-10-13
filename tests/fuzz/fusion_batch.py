@@ -7,6 +7,7 @@ comes out in two), and only this finds those.
     .venv/bin/python tests/fuzz/fusion_batch.py build out/fuzz/batch --count 40 --seed 1
     .venv/bin/python tests/fuzz/fusion_batch.py rebuild out/fuzz/batch.cases.txt out/fuzz/batch2
     .venv/bin/python tests/fuzz/fusion_batch.py examples out/fuzz/examples
+    .venv/bin/python tests/fuzz/fusion_batch.py joints out/fuzz/joints --count 40 --seed 1
 
 `build` draws boards until `count` pass every check of
 `boards.run_cutout`, builds them into one layout (modules `m0`, `m1`...)
@@ -14,7 +15,9 @@ and writes `<out>.json`, the preview's volume per part
 (`<out>.volumes.json`) and the cases (`<out>.cases.txt`, one `m<i>: <case>`
 a line, for `rebuild` with today's code or for building one again by
 hand). `examples` writes every build file in `examples/` the same way, as
-`<out>/<example>/layout`. Then, in Fusion, `fusion_check.check([...])`
+`<out>/<example>/layout`; `joints` draws joints that pass every check
+of `joints.check` (pairs, corners, crossings, frames) the same way, and
+`rebuild` builds either kind of cases file again. Then, in Fusion, `fusion_check.check([...])`
 with those paths (without `.json`), and back here
 
     .venv/bin/python tests/fuzz/fusion_batch.py explain out/fuzz/batch [more paths]
@@ -37,10 +40,13 @@ REPO = Path(__file__).resolve().parents[2]
 sys.path[:0] = [str(Path(__file__).resolve().parent), str(REPO)]
 
 from hypothesis import HealthCheck, Phase, given, seed, settings  # noqa: E402
+from hypothesis import strategies as st  # noqa: E402
 from shapely.geometry import Polygon  # noqa: E402
 
 import boards  # noqa: E402
+import joints  # noqa: E402
 from boards import BoardCase, CutoutCall, Feature  # noqa: E402
+from joints import CornerCase, CrossCase, FrameCase, JointCase, JointSpec, PairCase  # noqa: E402
 from fuzzing import fresh, sample  # noqa: E402
 from lang.core.errors import LangError  # noqa: E402
 from lang.build import run_build  # noqa: E402
@@ -82,19 +88,56 @@ def draw_cases(count: int, at: int) -> list[BoardCase]:
     return found
 
 
-def build_cases(cases: Sequence[BoardCase]) -> Layout:
+def draw_joint_cases(count: int, at: int) -> list[JointCase]:
+    """About `count` joints (rounded up to as many of each kind) that pass
+    every check of `joints.check` and are joined, as many of each kind (every joint between boards that
+    meet edge-on, tenons with a joint in their gaps, box joints, half laps,
+    grooves in a frame), the same ones for the same `at`."""
+    kinds: list[st.SearchStrategy[JointCase]] = [
+        *(joints.pair_cases().filter(lambda c, k=k: c.joint.kind == k and c.after is None)
+          for k in ("domino", "clamex", "cabineo", "screws", "tenons", "groove")),
+        joints.pair_cases().filter(lambda c: c.after is not None),
+        joints.corner_cases(), joints.cross_cases(), joints.frame_cases()]
+    quota = -(-count // len(kinds))
+    found: list[JointCase] = []
+    for i, kind in enumerate(kinds):
+        mine: list[JointCase] = []
+
+        @settings(max_examples=quota * 60, database=None, deadline=None, phases=[Phase.generate],
+                  suppress_health_check=[HealthCheck.too_slow, HealthCheck.filter_too_much])
+        @seed(at * 100 + i)
+        @given(kind)
+        def collect(case: JointCase) -> None:
+            if len(mine) >= quota or case in mine or joints.check(case):
+                return
+            with fresh():
+                try:
+                    joints.apply(case, "m")
+                except (LangError, joints.Refused):
+                    return          # refused: nothing to compile
+            mine.append(case)
+
+        collect()
+        found += mine
+    return found
+
+
+def build_cases(cases: Sequence[BoardCase | JointCase]) -> Layout:
     """The cases as one layout, module `m<i>` for case i."""
     registry.reset()
     for i, case in enumerate(cases):
-        problems = boards._run_cutout(case, f"m{i}", pipeline=False)  # pyright: ignore[reportPrivateUsage]
-        if problems:
-            raise AssertionError(f"m{i} no longer passes: {problems[0]}")
+        if isinstance(case, BoardCase):
+            problems = boards._run_cutout(case, f"m{i}", pipeline=False)  # pyright: ignore[reportPrivateUsage]
+            if problems:
+                raise AssertionError(f"m{i} no longer passes: {problems[0]}")
+        else:
+            joints.apply(case, f"m{i}")
     layout = build_layout()
     registry.reset()
     return layout
 
 
-def write(out: Path, layout: Layout, cases: Sequence[BoardCase] | None = None) -> None:
+def write(out: Path, layout: Layout, cases: Sequence[BoardCase | JointCase] | None = None) -> None:
     """`<out>.json`, `<out>.volumes.json` and, given cases, `<out>.cases.txt`."""
     out.parent.mkdir(parents=True, exist_ok=True)
     Path(f"{out}.json").write_text(json.dumps(layout))
@@ -107,8 +150,9 @@ def preview_volumes(layout: Layout) -> dict[str, float]:
     return {p["path"]: float(mesh_part(p, layout["frame"]).volume) for m in layout["modules"] for p in m["parts"]}
 
 
-def read_cases(path: Path) -> list[BoardCase]:
-    names = {"BoardCase": BoardCase, "CutoutCall": CutoutCall, "Feature": Feature}
+def read_cases(path: Path) -> list[BoardCase | JointCase]:
+    names = {"BoardCase": BoardCase, "CutoutCall": CutoutCall, "Feature": Feature, "PairCase": PairCase,
+             "JointSpec": JointSpec, "CornerCase": CornerCase, "CrossCase": CrossCase, "FrameCase": FrameCase}
     return [eval(line.split(": ", 1)[1], names) for line in path.read_text().splitlines() if line.strip()]
 
 
@@ -159,9 +203,12 @@ def tessellation(part: PartLayout) -> float:
             else:
                 depth = t if inner["through"] or inner["depth"] is None else min(inner["depth"], t)
             extra -= math.pi * (inner["d"] / 2) ** 2 * (1 - gon) * depth
-        elif inner["kind"] == "pocket" and op["kind"] != "edge":
+        elif inner["kind"] == "pocket":
             polygons, drawn = _areas(inner["shape"])
-            extra -= (drawn - polygons) * (t if inner["depth"] is None else min(inner["depth"], t))
+            if op["kind"] == "edge":            # (in a narrow face: as deep as given, or through)
+                extra -= (drawn - polygons) * (inner["depth"] or 0.0)
+            else:
+                extra -= (drawn - polygons) * (t if inner["depth"] is None else min(inner["depth"], t))
     return extra
 
 
@@ -204,6 +251,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     rebuild = commands.add_parser("rebuild", help="build a batch's cases again with today's code")
     rebuild.add_argument("cases", type=Path)
     rebuild.add_argument("out", type=Path)
+    joined = commands.add_parser("joints", help="draw passing joints into one layout")
+    joined.add_argument("out", type=Path)
+    joined.add_argument("--count", type=int, default=40)
+    joined.add_argument("--seed", type=int, default=0)
     examples = commands.add_parser("examples", help="build every example")
     examples.add_argument("out_dir", type=Path)
     explain_ = commands.add_parser("explain", help="list the bodies Fusion made differently")
@@ -214,6 +265,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             cases = draw_cases(args.count, args.seed)
         write(args.out, build_cases(cases), cases)
         print(f"{len(cases)} boards -> {args.out}.json")
+    elif args.command == "joints":
+        with fresh():
+            found = draw_joint_cases(args.count, args.seed)
+        write(args.out, build_cases(found), found)
+        print(f"{len(found)} joints -> {args.out}.json")
     elif args.command == "rebuild":
         cases = read_cases(args.cases)
         write(args.out, build_cases(cases), cases)

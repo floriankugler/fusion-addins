@@ -27,6 +27,7 @@ from hypothesis.errors import NonInteractiveExampleWarning  # noqa: E402
 
 import boards  # noqa: E402
 import fuzzing  # noqa: E402
+import joints  # noqa: E402
 from lang.core.errors import LangError  # noqa: E402
 
 Check = tuple[st.SearchStrategy[Any], Callable[[Any], list[str]]]
@@ -75,6 +76,10 @@ CHECKS: dict[str, Check] = {
     "chamfers": (st.tuples(fuzzing.line_polygons(), _radii), _chamfers),
     "offsets": (fuzzing.recipes(), fuzzing.offset_problems),
     "cutouts": (boards.board_cases(), boards.run_cutout),
+    "joints": (joints.pair_cases(), joints.run_pair),
+    "box_joints": (joints.corner_cases(), joints.run_corner),
+    "half_laps": (joints.cross_cases(), joints.run_cross),
+    "grooves": (joints.frame_cases(), joints.run_frame),
 }
 
 
