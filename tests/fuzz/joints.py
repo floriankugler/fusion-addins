@@ -18,7 +18,8 @@ hardware"): no other error than a LangError; a refused join changes no
 board; a join from the side equals the join from the shelf; an accepted
 one plans, draws and meshes, leaves every board in one piece, lets no two
 boards share material, cuts no blind pocket or hole as deep as its board,
-and a connector's operations lie within its contact. A join across a
+sinks no countersink past a board's edge, and a connector's operations
+lie within its contact. A join across a
 pocket made before, in the side's face or the shelf's end where they meet,
 is refused, and only such a one [Florian, 2026-10-13].
 """
@@ -44,7 +45,7 @@ from lang.core.directions import Direction, current_frame
 from lang.core.geometry import NARROWEST, parts_of, polygons_of
 from lang.core.layout import build_layout
 from lang.core.ops import Cut, EdgeOp, Hole, Op, Pocket, VGroove
-from lang.core.part import Board
+from lang.core.part import ON_FACE_TOLERANCE, Board
 from lib import connector_data as data
 from lang.joints import box_joint, cabineo, clamex, domino, groove, half_lap, screws, tenons
 from lang.joints.common import face_toward, touching
@@ -447,6 +448,7 @@ def _run_pair(case: PairCase) -> list[str]:
             problems.append(f"{x.path} came apart in {len(x.outline.polygons())} pieces")
         problems += _depth_problems(x, before)
     problems += _shared_problems(b, meshes)
+    problems += _sink_problems(b, before)
     if case.joint.kind in ("domino", "clamex", "cabineo", "screws"):
         problems += _within_problems(b, contacts, before)
         problems += _station_problems(case.joint, b, contacts, before)
@@ -542,7 +544,10 @@ def _shared_problems(b: Built, meshes: dict[str, Any] | None = None) -> list[str
     """No two boards share material once joined."""
     meshes = meshes or _meshes()
     paths = [x.path for x in b.boards]
-    problems: list[str] = []
+    # (a board in islands meshed open, which no boolean takes [fuzzing, 2026-10-13])
+    problems = [f"{p}'s preview mesh is not a closed volume" for p in paths if not meshes[p].is_volume]
+    if problems:
+        return problems
     for i, p in enumerate(paths):
         for q in paths[i + 1:]:
             shared, face = _shared(meshes[p], meshes[q])
@@ -598,6 +603,20 @@ def _within_problems(b: Built, contacts: list[Contact], before: list[tuple[str, 
                     fits = True
             if not fits:
                 problems.append(f"{x.path}: the {op.kind} {getattr(op, 'name', None)!r} lies outside every contact")
+    return problems
+
+
+def _sink_problems(b: Built, before: list[tuple[str, str, list[Op]]]) -> list[str]:
+    """Every countersink a join made lies on its board's face: within the
+    outline, give or take `ON_FACE_TOLERANCE` (Fusion cannot cut one
+    reaching past the board's edge, 2026-10-13)."""
+    problems: list[str] = []
+    for x in b.boards:
+        material = x.outline.geometry.buffer(ON_FACE_TOLERANCE)
+        for op in _new_ops(x, before):
+            if isinstance(op, Hole) and op.chamfer > 0 and \
+                    not material.contains(circle_geometry((op.u, op.v), op.d / 2 + op.chamfer)):
+                problems.append(f"{x.path}: the countersink of {op.name!r} reaches past the board's outline")
     return problems
 
 
@@ -1077,7 +1096,9 @@ def _tenon_problems(case: PairCase, b: Built, contacts: list[Contact], meshes: d
         full = math.prod(h - l for l, h in zip(box_lo, box_hi))
         missing = full - _volume_in(meshes[b.side.path], box_lo, box_hi) - _volume_in(meshes[b.shelf.path], box_lo, box_hi)
         depth, thick = case.side_t - remaining, c.across_hi - c.across_lo
-        tenons = len(_new_cuts(b.shelf)) or 5
+        # (the joint's stations: without dog bones no relief cut counts them, and a notch is a
+        # cut of its own [fuzzing, 2026-10-13])
+        tenons = len(make_joint(case.joint, [c]).stations(c))
         allowed = along * tenons * thick * depth + across * c.length * depth + 8 * tenons * math.pi * r * r * depth
         if missing > allowed + 1e-3 * full:
             problems.append(f"the tenons and mortises leave {missing:.4g} mm3 of the {full:.4g} at the contact "
@@ -1090,9 +1111,6 @@ def _yx(part: Board, poly: Any) -> list[tuple[float, float]]:
     i = 0 if part.u_axis == "y" else 1
     return [(q[1 - i], q[i]) for q in poly.exterior.coords]
 
-
-def _new_cuts(part: Board) -> list[Op]:
-    return [op for op in part.ops if isinstance(op, Cut)]
 
 
 # -- one layout of many cases (the Fusion batch check) --------------------------------------------
