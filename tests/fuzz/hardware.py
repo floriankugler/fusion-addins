@@ -33,7 +33,7 @@ from hypothesis import strategies as st
 from shapely.geometry import LineString
 from shapely.geometry.base import BaseGeometry
 
-from boards import KNOWN, _pipeline_problems  # pyright: ignore[reportPrivateUsage]
+from boards import _pipeline_problems  # pyright: ignore[reportPrivateUsage]
 from fuzzing import floats, fresh, sizes
 from lang import (BallCatch, Box, ConcealedHinge, DoorLatch, DrawerSlide, HatchHinge, LangError, SlidingBracket, board,
                   cabinet, check, material, no_interference, rect, scope)
@@ -43,6 +43,7 @@ from lang.core.layout import build_layout
 from lang.core.ops import Cut, EdgeOp, Hole, Op, Pocket, VGroove
 from lang.core.part import Board
 from lang.core.scope import Scope
+from lang.hardware.hinges import HINGE_SHAPES
 from lib import stations as station_rule
 
 #: The side of its box a cabinet opens toward, by index.
@@ -79,13 +80,13 @@ class Built:
     #: Stations to check: (what, the holes' names in order, the edge's ends
     #: as world positions on `axis`, count, end); see `_station_problems`.
     stations: Callable[[], list[tuple[str, list[str], Axis, tuple[float, float], int, float]]] | None = None
-    #: A Pull Lock 44 on a door thicker than its housing is deep (`_known`).
-    known_thick_pull_lock: bool = False
     #: The boards the hardware is mounted on: its boxes must not reach into them.
     mounted: list[Board] = field(default_factory=list[Board])
-    #: Numbered along the opening's outline, which runs as the world has it, so
-    #: compared without names (open, 2026-10-13: number them as the others?).
+    #: Numbered toward a world axis' positive end, as hardware on a part lying
+    #: flat is (`lang.hardware.common.numbering`), so compared without names.
     unnamed: bool = False
+    #: How far apart the stations must at least be (hinges: their plates' length).
+    apart: float = 0.0
 
 
 # -- doors: concealed hinges and latches -------------------------------------------------------------
@@ -175,8 +176,10 @@ def build_door(case: DoorCase, front: int, origin: tuple[float, float, float], n
             return [("hinge", names, edge, ends, hardware.count, hardware.end)]
         return []
 
-    thick = case.kind == "latch" and model == "Pull Lock 44" and case.door_t > 20.4
-    return Built(cab, box, [left, right, top, bottom, door], mount, stations, thick, [door, carcass])
+    # (the hinges' length along the edge, their plates', from their boxes)
+    apart = 2 * max(max(abs(a), abs(c)) for _, _, (a, c) in HINGE_SHAPES[model].boxes().values()) \
+        if case.kind == "hinge" else 0.0
+    return Built(cab, box, [left, right, top, bottom, door], mount, stations, [door, carcass], apart=apart)
 
 
 def _hole_choice() -> st.SearchStrategy[Any]:
@@ -369,7 +372,7 @@ def build_catch(case: CatchCase, front: int, origin: tuple[float, float, float],
         with cab:
             cab.mount(catch, opening=panel.opening, edge=panel.opening.side(side), hatch=hatch)
 
-    return Built(cab, box, [panel, hatch], mount, mounted=[panel, hatch], unnamed=True)
+    return Built(cab, box, [panel, hatch], mount, mounted=[panel, hatch], unnamed=case.on == "bottom")
 
 
 # -- drawers: slides -------------------------------------------------------------------------------
@@ -522,9 +525,9 @@ def _accepted_problems(b: Built, before: State) -> list[str]:
         if two and any(one.startswith(i + ".") for i in items) and two not in mounted:
             # (hardware meeting itself or a board it is not mounted on, where the build spaces it
             # closer than it is long or puts a board in its way: the check reports it, as it
-            # should; whether hinges 42 to 56 mm apart should be refused is open, 2026-10-13)
+            # should; hinges are refused that close, `Built.apart`)
             continue
-        problems.append(_known(b, p))
+        problems.append(p)
     old = {path: ops for path, _, ops in before[0]}
     for x in b.boards:
         if len(x.outline.polygons()) != 1:
@@ -534,16 +537,6 @@ def _accepted_problems(b: Built, before: State) -> list[str]:
     if b.stations is not None and not problems:
         problems += _station_problems(b)
     return problems
-
-
-def _known(b: Built, problem: str) -> str:
-    """The problem, marked `KNOWN` where it is known and open."""
-    if f" overlaps {b.cab.path}.door" in problem and b.known_thick_pull_lock:
-        # Open (2026-10-13): the Pull Lock 44's pawl box lies 20.4 to 33 behind the door's front,
-        # 2.5 mm outside the counterbore toward the carcass face, so on a door thicker than 20.4
-        # it reaches into the door. Does the lock fit such a door? Florian's to say.
-        return f"{KNOWN} {problem}"
-    return problem
 
 
 def _footprint(x: Board, op: Op) -> BaseGeometry | None:
@@ -605,6 +598,9 @@ def _station_problems(b: Built) -> list[str]:
         if len(found) != len(want) or any(abs(a - w) > 1e-6 for a, w in zip(sorted(found), sorted(want))):
             problems.append(f"the {what}s stand at {[round(v, 3) for v in sorted(found)]} along {axis}, "
                             f"lib.stations puts them at {[round(v, 3) for v in sorted(want)]}")
+        close = [round(q - p, 3) for p, q in zip(sorted(found), sorted(found)[1:]) if q - p < b.apart - 1e-6]
+        if close:
+            problems.append(f"the {what}s stand {close} apart, closer than {b.apart:g}")
     return problems
 
 
