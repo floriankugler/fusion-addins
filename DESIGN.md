@@ -872,7 +872,12 @@ proposed]
   length must allow; none where a mortise breaks out of its board or a
   tenon is flush with its board's end (the reliefs' geometry is the
   shared one of "Dog bones" below since 2026-10-12, the layout unchanged
-  to the bit). Reliefs and mortises are round
+  to the bit). With dog bones, the gaps between the tenons must be at
+  least the tool, which routes them, and a corner relief bites 0.15 times
+  the tool plus half the relief into a tenon's side at its root, so a
+  tenon must be wider than its two bites [found by fuzzing, 2026-10-13:
+  tenons 1.1 wide and apart with 8 mm dog bones were eaten, leaving
+  islands]. Reliefs and mortises are round
   through cuts and pockets, so the tenon joint needs no new operation; a
   through cut that would split a board in pieces is now an error.
   Florian's choices 2026-10-11: corner dog bones by default; screws and
@@ -891,8 +896,11 @@ proposed]
   screws.py`): `count=`/`at=` on a plain butt joint, or `gaps=t`, through
   the board that is met from its outer face into the other's end, centred
   on its thickness, `countersink=True` for a 90 degree countersink twice
-  the screw plus 0.4 wide (a chamfer on the hole's edge); `offset=12`
-  puts two beside each tenon instead. `screws(tenons=t)` drills through
+  the screw plus 0.4 wide (a chamfer on the hole's edge), which must lie
+  on the face it is sunk into, as hardware's holes do (`hole_fits`) [found
+  in the Fusion batch check, 2026-10-13: 4 mm screws into a 4 mm divider
+  flush with the side's edge, whose countersinks reached 2.2 past it];
+  `offset=12` puts two beside each tenon instead. `screws(tenons=t)` drills through
   the tenons themselves, halfway along each, one in the middle or two
   `offset` in from its edges, square to the tenon board's faces: only
   where the tenon's face lies open because its mortise runs out of the
@@ -2376,7 +2384,11 @@ pocket, hole or V-groove made before, unless a join made it. The pair fuzz
 check pockets the side over the contact and beside it and the shelf out
 through its end, and expects a refusal exactly where one lies in a
 contact; the lap check expects one exactly where a board ends inside the
-other.
+other. A second batch, drawn again, found countersinks reaching past the
+side's edge (screws as wide as a divider flush with it), now an error, and
+the pair check meanwhile tenons the tool could not cut (gaps and tenons
+narrower than it), now errors too; the fuzz checks look for both from the
+outside.
 
 1. `core`: the position algebra, box, board with `on`, `between` and `center`,
    scopes and paths, and layout JSON output with world transforms. With unit
