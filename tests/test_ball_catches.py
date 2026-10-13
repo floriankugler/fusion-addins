@@ -504,3 +504,30 @@ def test_catches_whose_holes_meet_are_refused_and_change_nothing():
             f.mount(catch, opening=panel.opening, edge=panel.opening.front, hatch=hatch)
         assert _holes(panel) == {} and _holes(hatch) == {} and f.hardware == []
         f.mount(BallCatch(count=1, gap=2.5), opening=panel.opening, edge=panel.opening.front, hatch=hatch)  # one alone
+
+
+def test_catches_on_a_level_edge_are_numbered_from_the_panels_left():
+    """Found by fuzzing: catches were numbered along each edge from its end
+    with the lower coordinates, so on the top edge of a back panel catch 1
+    sat at the cabinet's left facing one way and at its right facing the
+    other. They are numbered as the other hardware is [Florian,
+    2026-10-13]: here from the panel's own left, seen from its show face."""
+    for front in ("front", "back", "left", "right"):
+        registry.reset()
+        wide = front in ("front", "back")                   # the cabinet 800 wide whichever way it faces
+        box = Box.from_size(width=800 if wide else 400, depth=400 if wide else 800, height=600)
+        with cabinet("cab", box, front=getattr(box, front)) as cab:
+            panel = board("panel", ply15).on(cab.back).show(cab.front)
+            panel.cut(rect(width=400, height=300).rounded(20), at=panel.inner.center, name="opening")
+            catch = BallCatch()
+            hatch = catch.hatch("hatch", panel.opening)
+            cab.mount(catch, opening=panel.opening, edge=panel.opening.top, hatch=hatch)
+        left = cab.left.outward
+        plane = box.hi[left.axis] if left.sign > 0 else box.lo[left.axis]
+
+        def from_left(name: str) -> float:
+            (op,) = [op for op in panel.ops if isinstance(op, Hole) and op.name == name]
+            return left.sign * (plane - {panel.u_axis: op.u, panel.v_axis: op.v}[left.axis])
+
+        assert from_left("catch_hatch_1") < from_left("catch_hatch_2"), front     # the top edge, named
+        assert from_left("catch_hatch_3") < from_left("catch_hatch_4"), front     # the bottom edge

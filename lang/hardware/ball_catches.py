@@ -19,7 +19,11 @@ slot), each 2 mm across and 4 deep unless `pilot=` says otherwise, from
 the face the catches are screwed to: the big face that is not the show
 face (the hidden one), unless `face=` names one. They are named
 `catch_<hatch>_<n>` in the panel and `catch_<panel>_<n>` in the hatch, n
-numbering on past the catches an earlier mount put on the same pair.
+numbering on past the catches an earlier mount put on the same pair: the
+edge named first, along each edge as the other hardware numbers, from the
+bottom on an upright edge, from the panel's own left, seen from its show
+face, on a level one, and toward the world axis' positive end on a panel
+lying flat (`common.numbering`).
 
 `scope.mount(catch, opening=panel.opening, edge=panel.opening.left,
 hatch=hatch)` spaces `count` catches (4) over the straight edge that
@@ -78,7 +82,7 @@ from ..core.refs import Pos, PosLike, Side, as_pos
 from ..core.shapes import Shape
 from ..emit.arcs import Curve2, Line2, fit
 from ..joints.common import big_face, face_choice, hidden_face, make_spacing
-from .common import TOLERANCE, Point2, check_hole_size, check_pilot_depth, mm
+from .common import TOLERANCE, Point2, check_hole_size, check_pilot_depth, mm, numbering
 
 if TYPE_CHECKING:
     from ..core.scope import Scope
@@ -460,9 +464,21 @@ class BallCatch:
                     needed = 2 * self.end + (n - 1) * spec.holder_width
                     raise LangError(f"{self.name}: {side.label} is {mm(length)} long; {n} catches "
                                     f"{mm(self.end)} from its ends need {mm(needed)}.", panel.path)
-            side.catches = [self._catch(side, d, number + k) for k, d in enumerate(distances)]
+            order = self._order(panel, side)
+            side.catches = [self._catch(side, d, number + (k if order > 0 else n - 1 - k))
+                            for k, d in enumerate(distances)]
             number += n
         return sides
+
+    def _order(self, panel: Board, side: _Straight) -> int:
+        """+1 when the catches on `side` are numbered from its end `a`, -1
+        from `b`: as the other hardware numbers along an edge
+        (`common.numbering`), seen from the panel's show face [Florian,
+        2026-10-13; they were numbered from the lower coordinates, which on
+        a level edge of an upright panel is the left only facing one way]."""
+        i = 0 if abs(side.along[0]) >= abs(side.along[1]) else 1
+        axis = (panel.u_axis, panel.v_axis)[i]
+        return numbering(-panel.show_face.direction, axis) * (1 if side.along[i] > 0 else -1)
 
     def _opposite(self, panel: Board, selected: _Straight, edges: list[_Straight]) -> _Straight:
         """The straight edge across the opening from the one named: it runs
