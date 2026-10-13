@@ -877,19 +877,28 @@ class Board:
         (`panel.front.left` on a board lying flat, `side.front.bottom` on
         one standing), is a corner of the outline: the chamfer cuts it off,
         `size` along both its edges, and changes the outline at once, as
-        `fillet()` rounds a corner (see there)."""
+        `fillet()` rounds a corner (see there).
+
+        A list is chamfered whole or not at all: a refused item leaves the
+        board as it was [found by fuzzing, 2026-10-13: the items before it
+        stayed chamfered]."""
         items: list[object] = list(what) if isinstance(what, (list, tuple)) else [what]
-        corners = [e for e in items if isinstance(e, Edge) and e.part is self and e.through]
-        if corners:
-            if size <= 0:
-                raise LangError(f"chamfer(): the size must be positive, got {size:g}.", self.path)
-            self._check_chamfer(size, "chamfer()")
-            named = self._outline_corners(corners, "chamfer")
-            self._reshape(corner_geometry.clip_corners(self.outline, named, float(size), self.path),
-                          f"chamfer({size:g})")
-        for item in items:
-            if not any(item is e for e in corners):
-                self._chamfer_along(item, float(size))
+        saved = self._state()
+        try:
+            corners = [e for e in items if isinstance(e, Edge) and e.part is self and e.through]
+            if corners:
+                if size <= 0:
+                    raise LangError(f"chamfer(): the size must be positive, got {size:g}.", self.path)
+                self._check_chamfer(size, "chamfer()")
+                named = self._outline_corners(corners, "chamfer")
+                self._reshape(corner_geometry.clip_corners(self.outline, named, float(size), self.path),
+                              f"chamfer({size:g})")
+            for item in items:
+                if not any(item is e for e in corners):
+                    self._chamfer_along(item, float(size))
+        except BaseException:
+            self._restore(saved)
+            raise
         return self
 
     def _chamfer_along(self, what: object, size: float) -> None:

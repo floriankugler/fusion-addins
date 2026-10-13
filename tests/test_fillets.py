@@ -345,3 +345,18 @@ def test_corners_of_a_hair_thin_hole_are_refused_not_a_crash():
         corners = [p for p, _ in corner_points(shape)]
         chamfered(shape, 6, corners)                       # refused or cut off, not a crash
         filleted(shape, 6)
+
+
+def test_a_refused_chamfer_list_changes_nothing():
+    """Found by fuzzing: chamfer() with a list recorded the items before a
+    refused one, a V-groove's rim, and kept them. A list is chamfered whole
+    or not at all."""
+    m, panel = _panel()
+    with m:
+        panel.add_vgroove(panel.top, (50, 50), (250, 50), 3, name="groove")
+        before = (panel.outline.geometry.wkt, list(panel.ops))
+        with pytest.raises(LangError, match="a V-groove has no rim to chamfer"):
+            panel.chamfer([panel.top.outline, panel.front.right, panel.groove], 1)
+        assert (panel.outline.geometry.wkt, list(panel.ops)) == before
+
+
