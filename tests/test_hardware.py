@@ -629,3 +629,16 @@ def test_a_refused_mount_changes_nothing(case: Callable[[], tuple[Scope, Callabl
     with pytest.raises(LangError, match=re.escape(message)):
         mount()
     assert _untouched(scope_) == before
+
+
+def test_a_bay_exactly_deep_enough_is_deep_enough_at_any_origin():
+    """Found by fuzzing: a bay exactly NL + 3 deep behind the runner's
+    front, 518.05 - 15.05 at its origin, came out 502.99999999999994 and was
+    refused, where the same cabinet facing another way was not. The depth
+    is compared within the hardware's tolerance."""
+    slide = DrawerSlide("Dynapro 50/70", nl=500)
+    bay = Box.from_size(width=500, depth=518.0, height=300, origin=(0.05, 0, 0))     # x 0.05 to 518.05
+    box = slide.drawer_box(bay, front=Pos("x", 15.05), side_thickness=12, height=100)
+    assert box.hi["x"] - box.lo["x"] == pytest.approx(490)                          # NL - 10
+    with pytest.raises(LangError, match="needs 503 mm behind the runner's front"):
+        slide.drawer_box(bay, front=Pos("x", 15.06), side_thickness=12, height=100)

@@ -287,7 +287,7 @@ class DrawerSlide:
         if front_pos.axis != back.axis:
             raise LangError(f"{self.name}: the front position {front_pos} is not on the bay's depth axis.")
         available = (bay.back.value - front_pos.value) * back.sign
-        if available < self.depth_needed:
+        if available < self.depth_needed - TOLERANCE:      # (exactly enough, worked out at a far origin, may round short)
             raise LangError(f"{self.name}: needs {self.depth_needed:g} mm behind the runner's front, "
                             f"the bay has {available:g}.")
         box = bay.shrunk(left=clearance, right=clearance)
