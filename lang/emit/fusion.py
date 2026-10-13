@@ -181,6 +181,17 @@ class Emitter:
                 self._add_bodies(comp, [body])[0].name = f"{item.path}.{body_plan.name}"
         self.report.features += 1
 
+    def bodies(self) -> dict[str, list[adsk.fusion.BRepBody]]:
+        """The bodies drawn so far, by name: a part's path, or a hardware
+        body's (`tests/fuzz/fusion_check.py` compares them with the
+        preview)."""
+        out: dict[str, list[adsk.fusion.BRepBody]] = {}
+        for path, comp in self._components.items():
+            if path:
+                for body in comp.bRepBodies:
+                    out.setdefault(body.name, []).append(body)
+        return out
+
     def _problem(self, text: str) -> None:
         self.report.problems.append(text)
         self.log("problem: " + text)
