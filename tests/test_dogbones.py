@@ -5,7 +5,7 @@ import math
 from pathlib import Path
 
 import pytest
-from shapely.geometry import Point
+from shapely.geometry import Point, Polygon
 from shapely.geometry import box as shapely_box
 
 from lang import *
@@ -424,3 +424,100 @@ def test_the_drawer_boxes_relieve_only_their_cut_outs():
     assert made == {"left": [], "right": [],
                     "front": ["coupling_left_dogbones", "coupling_right_dogbones"],
                     "back": ["hook_left_dogbones", "hook_right_dogbones"]}
+
+
+# -- found by fuzzing ----------------------------------------------------------------------------
+
+def _fuzzed(name: str, size: tuple[float, float], t: float, place: str, origin: tuple[float, float, float],
+            features: list[tuple[str, int, float, float, float, float, float, float | None]],
+            outline: Shape | None = None) -> tuple[Scope, Board]:
+    """A board as the fuzz tests build one (`tests/fuzz/boards.py`): its
+    outline `size` from its low corner, then pockets ("pocket", face, u, v,
+    a, b, angle, depth fraction or None for through) and cuts ("cut", ...),
+    a rectangle a by b turned by angle about (u, v), a circle a across when
+    b is 0, named by kind and index; one the language refuses is left out."""
+    from shapely import affinity
+    u, v = size
+    box = {"bottom": Box.from_size(width=v, depth=u, height=100, origin=origin),
+           "left": Box.from_size(width=100, depth=u, height=v, origin=origin),
+           "back": Box.from_size(width=u, depth=100, height=v, origin=origin)}[place]
+    with module(name, box) as m:
+        b = board("panel", material("birch", t=t), outline).on(getattr(m, place))
+        u0, v0, _, _ = b.outline.bounds
+        for i, (kind, face, fu, fv, a, bb, angle, depth) in enumerate(features):
+            p = (u0 + fu, v0 + fv)
+            g = Point(p).buffer(a / 2, quad_segs=32) if bb <= 0 else \
+                affinity.rotate(shapely_box(p[0] - a / 2, p[1] - bb / 2, p[0] + a / 2, p[1] + bb / 2), angle, origin=p)
+            try:
+                if kind == "pocket":
+                    b.add_pocket(b.big_faces()[face], Shape(g), through if depth is None else max(0.1, depth * t),
+                                 f"pocket_{i}")
+                else:
+                    b.add_cut(Shape(g), f"cut_{i}")
+            except LangError:
+                pass
+    return m, b
+
+
+def test_dog_bones_with_no_relief_relieve_every_corner():
+    """Found by fuzzing: with relief=0 a dog bone's circle runs through its
+    corner, and its polygon, drawn on the whole degrees, a hair inside it
+    where the corner falls between two of them. The circle's part at the
+    corner then touched nothing of the corner's own material, and the
+    relief was left out as another's; where it was cut, the corner's tip it
+    left, edges under 0.01 mm, counted as a corner again. Every corner is
+    relieved, once."""
+    m, b = _fuzzed("m", (570, 293), 6, "back", (0, 0, 0), [
+        ("cut", 1, 34.16370084795572, 14.0, 35.0, 20.0, 77.0, 0.5),
+        ("pocket", 0, 28.0, 250.0, 51.0, 14.973648255725742, 128.63460686845886, None)])
+    with m:
+        b.dogbones(tool=10.5, relief=0)
+    assert corners(b) == []
+    assert sorted(op.name or "" for op in _dogbones(b)) == ["cut_0_dogbones", "pocket_1_dogbones"]
+
+
+def _taper(size: tuple[float, float], r: float) -> Shape:
+    u, v = size
+    return Shape(Polygon([(0, 0), (u, 0), (u, r), (0, v)]))
+
+
+def test_dog_bones_come_in_the_order_of_the_operations_wherever_the_board_lies():
+    """Found by fuzzing: the reliefs came in the order their corners were
+    found, which follows where each ring starts, and that follows the
+    board's place in the world: the same board lying elsewhere had them
+    in another order. They come in the order of the operations they
+    belong to."""
+    features: list[tuple[str, int, float, float, float, float, float, float | None]] = [
+        ("pocket", 0, 1550.0, 537.3755351993901, 102.89750496278405, 112.66173214154878, 0.0, 0.5),
+        ("pocket", 1, 1341.3208821543392, 30.048688607178907, 110.0, 47.0, 45.0, 0.6945524194107097),
+        ("cut", 0, 0.0, 58.0, 85.46812652873423, 119.0, 45.0, None),
+        ("cut", 1, 14.0, 115.86812070661084, 110.0, 120.0, 0.0, None),
+        ("pocket", 0, 1566.9690742404343, 518.0755351993902, 80.49557002503873, 71.0, 0.0, 0.613673301962901)]
+    size = (1600.0, 572.5755351993902)
+    for place, origin in (("left", (0.0, 0.0, 0.0)), ("back", (-420.0, 13.5, 4000.0))):
+        registry.reset()
+        m, b = _fuzzed("m", size, 6, place, origin, features, _taper(size, 137.67758347807668))
+        with m:
+            b.dogbones(tool=6, relief=0)
+        assert [op.name for op in _dogbones(b)] == ["pocket_1_dogbones", "cut_2_dogbones", "cut_3_dogbones"], place
+
+
+def test_a_hairline_spike_two_drawings_of_a_circle_leave_is_no_corner():
+    """Found by fuzzing: where a circle pocket overlaps pockets from the
+    other face, the regions the corners are found in, made by booleans of
+    the circle's two drawings, kept a spike, a ring turning back along
+    itself. It counted as a corner, and a dog bone needs a corner, not two
+    edges in one line: the second dogbones() was refused. The regions are
+    cleaned first, as every shape is."""
+    size = (58.0, 80.0)
+    features: list[tuple[str, int, float, float, float, float, float, float | None]] = [
+        ("pocket", 0, 36.0, 3.0, 55.012957425635086, 65.74747336688866, 45.0, 0.5),
+        ("pocket", 1, 20.171108416351803, 70.75689498186713, 116.0, 0.0, 45.0, 0.5),
+        ("pocket", 0, 37.5, 79.0, 32.5, 88.5, 0.0, 0.8648160999719844),
+        ("pocket", 1, 53.0, 50.0, 6.0, 58.0, 45.0, 0.4007865005434067)]
+    for origin in ((0.0, 0.0, 0.0), (-2.0, -2921.771679118425, -2115.0)):
+        registry.reset()
+        m, b = _fuzzed("m", size, 9, "left", origin, features, _taper(size, 17.60097056214606))
+        with m:
+            b.dogbones(tool=5, relief=0.1, at=b.pocket_1)
+            b.dogbones(tool=5, relief=0.1, at=b.pocket_1)

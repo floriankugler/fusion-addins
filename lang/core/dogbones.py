@@ -15,16 +15,20 @@ other board covers it.
 `board.dogbones()` puts one into every inside corner the board has where
 the call is written, or into those of the operations `at=` names; corners
 made later get none, so the call goes after the cuts and joins whose
-corners it should relieve. `corners` finds them: where two straight edges of the material meet
-and the material goes around the corner by more than half a turn, seen
-from either big face, at any angle. Straight means a line of the outline
-or a shape as the emitter draws it: runs that stand for an arc
-(`lang.emit.arcs.fit`), such as circles, round slot ends, rounded corners
-and other reliefs, have no corners, nor does a junction between a line and
-an arc, as the add-in only takes corners between straight edges. A vertex
-that turns no more than an arc's segments do (`arcs.MAX_STEP`) is not a
-corner either. So a corner relieved before, by a joint or by a hole over
-it, is not relieved again.
+corners it should relieve. `corners` finds them: where two straight edges
+of the material meet and the material goes around the corner by more than
+half a turn, seen from either big face, at any angle. Straight means a
+line of the outline or a shape as the emitter draws it: runs that stand
+for an arc (`lang.emit.arcs.fit`), such as circles, round slot ends,
+rounded corners and other reliefs, have no corners, nor does a junction
+between a line and an arc, as the add-in only takes corners between
+straight edges. A vertex that turns no more than an arc's segments do
+(`arcs.MAX_STEP`) is not a corner either, nor one with an edge shorter
+than `geometry.NARROWEST`. The regions are cleaned first
+(`geometry.clean`), as every shape is: the spikes and slivers booleans
+leave where two drawings of one edge or arc meet are not corners. So a
+corner relieved before, by a joint or by a hole over it, is not relieved
+again.
 
 A corner's wall runs from the face it is seen on, the board's own or a
 pocket's floor, down to the floor of what lies next to it, or through the
@@ -51,7 +55,7 @@ from .cutouts import circle_geometry
 from .errors import LangError
 from .ops import Cut, Hole, Pocket
 from .shapes import Shape, circle
-from .geometry import polygons_of
+from .geometry import NARROWEST, clean, polygons_of
 
 if TYPE_CHECKING:
     from .part import Board
@@ -174,7 +178,10 @@ def corners(board: Board) -> list[Corner]:
             if d0 + d1 >= t - _EPS:
                 voids.append(g0.intersection(g1))
     void = unary_union(voids) if voids else Polygon()
-    material = outline.difference(void) if voids else outline
+    # (cleaned as every shape is: the spikes and slivers of two drawings of one
+    # circle made corners that came and went with the board's place [found by
+    # fuzzing, 2026-10-13])
+    material = clean(outline.difference(void)) if voids else outline
     exteriors = [p.exterior for p in polygons_of(outline)]
 
     through: dict[tuple[float, float], Corner] = {}
@@ -188,7 +195,7 @@ def corners(board: Board) -> list[Corner]:
                 level = material
             else:
                 level = unary_union([g for g, d in cuts if d >= top - _EPS]).intersection(material)
-            level = level.difference(deeper)
+            level = clean(level.difference(deeper))
             for point, a, b in _concave(level):
                 probe = _toward(point, a, b, _PROBE)
                 outside = not outline.contains(probe)
@@ -255,7 +262,10 @@ def _concave(region: BaseGeometry) -> Iterator[tuple[Point2, Point2, Point2]]:
                 ix, iy = v[0] - before.a[0], v[1] - before.a[1]
                 ox, oy = after.b[0] - v[0], after.b[1] - v[1]
                 li, lo = math.hypot(ix, iy), math.hypot(ox, oy)
-                if li < _ON or lo < _ON:
+                if li < NARROWEST or lo < NARROWEST:
+                    # (no corner is meant with an edge that short: what a relief with no
+                    # relief= leaves where its circle's polygon passes a hair inside the
+                    # corner [found by fuzzing, 2026-10-13])
                     continue
                 if math.atan2(ix * oy - iy * ox, ix * ox + iy * oy) >= -MAX_STEP:
                     continue                  # a turn toward the material, or too slight
@@ -318,8 +328,19 @@ def reliefs(board: Board, request: Request) -> list[Relief]:
         base = f"{c.ops[-1]}_dogbones" if c.ops else "dogbones"
         face = None if c.bottom is None and c.outline_cut else c.face
         groups.setdefault((base, face, c.bottom), []).append(_relief_shape(c, request))
+    # In the order of the operations they belong to, the outline's own corners
+    # first, then by face and depth: the order the corners are found in
+    # follows where each ring starts, which follows the board's place in the
+    # world [found by fuzzing, 2026-10-13].
+    order = {getattr(op, "name", None): k for k, op in enumerate(board.ops)}
+
+    def key(item: tuple[tuple[str, str | None, float | None], list[Shape]]) -> tuple[int, str, float]:
+        (base, face, depth), _ = item
+        owner = base.removesuffix("_dogbones")
+        return (order.get(owner, -1), face or "", math.inf if depth is None else depth)
+
     out: list[Relief] = []
-    for (base, face, depth), shapes in groups.items():
+    for (base, face, depth), shapes in sorted(groups.items(), key=key):
         shape = shapes[0]
         for s in shapes[1:]:
             shape = shape.union(s)
@@ -341,7 +362,15 @@ def _relief_shape(c: Corner, request: Request) -> Shape:
     corner's level that touches the corner)."""
     disc = corner_relief(c.point, c.a, c.b, request.tool, request.relief)
     p = Point(c.point)
-    own = unary_union([g for g in polygons_of(disc.geometry.intersection(c.level)) if g.distance(p) < _ON])
+    # (with relief=0 the circle runs through the corner, its polygon a hair
+    # inside, and touched nothing of the corner's own: the whole relief went
+    # as another's material [found by fuzzing, 2026-10-13]. The polygon's
+    # chord crosses the corner's edges up to its sagitta over the sine of
+    # the angle between edge and circle from the corner; twice that.)
+    radius = (request.tool / 2) / math.sin(c.angle) + request.relief / 2
+    sagitta = radius * (1 - math.cos(math.pi / 360))           # the whole degrees' (`circle_geometry`)
+    near = 2 * sagitta / math.sin(max((math.pi - c.angle) / 2, MAX_STEP / 2)) + _ON
+    own = unary_union([g for g in polygons_of(disc.geometry.intersection(c.level)) if g.distance(p) < near])
     excess = disc.geometry.intersection(c.keep).difference(own)
     if excess.area <= _SLIVER:
         return disc
