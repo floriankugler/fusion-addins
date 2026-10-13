@@ -85,3 +85,16 @@ def test_clean_keeps_what_is_meant_as_it_is():
         assert clean(g) is g
     assert polygons_of(clean(Polygon([(0, 0), (10, 0), (10, 0.005), (0, 0.005)]))) == []    # 5 um wide
     assert len(polygons_of(clean(Polygon([(0, 0), (10, 0), (10, 0.02), (0, 0.02)])))) == 1  # 20 um
+
+
+def test_a_collection_is_cleaned_to_its_areas():
+    """Found by fuzzing: a shape intersected with the circle it had just
+    lost is a collection of lines, points and polygons of no area (2e-18
+    mm2); it was left as it was, invalid. A shape is an area: the lines
+    and points go, and the polygons are cleaned."""
+    from shapely.geometry import GeometryCollection, LineString
+    square = box(0, 0, 10, 10)
+    assert clean(GeometryCollection([square, LineString([(20, 0), (30, 0)]), Point(40, 0)])).equals(square)
+    lost = Point(0, 34).buffer(1.0)
+    left = Point(0, 0).buffer(34.5).union(lost).difference(lost).intersection(lost)
+    assert clean(left).is_empty and Shape(left).is_empty()

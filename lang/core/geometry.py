@@ -59,12 +59,20 @@ def clean(g: BaseGeometry) -> BaseGeometry:
     Every other vertex stays where it is: arcs are recovered from vertices
     that lie on their circle within 1e-7 mm (`lang.emit.arcs`), and snapping
     to any grid moves them off it. A geometry with nothing to clean comes
-    back as it is."""
-    if not isinstance(g, (Polygon, MultiPolygon)) or g.is_empty:
+    back as it is; of a collection (a boolean's lines and points with its
+    areas), only the areas."""
+    if g.is_empty:
         return g
-    polygons: list[Polygon] = list(g.geoms) if isinstance(g, MultiPolygon) else [g]
-    out: list[Polygon] = []
     changed = False
+    if isinstance(g, Polygon):
+        polygons: list[Polygon] = [g]
+    elif isinstance(g, MultiPolygon):
+        polygons = list(g.geoms)
+    elif hasattr(g, "geoms"):           # a collection (a shape cut by what it lost): its areas only
+        polygons, changed = polygons_of(g), True
+    else:
+        return g
+    out: list[Polygon] = []
     for poly in polygons:
         cleaned = _clean_polygon(poly)
         if cleaned is None:
