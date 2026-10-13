@@ -43,7 +43,9 @@ the edge must lie on the door's or the carcass board's face, outside the
 holes and pockets made before; the add-in probes its faces the same way,
 including a pilot-sized circle at each LL-66 station's centre); and pilot
 holes as deep as a board is thick. Beyond the add-in: latches so close
-that a hole of one meets a hole of another.
+that a hole of one meets a hole of another, and a Pull Lock 44 on a door
+thicker than 20.4 mm, where its pawl, behind the housing, would lie in
+the door (`LatchShape.max_door`).
 
 Mounted, a latch also places itself, closed, as boxes: the part on the
 door and its strike on the carcass board, which interlock when closed, as
@@ -107,6 +109,9 @@ class LatchShape:
     front: tuple[LatchBox, ...] = ()
     #: Strike boxes measured from the door's front face, as `front`.
     strike_front: tuple[LatchBox, ...] = ()
+    #: The thickest door it fits, mm, when a part behind the front reaches
+    #: past the door's holes: on a thicker door it would lie in the door.
+    max_door: float | None = None
 
     def latch_boxes(self, door_thickness: float) -> list[LatchBox]:
         """The part on the door as boxes, on a door `door_thickness` thick."""
@@ -162,6 +167,10 @@ LATCH_SHAPES: dict[str, LatchShape] = {
                ((-13.4, 13.4), (20.6, 47.4), (0.0, 20.4)),      # housing, a square in the 38.1 hole
                ((-16.9, 16.9), (17.1, 50.9), (10.0, 11.5)),     # clamp plate, a square in the 48 counterbore
                ((-8.0, 8.0), (7.5, 24.0), (20.4, 33.0))),       # pawl, rough width
+        # The pawl swings from the housing's end, 20.4 behind the front, 2.5 mm
+        # past the counterbore toward the carcass face [refused on thicker doors,
+        # Florian 2026-10-13, after fuzzing found it reaching into a 22 mm door].
+        max_door=20.4,
     ),
     "LL-66": LatchShape(
         door=(((-33.0, 33.0), (2.6, 21.1), (0.0, 8.5)),         # base
@@ -262,6 +271,10 @@ class DoorLatch:
         toward the door's middle, or that face itself (`shelf.top`).
         Nothing is drilled unless every hole fits."""
         where = self._where(door, carcass)
+        limit = self.shape.max_door
+        if limit is not None and door.thickness > limit + TOLERANCE:
+            raise LangError(f"{self.name}: {door.path} is {mm(door.thickness)} thick; the latch fits doors up to "
+                            f"{mm(limit)}, behind which its pawl swings.", door.path)
         holes = self._holes(where)
         check_pilot_depth(self.name, door, self.pilot[1], "pilot")
         check_pilot_depth(self.name, where.carcass, self.pilot[1], "pilot")

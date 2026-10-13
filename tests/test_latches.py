@@ -304,6 +304,19 @@ def test_latches_whose_holes_meet_are_refused_and_change_nothing():
             assert door.ops == [] and parts["top"].ops == [] and cab.hardware == []
             cab.mount(DoorLatch(latch.model, count=2, end=30), door=door, carcass=parts["top"])   # far apart
 
+
+def test_a_pull_lock_on_a_door_thicker_than_its_housing_is_refused():
+    """Found by fuzzing: on a 22 mm door the Pull Lock 44's pawl, which
+    swings behind the housing from 20.4 behind the front, 2.5 mm past the
+    counterbore toward the carcass face, lay in the door. Refused on doors
+    thicker than 20.4 [Florian, 2026-10-13]; up to that it fits."""
+    with pytest.raises(LangError, match=r"^cab\.door: Pull Lock 44: cab\.door is 22 mm thick; the latch fits doors "
+                                        r"up to 20\.4 mm, behind which its pawl swings\.$"):
+        _inset_door(DoorLatch("Pull Lock 44"), thickness=22)
+    registry.reset()
+    cab, parts = _inset_door(DoorLatch("Pull Lock 44"), thickness=20.4)
+    assert "pull_lock_top_1" in _holes(parts["door"]) and cab.hardware
+
 def test_layout_plan_and_preview():
     """The layout carries the holes and the boxes; the emitter's plan drills
     the lock's hole before the counterbore around it and the strike's pair
