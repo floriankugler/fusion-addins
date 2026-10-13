@@ -720,9 +720,15 @@ proposed]
   `across_hi`); a connector stays where the edge-on board's thickness puts
   it and is an error where it would reach past the other board's edge
   [2026-10-12]. Exact for outlines (a toe kick notch in the side
-  shortens the bottom's contact); pockets do not count; an end interrupted
-  by a notch gives one contact per piece. Joint layouts take a contact plus
-  settings and return operations for both parts. [implemented 2026-10-11]
+  shortens the bottom's contact); an end interrupted by a notch gives one
+  contact per piece. Pockets do not shape it, but a board meeting another
+  across a pocket, hole or V-groove made before, in the face it lies on or
+  in its own end, is an error, as across a cutout's opening: make it after
+  the join [Florian, 2026-10-13]. What joins made does not count (joins go
+  across each other's: screws in the tenons' gaps, a drawer's floor in its
+  groove past a box joint's reliefs). A contact narrower than 0.01 mm
+  either way is none. Joint layouts take a contact plus settings and
+  return operations for both parts. [implemented 2026-10-11]
 - Besides contacts there are **crossings** (`lang/core/crossing.py`): two
   boards in perpendicular planes whose material passes through each other,
   like battens across and along a floor. They share one axis, the line
@@ -745,8 +751,10 @@ proposed]
 - The first joint is the **half lap** (`lang/joints/laps.py`) [decided and
   implemented 2026-10-11]: `long.join(battens, using=half_lap(toward=
   floor.top))` laps the board with each board named, all of which it must
-  cross. Its own notches open toward `toward`, the other boards' the
-  opposite way;
+  cross, each reaching through the other's thickness (one ending inside
+  the other, short of its far face, would leave the notch cut through the
+  other open there: an error [Florian, 2026-10-13]). Its own notches open
+  toward `toward`, the other boards' the opposite way;
   the split lies in the middle of the height both share at each crossing
   (`split=` a position instead), and `clearance=` is the play in each
   notch in total, half on each side (default 0), as with tenons and box
@@ -2339,33 +2347,36 @@ is now none, the fin stays where it is (`clean` cannot take such fins out
 as it takes out pieces as narrow: an opening would also cut the tips where
 a circle meets a line tangentially, as the examples' do). And a half lap
 where one board ends inside the other, short of its far face, cuts the
-other's notch through its whole thickness and leaves it open there (open,
-for Florian: refuse, or notch only as deep as the board reaches). Found on
-the way, outside the joints: the exact inset of round 1b could lose a
-whole region (a slot through a rounded corner, its walls turned over at
-the border, took the inset's corner beside it, so a cross was laid out 17
-mm narrower and its openings ran into the bands); `grown`'s self-check and
-the offsets fuzz check now also require an inset to hold the shape shrunk
-by 1.25 times the inset with mitred corners (mitred as Fusion's offset:
-where a tab narrower than twice the inset turns over, it joins the tab's
-neighbours straight across, up to 1.41 times the inset in), and an outward
-offset to hold the shape grown round by 0.75 times the offset. And an arc
-that ends where it starts (a ring touching itself) kept a circle estimated
-through two points. An arc's end moved onto its circle along the line it
-continues in could land on the line's other end, where that lies on the
-circle too, and leave a line 6e-12 long, or not, as the rounding chose;
-such a vertex now stays. And `clean` left a geometry a move had rounded
-into a crossing (two crescents nearly touching, in a figure of eight)
-invalid; it makes it valid now. The Fusion batch check builds joints too
-(`fusion_batch.py joints`): 50 cases, five of every kind of pair, corner,
-crossing and frame, 132 parts, every body as the preview's. Fusion found
-one thing: screws in the tenons' gaps of a 6 mm side with a pocket where
-the shelf meets it go through the 1.5 mm the pocket leaves, and their 1.7
-mm countersink reaches through that, so Fusion cannot cut it (the emitter
-reports it, the rest builds). Contacts do not see pockets, so a joint over
-one bridges the void (open, for Florian: refuse a join across a pocket
-made before, as across a cutout's opening, or check a countersink against
-the material at its hole).
+other's notch through its whole thickness and leaves it open there;
+Florian decided to refuse such a lap. Found on the way, outside the
+joints: the exact inset of round 1b could lose a whole region (a slot
+through a rounded corner, its walls turned over at the border, took the
+inset's corner beside it, so a cross was laid out 17 mm narrower and its
+openings ran into the bands); `grown`'s self-check and the offsets fuzz
+check now also require an inset to hold the shape shrunk by 1.25 times the
+inset with mitred corners (mitred as Fusion's offset: where a tab narrower
+than twice the inset turns over, it joins the tab's neighbours straight
+across, up to 1.41 times the inset in), and an outward offset to hold the
+shape grown round by 0.75 times the offset. And an arc that ends where it
+starts (a ring touching itself) kept a circle estimated through two
+points. An arc's end moved onto its circle along the line it continues in
+could land on the line's other end, where that lies on the circle too, and
+leave a line 6e-12 long, or not, as the rounding chose; such a vertex now
+stays. And `clean` left a geometry a move had rounded into a crossing (two
+crescents nearly touching, in a figure of eight) invalid; it makes it
+valid now. The Fusion batch check builds joints too (`fusion_batch.py
+joints`): 50 cases, five of every kind of pair, corner, crossing and
+frame, 132 parts, every body as the preview's. Fusion found one thing:
+screws in the tenons' gaps of a 6 mm side with a pocket where the shelf
+meets it go through the 1.5 mm the pocket leaves, and their 1.7 mm
+countersink reaches through that, so Fusion cannot cut it (the emitter
+reports it, the rest builds). Contacts did not see pockets, so a joint
+over one bridged the void; Florian decided to refuse a join across a
+pocket, hole or V-groove made before, unless a join made it. The pair fuzz
+check pockets the side over the contact and beside it and the shelf out
+through its end, and expects a refusal exactly where one lies in a
+contact; the lap check expects one exactly where a board ends inside the
+other.
 
 1. `core`: the position algebra, box, board with `on`, `between` and `center`,
    scopes and paths, and layout JSON output with world transforms. With unit
