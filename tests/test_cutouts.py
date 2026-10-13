@@ -615,3 +615,19 @@ def test_a_border_next_to_a_notch_by_a_rounded_corner_keeps_its_width():
     op = panel.op("cutout").op
     assert isinstance(op, Cut)
     assert op.shape.geometry.distance(outline.exterior) >= 20 - 0.03
+
+
+def test_an_inset_loses_nothing_farther_than_the_border():
+    """Found by fuzzing (a cross's band cut into): a slot 2 wide cut
+    through a board's rounded corner; offset curve by curve, its walls
+    turned over at an inset of 20, and the inset lost its corner beside the
+    slot, 255 mm2, though it kept its distance and lay in the shape. The
+    cross was laid out over what was left, 17 mm narrower, and its
+    openings ran into the bands."""
+    from shapely.geometry import Point as P
+    from lang.core.shapes import Shape
+    board_outline = Shape(box(0, 0, 121, 118.5)).rounded(29.625).difference(Shape(box(15, 2.5, 17, 63.5)))
+    (outline,) = board_outline.polygons()
+    assert len(outline.interiors) == 0                  # the slot runs out through the corner
+    inset = cutouts.grown(outline, -20)
+    assert inset.bounds[0] == pytest.approx(20) and inset.contains(P(30, 90))

@@ -749,6 +749,26 @@ def offset_problems(recipe: Recipe) -> list[str]:
         near = float(np.min(shapely.distance(shapely.points(points), boundary)))
         if near < -d - slack:
             problems.append(f"the inset's boundary comes {near:.4g} near the shape's (inset {-d:g})")
+    # Nor does it lose anything well past the offset: an inset holds the
+    # shape shrunk mitred by 1.25 |d|, an outward offset the shape grown
+    # round by 0.75 d [a lost corner, 2026-10-13]. Mitred, as Fusion's
+    # offset: where a tab narrower than twice the inset turns over, both
+    # join its neighbours straight across, where shrinking round would bulge.
+    margin = max(slack, 0.25 * abs(d))
+    if d < 0:
+        reach = shape.buffer(d - margin, join_style="mitre", mitre_limit=100.0)
+    else:
+        reach = shape.buffer(d - margin, quad_segs=16) if d > margin else None
+    if reach is not None:
+        # (only what really lies so far in or so near: GEOS 3.14 buffered a
+        # circle with a slot out of it by 9 with a chord 26 long across the
+        # corner between them, 2026-10-13)
+        lost = [p for p in polygons_of(reach.difference(got)) if p.area > 1e-9
+                and (shape.distance(p.representative_point()) <= d - margin + slack if d > 0
+                     else shape.boundary.distance(p.representative_point()) >= -d + margin - slack)]
+        if sum(p.area for p in lost) > area_slack:
+            where = f"farther than {-d + margin:g} in from" if d < 0 else f"nearer than {d - margin:g} to"
+            problems.append(f"the offset loses {sum(p.area for p in lost):.3g} mm2 {where} the shape's boundary")
     return problems
 
 

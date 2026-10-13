@@ -936,6 +936,21 @@ def _keeps_its_distance(poly: Polygon, out: Polygon, d: float) -> bool:
     # fuzzing, 2026-10-13])
     tolerance = 0.02 + max([sag for _, _, sag in _chord_errors(poly)], default=0.0) \
         + max([sag for _, _, sag in _chord_errors(out)], default=0.0)
+    # And nothing well past the offset is lost: an inset holds the shape
+    # shrunk mitred by 1.25 |d|, an outward offset the shape grown round by
+    # 0.75 d [found by fuzzing, 2026-10-13: a slot 2 wide through a board's
+    # rounded corner, its walls turned over at an inset of 20, lost the
+    # inset's corner beside it, 255 mm2 reaching 27.5 in, which kept its
+    # distance and lay in the shape]. Mitred, as Fusion's offset: where a
+    # tab narrower than twice the inset turns over, both join its
+    # neighbours straight across, where shrinking round would bulge.
+    margin = max(tolerance, 0.25 * abs(d))
+    if d < 0:
+        reach = poly.buffer(d - margin, join_style="mitre", mitre_limit=100.0)
+    else:
+        reach = poly.buffer(d - margin, quad_segs=16) if d > margin else None
+    if reach is not None and not reach.is_empty and reach.difference(out).area > 1e-4 * poly.length + 1e-6:
+        return False
     for ring in [out.exterior, *out.interiors]:
         pts = _ring_points(ring.coords)
         for a, b in zip(pts, [*pts[1:], pts[0]]):
