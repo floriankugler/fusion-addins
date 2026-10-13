@@ -623,6 +623,8 @@ class Board:
         inner = op.op if isinstance(op, EdgeOp) else op
         if isinstance(inner, (Cut, Pocket, Hole, Chamfer)):
             self._check_chamfer(inner.size if isinstance(inner, Chamfer) else inner.chamfer, "chamfer")
+        if isinstance(inner, (Cut, Pocket, Hole)) and inner.chamfer > 0:
+            self._check_chamfer_depth(inner.chamfer, self._depth_of(inner), self._label(inner, name))
         if self._cutouts and not isinstance(op, Chamfer):
             footprint = self._footprint(op)
             for cutout, opening in self._cutouts:
@@ -645,6 +647,19 @@ class Board:
         if 0 < size < MIN_CHAMFER:
             raise LangError(f"{what}: {size:g} is less than {MIN_CHAMFER:g} mm, too small to make; leave it out, "
                             "or make it at least that.", self.path)
+
+    def _depth_of(self, op: Cut | Pocket | Hole) -> float:
+        """How deep an operation goes into the face it is cut from: a cut
+        and a hole or pocket through, the board's thickness."""
+        return self.thickness if isinstance(op, Cut) else min(op.depth, self.thickness)
+
+    def _check_chamfer_depth(self, size: float, depth: float, what: str) -> None:
+        """An error for a chamfer as deep as what it bevels, or deeper:
+        Fusion cannot bevel a wall that much (as the cutouts' chamfer, the
+        rule for every chamfer [found by fuzzing, 2026-10-13: a 4.5 mm
+        chamfer round a 0.9 mm pocket])."""
+        if size >= depth - 1e-9:
+            raise LangError(f"chamfer: {size:g} mm must be smaller than {depth:g}, the depth of {what}.", self.path)
 
     @staticmethod
     def _label(op: Op, name: str | None) -> str:
@@ -909,10 +924,12 @@ class Board:
         if isinstance(what, Edge):
             if what.part is not self:
                 raise LangError(f"chamfer(): {what!r} is not an edge of this board.", self.path)
+            self._check_chamfer_depth(size, self.thickness, f"the edge {what.name}")
             self._record(Chamfer(what.world_name, size, what.a.world_name), None)
         elif isinstance(what, Outline):
             if what.face.part is not self:
                 raise LangError(f"chamfer(): {what.face!r} is not a face of this board.", self.path)
+            self._check_chamfer_depth(size, self.thickness, "the board (its outline)")
             self._record(Chamfer("outline", size, what.face.world_name), None)
         elif isinstance(what, VGroove):
             raise LangError("chamfer(): a V-groove has no rim to chamfer; its flanks are 45 degrees already.",
@@ -921,6 +938,8 @@ class Board:
             name = next((n for n, op in self._named_ops.items() if op is what), None)
             if name is None:
                 raise LangError("chamfer(): the operation is not a named operation of this board.", self.path)
+            depth = what.op.depth if isinstance(what, EdgeOp) else self._depth_of(what)
+            self._check_chamfer_depth(size, depth, self._label(what, name))
             face = self.show_face.world_name if isinstance(what, Cut) else what.face
             self._record(Chamfer(name, size, face), None)
         else:

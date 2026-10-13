@@ -383,3 +383,26 @@ def test_a_corner_changed_leaves_the_rest_of_the_outline_as_it_was(how: str):
     assert all(p in set(after.exterior.coords) for p in kept)
 
 
+def test_a_chamfer_must_be_smaller_than_what_it_bevels():
+    """Found by fuzzing: a 4.5 mm chamfer round a 0.9 mm pocket was
+    accepted, which Fusion cannot cut, and the preview took more than a
+    chamfer can. Every chamfer must be smaller than the depth of what it
+    bevels, as the cutouts' chamfer always had to be: a pocket's or hole's
+    rim its depth, an edge, a face's outline or a cut's rim the board's
+    thickness."""
+    m, panel = _panel()
+    with m:
+        panel.add_pocket(panel.top, Shape(Point(150, 200).buffer(50)), 0.9, name="dish")
+        with pytest.raises(LangError, match=r"^m\.panel: chamfer: 4\.5 mm must be smaller than 0\.9, the depth of "
+                                            r"the pocket 'dish'\."):
+            panel.chamfer(panel.dish, 4.5)
+        with pytest.raises(LangError, match="chamfer: 15 mm must be smaller than 15, the depth of the board"):
+            panel.chamfer(panel.top.outline, 15)
+        with pytest.raises(LangError, match="chamfer: 15 mm must be smaller than 15, the depth of the edge"):
+            panel.chamfer(panel.front.top, 15)
+        with pytest.raises(LangError, match="chamfer: 5 mm must be smaller than 4, the depth of the hole 'pin'"):
+            panel.add_hole(panel.top, (50, 50), 5, 4, name="pin", chamfer=5)
+        panel.chamfer(panel.dish, 0.8)
+        panel.chamfer(panel.top.outline, 14)
+
+
