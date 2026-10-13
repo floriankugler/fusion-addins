@@ -9,6 +9,7 @@ comes out in two), and only this finds those.
     .venv/bin/python tests/fuzz/fusion_batch.py examples out/fuzz/examples
     .venv/bin/python tests/fuzz/fusion_batch.py joints out/fuzz/joints --count 40 --seed 1
     .venv/bin/python tests/fuzz/fusion_batch.py hardware out/fuzz/hardware --count 36 --seed 1
+    .venv/bin/python tests/fuzz/fusion_batch.py corners out/fuzz/corners --count 40 --seed 1
 
 `build` draws boards until `count` pass every check of
 `boards.run_cutout`, builds them into one layout (modules `m0`, `m1`...)
@@ -20,7 +21,9 @@ hand). `examples` writes every build file in `examples/` the same way, as
 of `joints.check` (pairs, corners, crossings, frames) the same way,
 `hardware` cabinets with hardware mounted that pass every check of
 `hardware.run_case` (hinges, latches, sliding brackets, hatch hinges, ball
-catches, slides), and `rebuild` builds any kind of cases file again. Then, in Fusion, `fusion_check.check([...])`
+catches, slides), `corners` boards with dog bones and chamfers that
+pass every check of `corners.run_case`, and `rebuild` builds any kind of
+cases file again. Then, in Fusion, `fusion_check.check([...])`
 with those paths (without `.json`), and back here
 
     .venv/bin/python tests/fuzz/fusion_batch.py explain out/fuzz/batch [more paths]
@@ -47,9 +50,11 @@ from hypothesis import strategies as st  # noqa: E402
 from shapely.geometry import Polygon  # noqa: E402
 
 import boards  # noqa: E402
+import corners  # noqa: E402
 import hardware  # noqa: E402
 import joints  # noqa: E402
 from boards import BoardCase, CutoutCall, Feature  # noqa: E402
+from corners import CornerOpCase  # noqa: E402
 from hardware import CatchCase, DoorCase, DrawerCase, HatchCase, PanelCase  # noqa: E402
 from joints import CornerCase, CrossCase, FrameCase, JointCase, JointSpec, PairCase  # noqa: E402
 from fuzzing import fresh, sample  # noqa: E402
@@ -153,7 +158,31 @@ def draw_hardware_cases(count: int, at: int) -> list[hardware.Case]:
     return found
 
 
-Case = BoardCase | JointCase | hardware.Case
+def draw_corner_cases(count: int, at: int) -> list[CornerOpCase]:
+    """About `count` boards with dog bones, corner chamfers or rim
+    chamfers (as many of each) that are accepted and keep every promise,
+    the same ones for the same `at`."""
+    kinds: list[st.SearchStrategy[CornerOpCase]] = [
+        corners.corner_op_cases().filter(lambda c, k=k: c.op == k) for k in ("dogbones", "corner chamfer", "rim chamfer")]
+    quota = -(-count // len(kinds))
+    found: list[CornerOpCase] = []
+    for i, kind in enumerate(kinds):
+        mine: list[CornerOpCase] = []
+
+        @settings(max_examples=quota * 60, database=None, deadline=None, phases=[Phase.generate],
+                  suppress_health_check=[HealthCheck.too_slow, HealthCheck.filter_too_much])
+        @seed(at * 100 + i)
+        @given(kind)
+        def collect(case: CornerOpCase) -> None:
+            if len(mine) < quota and case not in mine and corners.accepted(case):
+                mine.append(case)
+
+        collect()
+        found += mine
+    return found
+
+
+Case = BoardCase | JointCase | hardware.Case | CornerOpCase
 
 
 def build_cases(cases: Sequence[Case]) -> Layout:
@@ -166,6 +195,8 @@ def build_cases(cases: Sequence[Case]) -> Layout:
                 raise AssertionError(f"m{i} no longer passes: {problems[0]}")
         elif isinstance(case, (DoorCase, PanelCase, HatchCase, CatchCase, DrawerCase)):
             hardware.apply(case, f"m{i}")
+        elif isinstance(case, CornerOpCase):
+            corners.apply(case, f"m{i}")
         else:
             joints.apply(case, f"m{i}")
     layout = build_layout()
@@ -190,7 +221,7 @@ def read_cases(path: Path) -> list[Case]:
     names = {"BoardCase": BoardCase, "CutoutCall": CutoutCall, "Feature": Feature, "PairCase": PairCase,
              "JointSpec": JointSpec, "CornerCase": CornerCase, "CrossCase": CrossCase, "FrameCase": FrameCase,
              "DoorCase": DoorCase, "PanelCase": PanelCase, "HatchCase": HatchCase, "CatchCase": CatchCase,
-             "DrawerCase": DrawerCase}
+             "DrawerCase": DrawerCase, "CornerOpCase": CornerOpCase}
     return [eval(line.split(": ", 1)[1], names) for line in path.read_text().splitlines() if line.strip()]
 
 
@@ -297,6 +328,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     mounted.add_argument("out", type=Path)
     mounted.add_argument("--count", type=int, default=36)
     mounted.add_argument("--seed", type=int, default=0)
+    cornered = commands.add_parser("corners", help="draw boards with dog bones and chamfers into one layout")
+    cornered.add_argument("out", type=Path)
+    cornered.add_argument("--count", type=int, default=40)
+    cornered.add_argument("--seed", type=int, default=0)
     examples = commands.add_parser("examples", help="build every example")
     examples.add_argument("out_dir", type=Path)
     explain_ = commands.add_parser("explain", help="list the bodies Fusion made differently")
@@ -317,6 +352,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             mounts = draw_hardware_cases(args.count, args.seed)
         write(args.out, build_cases(mounts), mounts)
         print(f"{len(mounts)} cabinets -> {args.out}.json")
+    elif args.command == "corners":
+        with fresh():
+            boards_ = draw_corner_cases(args.count, args.seed)
+        write(args.out, build_cases(boards_), boards_)
+        print(f"{len(boards_)} boards -> {args.out}.json")
     elif args.command == "rebuild":
         cases = read_cases(args.cases)
         write(args.out, build_cases(cases), cases)

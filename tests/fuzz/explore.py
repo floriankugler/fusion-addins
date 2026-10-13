@@ -11,6 +11,7 @@ quote name the kind). An exception other than LangError is a problem of
 its own kind."""
 from __future__ import annotations
 
+import math
 import re
 import sys
 import time
@@ -26,6 +27,7 @@ from hypothesis import strategies as st  # noqa: E402
 from hypothesis.errors import NonInteractiveExampleWarning  # noqa: E402
 
 import boards  # noqa: E402
+import corners  # noqa: E402
 import fuzzing  # noqa: E402
 import hardware  # noqa: E402
 import joints  # noqa: E402
@@ -47,7 +49,7 @@ def _fillets(example: tuple[fuzzing.Lines, float]) -> list[str]:
         return ["refused, though every arc fits"]
     problems: list[str] = []
     off = got.hausdorff_distance(want)
-    if off > r * 4e-5 + 1e-6:
+    if off > r * (1 - math.cos(math.radians(0.8))) + 1e-6:     # as test_fuzz_fillets: an arc's end step
         problems.append(f"the fillet lies {off:.3g} off the reference")
     if cutouts.corner_points(got):
         problems.append(f"corners left: {len(cutouts.corner_points(got))}")
@@ -86,6 +88,9 @@ CHECKS: dict[str, Check] = {
     "hatches": (hardware.hatch_cases(), hardware.run_case),
     "catches": (hardware.catch_cases(), hardware.run_case),
     "drawers": (hardware.drawer_cases(), hardware.run_case),
+    "corners": (corners.corner_op_cases(), corners.run_case),
+    "dogbones": (corners.corner_op_cases().filter(lambda c: c.op == "dogbones"), corners.run_case),
+    "chamfers": (corners.corner_op_cases().filter(lambda c: c.op != "dogbones"), corners.run_case),
 }
 
 
