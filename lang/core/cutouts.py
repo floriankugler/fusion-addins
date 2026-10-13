@@ -929,8 +929,13 @@ def _keeps_its_distance(poly: Polygon, out: Polygon, d: float) -> bool:
     if outside.area > 1e-4 * poly.length + 1e-6:
         return False                  # grown, it must hold the shape; shrunk, lie in it
     target = true if d > 0 else true.boundary
-    # (the polygon's chords lie inside its arcs, the offset's on the true circles)
-    tolerance = 0.01 * abs(d) + 0.05 + max([sag for _, _, sag in _chord_errors(poly)], default=0.0)
+    # (the polygons' chords lie inside their arcs, the shape's and the
+    # offset's: so much nearer may a point between two vertices come; a
+    # dropped curve took the offset 0.17 too near at a notch by a rounded
+    # corner, inside the 1 % of the offset this allowed before [found by
+    # fuzzing, 2026-10-13])
+    tolerance = 0.02 + max([sag for _, _, sag in _chord_errors(poly)], default=0.0) \
+        + max([sag for _, _, sag in _chord_errors(out)], default=0.0)
     for ring in [out.exterior, *out.interiors]:
         pts = _ring_points(ring.coords)
         for a, b in zip(pts, [*pts[1:], pts[0]]):

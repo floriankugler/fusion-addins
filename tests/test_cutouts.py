@@ -596,3 +596,22 @@ def test_an_arc_drawn_on_whole_degrees_keeps_its_first_step_above_half_a_degree(
         assert isinstance(g, Polygon)
         ring = [(float(x), float(y)) for x, y in list(orient(g, 1.0).exterior.coords)[:-1]]
         assert [type(c).__name__ for c in fit(ring)] == ["Arc2", "Arc2"]
+
+
+def test_a_border_next_to_a_notch_by_a_rounded_corner_keeps_its_width():
+    """Found by fuzzing: a small turned notch where a board's rounded
+    corner begins; offset curve by curve, the notch's offset did not meet
+    the corner arc's, the shorter curve was dropped, and the inset came
+    0.17 nearer the outline than the border, inside the 1 % of the offset
+    the check allowed. It falls back to the mitred offset now."""
+    from shapely import affinity
+    from shapely.geometry import box as shapely_box
+    from lang.core.shapes import Shape
+    with module("m", Box.from_size(width=354, depth=354, height=100)) as m:
+        panel = board("panel", material("birch", t=6), Shape(shapely_box(0, 0, 354, 354)).rounded(47.015625)).on(m.bottom)
+        panel.add_cut(Shape(affinity.rotate(shapely_box(341.5, 17, 343.5, 23), 45, origin=(342.5, 20))))
+        (outline,) = panel.outline.polygons()
+        panel.cutout(border=20, around=20, radius=0)
+    op = panel.op("cutout").op
+    assert isinstance(op, Cut)
+    assert op.shape.geometry.distance(outline.exterior) >= 20 - 0.03
