@@ -467,6 +467,21 @@ def test_openings_touching_the_outline_at_a_point_are_an_error():
     assert panel.has_operation("cutout")
 
 
+def test_pocket_openings_touching_the_outline_at_a_point_are_an_error_too():
+    """Found compiling fuzz boards in Fusion: one row of triangles with no
+    border and sharp corners reached from edge to edge, each apex on the
+    far edge; as a pocket the material either side met at that point only,
+    and Fusion chamfered no rim through it ("non-manifold edge or
+    vertex"). Only through cutouts were checked."""
+    with module("m", Box.from_size(width=300, depth=400, height=100)) as m:
+        panel = board("panel", ply15).on(m.bottom)
+        with pytest.raises(LangError, match="touches the board's outline at a point only"):
+            panel.cutout(pattern=triangles(6, 1, 5), border=0, radius=0, depth=5, chamfer=1)
+        assert not panel.has_operation("cutout") and panel.ops == []
+        panel.cutout(pattern=triangles(6, 1, 5), border=10, radius=0, depth=5, chamfer=1)
+    assert panel.has_operation("cutout")
+
+
 def test_an_opening_that_touches_itself_at_a_point_is_an_error():
     """Found by fuzzing: the material kept 2 around a through pocket, turned
     45 degrees at a board's corner, pinched a pocket cutout's opening to a

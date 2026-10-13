@@ -1100,8 +1100,8 @@ class Board:
         opening = shape.geometry
         pieces = [q for p in result.pieces for q in polygons_of(clean(p))]
         self._check_pinched(pieces)
+        self._check_touching(pieces)
         if thru:
-            self._check_touching(pieces)
             self._check_islands(opening, kept, name)
             self._cut_through(shape, name, 0.0)
         else:
@@ -1210,9 +1210,12 @@ class Board:
         return found
 
     def _check_touching(self, pieces: list[Polygon]) -> None:
-        """An error for through openings that touch the outline, or each
-        other, at a point only: Fusion makes no profile of such an outline
-        (a cutout with no border and sharp corners, checked 2026-10-12).
+        """An error for openings that touch the outline, or each other, at a
+        point only: through, Fusion makes no profile of such an outline (a
+        cutout with no border and sharp corners, checked 2026-10-12); as a
+        pocket, the material either side meets at that point only, and
+        Fusion chamfers no rim through it ("non-manifold edge or vertex",
+        a fuzz board's triangles reaching from edge to edge, 2026-10-13).
         Openings sharing an edge with the outline make notches, which is
         fine."""
         u, v = self.u_axis, self.v_axis
@@ -1227,9 +1230,10 @@ class Board:
                 if points:
                     where = f"{u} {points[0].x:g}, {v} {points[0].y:g}"
                     what = "the board's outline" if other is others[0] else "another opening"
-                    raise LangError(f"cutout(): an opening touches {what} at a point only ({where}), which Fusion "
-                                    "cannot make a profile of: give it a border, or round its corners (radius=).",
-                                    self.path)
+                    raise LangError(f"cutout(): an opening touches {what} at a point only ({where}), where the "
+                                    "material either side would meet at that point (Fusion makes no profile of it "
+                                    "and chamfers no rim through it): give it a border, or round its corners "
+                                    "(radius=).", self.path)
 
     def _check_pinched(self, pieces: list[Polygon]) -> None:
         """An error for an opening that touches itself at a point, within
