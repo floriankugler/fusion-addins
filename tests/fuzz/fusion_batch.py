@@ -8,6 +8,7 @@ comes out in two), and only this finds those.
     .venv/bin/python tests/fuzz/fusion_batch.py rebuild out/fuzz/batch.cases.txt out/fuzz/batch2
     .venv/bin/python tests/fuzz/fusion_batch.py examples out/fuzz/examples
     .venv/bin/python tests/fuzz/fusion_batch.py joints out/fuzz/joints --count 40 --seed 1
+    .venv/bin/python tests/fuzz/fusion_batch.py hardware out/fuzz/hardware --count 36 --seed 1
 
 `build` draws boards until `count` pass every check of
 `boards.run_cutout`, builds them into one layout (modules `m0`, `m1`...)
@@ -16,8 +17,10 @@ and writes `<out>.json`, the preview's volume per part
 a line, for `rebuild` with today's code or for building one again by
 hand). `examples` writes every build file in `examples/` the same way, as
 `<out>/<example>/layout`; `joints` draws joints that pass every check
-of `joints.check` (pairs, corners, crossings, frames) the same way, and
-`rebuild` builds either kind of cases file again. Then, in Fusion, `fusion_check.check([...])`
+of `joints.check` (pairs, corners, crossings, frames) the same way,
+`hardware` cabinets with hardware mounted that pass every check of
+`hardware.run_case` (hinges, latches, sliding brackets, hatch hinges, ball
+catches, slides), and `rebuild` builds any kind of cases file again. Then, in Fusion, `fusion_check.check([...])`
 with those paths (without `.json`), and back here
 
     .venv/bin/python tests/fuzz/fusion_batch.py explain out/fuzz/batch [more paths]
@@ -44,8 +47,10 @@ from hypothesis import strategies as st  # noqa: E402
 from shapely.geometry import Polygon  # noqa: E402
 
 import boards  # noqa: E402
+import hardware  # noqa: E402
 import joints  # noqa: E402
 from boards import BoardCase, CutoutCall, Feature  # noqa: E402
+from hardware import CatchCase, DoorCase, DrawerCase, HatchCase, PanelCase  # noqa: E402
 from joints import CornerCase, CrossCase, FrameCase, JointCase, JointSpec, PairCase  # noqa: E402
 from fuzzing import fresh, sample  # noqa: E402
 from lang.core.errors import LangError  # noqa: E402
@@ -122,7 +127,36 @@ def draw_joint_cases(count: int, at: int) -> list[JointCase]:
     return found
 
 
-def build_cases(cases: Sequence[BoardCase | JointCase]) -> Layout:
+def draw_hardware_cases(count: int, at: int) -> list[hardware.Case]:
+    """About `count` cabinets with hardware (as many of each kind: hinges,
+    latches, sliding brackets, hatch hinges, ball catches, slides) whose
+    mount is accepted and keeps every promise, the same ones for the same
+    `at`."""
+    kinds: list[st.SearchStrategy[hardware.Case]] = [
+        hardware.door_cases().filter(lambda c: c.kind == "hinge"), hardware.door_cases().filter(lambda c: c.kind == "latch"),
+        hardware.panel_cases(), hardware.hatch_cases(), hardware.catch_cases(), hardware.drawer_cases()]
+    quota = -(-count // len(kinds))
+    found: list[hardware.Case] = []
+    for i, kind in enumerate(kinds):
+        mine: list[hardware.Case] = []
+
+        @settings(max_examples=quota * 60, database=None, deadline=None, phases=[Phase.generate],
+                  suppress_health_check=[HealthCheck.too_slow, HealthCheck.filter_too_much])
+        @seed(at * 100 + i)
+        @given(kind)
+        def collect(case: hardware.Case) -> None:
+            if len(mine) < quota and case not in mine and hardware.accepted(case):
+                mine.append(case)
+
+        collect()
+        found += mine
+    return found
+
+
+Case = BoardCase | JointCase | hardware.Case
+
+
+def build_cases(cases: Sequence[Case]) -> Layout:
     """The cases as one layout, module `m<i>` for case i."""
     registry.reset()
     for i, case in enumerate(cases):
@@ -130,6 +164,8 @@ def build_cases(cases: Sequence[BoardCase | JointCase]) -> Layout:
             problems = boards._run_cutout(case, f"m{i}", pipeline=False)  # pyright: ignore[reportPrivateUsage]
             if problems:
                 raise AssertionError(f"m{i} no longer passes: {problems[0]}")
+        elif isinstance(case, (DoorCase, PanelCase, HatchCase, CatchCase, DrawerCase)):
+            hardware.apply(case, f"m{i}")
         else:
             joints.apply(case, f"m{i}")
     layout = build_layout()
@@ -137,7 +173,7 @@ def build_cases(cases: Sequence[BoardCase | JointCase]) -> Layout:
     return layout
 
 
-def write(out: Path, layout: Layout, cases: Sequence[BoardCase | JointCase] | None = None) -> None:
+def write(out: Path, layout: Layout, cases: Sequence[Case] | None = None) -> None:
     """`<out>.json`, `<out>.volumes.json` and, given cases, `<out>.cases.txt`."""
     out.parent.mkdir(parents=True, exist_ok=True)
     Path(f"{out}.json").write_text(json.dumps(layout))
@@ -150,9 +186,11 @@ def preview_volumes(layout: Layout) -> dict[str, float]:
     return {p["path"]: float(mesh_part(p, layout["frame"]).volume) for m in layout["modules"] for p in m["parts"]}
 
 
-def read_cases(path: Path) -> list[BoardCase | JointCase]:
+def read_cases(path: Path) -> list[Case]:
     names = {"BoardCase": BoardCase, "CutoutCall": CutoutCall, "Feature": Feature, "PairCase": PairCase,
-             "JointSpec": JointSpec, "CornerCase": CornerCase, "CrossCase": CrossCase, "FrameCase": FrameCase}
+             "JointSpec": JointSpec, "CornerCase": CornerCase, "CrossCase": CrossCase, "FrameCase": FrameCase,
+             "DoorCase": DoorCase, "PanelCase": PanelCase, "HatchCase": HatchCase, "CatchCase": CatchCase,
+             "DrawerCase": DrawerCase}
     return [eval(line.split(": ", 1)[1], names) for line in path.read_text().splitlines() if line.strip()]
 
 
@@ -255,6 +293,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     joined.add_argument("out", type=Path)
     joined.add_argument("--count", type=int, default=40)
     joined.add_argument("--seed", type=int, default=0)
+    mounted = commands.add_parser("hardware", help="draw cabinets with hardware into one layout")
+    mounted.add_argument("out", type=Path)
+    mounted.add_argument("--count", type=int, default=36)
+    mounted.add_argument("--seed", type=int, default=0)
     examples = commands.add_parser("examples", help="build every example")
     examples.add_argument("out_dir", type=Path)
     explain_ = commands.add_parser("explain", help="list the bodies Fusion made differently")
@@ -270,6 +312,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             found = draw_joint_cases(args.count, args.seed)
         write(args.out, build_cases(found), found)
         print(f"{len(found)} joints -> {args.out}.json")
+    elif args.command == "hardware":
+        with fresh():
+            mounts = draw_hardware_cases(args.count, args.seed)
+        write(args.out, build_cases(mounts), mounts)
+        print(f"{len(mounts)} cabinets -> {args.out}.json")
     elif args.command == "rebuild":
         cases = read_cases(args.cases)
         write(args.out, build_cases(cases), cases)

@@ -27,6 +27,7 @@ from hypothesis.errors import NonInteractiveExampleWarning  # noqa: E402
 
 import boards  # noqa: E402
 import fuzzing  # noqa: E402
+import hardware  # noqa: E402
 import joints  # noqa: E402
 from lang.core.errors import LangError  # noqa: E402
 
@@ -80,6 +81,11 @@ CHECKS: dict[str, Check] = {
     "box_joints": (joints.corner_cases(), joints.run_corner),
     "half_laps": (joints.cross_cases(), joints.run_cross),
     "grooves": (joints.frame_cases(), joints.run_frame),
+    "doors": (hardware.door_cases(), hardware.run_case),
+    "panels": (hardware.panel_cases(), hardware.run_case),
+    "hatches": (hardware.hatch_cases(), hardware.run_case),
+    "catches": (hardware.catch_cases(), hardware.run_case),
+    "drawers": (hardware.drawer_cases(), hardware.run_case),
 }
 
 
