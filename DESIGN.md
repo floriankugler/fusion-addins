@@ -2411,14 +2411,18 @@ facing each other across a narrow opening and the two hatch hinges in a
 narrow cabinet drilled into each other, or were refused by the core
 halfway with the first holes drilled; each now refuses before it drills
 (latches or catches whose holes meet, hatch hinges whose mounting plates
-meet). Open, for Florian: the Pull Lock 44's pawl box lies 20.4 to 33
-behind the door's front, 2.5 mm outside the counterbore, so on a door
-thicker than 20.4 it reaches into the door (marked known); hinges 42 to 56
-mm apart pass the add-in's rule but their 56 mm plates meet, which the
-check reports (refuse them?); ball catches are numbered along the
-opening's outline as the world has it, not from the left or the bottom as
-the other hardware (number them alike?). The Fusion batch check builds
-hardware too (`fusion_batch.py hardware`).
+meet). Then decided by Florian: a Pull Lock 44 on a door thicker than 20.4
+mm is refused (its pawl, swinging behind the housing from 20.4 behind the
+front, 2.5 mm past the counterbore, would lie in the door;
+`LatchShape.max_door`); hinges closer than their mounting plates are long,
+56.2 mm, are refused (the add-in's 42 is where their hole pairs meet);
+ball catches are numbered along each edge as the other hardware is
+(`common.numbering`: from the panel's own left on a level edge of an
+upright panel, where they counted from the lower coordinates). And a slide
+refused a bay exactly deep enough where its depth rounded 1e-14 short at a
+far origin; it is compared within the tolerance now. The Fusion batch
+check builds hardware too (`fusion_batch.py hardware`): 36 cabinets, 198
+parts and 36 hardware items, every body as the preview's, no problems.
 
 1. `core`: the position algebra, box, board with `on`, `between` and `center`,
    scopes and paths, and layout JSON output with world transforms. With unit
