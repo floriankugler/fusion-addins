@@ -221,6 +221,23 @@ def test_dados_for_shelves_from_the_side():
         "covers it.")
 
 
+def test_an_end_narrower_than_anything_meant_goes_into_no_groove():
+    """Found by fuzzing: a shelf's end notched to 7 um short of its edge
+    keeps a fin as wide there. The fin's end went 4 deep into the side with
+    the rest of the shelf's, but its groove, as narrow, was cleaned away as
+    what a boolean leaves, and the two shared the fin. Nothing that narrow
+    is meant: it is no contact, and the fin stays where it is."""
+    from shapely.geometry import box
+    with module("unit", Box.from_size(width=300, depth=200, height=400)) as m:
+        side = board("side", ply12).on(m.left)
+        shelf = board("shelf", ply12).on(Pos("z", 100), toward=m.top).between(side, m.right)
+        shelf.add_cut(Shape(box(0.007, 11, 50, 13)))         # (the shelf's outline: x 0..200, y 12..300)
+        side.join(shelf, using=groove(4))
+    assert shelf.outline.geometry.intersection(box(0, 8, 0.007, 12)).area == 0
+    assert shelf.outline.geometry.intersection(box(50, 8, 200, 12)).area == pytest.approx(150 * 4)
+    meshes = part_meshes()
+    assert overlap(meshes["unit.side"], meshes["unit.shelf"]) < 1e-6
+
 def test_a_groove_through_the_board_is_an_error():
     m, p = _box()
     with m, pytest.raises(LangError, match=r"^box\.floor: groove with box\.left: a groove 12 deep, 0 beyond the "

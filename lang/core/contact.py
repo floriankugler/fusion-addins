@@ -9,7 +9,8 @@ it. That is exact for the outlines (through cuts included); pockets are not
 taken into account. An end interrupted by a notch meets the other board in
 several places, one contact each. A board meeting the other across an
 opening of a cutout made before is an error: the cutout should have kept
-material there.
+material there. A contact narrower than `geometry.NARROWEST` either way
+is none: nothing so narrow is meant, it is what a boolean left.
 """
 from __future__ import annotations
 
@@ -20,7 +21,7 @@ from shapely.geometry import box as shapely_box
 
 from .directions import AXES, Axis
 from .errors import LangError
-from .geometry import parts_of
+from .geometry import NARROWEST, parts_of
 
 if TYPE_CHECKING:
     from .part import Board, Face
@@ -96,6 +97,12 @@ def contacts(edge_on: Board, face_on: Board, tolerance: float = 1e-6) -> list[Co
                 continue
             b = piece.bounds
             bounds = {u: (float(b[0]), float(b[2])), v: (float(b[1]), float(b[3]))}
+            if min(hi - lo for lo, hi in bounds.values()) < NARROWEST:
+                # (a notch ending 7 um short of the end leaves a fin as wide;
+                # set into a groove, which would be as narrow and cleaned
+                # away, it would share material with the board [found by
+                # fuzzing, 2026-10-13])
+                continue
             found.append(Contact(edge_on, face_on, end, face, axis, bounds[axis][0], bounds[axis][1],
                                  bounds[across][0], bounds[across][1]))
     found.sort(key=lambda c: c.lo)
