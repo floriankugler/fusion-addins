@@ -57,7 +57,7 @@ from .contours import Contour, ContourLimit, ContourLimits, as_contour_limit
 from .directions import AXES, Axis, Direction, ExtentName, InnerOuter
 from .errors import LangError, one_of
 from .faces import Anchor, Edge, Face, Operation, Outline
-from .geometry import parts_of, polygons_of
+from .geometry import clean, parts_of, polygons_of
 from .layout_types import (ChamferLayout, CutLayout, EdgeOpLayout, HoleLayout, OpLayout,
                            PartLayout, PocketLayout, Rings, VGrooveLayout)
 from .material import Material
@@ -1096,11 +1096,12 @@ class Board:
         result = cutout_geometry.openings(cut_region, frame, pattern, radius, self.path)
         if not result.pieces:
             raise LangError(f"cutout(): every piece is too small for radius={radius:g}.", self.path)
-        opening = result.geometry
-        shape = Shape(opening)
-        self._check_pinched(result.pieces)
+        shape = Shape(result.geometry)
+        opening = shape.geometry
+        pieces = [q for p in result.pieces for q in polygons_of(clean(p))]
+        self._check_pinched(pieces)
         if thru:
-            self._check_touching(result.pieces)
+            self._check_touching(pieces)
             self._check_islands(opening, kept, name)
             self._cut_through(shape, name, 0.0)
         else:

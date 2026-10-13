@@ -2234,7 +2234,7 @@ spikes or sub-micrometre edges: refuse, clean or tolerate.
 
 Round 1b, the same day, as proposed to Florian (openings touching at a
 point refused, a cut circle tangent to an edge kept as Fusion builds it;
-hairline spikes still open: the fuzz checks skip them). Fixed, each with a
+hairline spikes: cleaned since, see below). Fixed, each with a
 regression test: `grown` offsets the lines and arcs exactly as Fusion's
 sketch offset does (arcs run on along their circles, corners keep the full
 distance), and where that does not hold (a curve vanishes, pieces merge)
@@ -2266,6 +2266,34 @@ within the polygon's sagitta of a large arc (0.014 mm inside a corner
 rounded 496) opens onto the outline as polygons but would be a hole on the
 true arcs, and `fit` draws that ring crossing itself. Joints and hardware
 are next.
+
+2026-10-13, cleaning [decided with Florian: nothing under 0.01 mm is
+meant]: every `Shape` is cleaned when it is made (`geometry.clean`) of
+what booleans leave where two edges coincide: points within 1e-6 mm of the
+one before, spikes (a ring running out and back along itself within 1e-6
+mm), pieces and holes narrower than 0.01 mm on average (twice the area
+over the length), and walls of no width (a hole along another ring within
+1e-9 mm for more than 0.01 mm), which are opened. Every other vertex stays
+exactly where it was: snapping to a grid, even one of 1e-9 mm, moves arc
+vertices off their circles and `fit` no longer finds the arcs. Geometry
+with nothing to clean comes back unchanged, and every example's plan is
+the same. In Fusion an uncleaned spike made the whole body fail
+(ASM_WIRE_SELF_INTERSECTS2). A circle cut on a rounded corner's own arc,
+refused before as splitting the board, takes the corner now, and a band
+cut across a shape exactly as tall parts it in two. Still open: `circle()`
+draws 32 segments a quarter, the fillets and the cutouts' circles a vertex
+every whole degree, so one arc drawn both ways leaves crescents as thick
+as the coarser drawing's sagitta, too thick to clean from a radius of
+about 200 mm (such a cut is still refused as splitting the board); drawing
+every circle as the cutouts do would make them coincide. A chamfer is 0 or
+at least 0.01 mm. The Fusion batch check is in `tests/fuzz` (AGENTS.md).
+Its first run: the eleven examples without a difference; of 40 fuzz
+boards, the rim chamfers Fusion refused on two (one of them drawn three
+times): one along a cutout's fallback edges of 0.06 mm (open, above), and
+one where a pocket cutout with no border runs out of the board: its rim
+along the board's edge does not exist, and Fusion refuses the whole
+contour, inside the face too, which the preview chamfers (to fix: chamfer
+only the rim inside the face).
 
 1. `core`: the position algebra, box, board with `on`, `between` and `center`,
    scopes and paths, and layout JSON output with world transforms. With unit

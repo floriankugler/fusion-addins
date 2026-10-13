@@ -26,6 +26,7 @@ from . import directions
 from .cutouts import filleted
 from .directions import AXES, Axis, ExtentName
 from .errors import LangError
+from .geometry import clean
 
 Ring = list[tuple[float, float]]
 #: The two world axes a shape's u and v are bound to, or None for a raw shape.
@@ -48,6 +49,7 @@ class Anchor:
 
 class Shape:
     def __init__(self, geometry: BaseGeometry, axes: Axes = None):
+        geometry = clean(geometry)          # what booleans of coincident edges leave (`geometry.clean`)
         if isinstance(geometry, MultiPolygon) and len(geometry.geoms) == 1:
             geometry = geometry.geoms[0]
         self.geometry: BaseGeometry = geometry

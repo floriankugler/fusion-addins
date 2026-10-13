@@ -1,14 +1,32 @@
-"""Taking shapely's results apart.
+"""Taking shapely's results apart, and cleaning them.
 
 A boolean or a section in shapely returns a polygon, a multi-polygon, a
 line, a collection of all of these, or an empty geometry, depending on
-what it found. These two functions give the pieces in one form, so callers
-need not ask which kind came back.
+what it found. `parts_of` and `polygons_of` give the pieces in one form, so
+callers need not ask which kind came back.
+
+`clean` takes out what a boolean leaves where two edges coincide (the same
+edge or arc made twice, by two calculations that round differently): it
+cannot tell on which side such an edge lies, and leaves spikes, slivers
+and walls of no width. Every `Shape` is cleaned when it is made.
 """
 from __future__ import annotations
 
-from shapely.geometry import MultiPolygon, Polygon
+import numpy as np
+import shapely
+from shapely.geometry import LinearRing, MultiPolygon, Polygon
 from shapely.geometry.base import BaseGeometry
+
+#: Points nearer than this (mm) are one point, and a ring that turns back
+#: along itself within it has a spike there.
+SAME_POINT = 1e-6
+#: How near (mm) two rings run along each other in a wall of no width: a
+#: boolean's rounding, far under what a circle touching a line within
+#: `SAME_POINT` shares with it (0.004 mm for a radius of 2 m).
+_WALL = 1e-9
+#: The narrowest (mm) piece or hole the language keeps: nothing narrower is
+#: meant [Florian, 2026-10-13], so narrower ones are what booleans leave.
+NARROWEST = 0.01
 
 
 def parts_of(g: BaseGeometry) -> list[BaseGeometry]:
@@ -26,3 +44,120 @@ def polygons_of(g: BaseGeometry) -> list[Polygon]:
     if isinstance(g, MultiPolygon) or hasattr(g, "geoms"):
         return [p for sub in getattr(g, "geoms", []) for p in polygons_of(sub)]
     return []
+
+
+def clean(g: BaseGeometry) -> BaseGeometry:
+    """`g` without what booleans of coincident edges leave [decided with
+    Florian, 2026-10-13]: points nearer than `SAME_POINT` to the one before;
+    spikes, where a ring runs out and back along itself; pieces and holes
+    narrower than `NARROWEST` on average (twice their area over their
+    length: the crescents between two drawings of one arc, hairlines); and
+    walls of no width, where a hole runs along another ring for more than
+    `NARROWEST` (a band cut across a shape exactly as tall leaves one piece
+    held by two such walls instead of two pieces): they are opened.
+
+    Every other vertex stays where it is: arcs are recovered from vertices
+    that lie on their circle within 1e-7 mm (`lang.emit.arcs`), and snapping
+    to any grid moves them off it. A geometry with nothing to clean comes
+    back as it is."""
+    if not isinstance(g, (Polygon, MultiPolygon)) or g.is_empty:
+        return g
+    polygons: list[Polygon] = list(g.geoms) if isinstance(g, MultiPolygon) else [g]
+    out: list[Polygon] = []
+    changed = False
+    for poly in polygons:
+        cleaned = _clean_polygon(poly)
+        if cleaned is None:
+            out.append(poly)
+        else:
+            changed = True
+            out.extend(cleaned)
+    if not changed:
+        return g
+    if not out:
+        return Polygon()
+    return out[0] if len(out) == 1 else MultiPolygon(out)
+
+
+def _clean_polygon(poly: Polygon, walls: bool = True) -> list[Polygon] | None:
+    """The polygon's clean pieces, or None when it has nothing to clean."""
+    if _narrow(poly.exterior):
+        return []
+    exterior = _without_spikes(poly.exterior)
+    holes: list[LinearRing | list[tuple[float, float]]] = []
+    changed = exterior is not None
+    for ring in poly.interiors:
+        if _narrow(ring):
+            changed = True
+            continue
+        kept = _without_spikes(ring)
+        changed = changed or kept is not None
+        if kept is None:
+            holes.append(ring)
+        elif len(kept) >= 4:
+            holes.append(kept)
+    shell = list(poly.exterior.coords) if exterior is None else exterior
+    if changed:
+        if len(shell) < 4:
+            return []
+        made = Polygon(shell, holes)
+        if not made.is_valid:
+            return None                 # (cleaning would make it worse; leave it as it was)
+        poly = made
+    if walls and len(poly.interiors) > 0 and _has_walls(poly):
+        opened = poly.buffer(-SAME_POINT, join_style="mitre", mitre_limit=1e6).buffer(
+            SAME_POINT, join_style="mitre", mitre_limit=1e6)
+        pieces: list[Polygon] = []
+        for piece in polygons_of(opened):
+            again = _clean_polygon(piece, walls=False)
+            pieces.extend([piece] if again is None else again)
+        return pieces
+    if _narrow(poly.exterior):
+        return []
+    return [poly] if changed else None
+
+
+def _narrow(ring: LinearRing) -> bool:
+    """Whether the ring encloses less than `NARROWEST` wide on average."""
+    length = ring.length
+    return length == 0 or 2 * abs(Polygon(ring).area) < NARROWEST * length
+
+
+def _without_spikes(ring: LinearRing) -> list[tuple[float, float]] | None:
+    """The ring (closed) without points within `SAME_POINT` of the one
+    before and without spike tips, or None when it has neither."""
+    pts = np.asarray(ring.coords)[:-1, :2]
+    changed = False
+    while len(pts) >= 3:
+        before, after = np.roll(pts, 1, axis=0), np.roll(pts, -1, axis=0)
+        come, go, across = pts - before, after - pts, after - before
+        repeated = np.hypot(come[:, 0], come[:, 1]) <= SAME_POINT
+        span = np.hypot(across[:, 0], across[:, 1])
+        off = np.abs(across[:, 0] * come[:, 1] - across[:, 1] * come[:, 0]) / np.maximum(span, 1e-300)
+        off = np.where(span > SAME_POINT, off, np.hypot(come[:, 0], come[:, 1]))
+        spike = ((come * go).sum(axis=1) < 0) & (off <= SAME_POINT)
+        drop = repeated | spike
+        if not drop.any():
+            break
+        drop &= ~np.roll(drop, 1)       # one of each run at a time, so a spike's base stays
+        if not drop.any():
+            drop[np.argmax(repeated | spike)] = True
+        pts = pts[~drop]
+        changed = True
+    if not changed:
+        return None
+    coords = [(float(x), float(y)) for x, y in pts]
+    return coords + coords[:1] if coords else []
+
+
+def _has_walls(poly: Polygon) -> bool:
+    """Whether a hole runs along the exterior or another hole within
+    `_WALL` for more than `NARROWEST`."""
+    rings = [poly.exterior, *poly.interiors]
+    tree = shapely.STRtree(rings)
+    for i, ring in enumerate(rings[1:], start=1):
+        for j in tree.query(ring, predicate="dwithin", distance=_WALL):
+            if j != i and (j < i or j == 0):
+                if ring.intersection(rings[int(j)].buffer(_WALL)).length > NARROWEST:
+                    return True
+    return False

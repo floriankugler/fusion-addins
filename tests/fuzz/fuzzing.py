@@ -24,7 +24,7 @@ from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
 
 from lang.core import cutouts
-from lang.core.geometry import polygons_of
+from lang.core.geometry import clean, polygons_of
 from lang.core.scope import registry
 from lang.emit.arcs import MAX_STEP, MIN_SEGMENTS, MIN_STEP, Arc2, Circle2, Curve2, Line2, fit
 
@@ -207,7 +207,12 @@ class Recipe:
     shift: Point2 = (0.0, 0.0)
 
     def geometry(self) -> BaseGeometry:
-        """The shape as the language makes it."""
+        """The shape as the language makes it: cleaned after every step, as
+        every `Shape` is (`geometry.clean`)."""
+        return self._made(lambda p: p.geometry(), lambda g, d: cutouts.grown(g, d), clean)
+
+    def raw(self) -> BaseGeometry:
+        """The shape as shapely's booleans leave it, uncleaned."""
         return self._made(lambda p: p.geometry(), lambda g, d: cutouts.grown(g, d))
 
     def truth(self) -> BaseGeometry:
@@ -216,14 +221,15 @@ class Recipe:
         return self._made(lambda p: p.truth(), lambda g, d: g.buffer(d, join_style="mitre", mitre_limit=100.0))
 
     def _made(self, make: Callable[[Primitive], BaseGeometry],
-              grow: Callable[[BaseGeometry, float], BaseGeometry]) -> BaseGeometry:
+              grow: Callable[[BaseGeometry, float], BaseGeometry],
+              tidy: Callable[[BaseGeometry], BaseGeometry] = lambda g: g) -> BaseGeometry:
         g = make(self.base)
         for how, p in self.steps:
             other = make(p)
-            g = unary_union([g, other]) if how == "union" else g.difference(other) if how == "difference" \
-                else g.intersection(other)
+            g = tidy(unary_union([g, other]) if how == "union" else g.difference(other) if how == "difference"
+                     else g.intersection(other))
         if self.grow is not None and not g.is_empty:
-            g = grow(g, self.grow)
+            g = tidy(grow(g, self.grow))
         if self.shift != (0.0, 0.0):
             g = affinity.translate(g, *self.shift)
         return g
@@ -403,8 +409,9 @@ def degenerate(ring: Sequence[Point2]) -> bool:
     """Whether the ring passes a point twice, give or take a nanometre,
     turns back on itself, or is a sliver: a hairline spike a boolean left
     (a circle added and taken away again), which no drawing of it can keep
-    apart. Open (2026-10-12): whether the
-    language should refuse, clean or keep such geometry."""
+    apart. The language cleans spikes and slivers away (`geometry.clean`,
+    2026-10-13); what is left of this, rings that pass a point twice, and
+    the finely drawn truth, which is not cleaned, the checks skip."""
     seen: set[tuple[int, int]] = set()
     for x, y in ring:
         key = (round(x * 1e6), round(y * 1e6))
@@ -432,7 +439,8 @@ def hairline(poly: Polygon) -> bool:
     """Whether two rings of the polygon come within a nanometre of each
     other: a wall of no thickness, which a boolean leaves where a band is
     cut across a shape exactly as tall as it (a hole whose edges lie on the
-    outline's, instead of two pieces). Open (2026-10-12), as `degenerate`."""
+    outline's, instead of two pieces; `geometry.clean` opens such walls
+    now), or touch at a point, which the fillet checks skip."""
     rings = [poly.exterior, *poly.interiors]
     return any(a.distance(b) < 1e-6 for i, a in enumerate(rings) for b in rings[i + 1:])
 
@@ -574,11 +582,21 @@ class Lines:
     steps: tuple[tuple[Combine, Rect], ...] = ()
     shift: Point2 = (0.0, 0.0)
 
-    def polygon(self) -> Polygon | None:
+    def raw(self) -> BaseGeometry:
+        """The rectangles united and subtracted, as shapely leaves them."""
+        return self._combined(lambda g: g)
+
+    def _combined(self, tidy: Callable[[BaseGeometry], BaseGeometry]) -> BaseGeometry:
         g = self.base.geometry()
         for how, p in self.steps:
             other = p.geometry()
-            g = unary_union([g, other]) if how == "union" else g.difference(other)
+            g = tidy(unary_union([g, other]) if how == "union" else g.difference(other))
+        return g
+
+    def polygon(self) -> Polygon | None:
+        """Its largest piece, cleaned after every step as the language
+        cleans every `Shape`."""
+        g = self._combined(clean)
         pieces = [p for p in polygons_of(g) if p.is_valid and p.area > 1.0]
         if not pieces:
             return None
