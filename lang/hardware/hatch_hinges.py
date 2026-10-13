@@ -26,7 +26,8 @@ top reaches above the reference (the overlap A, at most the hinge's A_max
 for the hatch thickness and opening angle; it is never chosen), that the
 holes and the mounting plate fit on their boards (`Board.hole_fits`), that
 the holes stop short of the boards' far faces, and that no part takes the
-closed hinge's space. And it places the hinges as boxes (`HingeShape`),
+closed hinge's space; and, beyond the add-in, that the two hinges'
+mounting plates do not meet on a narrow hatch. And it places the hinges as boxes (`HingeShape`),
 one body per hinge named by the hatch's own left and right, seen standing
 in front of it, in an item `<hatch>_hinges`. A hatch hangs on a side
 panel once.
@@ -306,6 +307,13 @@ class HatchHinge:
                 raise LangError(f"The front edges of the two side panels are {mm(abs(first.front - second.front))} "
                                 "apart in depth; the hatch closes against both, so they must be flush.",
                                 second.side.path)
+            # [found by fuzzing, 2026-10-13: in a cabinet 85 wide the two hinges' pilot holes met on the
+            # hatch, and the core refused the second halfway, the first drilled]
+            width = abs(first.inner - second.inner)
+            if width < 2 * spec.plate_inward[1] - TOLERANCE:
+                raise LangError(f"{self.name}: the side panels' inner faces are {mm(width)} apart; the two hinges' "
+                                f"mounting plates, each reaching {mm(spec.plate_inward[1])} in from its side panel, "
+                                "would meet on the hatch.", hatch.path)
         hinges.sort(key=lambda h: h.which)       # left, then right
         frame = _Frame(up, back, reference.value)
 

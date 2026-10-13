@@ -505,3 +505,28 @@ def test_two_hatches_in_one_cabinet():
     assert [item["name"] for item in cab.hardware] == ["one_hinges", "two_hinges"]
     assert {(h.name, h.face) for h in _holes(wall)} == {
         (f"hinge_{n}_{c}", f) for n, f in (("one", "right"), ("two", "left")) for c in "abc"}
+
+
+def test_two_hinges_whose_plates_meet_on_a_narrow_hatch_are_refused():
+    """Found by fuzzing: in a cabinet 85 wide the two hinges' pilot holes,
+    25 in from each side panel, met on the hatch; each was checked against
+    what was there before, and the core refused the second halfway, the
+    first drilled. The mounting plates reach 34.5 in from their side panel:
+    sides whose inner faces lie closer than 69 are refused before anything
+    is drilled."""
+    for width, inner in ((85, 49), (36 + 69, 69)):
+        registry.reset()
+        box = Box.from_size(width=width, depth=320, height=350)
+        with cabinet("cab", box, front=box.front) as cab:
+            carcass = cab.front.into(18)
+            left = board("left", ply18).on(cab.left).between(carcass, cab.back)
+            right = board("right", ply18).on(cab.right).between(carcass, cab.back)
+            top = board("top", ply18).on(cab.top).between(left, right, carcass, cab.back)
+            hatch = board("hatch", ply18).on(cab.front)
+            if inner < 69:
+                with pytest.raises(LangError, match=rf"^cab\.hatch: Häfele Free space 1\.11: the side panels' inner "
+                                                    rf"faces are {inner} mm apart; the two hinges' mounting plates"):
+                    cab.mount(HatchHinge("Free space 1.11"), hatch=hatch, sides=(left, right), top=top)
+                assert hatch.ops == [] and left.ops == [] and right.ops == [] and cab.hardware == []
+            else:
+                cab.mount(HatchHinge("Free space 1.11"), hatch=hatch, sides=(left, right), top=top)
