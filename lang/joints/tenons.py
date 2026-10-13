@@ -18,7 +18,10 @@ where the shoulder covers them once assembled; None leaves the corners
 square (`board.dogbones()` can relieve them later). A mortise corner where the
 mortise breaks out of its board needs none, nor does a tenon flush with the
 end of its board. The reliefs' geometry is `lang.core.dogbones`, shared
-with half laps and `board.dogbones()`.
+with half laps and `board.dogbones()`. With dog bones, the tool routes the
+gaps between the tenons, which must be at least as wide as it, and a
+corner dog bone bites into the tenon's side at its root, so a tenon must
+be wider than its two bites.
 
 Along each contact: `count=` tenons `width=` wide, the outer ones `margin=`
 from the contact's ends (a single one centred), `even=True` for tenons as
@@ -33,6 +36,8 @@ take their stations from what this joint made (`cabineo(gaps=t)`,
 per contact.
 """
 from __future__ import annotations
+
+import math
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -123,6 +128,17 @@ class Tenons(ContactJoint):
             raise LangError(f"a {w:g} mm tenon reaches past the contact ({c.lo:g} to {c.hi:g}).")
         if any(b - a < w - EPS for a, b in zip(stations, stations[1:])):
             raise LangError(f"the {w:g} mm tenons overlap.")
+        # [found by fuzzing, 2026-10-13: tenons 1.1 wide, 1.1 apart, with
+        # 8 mm corner dog bones, which ate them and left islands of the board]
+        gap = min((b - a - w for a, b in zip(stations, stations[1:])), default=math.inf)
+        if self.dogbones is not None and gap < self.tool - EPS:
+            raise LangError(f"the {gap:g} mm gaps between the tenons are narrower than the {self.tool:g} mm tool "
+                            "that cuts them; give fewer or narrower tenons, a smaller tool= or dogbones=None.")
+        if self.dogbones == "corner":
+            bite = self.radius - self.tool / (2 * math.sqrt(2))
+            if w <= 2 * bite + EPS:
+                raise LangError(f"corner dog bones cut {bite:.3g} into each side of a tenon at its root; the "
+                                f"tenons must be wider than {2 * bite:.3g}.")
         if self.dogbones == "hidden":
             # Each is a circle as wide as the tool plus the relief: one bites
             # into each side of a tenon and reaches that far along it from

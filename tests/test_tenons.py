@@ -109,6 +109,26 @@ def test_hidden_dog_bones_must_not_reach_past_the_tenons_end():
         shelf.join(left, using=tenons(count=1, width=50, remaining=8.9, dogbones="hidden"))    # 6.1 long: fits
 
 
+
+def test_the_tool_must_fit_between_the_tenons_and_leave_them_standing():
+    """Found by fuzzing: five tenons 1.1 wide and 1.1 apart, with 8 mm
+    corner dog bones, each biting 1.2 into a tenon's side at its root: they
+    ate the tenons, and the shelf was left with islands. With dog bones,
+    the gaps between the tenons must be at least the tool, which cuts them,
+    and the two corner dog bones at a tenon's root must leave it standing."""
+    u, left, _, shelf = _unit()
+    with u:
+        before = state(left, shelf)
+        with pytest.raises(LangError, match=r"^unit\.shelf: tenons with unit\.left: the 5 mm gaps between the tenons "
+                                            r"are narrower than the 6 mm tool that cuts them"):
+            shelf.join(left, using=tenons(width=20, at=[Pos("x", 100), Pos("x", 125)]))
+        with pytest.raises(LangError, match=r"corner dog bones cut 0\.929 into each side of a tenon at its root; the "
+                                            r"tenons must be wider than 1\.86"):
+            shelf.join(left, using=tenons(width=1.5, at=[Pos("x", 100)]))
+        assert state(left, shelf) == before
+        shelf.join(left, using=tenons(width=20, at=[Pos("x", 100), Pos("x", 126)]))      # a 6 mm gap: it fits
+
+
 def test_tenons_without_dog_bones_leave_square_corners():
     """dogbones=None, as half laps and grooves take it: square roots and
     mortises, for board.dogbones() or another way of relieving them."""
