@@ -2459,6 +2459,19 @@ Added by Florian 2026-10-13:
   checked for overlaps (CAD files were dropped for it on 2026-10-12),
   runs' `keepout`, and hand-modeled bodies as inputs (rung 3 under
   "Hand-made geometry and escape hatches").
+- **Colors and appearances**: a color, or a Fusion appearance or physical
+  material, given to a part or to a material for all its parts, carried by
+  the layout to the preview and to Fusion. Now the preview colors parts by
+  material from a fixed palette, in the order the materials come, and the
+  compiled bodies get no appearance at all. Related: the grain made
+  visible by an appearance (Later, under "Backend"). (The grain itself is
+  done: `grain()`, the scope's default and the material's `grain` flag,
+  handed to Multi Arrange.)
+- **Manufacturing groups**: parts marked in the build as one group, which
+  Multi Arrange then nests as a rigid group, keeping their arrangement, as
+  its own groups do now (a group name per part, set by hand in its
+  dialog). The compiler would write the group into the `lang`/`part`
+  attribute next to the grain.
 
 (Operations, the half lap, the connectors and the tenons are done; the
 assembly experiment from question 2 was dropped as a priority on
