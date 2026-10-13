@@ -23,7 +23,8 @@ def test_every_corner_is_rounded_as_the_tangent_lengths_say(shape: Lines, r: flo
         return
     assert got is not None, "refused, though every arc fits"
     assert got.is_valid
-    assert got.hausdorff_distance(want) <= r * (1 - math.cos(math.radians(0.5))) + 1e-6
+    # (an arc's steps are whole degrees, the ones at its ends up to 1.6: `cutouts._END`)
+    assert got.hausdorff_distance(want) <= r * (1 - math.cos(math.radians(0.8))) + 1e-6
     assert cutouts.corner_points(got) == []
 
 

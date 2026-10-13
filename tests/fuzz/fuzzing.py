@@ -175,7 +175,7 @@ class Rounded:
         return out
 
     def sagitta(self, grow: float) -> float:
-        return _sagitta(self.r + abs(grow), math.radians(1.0))
+        return _sagitta(self.r + abs(grow), math.radians(1.6))     # (whole degrees, the end steps up to 1.6)
 
     def truth(self) -> BaseGeometry:
         rect = Rect(self.cx, self.cy, self.w, self.h, self.angle).geometry()

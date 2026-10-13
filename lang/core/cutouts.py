@@ -26,11 +26,13 @@ the add-in.
 """
 from __future__ import annotations
 
+import functools
 import math
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
+import numpy as np
 import shapely
 from shapely.geometry import LineString, Point, Polygon
 from shapely.geometry.base import BaseGeometry
@@ -52,6 +54,22 @@ Point2 = tuple[float, float]
 #: Arcs are drawn with a vertex at least every this many degrees, so that
 #: short pieces of them are still recognised as arcs.
 _ARC_STEP = math.radians(1.0)
+#: Every circle is drawn with its vertices on the whole degrees about its
+#: centre, this many a turn, and every arc on those between its ends, so
+#: that two drawings of one circle (a circle cut on a rounded corner's own
+#: arc) share their vertices and leave nothing between them [Florian,
+#: 2026-10-13]. Fusion gets the same arcs either way.
+_GRID = 360
+#: The whole degrees' cosines and sines, as every circle's vertices are
+#: worked out from them: the same floats, however a vertex is reached.
+_UNIT = np.array([(math.cos(2 * math.pi * i / _GRID), math.sin(2 * math.pi * i / _GRID)) for i in range(_GRID)])
+#: No whole degree nearer an arc's end than this: `lang.emit.arcs` takes a
+#: step under half a degree (`MIN_STEP`) for a sample of a curve, not a
+#: piece of an arc, and a step of exactly that falls either side of it.
+_END = math.radians(0.6)
+#: Arcs shorter than this have too few whole degrees for four steps (the
+#: fewest an arc is found by); they are drawn in even steps.
+_SHORT = math.radians(5.0)
 #: Corners turning less than this are left as they are: they are the joints
 #: of a polygon standing for a curve, not corners.
 _MIN_CORNER = math.radians(2.0)
@@ -273,12 +291,15 @@ def _sweep(c: Point2, p: Point2, q: Point2, ccw: bool) -> float:
 
 
 def _arc_points(c: Point2, r: float, p: Point2, q: Point2, ccw: bool, sweep: float | None = None) -> list[Point2]:
-    """Points on the circle from `p` to `q` (both included), at most
-    `_ARC_STEP` apart and at least four segments when the arc allows; the
-    end points are taken as given."""
+    """Points on the circle from `p` to `q` (both included): the ends as
+    given, between them the whole degrees about `c` (`_GRID`), none nearer
+    an end than `_END`; an arc shorter than `_SHORT` in even steps, at
+    most `_ARC_STEP` apart and at least four when the arc allows."""
     total = _sweep(c, p, q, ccw) if sweep is None else sweep
+    if total >= _SHORT:
+        return [p] + _grid_points(c, r, _angle(c, p), total, ccw) + [q]
     n = max(1, math.ceil(total / _ARC_STEP - 1e-9))
-    if total >= math.radians(2.0):
+    if total >= 4 * _END:                    # four steps, each above MIN_STEP
         n = max(n, 4)
     a0 = _angle(c, p)
     sign = 1.0 if ccw else -1.0
@@ -288,6 +309,31 @@ def _arc_points(c: Point2, r: float, p: Point2, q: Point2, ccw: bool, sweep: flo
         out.append((c[0] + r * math.cos(a), c[1] + r * math.sin(a)))
     out.append(q)
     return out
+
+
+def arc_points(c: Point2, r: float, p: Point2, q: Point2, ccw: bool, sweep: float | None = None) -> list[Point2]:
+    """The points of an arc about `c` from `p` to `q`, both included, as
+    every arc the language makes is drawn (`_arc_points`)."""
+    return _arc_points(c, r, p, q, ccw, sweep)
+
+
+def _grid_points(c: Point2, r: float, a0: float, total: float, ccw: bool) -> list[Point2]:
+    """The whole-degree points of the circle about `c` from the angle `a0`
+    on, `total` the way it turns, at least `_END` inside both ends; worked
+    out as `_circle` works out its vertices, so they are the same floats."""
+    step = 2 * math.pi / _GRID
+    sign = 1 if ccw else -1
+    # the first whole degree at or past a0, the way the arc turns
+    k = math.ceil(a0 / step - 1e-12) if ccw else math.floor(a0 / step + 1e-12)
+    out: list[Point2] = []
+    while True:
+        t = sign * (k * step - a0)
+        if t > total - _END:
+            return out
+        if t >= _END:
+            ux, uy = _UNIT[k % _GRID]
+            out.append((c[0] + r * float(ux), c[1] + r * float(uy)))
+        k += sign
 
 
 @dataclass
@@ -958,10 +1004,12 @@ def _turned_over(original: Curve2, moved: Curve2, start: Point2 | None, end: Poi
     return after > before + math.pi / 2
 
 
+@functools.lru_cache(maxsize=4096)
 def _circle(c: Point2, r: float) -> Polygon:
-    n = max(8, math.ceil(2 * math.pi / _ARC_STEP))
-    return Polygon([(c[0] + r * math.cos(2 * math.pi * i / n), c[1] + r * math.sin(2 * math.pi * i / n))
-                    for i in range(n)])
+    """The circle with a vertex on every whole degree (`_GRID`); the same
+    polygon for the same circle (they are immutable), as holes' footprints
+    are asked for again and again."""
+    return Polygon(np.column_stack((c[0] + r * _UNIT[:, 0], c[1] + r * _UNIT[:, 1])))
 
 
 def _onto_circles(poly: Polygon, targets: list[_Target], keep: Callable[[Point2], bool] | None = None) -> Polygon:
@@ -1041,9 +1089,9 @@ def _on(c: Point2, r: float, p: Point2) -> Point2:
 
 
 def circle_geometry(c: Point2, r: float) -> Polygon:
-    """A circle as a polygon with its vertices exactly on it, close enough
-    together to be drawn as a circle again."""
-    return _circle(c, r)
+    """A circle as a polygon with its vertices exactly on it, on the whole
+    degrees about its centre (`_GRID`), as every circle and arc is drawn."""
+    return _circle((float(c[0]), float(c[1])), float(r))
 
 
 # -- an exact inset of one polygon ---------------------------------------------------------------
@@ -1166,13 +1214,16 @@ def _circles_cross(p: Arc2, q: Arc2, near: Point2) -> Point2 | None:
 
 def _arc_between(arc: Arc2, start: Point2, end: Point2) -> list[Point2]:
     """The vertices strictly between `start` and `end` on the arc's circle,
-    the way the arc turns, at most `_ARC_STEP` apart."""
+    the way the arc turns: on the whole degrees, as `_arc_points` puts
+    them, or for a short arc at most `_ARC_STEP` apart."""
     c, r = arc.center, arc.radius
     (ax, ay), (mx, my), (bx, by) = arc.a, arc.mid, arc.b
     ccw = (mx - ax) * (by - my) - (my - ay) * (bx - mx) > 0
     a0 = math.atan2(start[1] - c[1], start[0] - c[0])
     a1 = math.atan2(end[1] - c[1], end[0] - c[0])
     sweep = (a1 - a0) % (2 * math.pi) if ccw else -((a0 - a1) % (2 * math.pi))
+    if abs(sweep) >= _SHORT:
+        return _grid_points(c, r, a0, abs(sweep), ccw)
     steps = max(4, math.ceil(abs(sweep) / _ARC_STEP))
     return [(c[0] + r * math.cos(a0 + sweep * i / steps), c[1] + r * math.sin(a0 + sweep * i / steps))
             for i in range(1, steps)]

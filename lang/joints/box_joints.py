@@ -146,7 +146,7 @@ class BoxJoint(ContactJoint):
             grooves = union_all([corner.on_tips(_lens(corner.tb, z, r)) for z in sides])
             b.add_edge_pocket(c.end, grooves, seat - r, name=naming(b, f"finger_{a.name}_grooves"),
                               offset=corner.tips_offset)
-            reliefs = union_all([circle(2 * r, corner.point_b(seat - r, z), _QUARTER) for z in sides])
+            reliefs = union_all([circle(2 * r, corner.point_b(seat - r, z)) for z in sides])
             b.add_pocket(corner.b_inner, reliefs, r, name=naming(b, f"finger_{a.name}_reliefs"))
 
         # The notched board: the notches, the grooves along their walls
@@ -158,7 +158,7 @@ class BoxJoint(ContactJoint):
                               for z, opens in ((z0, 1), (z1, -1))])
             a.add_edge_pocket(corner.a_end, grooves, bottom, name=naming(a, f"notch_{b.name}_grooves"),
                               offset=corner.a_end_offset)
-            reliefs = union_all([circle(2 * r, corner.point_a(bottom - r, z), _QUARTER) for z0, z1 in notches
+            reliefs = union_all([circle(2 * r, corner.point_a(bottom - r, z)) for z0, z1 in notches
                               for z in (z0, z1)])
             a.add_pocket(c.face, reliefs, r, name=naming(a, f"notch_{b.name}_reliefs"))
 

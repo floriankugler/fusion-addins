@@ -169,8 +169,8 @@ def _outline_shape(case: BoardCase) -> Shape | None:
     if case.outline == "taper":
         return Shape(Polygon([(0, 0), (u, 0), (u, case.outline_r), (0, v)]))
     if u < v:
-        return slot_shape((u / 2, u / 2), (u / 2, v - u / 2), u, 32)
-    return slot_shape((v / 2, v / 2), (u - v / 2, v / 2), v, 32)
+        return slot_shape((u / 2, u / 2), (u / 2, v - u / 2), u)
+    return slot_shape((v / 2, v / 2), (u - v / 2, v / 2), v)
 
 
 def _shape_at(f: Feature, p: tuple[float, float]) -> BaseGeometry:

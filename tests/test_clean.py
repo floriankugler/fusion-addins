@@ -31,6 +31,20 @@ def test_a_circle_cut_on_a_rounded_corners_own_arc_takes_the_corner(cutter: str)
     assert panel.outline.area == pytest.approx(before.difference(hole.geometry).area, abs=1.0)
 
 
+@pytest.mark.parametrize("r, turn", [(200, 0.0), (500, 0.0), (2000, 7.3)])
+def test_one_circle_drawn_twice_coincides_at_any_radius(r: float, turn: float):
+    """`circle()` drew 32 segments a quarter, fillets a vertex every whole
+    degree: from a radius of about 200 the crescents between the two
+    drawings of a rounded corner's arc were too thick to clean, and a
+    circle cut on it split the shape in 32 pieces. Every circle and arc
+    has its vertices on the whole degrees about its centre now, also on a
+    board turned by a part of a degree."""
+    a = math.radians(turn)
+    board = Shape(affinity.rotate(box(0, 0, 3 * r, 4 * r), turn, origin=(0, 0))).rounded(r)
+    centre = (r * math.cos(a) - r * math.sin(a), r * math.sin(a) + r * math.cos(a))
+    assert len(board.difference(circle(2 * r, centre)).polygons()) == 1
+
+
 def test_a_shape_added_and_taken_away_again_leaves_no_spike():
     """A diamond poking out of a square, added and taken away again, left
     a spike of no width 29 mm out from the square's corner along its edge:

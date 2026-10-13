@@ -47,6 +47,7 @@ from shapely.geometry.polygon import orient
 from shapely.ops import unary_union
 
 from ..emit.arcs import MAX_STEP, Line2, fit
+from .cutouts import circle_geometry
 from .errors import LangError
 from .ops import Cut, Hole, Pocket
 from .shapes import Shape, circle
@@ -60,8 +61,6 @@ if TYPE_CHECKING:
 DogBones = Literal["corner", "hidden"]
 Point2 = tuple[float, float]
 
-#: Sides per quarter circle of a relief; the emitter draws it as an arc.
-SEGMENTS = 16
 #: How far (mm) from a corner the probes into the space next to it lie.
 _PROBE = 0.01
 #: How close (mm) a point must be to count as on a line or at a corner.
@@ -86,7 +85,7 @@ def corner_relief(corner: Point2, a: Point2, b: Point2, tool: float, relief: flo
     reach = tool / 2 / sin
     bx, by = a[0] + b[0], a[1] + b[1]
     k = reach / math.hypot(bx, by)
-    return circle(2 * reach + relief, (corner[0] + bx * k, corner[1] + by * k), SEGMENTS)
+    return circle(2 * reach + relief, (corner[0] + bx * k, corner[1] + by * k))
 
 
 def hidden_relief(corner: Point2, along: Point2, tool: float, relief: float) -> Shape:
@@ -97,7 +96,7 @@ def hidden_relief(corner: Point2, along: Point2, tool: float, relief: float) -> 
     it (a tenon's root under the mortise, a mortise's end under the
     shoulder, a lap's floor in the other board's notch)."""
     r = (tool + relief) / 2
-    return circle(2 * r, (corner[0] + along[0] * r, corner[1] + along[1] * r), SEGMENTS)
+    return circle(2 * r, (corner[0] + along[0] * r, corner[1] + along[1] * r))
 
 
 # -- inside corners of a board ---------------------------------------------------------------
@@ -272,9 +271,8 @@ def _toward(point: Point2, a: Point2, b: Point2, distance: float) -> Point:
 
 
 def _disc(c: Point2, r: float) -> Polygon:
-    """A hole as a polygon with its vertices on the circle, fine enough to
-    read as an arc."""
-    return Point(*c).buffer(r, quad_segs=SEGMENTS)
+    """A hole as a polygon, drawn as every circle is (`circle_geometry`)."""
+    return circle_geometry(c, r)
 
 
 # -- what board.dogbones() asks for --------------------------------------------------------------

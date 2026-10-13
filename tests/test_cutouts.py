@@ -250,10 +250,10 @@ def test_a_border_closing_a_round_ended_board_leaves_nothing_to_cut_out():
     snapped onto its circles and shapely raised a ValueError."""
     from lang.core.shapes import slot_shape
     with module("m", Box.from_size(width=600, depth=500, height=720)) as m:
-        rail = board("rail", ply15, slot_shape((73.0, 50.0), (172.0, 149.0), 22, 32)).on(m.bottom)
+        rail = board("rail", ply15, slot_shape((73.0, 50.0), (172.0, 149.0), 22)).on(m.bottom)
         with pytest.raises(LangError, match="leaves nothing of the face"):
             rail.cutout(border=11)
-    assert cutouts.grown(slot_shape((73.0, 50.0), (172.0, 149.0), 22, 32).geometry, -11.0).is_empty
+    assert cutouts.grown(slot_shape((73.0, 50.0), (172.0, 149.0), 22).geometry, -11.0).is_empty
 
 
 def test_a_cut_refused_for_lying_in_a_cutout_leaves_the_outline_as_it_was():
@@ -563,3 +563,21 @@ def test_an_offset_whose_edge_passes_near_between_its_ends_is_refused():
     shape = _rounded_rect(0, 76, 73.34223977009138, 300.3733725850022, 7.334223977009138, 120.45463784150706) \
         .difference(_rounded_rect(59.5, 188.5, 399, 183, 60.32945596815371, 45))
     assert _keeps(cutouts.grown(shape, 21.52965333733873), shape, 21.53) > 21.52965333733873 - 0.25
+
+
+def test_an_arc_drawn_on_whole_degrees_keeps_its_first_step_above_half_a_degree():
+    """Found by fuzzing: an arc's ends are left half a degree clear of the
+    whole degrees between them; a step of exactly half a degree is
+    `lang.emit.arcs`' smallest, and rounding put it just below, so the
+    arc was found one vertex late and a short line was left (a circle of
+    16 segments a quarter united with an exact one and grown 0.004, its
+    mirror image found whole). Ends are 0.6 degrees clear now."""
+    from shapely import affinity
+    from shapely.geometry.polygon import orient
+    from shapely.ops import unary_union
+    shape = unary_union([Point(0, 65).buffer(56.5, quad_segs=32), cutouts.circle_geometry((0, 0), 119)])
+    grown = cutouts.grown(shape, 0.00390625)
+    for g in (grown, affinity.scale(grown, -1, 1, origin=(0, 0))):
+        assert isinstance(g, Polygon)
+        ring = [(float(x), float(y)) for x, y in list(orient(g, 1.0).exterior.coords)[:-1]]
+        assert [type(c).__name__ for c in fit(ring)] == ["Arc2", "Arc2"]

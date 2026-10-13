@@ -2,9 +2,10 @@
 import math
 
 import pytest
-from shapely.geometry import Point, box
+from shapely.geometry import box
 
 from lang import *
+from lang.core.cutouts import circle_geometry
 from lang.core.layout import build_layout
 from lang.core.ops import Cut, Hole, Pocket
 from helpers import has_material, ply15, ply18, state
@@ -53,7 +54,7 @@ def test_the_sides_get_through_mortises_with_corner_reliefs():
     assert has_material(left, (80.08, 418.08), (80.1, 418.1)) == [False, True]
     mortise = left.op("mortise_shelf_1").op
     assert isinstance(mortise, Cut)
-    lobe = Point(O, O).buffer(R, quad_segs=16).difference(box(0, 0, 100, 100)).area    # outside one corner
+    lobe = circle_geometry((O, O), R).difference(box(0, 0, 100, 100)).area    # outside one corner
     assert mortise.shape.area == pytest.approx(50.1 * 18.1 + 4 * lobe, rel=1e-6)
 
 

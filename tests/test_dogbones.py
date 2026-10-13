@@ -100,7 +100,7 @@ def test_round_shapes_have_no_corners():
         panel.pocket(rect(depth=40, width=40).rounded(6), at=top.back(20).left(20), depth=5)
         panel.hole(d=10, at=top.front(100).right(100), depth=8)
         # a coarse polygon standing for nothing round: its corners are corners
-        panel.cut(circle(20, resolution=1), at=top.front(150).left(150))
+        panel.cut(polygon([(10, 0), (0, 10), (-10, 0), (0, -10)]), at=top.front(150).left(150))
     found = corners(panel)
     assert len(found) == 4 and all(math.degrees(c.angle) == pytest.approx(90) for c in found)
 

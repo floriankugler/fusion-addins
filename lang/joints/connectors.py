@@ -330,7 +330,7 @@ class Cabineo(SpacedJoint):
                 e.add_pocket(access, shape, data.CABINEO_FLUSH_RELIEF_DEPTH, naming(e, base + "_relief"))
             elif self.surface == "anti-break":
                 depth, widening = self.anti_break
-                circles = [circle(data.CABINEO_ACCESS_DIAMETER + 2 * widening, g.on_board(s, centre), 16)
+                circles = [circle(data.CABINEO_ACCESS_DIAMETER + 2 * widening, g.on_board(s, centre))
                            for centre in centres]
                 shape = circles[0].union(circles[1]).union(circles[2])
                 e.add_pocket(access, shape, depth, naming(e, base + "_relief"))
@@ -338,7 +338,7 @@ class Cabineo(SpacedJoint):
             at = g.on_face(s, across)
             f.add_hole(c.face, at, guide.diameter, guide_depth, name)
             if guide.collar_diameter is not None and guide.collar_depth is not None:
-                f.add_pocket(c.face, circle(guide.collar_diameter, at, 16), guide.collar_depth,
+                f.add_pocket(c.face, circle(guide.collar_diameter, at), guide.collar_depth,
                              naming(f, name + "_collar"))
 
 

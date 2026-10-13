@@ -13,17 +13,18 @@ point; the face maps the direction names it was given to u and v.
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import cast
 
 from shapely import affinity, maximum_inscribed_circle
-from shapely.geometry import LineString, MultiPolygon, Point, Polygon
+from shapely.geometry import MultiPolygon, Polygon
 from shapely.geometry import box as shapely_box
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
 
 from . import directions
-from .cutouts import filleted
+from .cutouts import arc_points, circle_geometry, filleted
 from .directions import AXES, Axis, ExtentName
 from .errors import LangError
 from .geometry import clean
@@ -259,16 +260,25 @@ def rect(*, width: float | None = None, depth: float | None = None, height: floa
     return box_shape(0.0, 0.0, by_axis[u], by_axis[v], (u, v))
 
 
-def slot_shape(start: tuple[float, float], end: tuple[float, float], width: float,
-               segments: int = 8) -> Shape:
+def slot_shape(start: tuple[float, float], end: tuple[float, float], width: float) -> Shape:
     """A raw slot: the line from `start` to `end` widened to `width`, with
-    round ends of `segments` sides per quarter circle; for joints and
+    round ends drawn as every circle is (`circle`); for joints and
     hardware, which compute their own positions."""
-    return Shape(LineString([start, end]).buffer(width / 2, quad_segs=segments))
+    r = width / 2
+    length = math.dist(start, end)
+    if length == 0:
+        return circle(width, start)
+    nx, ny = -(end[1] - start[1]) / length * r, (end[0] - start[0]) / length * r      # across, to the left
+    ends = [arc_points(end, r, (end[0] - nx, end[1] - ny), (end[0] + nx, end[1] + ny), True, math.pi),
+            arc_points(start, r, (start[0] + nx, start[1] + ny), (start[0] - nx, start[1] - ny), True, math.pi)]
+    return Shape(Polygon(ends[0] + ends[1]))
 
 
-def circle(diameter: float, center: tuple[float, float] = (0.0, 0.0), resolution: int = 32) -> Shape:
-    return Shape(Point(*center).buffer(diameter / 2.0, quad_segs=resolution))
+def circle(diameter: float, center: tuple[float, float] = (0.0, 0.0)) -> Shape:
+    """A circle, its vertices on the whole degrees about its centre, as every
+    circle and arc the language makes, so that two drawings of one circle
+    coincide (`cutouts.circle_geometry`)."""
+    return Shape(circle_geometry((float(center[0]), float(center[1])), diameter / 2.0))
 
 
 def polygon(points: list[tuple[float, float]]) -> Shape:
