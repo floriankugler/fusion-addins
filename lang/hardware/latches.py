@@ -42,7 +42,8 @@ each hole's centre and the four points its radius away along and across
 the edge must lie on the door's or the carcass board's face, outside the
 holes and pockets made before; the add-in probes its faces the same way,
 including a pilot-sized circle at each LL-66 station's centre); and pilot
-holes as deep as a board is thick.
+holes as deep as a board is thick. Beyond the add-in: latches so close
+that a hole of one meets a hole of another.
 
 Mounted, a latch also places itself, closed, as boxes: the part on the
 door and its strike on the carcass board, which interlock when closed, as
@@ -58,6 +59,8 @@ Operations are named by latch, the other board and the latch's number:
 face), `pull_lock_door_1a` and `_1b` in the carcass board.
 """
 from __future__ import annotations
+
+import math
 
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
@@ -209,6 +212,8 @@ class _Hole:
     #: of material at the door's front).
     kind: data.HoleKind
     depth: float = 0.0
+    #: The latch it is for, numbered as the latches are.
+    latch: int = 1
 
 
 class DoorLatch:
@@ -262,6 +267,7 @@ class DoorLatch:
         check_pilot_depth(self.name, where.carcass, self.pilot[1], "pilot")
         for hole in holes:                       # check everything before machining anything
             check_hole(self.name, hole.board, hole.face, hole.point, hole.d, f"hole {hole.name!r}")
+        self._check_apart(holes)
         for anchor in self._anchors(where):
             if not door.hole_fits(where.inner, anchor, self.pilot[0]):
                 raise LangError(f"{self.name}: the latch does not fit on {door.path}'s {where.inner.name} face.",
@@ -331,21 +337,35 @@ class DoorLatch:
             base = f"{kind}_{carcass.name}_{i}"
             for letter, h in zip("abcd", door_pilots):
                 pilots.append(_Hole(door, where.inner, where.on_door(s, h.along, h.below), pd, base + letter,
-                                    "pilot", pdepth))
+                                    "pilot", pdepth, i))
             for h in pattern.door:
                 if h.diameter is None:
                     continue
                 point = where.on_door(s, h.along, h.below)
                 if h.kind == "through":
-                    mains.append(_Hole(door, where.inner, point, h.diameter, base, "through"))
+                    mains.append(_Hole(door, where.inner, point, h.diameter, base, "through", latch=i))
                 elif h.remaining is not None and door.thickness > h.remaining + TOLERANCE:
                     counterbores.append(_Hole(door, where.inner, point, h.diameter, base + "_counterbore",
-                                              "counterbore", h.remaining))
+                                              "counterbore", h.remaining, i))
             pair = sorted(pattern.carcass_holes(door.thickness), key=lambda p: p[0] * sign)
             for letter, (a, behind) in zip("ab", pair):
                 strikes.append(_Hole(carcass, where.face, where.on_carcass(s, a, behind), pd,
-                                     f"{kind}_{door.name}_{i}{letter}", "pilot", pdepth))
+                                     f"{kind}_{door.name}_{i}{letter}", "pilot", pdepth, i))
         return pilots + mains + counterbores + strikes
+
+    def _check_apart(self, holes: list[_Hole]) -> None:
+        """No hole of one latch meets a hole of another in the same board:
+        each is checked against what was there before, not against the
+        others [found by fuzzing, 2026-10-13: two Everlocks 34 mm apart,
+        and three Pull Locks 9 apart, whose second hole the core refused
+        once the first lock was drilled]. A latch's own holes may meet, as
+        the Pull Lock's hole and its counterbore do."""
+        for i, a in enumerate(holes):
+            for b in holes[i + 1:]:
+                if a.board is b.board and a.latch != b.latch and \
+                        math.dist(a.point, b.point) < (a.d + b.d) / 2 - TOLERANCE:
+                    raise LangError(f"{self.name}: latches {a.latch} and {b.latch} are too close: their holes "
+                                    f"{a.name!r} and {b.name!r} in {a.board.path} meet.", a.board.path)
 
     def _anchors(self, where: _Where) -> list[Point2]:
         """Each station's centre on the door, where the add-in's layout

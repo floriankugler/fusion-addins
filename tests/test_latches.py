@@ -280,6 +280,30 @@ def test_refuses_latches_that_do_not_fit_and_changes_nothing():
     assert {h[1] for h in _holes(tall).values()} == {360 - 7.5 - 26, 360 - 7.5 - 42, 360 - 7.5 - 30}
 
 
+
+def test_latches_whose_holes_meet_are_refused_and_change_nothing():
+    """Found by fuzzing: two Everlocks 50 from the ends of a 134 mm door
+    edge, 34 apart, drilled their holes into each other, as each was
+    checked only against what was there before; three Pull Locks 9 apart
+    were refused by the core halfway, the first lock drilled. Latches so
+    close that a hole of one meets a hole of another are refused before
+    anything is drilled."""
+    box = Box.from_size(width=600, depth=500, height=720)
+    for name, latch, width, message in (
+            ("ever", DoorLatch("Everlock", count=2, end=50), 134,
+             r"^ever\.door: Everlock: latches 1 and 2 are too close: their holes 'everlock_top_1b' and "
+             r"'everlock_top_2' in ever\.door meet\."),
+            ("pull", DoorLatch("Pull Lock 44", count=3, end=241), 500,
+             r"^pull\.door: Pull Lock 44: latches 1 and 2 are too close")):
+        with module(name, box) as cab:
+            parts = _carcass(cab)
+            door = board("door", ply15).on(cab.front).between(cab.left.into(50), cab.left.into(50 + width),
+                                                              cab.bottom.into(300), cab.top.into(17))
+            with pytest.raises(LangError, match=message):
+                cab.mount(latch, door=door, carcass=parts["top"])
+            assert door.ops == [] and parts["top"].ops == [] and cab.hardware == []
+            cab.mount(DoorLatch(latch.model, count=2, end=30), door=door, carcass=parts["top"])   # far apart
+
 def test_layout_plan_and_preview():
     """The layout carries the holes and the boxes; the emitter's plan drills
     the lock's hole before the counterbore around it and the strike's pair
