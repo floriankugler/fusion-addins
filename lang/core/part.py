@@ -789,7 +789,11 @@ class Board:
                 along = LineString([(value, op.s - reach), (value, op.s + reach)])
             else:
                 along = LineString([(op.s - reach, value), (op.s + reach, value)])
-            if outline.boundary.intersection(along).length <= 1e-6:
+            # (within a micrometre of the face, an edge crossing it does not count [found by fuzzing,
+            # 2026-10-14: a notch placed by the board's far corner came 6e-14 short of it and left the
+            # face's edge that much askew, and a hole into its other end was then off the board])
+            run = outline.boundary.intersection(along.buffer(1e-6, cap_style="flat")).length
+            if run <= min(1e-3, reach / 2):
                 return (f"goes into the {face.name} face where the board has none: its outline does not reach the "
                         f"{face.name} side there.")
             # Fusion's hole feature starts at its centre, on the face.

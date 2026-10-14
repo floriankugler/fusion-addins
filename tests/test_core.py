@@ -326,6 +326,26 @@ def test_shapes_name_their_plane():
         rect(width=10)
 
 
+def test_a_hole_into_a_narrow_face_stays_there_when_a_cut_leaves_the_face_a_hair_askew():
+    """Found by fuzzing the placement: a notch at a board's back right
+    corner, placed by that corner, came 6e-14 mm short of the back face,
+    so the cut left the back face's edge 6e-14 askew, and a hole made
+    before into the back face's other end was then taken to be off the
+    board ("its outline does not reach the back side there"); in another
+    frame the same notch was made. The outline must run along the face
+    within a micrometre. A notch that takes the face from under the hole is
+    still refused."""
+    with module("m", Box.from_size(width=600, depth=426.71380074360144, height=100)) as m:
+        panel = board("panel", ply15).on(m.bottom)
+        panel.hole(d=8, at=panel.back.left(50), depth=20)
+        panel.cut(rect(depth=77.69648890942747, width=100), at=panel.top.back.right, name="notch")
+        other = board("other", ply15).on(m.bottom + 20)
+        other.hole(d=8, at=other.back.right(30), depth=20)
+        with pytest.raises(LangError, match="does not reach the back side there"):
+            other.cut(rect(depth=77.69648890942747, width=100), at=other.top.back.right, name="notch")
+    assert panel.has_operation("notch") and not other.has_operation("notch")
+
+
 def test_a_shaped_board_s_box_lies_where_its_shape_s_edges_do():
     """Found by fuzzing the placement: a board made of a rect between
     limits as far apart as the rect is wide had its far edge at 110.2
