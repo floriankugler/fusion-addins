@@ -97,32 +97,33 @@ def clean(g: BaseGeometry) -> BaseGeometry:
 
 
 def _clean_polygon(poly: Polygon, walls: bool = True) -> list[Polygon] | None:
-    """The polygon's clean pieces, or None when it has nothing to clean."""
-    if _narrow(poly.exterior):
+    """The polygon's clean pieces, or None when it has nothing to clean.
+    A ring is judged narrow without its spikes [found by fuzzing the
+    placement, 2026-10-14: a strip 0.2 by 7 mm with a hairline tail 175 mm
+    long was narrower than 0.01 mm on average, and went with it]."""
+    exterior = _without_spikes(poly.exterior)
+    shell = list(poly.exterior.coords) if exterior is None else exterior
+    if len(shell) < 4:
+        return []
+    if _narrow(LinearRing(shell)):
         # (narrow on average, it may be wider pieces that a hairline of no width joins: two
         # slivers of a box beside a pocket, 0.09 mm wide, joined along the pocket's side 6e-14
         # apart, went with it [found by fuzzing the checks, 2026-10-14])
         return _opened(poly) if walls else []
-    exterior = _without_spikes(poly.exterior)
     holes: list[LinearRing | list[tuple[float, float]]] = []
     changed = exterior is not None
     for ring in poly.interiors:
-        if _narrow(ring):
+        kept = _without_spikes(ring)
+        if (kept is not None and len(kept) < 4) or _narrow(ring if kept is None else LinearRing(kept)):
             changed = True
             continue
-        kept = _without_spikes(ring)
         changed = changed or kept is not None
-        if kept is None:
-            holes.append(ring)
-        elif len(kept) >= 4:
-            holes.append(kept)
-    shell = list(poly.exterior.coords) if exterior is None else exterior
+        holes.append(ring if kept is None else kept)
     if changed:
-        if len(shell) < 4:
-            return []
         made = Polygon(shell, holes)
         if not made.is_valid:
-            return None                 # (cleaning would make it worse; leave it as it was)
+            # (cleaning would make it worse; leave it as it was, unless it is narrow as it is)
+            return (_opened(poly) if walls else []) if _narrow(poly.exterior) else None
         poly = made
     if walls and len(poly.interiors) > 0 and _has_walls(poly):
         return _opened(poly)

@@ -141,3 +141,23 @@ def test_a_ring_a_move_rounds_into_a_crossing_is_made_valid():
     cleaned = clean(moved)
     assert cleaned.is_valid
     assert cleaned.symmetric_difference(affinity.translate(clean(crescents), 0, -11)).area < 1e-9
+
+
+def test_a_piece_with_a_hairline_tail_keeps_the_piece():
+    """Found by fuzzing the placement: what a dado left of a side where a
+    shelf sat in it, a strip 0.2 by 7 mm, came with a hairline 175 mm long
+    and 6e-14 wide along the dado's edge (the two edges a rounding apart),
+    and the strip and hairline together were narrower than 0.01 mm on
+    average: the strip was dropped with it, and the side did not overlap a
+    shelf reaching into that strip, where the module lay at the origin. The
+    hairline goes first, as a spike, then the strip is judged; a hole
+    likewise."""
+    y1, y2 = 302.98609239092434, 302.9860923909243
+    tailed = [(194.5, y1), (194.5, y2), (19.355946959201994, y2), (19.355946959201994, 296),
+              (19.155946959201994, 296), (19.155946959201994, y1)]
+    strip = box(19.155946959201994, 296, 19.355946959201994, y1)
+    (piece,) = polygons_of(clean(Polygon(tailed)))
+    assert piece.symmetric_difference(strip).area < 1e-9
+    holed = Polygon([(0, 200), (300, 200), (300, 400), (0, 400)], [tailed])
+    (piece,) = polygons_of(clean(holed))
+    assert len(piece.interiors) == 1 and piece.area == pytest.approx(300 * 200 - strip.area)
