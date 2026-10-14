@@ -25,8 +25,10 @@ of `KEEP_AREA` is stock, kept; smaller ones are waste.
 
 `best_plan` saws with a few settings (two or three stages, cross cuts or
 rips first, with or without a limit on the cuts per stage), each in a
-second or so, and keeps, in this order: no sheet over `max_cuts`; fewest
-sheets; the largest single piece of stock; fewest cuts.
+second or so, and keeps, in this order: no sheet over `max_cuts`; the
+cheapest stock (fewest sheets, when there is one kind); the largest single
+piece of stock left; fewest cuts. The stock to saw may be sheets of several
+sizes and offcuts larger than the bed.
 """
 from __future__ import annotations
 
@@ -163,10 +165,16 @@ def leaves(node: Node) -> list[Node]:
     return [node] if node.leaf else [l for c in node.children for l in leaves(c)]
 
 
-def solve(blanks, sheet, kerf, seconds, stages=3, first="vertical", max1=-1, max2=-1, objective="leftovers"):
-    """The solver's plans: one cutting tree per sheet."""
+def solve(blanks, stock, kerf, seconds, stages=3, first="vertical", max1=-1, max2=-1):
+    """The solver's plans: (cutting tree, stock type) for each piece of
+    stock sawn. `stock`: the sheets and offcuts to saw, each
+    {width, height, copies (-1: as many as needed), cost}. One kind of sheet
+    in any number: fewest sheets, then the largest leftover on the last;
+    else the cheapest stock (a sheet costs its area, an offcut on hand next
+    to nothing)."""
     b = rg.InstanceBuilder()
-    b.set_objective(ps.Objective.BinPackingWithLeftovers if objective == "leftovers" else ps.Objective.BinPacking)
+    one = len(stock) == 1 and stock[0]["copies"] == -1
+    b.set_objective(ps.Objective.BinPackingWithLeftovers if one else ps.Objective.VariableSizedBinPacking)
     b.set_cut_thickness(int(kerf))
     b.set_number_of_stages(stages)
     b.set_first_stage_orientation({"vertical": rg.CutOrientation.Vertical,
@@ -176,7 +184,11 @@ def solve(blanks, sheet, kerf, seconds, stages=3, first="vertical", max1=-1, max
         b.set_maximum_number_1_cuts(max1)
     if max2 > 0:
         b.set_maximum_number_2_cuts(max2)
-    b.add_bin_type(int(sheet[0]), int(sheet[1]), copies=-1)
+    for t in stock:
+        kwargs = {"copies": t["copies"]}
+        if not one:
+            kwargs["cost"] = t.get("cost", t["width"] * t["height"])
+        b.add_bin_type(int(t["width"]), int(t["height"]), **kwargs)
     for w, h in blanks:
         b.add_item_type(int(math.ceil(w)), int(math.ceil(h)), oriented=True, copies=1)
     params = rg.OptimizeParameters()
@@ -196,7 +208,7 @@ def solve(blanks, sheet, kerf, seconds, stages=3, first="vertical", max1=-1, max
                 nodes[raw.f].children.append(node)
         widen(root, kerf)
         for _ in range(sb.copies):
-            trees.append(root)
+            trees.append((root, sb.bin_type_id))
     return trees
 
 
@@ -226,23 +238,27 @@ SETTINGS = [dict(stages=s, first=f, max1=m1, max2=m2)
             for m1, m2 in ((-1, -1), (2, -1), (2, 2)) if not (s == 2 and m2 > 0)]
 
 
-def judge(trees: list[Node], bed, max_cuts: int) -> dict:
-    plans = [simplify(t, bed) for t in trees]
+def judge(trees: list[tuple[Node, int]], stock: list[dict], bed, max_cuts: int) -> dict:
+    plans = [simplify(t, bed) for t, _k in trees]
+    kinds = [k for _t, k in trees]
     n_cuts = [cuts(p) for p in plans]
-    stock = [l.rect for p in plans for l in leaves(p) if l.stock]
-    largest = max((r[2] * r[3] for r in stock), default=0.0)
-    return {"plans": plans, "cuts": n_cuts, "sheets": len(plans), "largest_stock": largest,
-            "stock": sum(r[2] * r[3] for r in stock), "stock_pieces": len(stock),
+    pieces = [l.rect for p in plans for l in leaves(p) if l.stock]
+    largest = max((r[2] * r[3] for r in pieces), default=0.0)
+    cost = sum(stock[k].get("cost", stock[k]["width"] * stock[k]["height"]) for k in kinds)
+    return {"plans": plans, "kinds": kinds, "cuts": n_cuts, "sheets": len(plans), "cost": cost,
+            "largest_stock": largest, "stock": sum(r[2] * r[3] for r in pieces), "stock_pieces": len(pieces),
             "over": sum(1 for c in n_cuts if c > max_cuts)}
 
 
-def best_plan(blanks, sheet, bed, kerf, max_cuts=5, seconds=1.0, settings=SETTINGS):
-    """Saw with each setting; keep: no sheet over `max_cuts`, fewest sheets,
-    the largest single piece of stock, fewest cuts."""
+def best_plan(blanks, stock, bed, kerf, max_cuts=5, seconds=1.0, settings=SETTINGS):
+    """Saw with each setting; keep: no sheet over `max_cuts`, the cheapest
+    stock (with one kind of sheet: the fewest sheets), the largest single
+    piece of stock left, the fewest cuts."""
     tried = []
     for s in settings:
-        r = judge(solve(blanks, sheet, kerf, seconds, **s), bed, max_cuts)
+        r = judge(solve(blanks, stock, kerf, seconds, **s), stock, bed, max_cuts)
         r["setting"] = s
         tried.append(r)
-    tried.sort(key=lambda r: (r["over"] > 0, r["sheets"], -r["largest_stock"], sum(r["cuts"])))
+    tried = [r for r in tried if r["plans"]] or tried
+    tried.sort(key=lambda r: (r["over"] > 0, r["cost"], -r["largest_stock"], sum(r["cuts"])))
     return tried[0], tried

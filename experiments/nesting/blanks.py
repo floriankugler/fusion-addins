@@ -55,6 +55,13 @@ def size(text: str) -> tuple[float, float]:
     return float(w), float(h)
 
 
+def sheet_spec(text: str) -> tuple[float, float, int]:
+    """`2470x1240` (as many as needed) or `1525x1525*2`."""
+    dims, _, count = text.lower().partition("*")
+    w, h = size(dims)
+    return w, h, int(count) if count else -1
+
+
 def fits_bed(w: float, h: float, bed: tuple[float, float]) -> bool:
     return (w <= bed[0] and h <= bed[1]) or (w <= bed[1] and h <= bed[0])
 
@@ -232,13 +239,44 @@ def gravity(job: dict, items: list[dict], step: float = 20.0) -> list[dict]:
     return items
 
 
-def candidate_blanks(sheet, bed, lengths, widths, per_blank: float) -> list[dict]:
+def candidate_blanks(sawn: list[dict], bed, lengths, widths, per_blank: float) -> list[dict]:
+    """Blank sizes from the grid that fit the bed and some stock to saw (in
+    the stock's own orientation: the grain)."""
+    # The stock's and the bed's own sizes too, so that a sheet the bed takes
+    # whole can be one blank.
+    lengths = sorted(set(lengths) | {t["width"] for t in sawn} | set(bed))
+    widths = sorted(set(widths) | {t["height"] for t in sawn} | set(bed))
     out = []
     for w in lengths:
         for h in widths:
-            if w <= sheet[0] and h <= sheet[1] and fits_bed(w, h, bed):
+            if fits_bed(w, h, bed) and any(w <= t["width"] and h <= t["height"] for t in sawn):
                 out.append({"width": w, "height": h, "copies": -1, "cost": w * h + per_blank})
     return out
+
+
+def split_to_bed(w: float, h: float, bed, kerf: float) -> list[tuple[float, float]]:
+    """A piece of stock in pieces the bed takes: the largest from its corner,
+    then the rest to the right and above, again (straight cuts)."""
+    if w <= 0 or h <= 0:
+        return []
+    if fits_bed(w, h, bed):
+        return [(w, h)]
+    cw, ch = clip_to_bed(w, h, bed)
+    return ([(cw, ch)] + split_to_bed(w - cw - kerf, h, bed, kerf)
+            + split_to_bed(cw, h - ch - kerf, bed, kerf))
+
+
+def stock_of(a) -> tuple[list[dict], list[tuple[float, float]]]:
+    """The stock to saw (the sheets, and offcuts the bed does not take) and
+    the offcuts that go on the bed as they are."""
+    sawn = [{"width": w, "height": h, "copies": n, "cost": w * h, "kind": "sheet"} for w, h, n in a.sheet]
+    direct = []
+    for w, h in a.offcut:
+        if fits_bed(w, h, a.bed):
+            direct.append((w, h))
+        else:
+            sawn.append({"width": w, "height": h, "copies": 1, "cost": 1.0, "kind": "offcut"})
+    return sawn, direct
 
 
 # --- refilling -------------------------------------------------------------
@@ -263,7 +301,11 @@ def refill(job: dict, sheets: list[dict], seconds: float, kerf: float, bed, max_
     while len(sheets) > 1:
         area = lambda s: sum(job["parts"][i["index"]]["area"] for p in s["pieces"] if p.get("bin")
                              for i in p["bin"]["items"])
-        k = min(range(len(sheets)), key=lambda k: area(sheets[k]))
+        # Only a sheet bought is worth emptying, not an offcut on hand.
+        bought = [k for k, sh in enumerate(sheets) if sh.get("kind", "sheet") == "sheet"]
+        if not bought:
+            break
+        k = min(bought, key=lambda k: area(sheets[k]))
         moving = [i["index"] for p in sheets[k]["pieces"] if p.get("bin") for i in p["bin"]["items"]]
         if not moving:
             sheets = sheets[:k] + sheets[k + 1:]
@@ -334,8 +376,8 @@ def draw(job: dict, sheets: list[dict], sheet, path: Path, title: str, offcut_bi
     """Each sheet with its pieces: blanks with their parts (blue), blanks
     left whole (green: stock), waste (grey)."""
     pad = 60
-    W, H = sheet
-    total_h = len(sheets) * (H + pad) + sum(b["size"][1] + pad for b in offcut_bins) + pad + 60
+    W = max([s.get("size", sheet)[0] for s in sheets] + [b["size"][0] for b in offcut_bins] + [sheet[0]])
+    total_h = sum(s.get("size", sheet)[1] + pad for s in sheets) + sum(b["size"][1] + pad for b in offcut_bins) + pad + 60
     out = [f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="{-pad} 0 {W + 2 * pad} {total_h}" '
            f'width="{(W + 2 * pad) / 4:.0f}" height="{total_h / 4:.0f}" font-family="sans-serif">',
            '<rect x="-1e5" y="-1e5" width="2e5" height="2e5" fill="#fff"/>',
@@ -350,8 +392,10 @@ def draw(job: dict, sheets: list[dict], sheet, path: Path, title: str, offcut_bi
 
     top = 60 + pad
     for s in sheets:
+        SW, H = s.get("size", sheet)
         dy = top + H
-        out.append(f'<rect x="0" y="{top}" width="{W}" height="{H}" fill="#ddd" stroke="#333" stroke-width="3"/>')
+        fill = "#f6e3c4" if s.get("kind") == "offcut" else "#ddd"
+        out.append(f'<rect x="0" y="{top}" width="{SW}" height="{H}" fill="{fill}" stroke="#333" stroke-width="3"/>')
         for piece in s["pieces"]:
             x, y, w, h = piece["rect"]
             kind = piece.get("kind") or ("used" if piece.get("bin") else "stock")
@@ -384,6 +428,9 @@ def checked_job(job: dict, types: list[dict]) -> dict:
 # --- strategies ------------------------------------------------------------
 
 def run_patterns(job, a, offcuts, out: Path) -> dict:
+    # Patterns are for one size of sheet: the first.
+    a = argparse.Namespace(**vars(a))
+    a.sheet = a.sheet[0][:2]
     pats = patterns(a.sheet, a.bed, a.kerf, a.lengths, a.widths)
     print(f"{len(pats)} patterns")
     t0 = time.perf_counter()
@@ -449,7 +496,15 @@ def run_patterns(job, a, offcuts, out: Path) -> dict:
 
 def run_twostep(job, a, offcuts, out: Path) -> dict:
     t0 = time.perf_counter()
-    types = candidate_blanks(a.sheet, a.bed, a.lengths, a.widths, a.blank_cost)
+    sawn, offcuts = stock_of(a)
+    types = candidate_blanks(sawn, a.bed, a.lengths, a.widths, a.blank_cost)
+    # An offcut larger than the bed offers its own pieces, next to free (the
+    # grid's blanks would not know it is there).
+    for t in sawn:
+        if t["kind"] == "offcut":
+            types += [{"width": w, "height": h, "copies": 1, "cost": 1.0}
+                      for w, h in split_to_bed(t["width"], t["height"], a.bed, a.kerf)
+                      if min(w, h) > 2 * job["margin"]]
     types += [{"width": w, "height": h, "copies": 1, "cost": 1.0, "offcut": True} for w, h in offcuts]
     bins, left, hist, _o = ps_nest.solve(job, list(range(len(job["parts"]))), types,
                                         ps.Objective.VariableSizedBinPacking, solver_args(), a.nest_seconds)
@@ -474,11 +529,11 @@ def run_twostep(job, a, offcuts, out: Path) -> dict:
         h = math.ceil(y1) if t["height"] - y1 >= a.min_strip else t["height"]
         blanks.append({"chosen": [t["width"], t["height"]], "size": [w, h], "items": items})
     t_shrink = time.perf_counter() - t0 - t_nest
-    plan, tried = sawing.best_plan([tuple(b["size"]) for b in blanks], a.sheet, a.bed, a.kerf,
+    plan, tried = sawing.best_plan([tuple(b["size"]) for b in blanks], sawn, a.bed, a.kerf,
                                    a.max_cuts, a.saw_seconds)
     t_saw = time.perf_counter() - t0 - t_nest - t_shrink
     sheets = []
-    for tree in plan["plans"]:
+    for tree, kind in zip(plan["plans"], plan["kinds"]):
         pieces = []
         for leaf in sawing.leaves(tree):
             x, y, w, h = leaf.rect
@@ -494,17 +549,18 @@ def run_twostep(job, a, offcuts, out: Path) -> dict:
             else:
                 pieces.append({"rect": [x, y, w, h], "bin": None,
                                "kind": "stock" if sawing.useful(w, h) else "waste"})
-        sheets.append({"pieces": pieces, "cuts": sawing.cuts(tree)})
+        sheets.append({"pieces": pieces, "cuts": sawing.cuts(tree), "size": tree.rect[2:],
+                       "kind": sawn[kind]["kind"]})
     print(f"  saw: {plan['setting']}, cuts per sheet {plan['cuts']} "
           f"({len(tried)} settings tried, {sum(1 for r in tried if r['over'] == 0)} within {a.max_cuts} cuts)")
-    sawn = len(sheets)
+    n_sawn = len(sheets)
     if a.refill > 0:
         sheets, log = refill(job, sheets, a.refill, a.kerf, a.bed, a.max_cuts)
         for line in log:
             print(f"  refill: {line}")
     stock = sum(p["rect"][2] * p["rect"][3] for s in sheets for p in s["pieces"] if p["kind"] == "stock")
     elapsed = time.perf_counter() - t0
-    draw(job, sheets, a.sheet, out / "twostep.svg",
+    draw(job, sheets, a.sheet[0][:2], out / "twostep.svg",
          f"twostep: {len(sheets)} sheets, cuts {[sh['cuts'] for sh in sheets]}", on_offcuts)
     used_pieces = [p for s in sheets for p in s["pieces"] if p.get("bin")]
     btypes = [{"width": p["rect"][2], "height": p["rect"][3], "copies": 1} for p in used_pieces]
@@ -513,15 +569,23 @@ def run_twostep(job, a, offcuts, out: Path) -> dict:
     rbins += [{"sheet": len(used_pieces) + k, "items": o["items"]} for k, o in enumerate(on_offcuts)]
     (out / "twostep_job.json").write_text(json.dumps(checked_job(job, btypes)))
     (out / "twostep_result.json").write_text(json.dumps({"bins": rbins, "unplaced": []}))
-    used = len(sheets) * a.sheet[0] * a.sheet[1] - stock  # blanks, kerf and waste
+    used = sum(sh["size"][0] * sh["size"][1] for sh in sheets) - stock  # blanks, kerf and waste
+    bought = {}
+    for sh in sheets:
+        if sh["kind"] == "sheet":
+            key = f"{sh['size'][0]:g}x{sh['size'][1]:g}"
+            bought[key] = bought.get(key, 0) + 1
     stock_pieces = sorted((p["rect"] for sh in sheets for p in sh["pieces"] if p["kind"] == "stock"),
                           key=lambda r: -r[2] * r[3])
     largest = stock_pieces[0] if stock_pieces else None
-    print(f"twostep: {len(sheets)} sheets (sawn {sawn}), {len(used_pieces)} blanks (+{len(on_offcuts)} offcuts), "
+    print(f"twostep: {len(sheets)} pieces of stock sawn ({n_sawn} before refill; sheets {bought}, "
+          f"{sum(1 for sh in sheets if sh['kind'] == 'offcut')} large offcuts), "
+          f"{len(used_pieces)} blanks (+{len(on_offcuts)} small offcuts), "
           f"cuts {[sh['cuts'] for sh in sheets]}, {stock / 1e6:.2f} m2 left as stock in {len(stock_pieces)} pieces"
           + (f" (largest {largest[2]:.0f} x {largest[3]:.0f})" if largest else "")
           + f", {used / 1e6:.2f} m2 used; nest {t_nest:.1f} s (best at {best_at:.1f} s), saw {t_saw:.1f} s")
-    return {"strategy": "twostep", "sheets": len(sheets), "used_area": used, "blanks": [b["size"] for b in blanks],
+    return {"strategy": "twostep", "sheets": len(sheets), "bought": bought, "used_area": used,
+            "blanks": [b["size"] for b in blanks],
             "cuts": [sh["cuts"] for sh in sheets], "saw_setting": plan["setting"],
             "stock_pieces": [r[2:] for r in stock_pieces],
             "pieces_per_sheet": [len(sh["pieces"]) for sh in sheets],
@@ -530,12 +594,12 @@ def run_twostep(job, a, offcuts, out: Path) -> dict:
 
 
 def run_baseline(job, a, offcuts, out: Path) -> dict:
-    types = [{"width": a.sheet[0], "height": a.sheet[1], "copies": -1}]
+    types = [{"width": w, "height": h, "copies": n} for w, h, n in a.sheet]
     types += [{"width": w, "height": h, "copies": 1, "cost": 1.0, "offcut": True} for w, h in offcuts]
     t0 = time.perf_counter()
     bins, left, _h, _o = ps_nest.solve(job, list(range(len(job["parts"]))), types,
                                       ps.Objective.VariableSizedBinPacking, solver_args(), a.nest_seconds)
-    sheets = sum(1 for b in bins if b["sheet"] == 0)
+    sheets = sum(1 for b in bins if b["sheet"] < len(a.sheet))
     print(f"baseline (no bed limit): {sheets} sheets, {len(left)} unplaced, {time.perf_counter() - t0:.1f} s")
     return {"strategy": "baseline", "sheets": sheets, "unplaced": len(left), "seconds": time.perf_counter() - t0}
 
@@ -545,10 +609,13 @@ def main() -> None:
     ap.add_argument("job", type=Path)
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--strategy", nargs="+", choices=["patterns", "twostep", "baseline"], default=["patterns", "twostep", "baseline"])
-    ap.add_argument("--sheet", type=size, default=(2470.0, 1240.0))
-    ap.add_argument("--bed", type=size, default=(2000.0, 1000.0))
+    ap.add_argument("--sheet", type=sheet_spec, action="append", default=None,
+                    help="a size of sheet on hand, WxH (as many as needed) or WxH*N; again for each size "
+                         "(default 2470x1240)")
+    ap.add_argument("--bed", type=size, default=(2000.0, 1000.0), help="the machine's bed, WxH")
     ap.add_argument("--kerf", type=float, default=4.0)
-    ap.add_argument("--offcut", type=size, action="append", default=[])
+    ap.add_argument("--offcut", type=size, action="append", default=[],
+                    help="an offcut on hand, WxH (one); sawn first when larger than the bed")
     ap.add_argument("--lengths", type=float, nargs="+", default=[2000, 1800, 1600, 1470, 1233])
     ap.add_argument("--widths", type=float, nargs="+", default=[1000, 800, 618])
     ap.add_argument("--seconds", type=float, default=3.0, help="per try of a pattern and a number of sheets")
@@ -566,12 +633,16 @@ def main() -> None:
     ap.add_argument("--refill", type=float, default=0.0, metavar="SECONDS",
                     help="then move the emptiest sheet's parts into the room on the others, this long a try")
     a = ap.parse_args()
+    a.sheet = a.sheet or [(2470.0, 1240.0, -1)]
     job = json.loads(a.job.read_text())
     a.out.mkdir(parents=True, exist_ok=True)
     summary = {"job": str(a.job), "sheet": a.sheet, "bed": a.bed, "kerf": a.kerf, "offcuts": a.offcut,
                "parts": len(job["parts"]), "area": sum(p["area"] for p in job["parts"])}
-    print(f"{summary['parts']} parts, {summary['area'] / 1e6:.2f} m2; sheet {a.sheet[0]:g} x {a.sheet[1]:g} "
-          f"({summary['area'] / (a.sheet[0] * a.sheet[1]):.2f} sheets of area)")
+    first = a.sheet[0]
+    print(f"{summary['parts']} parts, {summary['area'] / 1e6:.2f} m2 "
+          f"({summary['area'] / (first[0] * first[1]):.2f} of the first sheet's area); sheets "
+          + ", ".join(f"{w:g} x {h:g}" + (f" x{n}" if n > 0 else "") for w, h, n in a.sheet)
+          + f"; bed {a.bed[0]:g} x {a.bed[1]:g}" + (f"; offcuts {a.offcut}" if a.offcut else ""))
     for s in a.strategy:
         if s == "patterns":
             summary["patterns"] = run_patterns(job, a, a.offcut, a.out)
