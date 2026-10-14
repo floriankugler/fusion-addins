@@ -16,7 +16,7 @@ from boards import KNOWN
 from contours import ContourCase, ContourSpec, LimitSpec, Variant, contour_cases, expected, run_case
 from fuzzing import line_polygons, recipes, shifts, sizes
 from lang.core.contours import round_offset
-from lang.core.geometry import polygons_of
+from lang.core.geometry import clean, polygons_of
 
 
 @given(contour_cases())
@@ -97,7 +97,9 @@ def test_a_round_offset_is_the_same_however_its_rings_come(g: BaseGeometry, d: f
     edges = MultiLineString([(p, q) for poly in polygons_of(g) for r in (poly.exterior, *poly.interiors)
                              for p, q in zip(r.coords, r.coords[1:])])
     capsules = edges.buffer(d, quad_segs=32)
-    truth = g.union(capsules) if grow else g.difference(capsules)
+    # (cleaned, as the language cleans its offsets: a strip shrunk to 0.008 mm, with a bump
+    # 0.1 mm high in its middle, is narrower than 0.01 mm on average, and nothing)
+    truth = clean(g.union(capsules) if grow else g.difference(capsules))
     # (its arcs' chords, an eighth of a quarter turn, up to 1.5 times that as GEOS rounds their
     # number, about twice as deep where two arcs' chords cross; a strip shrunk to nothing)
     chords = 2 * d * (1 - math.cos(0.75 * math.pi / 16)) + 1e-6
