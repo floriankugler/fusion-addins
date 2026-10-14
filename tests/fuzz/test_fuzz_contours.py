@@ -70,6 +70,13 @@ def _thinner(g: BaseGeometry, width: float) -> bool:
     return all(p.area <= 1e-9 or p.buffer(-width / 2).is_empty for p in polygons_of(g))
 
 
+def _beyond(a: BaseGeometry, b: BaseGeometry, by: float) -> BaseGeometry:
+    """What of `a` lies further than `by` outside `b`. (Never `a` less `b`
+    itself: GEOS takes two polygons this close apart wrongly, without an
+    error, all of `a` left where they lay 0.005 mm apart.)"""
+    return a if b.is_empty else a.difference(b.buffer(by))
+
+
 @given(_shapes(), sizes(0.5, 30), st.booleans(), st.booleans(), st.integers(0, 40), st.sampled_from([0, 0, 1, 3]),
        st.booleans(), shifts())
 def test_a_round_offset_is_the_same_however_its_rings_come(g: BaseGeometry, d: float, grow: bool, reverse: bool,
@@ -95,13 +102,16 @@ def test_a_round_offset_is_the_same_however_its_rings_come(g: BaseGeometry, d: f
     # number, about twice as deep where two arcs' chords cross; a strip shrunk to nothing)
     chords = 2 * d * (1 - math.cos(0.75 * math.pi / 16)) + 1e-6
     simplified = 0.02 * d
-    less, more = (truth.difference(got), got.difference(truth)) if grow else (got.difference(truth), truth.difference(got))
-    assert _thinner(less, 2 * chords)
-    assert _thinner(more, 2 * (chords + simplified))
+    far = chords + simplified
+    # never less clearance than the chords take, more by no more than GEOS's simplification
+    inner, outer = (truth, got) if grow else (got, truth)
+    assert _thinner(_beyond(inner, outer, chords), 2 * chords)
+    assert _thinner(_beyond(outer, inner, far), 2 * far)
 
     def moved(x: BaseGeometry) -> BaseGeometry:
         if mirror:
             x = affinity.affine_transform(x, [0, 1, 1, 0, 0, 0])
         return affinity.translate(x, *shift)
     elsewhere = round_offset(moved(g), distance)
-    assert _thinner(elsewhere.symmetric_difference(moved(got)), 2 * (chords + simplified))
+    assert _thinner(_beyond(elsewhere, moved(got), far), 2 * far)
+    assert _thinner(_beyond(moved(got), elsewhere, far), 2 * far)

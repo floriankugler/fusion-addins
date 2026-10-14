@@ -36,7 +36,8 @@ in the world by a `Variant`: those axes on any of the world's, anywhere.
 
 Decided by Florian (2026-10-14): an open contour that runs back along
 itself (`overhangs`) is refused, and a clearance may come out up to about
-a hundredth more than asked, never less (`_tolerance`).
+a hundredth more than asked, never less (`_tolerance`). Known and open
+(`spiked`): whether a clearance is kept to a spike of an open contour.
 """
 from __future__ import annotations
 
@@ -920,12 +921,31 @@ def _limit_problems(case: ContourCase, got: Outcome, regions: dict[int, Region])
             elif g > 0:
                 near = shape.distance(region.contour)
                 if near < g - _slack(g):
-                    problems.append(f"the board comes {near:.4g} near {what}, its gap is {g:g}")
+                    problem = f"the board comes {near:.4g} near {what}, its gap is {g:g}"
+                    problems.append(f"{KNOWN} a spike; {problem}" if not spec.closed and spiked(polyline(spec))
+                                    else problem)
         else:
             past = clean(shape.difference(region.bounded).difference(region.contour.buffer(-g + _slack(g))))
             if past.area > 1e-6:
                 problems.append(f"the board reaches further than {-g:g} past {what} ({past.area:.3g} mm2)")
     return problems
+
+
+#: Known and open (2026-10-14): an open contour with a spike, a stretch
+#: that runs out and straight back along itself (here across the way it
+#: runs, which the overhang rule leaves alone). The region beyond it, an
+#: area, has nothing of the spike, so a board keeps its clearance from the
+#: rest of the contour and may cross the spike. Whether a clearance is kept
+#: to a spike, or such a contour refused, is Florian's to decide.
+def spiked(points: list[Point2]) -> bool:
+    """Whether the polyline runs straight back along itself somewhere."""
+    pts = [p for i, p in enumerate(points) if i == 0 or p != points[i - 1]]
+    for a, b, c in zip(pts, pts[1:], pts[2:]):
+        d1, d2 = (b[0] - a[0], b[1] - a[1]), (c[0] - b[0], c[1] - b[1])
+        n = math.hypot(*d1) * math.hypot(*d2)
+        if n and (d1[0] * d2[0] + d1[1] * d2[1]) / n < -math.cos(1e-3):
+            return True
+    return False
 
 
 def _inside_problems(case: ContourCase, built: Built) -> list[str]:
