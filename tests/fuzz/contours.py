@@ -730,7 +730,7 @@ def expected(case: ContourCase, variant: Variant | None = None) -> Expected:
     for axis in sorted((1, 2), key=lambda k: bool(edges[k])):
         room = case.room[axis]
         centre = (room[0] + room[1]) / 2
-        values = _values(case, axis)
+        values, away = _values(case, axis)
         explicit = bool(values)
         if values:
             reference = sum(values) / len(values)
@@ -791,7 +791,9 @@ def expected(case: ContourCase, variant: Variant | None = None) -> Expected:
             if ends:
                 a, b = (v, span[1]) if ends[0][1] > 0 else (span[0], v)
             else:
-                a, b = (v, span[1]) if v < (span[0] + span[1]) / 2 else (span[0], v)
+                # away from an end board, a position to the far side of the room
+                side = away[0] or (1 if v < (span[0] + span[1]) / 2 else -1)
+                a, b = (v, span[1]) if side > 0 else (span[0], v)
         else:
             a, b = span
         # an open contour across the board gives its end on the contour's side
@@ -820,10 +822,12 @@ def expected(case: ContourCase, variant: Variant | None = None) -> Expected:
     return Expected(((t0, t1), extents[1], extents[2]), outline, regions)
 
 
-def _values(case: ContourCase, axis: int) -> list[float]:
-    """The positions the case's other limits give on `axis`: a position,
+def _values(case: ContourCase, axis: int) -> tuple[list[float], list[int]]:
+    """The positions the case's other limits give on `axis` (a position,
     the room's side, an end board's face toward the other limit there, or
-    toward the room's middle."""
+    toward the room's middle), and for each the way from it the board lies:
+    away from an end board (+1 toward the axis' high end), 0 for a
+    position, as `between()` reads a part's face."""
     room = case.room[axis]
     values: list[float] = []
     ends: list[tuple[float, float]] = []
@@ -837,14 +841,17 @@ def _values(case: ContourCase, axis: int) -> list[float]:
         else:
             ends.append((room[1] - case.end_t, room[1]) if limit.value > 0 else (room[0], room[0] + case.end_t))
     positions = list(values)
+    away = [0] * len(values)
     centre = (room[0] + room[1]) / 2
     for j, (lo, hi) in enumerate(ends):
         others = positions + [(e[0] + e[1]) / 2 for k, e in enumerate(ends) if k != j]
         toward = others[0] if len(others) == 1 else centre
-        values.append(hi if toward >= (lo + hi) / 2 else lo)
+        high = toward >= (lo + hi) / 2
+        values.append(hi if high else lo)
+        away.append(1 if high else -1)
     if len(values) > 2:
         raise Refusal("more than two limits")
-    return values
+    return values, away
 
 
 def _open_position(points: list[Point2], gap: float, reference: float, explicit: bool, t0: float,

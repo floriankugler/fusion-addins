@@ -13,7 +13,7 @@ from shapely.geometry import MultiLineString, MultiPolygon, Polygon
 from shapely.geometry.base import BaseGeometry
 
 from boards import KNOWN
-from contours import ContourCase, contour_cases, run_case
+from contours import ContourCase, ContourSpec, LimitSpec, Variant, contour_cases, expected, run_case
 from fuzzing import line_polygons, recipes, shifts, sizes
 from lang.core.contours import round_offset
 from lang.core.geometry import polygons_of
@@ -22,6 +22,21 @@ from lang.core.geometry import polygons_of
 @given(contour_cases())
 def test_contour_limits_keep_their_promises_on_any_board(case: ContourCase):
     assert [p for p in run_case(case) if not p.startswith(KNOWN)] == []
+
+
+def test_the_reckoning_puts_a_board_away_from_its_end_board():
+    """A board limited on one axis by an end board alone lies away from
+    it, as `between()` reads a part's face, even where the stretch a
+    contour leaves (here beside a notch, 0 to 18.75) has its middle behind
+    the end board's face (12): the reckoning took the side by the middle
+    and put the board on the end board. A long run found it."""
+    notched = ContourSpec(True, 1, 0.0, ((0.0, 0.0), (6.0, 0.0), (6.0, 50.0), (0.0, 50.0), (0.0, 31.25),
+                                         (1.5, 31.25), (1.5, 18.75), (0.0, 18.75)), (0.0,) * 8)
+    case = ContourCase(((0.0, 30.0), (0.0, 50.0), (0.0, 50.0)), 6.0, 3.0, (notched,),
+                       (LimitSpec("contour", gap=None), LimitSpec("end", 2, 0.0)), 12.0, Variant((0, 1, 2)),
+                       Variant((0, 1, 2)))
+    assert expected(case).box[2] == (12.0, 18.75)
+    assert run_case(case) == []
 
 
 def _shapes() -> st.SearchStrategy[BaseGeometry]:
