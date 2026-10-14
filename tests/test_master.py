@@ -311,6 +311,19 @@ def test_inside_box_and_inside_contour(van: Master):
     assert not any(p.startswith("cab.left") for p in problems)
 
 
+def test_inside_does_not_count_a_rounding_past_the_contour():
+    """A board across a contour whose face lies a rounding past the
+    contour's edge (the snapshot rounds to 0.1 micrometre) is inside it:
+    `between()` takes it, and `inside()` reported the sliver as "0 mm²
+    outside". Fuzzing found it."""
+    band = _contour("band", [(-3.0, 0.0), (3.0, 0.0), (3.0, 50.0), (-3.0, 50.0)], True)
+    with module("m", Box({"x": -10, "y": 0, "z": 0}, {"x": 10, "y": 50, "z": 50})):
+        b = board("b", material("thin", t=6)).center(Pos("x", 1.192092896e-07)).between(band)
+        check(inside(band))
+    assert (b.box().lo["y"], b.box().hi["y"]) == (0, 50)
+    assert build_layout()["problems"] == []
+
+
 # -- the example ------------------------------------------------------------------
 
 def test_the_van_example_builds_without_problems(tmp_path: Path):
