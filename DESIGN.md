@@ -548,9 +548,11 @@ proposed]
   misspelling is a `LangError` naming the call and the choices; tests
   keep the connector literals equal to `lib/connector_data.py`.
 - Contour limits: a contour in the part's own plane bounds the outline directly;
-  a contour in a perpendicular plane is sectioned at both big faces of the part
-  and the tighter result wins, so the part fits over its whole thickness. Both
-  are polyline math on the snapshot (`lang/core/contours.py`). [implemented
+  a contour in a perpendicular plane must hold the part over its whole
+  thickness: its section across that plane, from one big face to the other,
+  keeps clear of the contour [changed 2026-10-14, after fuzzing: it was
+  sectioned at both big faces only, the tighter result winning, so a notch
+  between them let the part run into it]. Both are polyline math on the snapshot (`lang/core/contours.py`). [implemented
   2026-10-11; the rules below were chosen while implementing and confirmed
   by Florian the same day]
   - In the part's plane, a closed contour is intersected with the outline
@@ -561,7 +563,13 @@ proposed]
     other limit within the contour's reach, is an error.
   - In a perpendicular plane, a closed contour gives a stretch on the axis
     the two planes share; an open contour gives a position there, and must
-    cross each face once. Where the contour leaves several stretches (a
+    cross each face once. The position is the part's end on the contour's
+    side: the part lies on the side its other limit on that axis is on,
+    without one on the side of an open contour in its own plane on that
+    axis, else in the middle of its room; a clearance reaching past the
+    other limit is an error, and so are two open contours across a part on
+    one side of it. [chosen 2026-10-14 while fixing what fuzzing found,
+    confirmed by Florian the same day] Where the contour leaves several stretches (a
     batten along the wall, cut in two by a wheel arch), the part's limits
     on that axis pick one: a single limit the stretch it lies in, two
     limits the one between them, and two limits spanning several stretches
@@ -570,7 +578,10 @@ proposed]
     `between(..., floor_outline, floor_front)` and `... floor_back)`.
     [decided 2026-10-11]
   - `contour.gap(n)` keeps n of clearance, measured in the contour's plane
-    with round joins, so it is exact at corners; `contour.into(n)` reaches
+    with round joins, so it is exact at corners (GEOS offsets the area given
+    in one form, without points along its edges, so the same contour gives
+    the same part however its points run; the clearance is at least n and
+    up to about a hundredth more, which is open); `contour.into(n)` reaches
     past it. Stretches from closed contours cut every other range down
     (tighter wins). A contour that splits the part in two, leaves nothing,
     lies in a tilted plane or is not planar is an error.
@@ -673,7 +684,11 @@ proposed]
     so they are named `__...` to leave them out (no guessing from hidden
     or consumed sketches);
   - a sketch's construction curves do not count; the rest must form one
-    chain without branches;
+    chain without branches; a curve no longer than the join tolerance
+    (0.01 mm) is a point its neighbours meet at, and a closed chain of
+    fewer than three points (a line drawn twice) is a problem, "the curves
+    close around nothing" [found by fuzzing, 2026-10-14]; the places of a
+    name made twice are listed in order;
   - surface bodies, duplicate names (per kind: a plane and a sketch may
     share a name) and sketches that are not one chain are listed as
     problems in the file instead of failing the snapshot, and using such a
@@ -2483,6 +2498,174 @@ corner of a shallower pocket beside it down with it: that corner,
 relieved as deep as it was, is there again, deeper, a corner the call
 made, which a second `dogbones()` relieves (left so: the reliefs are the
 corners' at the call).
+
+2026-10-14, five more fuzz harnesses, three of them written by agents in
+worktrees of their own and merged (where two fixed one thing, the merge
+keeps both findings: `clean` takes a ring's spikes off before judging it
+narrow, and opens a narrow piece by 1e-6 instead of dropping it, so
+wider parts a hairline joins stay; a piece held on by less than 0.01 mm,
+by a hairline or at a point, is apart, `_pieces`, for cuts and for holes
+and pockets through the board; `inside()` allows 1e-6 mm, as a distance,
+past a contour offset as `between()` offsets it).
+
+The placement (`tests/fuzz/placement.py`): designs written in a module's
+own terms, a carcass in the examples' shapes (sides with a toe kick a
+bottom stands on and a dado a shelf sits in, its place taken from the
+dado's edges and floor; a top, a back grooved into the sides or not, a
+shelf and a divider centred between boards, a door over the front or set
+in), a bay of the interior in a scope, a module or a cabinet of its own,
+with a face and a drawer box in it, and boards placed at random (on a
+side, a face or a position, centred on a mix of positions, between sides,
+boards, faces, mixes and boxes, inset, some of them rects), then holes,
+rows, pockets and notches placed through anchors, `to()` depths, holes
+into narrow faces, a board cut by another, edge and corner chamfers,
+fillets. Each is built as written, moved (a cabinet facing another side)
+and in another world frame (any of the 48 bindings of the names to axes
+and signs), written otherwise (other orders; `side + n` for
+`side.into(n)`, an anchor from the opposite edge, a depth `to()` the
+other face, a row spread from its other end, an edge named from its
+other face). Measured from the module's front, left and bottom, every
+board, outline, face name, operation, refusal and layout problem must come
+out the same, and `on()`, `center()`, `between()`, anchors and depths put
+things where they say. Found and fixed: `side.show(side.inner)`, the form
+`show()`'s docstring gives, was always refused; a board between a single
+board lying across the box's middle ran through it; a board with a face
+on its scope's middle had its other face for the inner one, and rounding
+put the face across the middle at some places; `spread()` ran from the
+lower coordinate whatever end came first, and fitted one position fewer
+where rounding left a span of whole pitches a hair short; `0.5 *
+cab.bottom + 0.5 * cab.top` was a TypeError; `to(side.outer, -20)` on a
+15 mm board made a hole -5 deep (a depth under 0.01 mm is refused now);
+an edge's chamfer was on the face named first (`side.front.inner` the
+front, `side.inner.front` the inner face), now always on its big face (the
+examples' layouts record two chamfers on their big face, no plan
+changes); a shaped board's far edge lay 1e-13 off its box at some places,
+and a hole into that narrow face was refused there; a clipped notch at a
+board's corner cut the corner free but, 4 m out, its edge came 5e-13 off
+the board's and held the corner on; a floor reaching 0.0036 mm into a
+side was refused as `side.cut(floor)` and made a pocket that deep as
+`side.cut(floor.box())` (a region must reach 0.01 mm in); a hole centred
+the face tolerance off a board's edge was refused at the origin only; a
+notch left a narrow face 6e-14 askew, and a hole into its other end was
+then off the board; `clean` dropped a strip 0.2 by 7 mm with a hairline
+tail 175 mm long. Left open by the fuzzing (marked `known:` in the
+check), decided by Florian the same day, to be implemented next: a board
+across its scope's middle without `show()` showed the world's positive
+face (it shows its top, else back, else right face in the scope's own
+frame); a shaped board that does not fill its limits less its inset, or
+has fewer than two on an axis, sat at their lowest corner in world terms
+(refused when it does not match two limits; with one it sits against it,
+with none at the scope's front, left, bottom corner; its box is its
+outline's); limits that overlap (two boards overlapping each other, the
+same board twice, a position inside a board), a single limit at the
+box's middle, and a board as the only limit centred in the box put the
+board inside them or on the world's positive or negative side (all three
+refused). And `+` and `-` on sides move along the world axis
+(`cab.bottom + 60` is 60 in only where the world's top is its axis's
+positive end): kept, with `side.into(n)` and `gap(n)` sides that `on()`
+takes; `a + b - c` of positions, whose weights add to one, was a
+TypeError (allowed).
+
+The master's contours and the snapshot (`tests/fuzz/contours.py`,
+`tests/fuzz/snapshots.py`): random masters, contours as the snapshot holds
+them (closed rectangles with notches, stars and circles, open edges,
+walks, steps and the van floor's ribs, corners rounded by arcs sampled and
+rounded as the writer does), in a board's own plane or across it, given
+to `between()` with `gap()`, `into()` or bare, with positions, room sides
+and an end board. The board must lie in what each contour allows and keep
+its gap, as `inside()` agrees, be the board worked out independently, and
+come out the same with its axes on other world axes, elsewhere, and each
+contour reversed, restarted, resampled, its plane moved and its normal
+turned; a refusal changes nothing. `chain()` must give back the chain
+however its curves come (shuffled, reversed, split, ends moved under the
+tolerance), the writer's snapshot be the same in any order, `dumps` and
+`content_hash` deterministic, and `master()` read back what was written.
+Found and fixed: a contour across a board was sectioned only at the
+board's two faces, so a notch between them let the board run 75 mm into
+it (now its section over the whole thickness keeps clear, see "Contour
+limits"); an open contour across a board missed a dip between the faces,
+its clearance could pass the board's other limit or the room's middle,
+fell short of a face the contour only just crossed, and came out refused
+or not as the contour ran; GEOS simplifies what it buffers as the points
+come, so the same outline reversed with points added moved a panel 0.03
+mm for a 26 mm gap (now the area is given to it in one form);
+`inside()` reported a face a rounding (1.2e-7 mm) past a contour, which
+`between()` takes; a name made twice listed its places in Fusion's order,
+so the hash changed with the order of components; a curve under 0.01 mm
+at a join was refused as "4 curves meet"; one line drawn twice became a
+closed contour of two points, which then failed in shapely. Tried and
+dropped: an exact offset of its own, which GEOS unites wrongly, without an
+error, where its pieces' edges nearly coincide. Decided by Florian the
+same day: an open contour that runs back along itself (an overhang) is
+refused (to be implemented next); clearances up to about a hundredth more
+than asked (never less), so that a mirrored contour can differ by that
+much, are accepted; the rules chosen while fixing are confirmed (see
+"Contour limits"). Every example's plan is unchanged.
+
+The design checks (`tests/fuzz/checks.py`): scenes of the board fuzz's
+boards, each placed against one before it, parallel or across, touching,
+apart or overlapping by around 1e-9, 1e-6 and 0.01 mm, or set into one of
+its pockets or holes, with hardware boxes standing in holes or against
+boards and boxes, in a module whose box is the scene's grown or shrunk a
+little and a closed contour around it; each built twice (turned,
+mirrored, moved, in another world frame, as a module or a cabinet, in
+another order), and `no_interference`, `inside_box`, `fits_sheet` and
+`inside(contour)` must name what the truth has (boards in one plane slab
+by slab with exact 2D booleans, boards across each other from the
+preview's meshes, hardware boxes exactly): an overlap 1e-5 deep and 0.025
+wide must be reported, one no deeper than 1e-7 never. Found and fixed:
+`no_interference` counted a pocket or hole as missing material only where
+it spanned all of the range in question, so a pin through a pocket from
+the top and a hole from the bottom, or two parallel boards lapped with a
+pocket in each, seemed to overlap, and boards across each other counted
+where each had material somewhere in the boxes they share (a divider in a
+groove, its end notched clear); it looks slab by slab between the pockets'
+and holes' ends now, and across cell by cell. It drew a hole as 64 sides,
+1.2e-3 r too much, now a side a degree. `fits_sheet` had no tolerance (a
+part from -1219.9 to -976.9 is 243.0000000000001 high), and `inside()`
+measured by area; both allow 1e-6 mm as a distance. `clean` dropped a
+hardware box's two ends joined by a hairline 6e-14 wide. And a through
+hole tangent to the board's edge that cuts a corner off but for the point
+where it touches was refused at one place and kept at another, as was the
+same circle cut: refused everywhere now, a corner held on at a point being
+apart (a circle that only touches the edge is kept, as Fusion builds it).
+No example's plan or check results change. Decided by Florian the same
+day, to be implemented next: an overlap narrower than 0.01 mm in a
+board's plane was not reported (`clean` takes such pieces out of the
+material), while one as thin across the thickness was, down to 1e-6;
+anything deeper than 1e-6 in every direction counts. And material outside
+a placement box (a tenon, a tab) was not looked at by `no_interference`,
+`inside_box` or `inside()`: `inside_box` and `inside()` take the
+outline's extent, `no_interference` too once pockets and holes in narrow
+faces count.
+
+The lib modules that compute (`tests/fuzz/test_fuzz_lib.py`):
+`lib.stations` on its own and its three callers' refusals, the drawer
+slides' choice of holes against every choice, the hatch hinges' overlap
+limit in mm and in cm, the cutouts' triangle and rhombus solvers against
+their own equations, and (a plain test) every spec's `in_cm()`. Nothing
+was found.
+
+Merging the three and running every long fuzz profile again found five
+more, each with a regression test: `no_interference` failed ("Shape is
+not an area") on a cell lying in a notch of a board's outline, touching
+it along the notch's edge only (a material's areas only now); `clean` kept
+a spike whose removal left the ring running along itself, invalid (made
+valid now, as an invalid input is); `round_offset` left GEOS's invalid
+sliver where an area shrinks by half its width (cleaned); a relief took a
+piece of material held on to its corner at a point only at some places
+of the board (a piece held on at a point is apart); and a level the dog
+bones find corners in ran along itself where pockets from either face
+meet along an edge, a wall of no width `clean` does not see, which gave
+two corners at one place only (the material and levels are opened by
+1e-6, `geometry.opened`). And the arcs check, older than this round,
+found `fit` taking a dent 0.0014 mm deep into its arc one way round a ring
+and keeping it as two short lines the other; where the lists of curves
+differ, the drawings must agree within 0.01 mm now. Every pytest run
+takes about 30 s (16 without the fuzz tests, whose fast budget is about
+14 s); the long profile 16 minutes, its slowest checks (box joints,
+placement, cutouts, offsets, dog bones, the design checks) 80 to 100 s
+each.
 
 1. `core`: the position algebra, box, board with `on`, `between` and `center`,
    scopes and paths, and layout JSON output with world transforms. With unit
