@@ -183,7 +183,7 @@ def _blank_types(stock: _Stock, workshop: Workshop) -> tuple[list[Bin], list[str
                 kinds.append("grid")
     for s in available:
         if s.kind == "offcut":
-            for w, h in _split_to_bed(s.length, s.width, bed, workshop.kerf):
+            for w, h in _split_to_bed(s.length, s.width, bed, workshop.saw_kerf):
                 if min(w, h) > 2 * workshop.margin:
                     bins.append(Bin(w, h, 1, ON_HAND))
                     kinds.append("piece")
@@ -237,7 +237,7 @@ def _nest_round(items: list[Item], indices: list[int], stock: _Stock, workshop: 
         blank_parts.append(parts)
     if blank_sizes:
         t1 = time.perf_counter()
-        plan = sawing.best_plan(blank_sizes, stock.sawn, workshop.kerf, workshop.max_cuts, workshop.fits_bed,
+        plan = sawing.best_plan(blank_sizes, stock.sawn, workshop.saw_kerf, workshop.max_cuts, workshop.fits_bed,
                                 workshop.keeps, options.saw_seconds)
         notes.append(f"saw: {plan.setting}, cuts {plan.cuts}, {time.perf_counter() - t1:.1f} s")
         used: dict[int, int] = {}
@@ -316,7 +316,7 @@ def _material_out(items: list[Item], material: str, states: list[SheetState], re
                 if keep:
                     kept_area += w * h
         cuts: list[CutOut] = [{"line": list(c.line), "piece": list(c.piece)}
-                              for c in sawing.cut_list(state.tree, workshop.kerf)]
+                              for c in sawing.cut_list(state.tree, workshop.saw_kerf)]
         sheets.append({"name": str(n), "stock": "offcut" if state.kind == "offcut" else "sheet",
                        "size": [state.size[0], state.size[1]], "cuts": cuts, "blanks": blanks, "rests": rests})
         stock_area += state.size[0] * state.size[1]

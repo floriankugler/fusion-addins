@@ -48,6 +48,11 @@ ps: Any = importlib.import_module("packingsolver")
 rg: Any = importlib.import_module("packingsolver.rectangleguillotine")
 
 Rect = list[float]      # x, y, w, h
+#: The guillotine solver takes whole numbers: it saws in tenths of a
+#: millimetre, the kerf rounded up to one (`Workshop.saw_kerf`) [found by
+#: fuzzing, 2026-10-14: in whole millimetres a 3.2 kerf became 4, and the
+#: pieces between the cuts grew by the difference, past the bed].
+UNIT = 10
 
 
 @dataclass(frozen=True)
@@ -261,7 +266,7 @@ def _solve(blanks: Sequence[tuple[float, float]], stock: list[Stock], kerf: floa
         b.set_objective(ps.Objective.Knapsack)
     else:
         b.set_objective(ps.Objective.BinPackingWithLeftovers if one else ps.Objective.VariableSizedBinPacking)
-    b.set_cut_thickness(int(math.ceil(kerf - 1e-9)))
+    b.set_cut_thickness(round(kerf * UNIT))
     b.set_number_of_stages(stages)
     b.set_first_stage_orientation({"vertical": rg.CutOrientation.Vertical,
                                    "horizontal": rg.CutOrientation.Horizontal}[first])
@@ -279,11 +284,11 @@ def _solve(blanks: Sequence[tuple[float, float]], stock: list[Stock], kerf: floa
             kwargs["copies"] = 1000
         if not one or knapsack:
             kwargs["cost"] = max(s.cost, 1.0)
-        b.add_bin_type(int(math.floor(s.length + 1e-9)), int(math.floor(s.width + 1e-9)), **kwargs)
+        b.add_bin_type(math.floor(s.length * UNIT + 1e-9), math.floor(s.width * UNIT + 1e-9), **kwargs)
     if not type_of or not blanks:
         return [], {}
     for w, h in blanks:
-        b.add_item_type(int(math.ceil(w - 1e-9)), int(math.ceil(h - 1e-9)), oriented=True, copies=1)
+        b.add_item_type(math.ceil(w * UNIT - 1e-9), math.ceil(h * UNIT - 1e-9), oriented=True, copies=1)
     params = rg.OptimizeParameters()
     params.time_limit = seconds
     params.verbosity_level = 0
@@ -298,8 +303,8 @@ def _solve(blanks: Sequence[tuple[float, float]], stock: list[Stock], kerf: floa
         items = [n.item_type_id >= 0 and not n.children and n.f >= 0 for n in sb.nodes]
         for n, item in zip(sb.nodes, items):
             if item:
-                origins[int(n.item_type_id)] = (float(n.l), float(n.b))
-        nodes = [Node([float(n.l), float(n.b), float(n.r - n.l), float(n.t - n.b)],
+                origins[int(n.item_type_id)] = (n.l / UNIT, n.b / UNIT)
+        nodes = [Node([n.l / UNIT, n.b / UNIT, (n.r - n.l) / UNIT, (n.t - n.b) / UNIT],
                       [int(n.item_type_id)] if item else []) for n, item in zip(sb.nodes, items)]
         root: Node | None = None
         for raw, node in zip(sb.nodes, nodes):
@@ -308,6 +313,11 @@ def _solve(blanks: Sequence[tuple[float, float]], stock: list[Stock], kerf: floa
             else:
                 nodes[raw.f].children.append(node)
         assert root is not None
+        # The solver sawed whole millimetres of the stock: the last pieces
+        # take the rest [found by fuzzing, 2026-10-14: a sheet 400.5 wide
+        # lost its half millimetre].
+        stock_ = stock[type_of[sb.bin_type_id]]
+        root.rect = [0.0, 0.0, stock_.length, stock_.width]
         _widen(root, kerf)
         for _ in range(sb.copies):
             trees.append((_copy(root), type_of[sb.bin_type_id]))
@@ -400,7 +410,9 @@ def best_plan(blanks: Sequence[tuple[float, float]], stock: list[Stock], kerf: f
               fits_bed: FitsBed, keeps: Keeps, seconds: float = 1.0,
               settings: Sequence[dict[str, Any]] = SETTINGS) -> Plan:
     """Saws `blanks` (w along the grain, h) out of `stock` with each setting
-    and keeps the best (see the module's doc)."""
+    and keeps the best (see the module's doc); `kerf` in tenths of a
+    millimetre (`Workshop.saw_kerf`)."""
+    assert abs(kerf * UNIT - round(kerf * UNIT)) < 1e-9, "the kerf is rounded to the plan's unit"
     def solve(knapsack: bool, s: dict[str, Any]) -> tuple[list[tuple[Node, int]], dict[int, tuple[float, float]]]:
         return _solve(blanks, stock, kerf, seconds, knapsack, **s)
 

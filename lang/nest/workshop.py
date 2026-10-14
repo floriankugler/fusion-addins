@@ -104,10 +104,21 @@ class Workshop:
         """Whether a rest of w x h is worth keeping as stock."""
         return min(w, h) >= self.keep_across - 1e-9 and w * h >= self.keep_area * 1e6 - 1e-6
 
+    @property
+    def saw_kerf(self) -> float:
+        """The kerf as the saw plan takes it: rounded up to a tenth of a
+        millimetre, the plan's unit (`sawing`)."""
+        return saw_kerf(self.kerf)
+
     def fits_bed(self, w: float, h: float) -> bool:
         """Whether a blank of w x h goes on the bed, either way round."""
         assert self.bed is not None
         return fits(w, h, self.bed)
+
+
+def saw_kerf(kerf: float) -> float:
+    """`kerf` rounded up to a tenth of a millimetre."""
+    return math.ceil(kerf * 10 - 1e-9) / 10
 
 
 def fits(w: float, h: float, bed: tuple[float, float], tolerance: float = 1e-6) -> bool:

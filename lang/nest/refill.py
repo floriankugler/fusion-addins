@@ -106,8 +106,8 @@ def _room(leaf: Node, workshop: Workshop) -> tuple[float, float]:
         return w, h
     options: list[tuple[float, float]] = []
     for bw, bh in (workshop.bed, (workshop.bed[1], workshop.bed[0])):
-        cw = w if w <= bw else min(bw, w - workshop.kerf - 1)
-        ch = h if h <= bh else min(bh, h - workshop.kerf - 1)
+        cw = w if w <= bw else min(bw, w - workshop.saw_kerf - 1)
+        ch = h if h <= bh else min(bh, h - workshop.saw_kerf - 1)
         options.append((cw, ch))
     return max(options, key=lambda o: o[0] * o[1])
 
@@ -118,7 +118,7 @@ def _cut_down(leaf: Node, w2: float, h2: float, parts: list[PartOn], workshop: W
     worth keeping or the piece would not fit the bed; anything else stays
     with the piece."""
     assert workshop.bed is not None
-    kerf = workshop.kerf
+    kerf = workshop.saw_kerf
     x, y, w, h = leaf.rect
     right = w - w2 - kerf
     if right > 0 and (workshop.keeps(right, h) or not fits(w, h, workshop.bed)):

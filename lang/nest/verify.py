@@ -89,7 +89,7 @@ def _check_sheet(s: SheetOut, workshop: Workshop) -> list[str]:
         for j in tree.query(p):
             if j > i and p.intersection(pieces[int(j)]).area > 1e-6:
                 problems.append(f"{name}: two pieces overlap")
-    kerf = workshop.kerf
+    kerf = workshop.saw_kerf
     strips: list[Polygon] = []
     for k, cut in enumerate(s["cuts"]):
         x0, y0, x1, y1 = cut["line"]

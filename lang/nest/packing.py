@@ -118,6 +118,8 @@ def pack(items: list[Item], indices: list[int], bins: list[Bin], spacing: float,
             placed.add(index)
             placements.append(Placement(index, _turn(float(it.angle), items[index].turns),
                                         (float(it.bl_corner.x), float(it.bl_corner.y))))
+        if not placements:
+            continue
         for _ in range(sb.copies):
             packed.append(Packed(type_of[sb.bin_type_id], list(placements)))
     return Result(packed, [i for i in indices if i not in placed])

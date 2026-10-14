@@ -11,9 +11,11 @@ them (its inside, the spacing in from its edge, at least that part's area)
 and is filled where it could not, which spares the solver its vertices.
 
 The solver gets a polygon that contains the true outline: grown by 1.5
-times `TOLERANCE` (mitred, so rectangles stay rectangles) and simplified by
-`TOLERANCE`, at most about 0.6 mm outside it (the experiments: true arcs
-nested no better than polygons simplified to 0.25 mm). Openings go in as
+times `TOLERANCE` (mitred up to `MITRE` times that, so square corners stay
+square and a sharp one is cut off) and simplified by `TOLERANCE`: at most
+`OUTSIDE` (0.81 mm) outside it, 0.53 mm off a square corner (the
+experiments: true arcs nested no better than polygons simplified to
+0.25 mm). Openings go in as
 polygons, never as circles (PackingSolver puts nothing into a circular
 hole). Everything is moved so that the solver's polygon starts at (0, 0).
 
@@ -39,6 +41,13 @@ from .workshop import Workshop, fits
 
 #: How far (mm) the solver's polygon may be simplified (see the module's doc).
 TOLERANCE = 0.25
+#: The longest mitre when the outline is grown, in times the growth: a
+#: square corner (1.41) stays square [found by fuzzing, 2026-10-14: with
+#: 10, a hole tangent to an edge left a needle of material whose mitre
+#: reached 3.75 mm out].
+MITRE = 1.5
+#: How far (mm) the solver's polygon may lie outside the part.
+OUTSIDE = 1.5 * TOLERANCE * MITRE + TOLERANCE
 AXES = ("x", "y", "z")
 #: Cyclic orders of the world axes: (u, v, t) in one of these is right-handed.
 _RIGHT_HANDED = {("x", "y", "z"), ("y", "z", "x"), ("z", "x", "y")}
@@ -231,7 +240,7 @@ def _item(part: PartLayout, shape: Polygon, pf: PartFrame, spacing: float, small
     kept = [ring for ring in shape.interiors
             if Polygon(ring).buffer(-spacing, join_style="mitre").area >= smallest - 1e-6]
     solid = Polygon(shape.exterior, kept)
-    grown = solid.buffer(1.5 * TOLERANCE, join_style="mitre", mitre_limit=10)
+    grown = solid.buffer(1.5 * TOLERANCE, join_style="mitre", mitre_limit=MITRE)
     simple = grown.simplify(TOLERANCE, preserve_topology=True)
     if not isinstance(simple, Polygon) or simple.is_empty:
         raise LangError(f"{part['path']}: its outline could not be simplified for the nest.")

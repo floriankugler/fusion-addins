@@ -34,6 +34,7 @@ import fuzzing  # noqa: E402
 import hardware  # noqa: E402
 import joints  # noqa: E402
 import lips  # noqa: E402
+import nesting  # noqa: E402
 import placement  # noqa: E402
 import slats  # noqa: E402
 import snapshots  # noqa: E402
@@ -104,6 +105,10 @@ CHECKS: dict[str, Check] = {
     "placement": (placement.placement_cases(), placement.run_case),
     "slats": (slats.slat_cases(), slats.run_case),
     "lips": (lips.lip_cases(), lips.run_case),
+    "nest_parts": (st.lists(nesting.part_cases(), min_size=1, max_size=4).map(tuple), nesting.run_parts),
+    "saw_trees": (nesting.tree_cases(), nesting.run_tree),
+    "saws": (nesting.saw_cases(), nesting.run_saw),
+    "nests": (nesting.nest_cases(), nesting.run_nest),
 }
 
 

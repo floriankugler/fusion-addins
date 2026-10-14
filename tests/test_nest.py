@@ -13,7 +13,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from shapely import Polygon
+from shapely import Point, Polygon
 
 from lang import (Board, Box, LangError, SheetMaterial, board, circle, module, rect, sheet_material, slat,
                   slat_material, through)
@@ -24,7 +24,7 @@ from lang.nest import Options, Sheet, Workshop, nest_layout, read_workshop
 from lang.nest import sawing
 from lang.nest.__main__ import main as nest_main
 from lang.nest.draw import draw_nest
-from lang.nest.items import Item, Parts, check_sizes, parts_of_layout, turned
+from lang.nest.items import OUTSIDE, Item, Parts, check_sizes, parts_of_layout, turned
 from lang.nest.nest_types import NEST_VERSION, Nest
 from lang.nest.packing import KNAPSACK, VARIABLE, Bin, pack
 from lang.nest.refill import SheetState, refill
@@ -224,6 +224,18 @@ def test_openings_stay_open_where_a_part_fits_and_the_solver_outline_contains_th
     assert item.solver.bounds[:2] == (0.0, 0.0)
 
 
+def test_a_needle_of_material_does_not_grow_a_spike_on_the_solver_outline():
+    """A through hole tangent to the board's end leaves a needle of material
+    at the corner; mitred without a limit its growth reached 3.75 mm out
+    [found by fuzzing, 2026-10-14]."""
+    b = panel("a", 40, 40)
+    b.add_hole(b.big_faces()[0], (0.0, 1.0), 2.0, through)
+    (item,) = parts_of_layout(build_layout(), 10).by_material["birch 15"]
+    outside = max(Polygon(item.shape.exterior).distance(Point(p)) for p in item.solver.exterior.coords)
+    assert outside <= OUTSIDE + 1e-9
+    assert item.solver.buffer(1e-6).contains(item.shape)
+
+
 def test_a_part_too_large_for_the_bed_or_the_stock_is_refused_by_name():
     panel("long", 2400, 100)
     panel("ok", 500, 300)
@@ -351,6 +363,31 @@ def test_each_blank_lies_where_the_saw_plan_puts_it():
                     (bx, by), (bw, bh) = origins[bi], sizes[bi]
                     x, y, w, h = leaf.rect
                     assert x <= bx and y <= by and bx + bw <= x + w and by + bh <= y + h
+
+
+def test_a_sheet_of_a_fraction_of_a_millimetre_is_sawn_whole():
+    """The guillotine solver takes whole millimetres; the pieces must still
+    cover the sheet [found by fuzzing, 2026-10-14]."""
+    stock = [sawing.Stock(500, 400.5, -1, 500 * 400.5, "sheet", 0)]
+    plan = sawing.best_plan([(60, 60)], stock, 0, 1, _fits, _keeps, 0.05)
+    (sheet,) = plan.sheets
+    assert sheet.tree.rect == [0, 0, 500, 400.5]
+    assert sum(leaf.rect[2] * leaf.rect[3] for leaf in leaves(sheet.tree)) == pytest.approx(500 * 400.5)
+
+
+def test_a_kerf_in_tenths_of_a_millimetre_is_sawn_as_it_is():
+    """In whole millimetres a kerf of 3.2 was sawn as 4: two blanks that
+    fill a sheet but for one kerf found no room, and elsewhere the pieces
+    between the cuts grew by the difference, past the bed [found by
+    fuzzing, 2026-10-14]."""
+    stock = [sawing.Stock(1203.2, 500, 1, 1203.2 * 500, "sheet", 0)]
+    def small_bed(w: float, h: float) -> bool:                # takes one blank, not both
+        return w <= 1000 and h <= 1000
+    plan = sawing.best_plan([(600, 500), (600, 500)], stock, 3.2, 5, small_bed, _keeps, 0.05)
+    assert not plan.unsawn
+    (sheet,) = plan.sheets
+    assert [leaf.rect for leaf in leaves(sheet.tree)] == [[0, 0, 600, 500], [603.2, 0, 600, 500]]
+    assert Workshop(kerf=3.25).saw_kerf == 3.3 and Workshop(kerf=3.2).saw_kerf == 3.2
 
 
 def test_best_plan_saws_every_blank_or_says_which_it_could_not():
