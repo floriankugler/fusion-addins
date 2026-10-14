@@ -6,6 +6,12 @@
       "runtimeExecutable": ".venv/bin/python",
       "runtimeArgs": ["-m", "lang.preview", "examples", "--out", "out", "--port", "8765"],
       "port": 8765
+    },
+    {
+      "name": "svgnest",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "8766", "--bind", "127.0.0.1", "--directory", "experiments/nesting"],
+      "port": 8766
     }
   ]
 }
