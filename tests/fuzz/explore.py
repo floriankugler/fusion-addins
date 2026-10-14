@@ -33,6 +33,7 @@ import corners  # noqa: E402
 import fuzzing  # noqa: E402
 import hardware  # noqa: E402
 import joints  # noqa: E402
+import snapshots  # noqa: E402
 from lang.core.errors import LangError  # noqa: E402
 
 Check = tuple[st.SearchStrategy[Any], Callable[[Any], list[str]]]
@@ -95,6 +96,8 @@ CHECKS: dict[str, Check] = {
     "board_chamfers": (corners.corner_op_cases().filter(lambda c: c.op != "dogbones"), corners.run_case),
     "checks": (checks.scenes(), checks.run_case),
     "contours": (contours.contour_cases(), contours.run_case),
+    "chains": (snapshots.chain_cases(), snapshots.chain_problems),
+    "snapshots": (snapshots.master_cases(), snapshots.snapshot_problems),
 }
 
 
