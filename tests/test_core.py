@@ -423,6 +423,50 @@ def test_a_shaped_board_s_box_lies_where_its_shape_s_edges_do():
         assert panel.box().hi["y"] == pytest.approx(y + 110.1)
 
 
+def _measured(cab: Scope, b: Board) -> list[tuple[float, float]]:
+    """A board's box measured inward from its scope's front, left and
+    bottom sides."""
+    out: list[tuple[float, float]] = []
+    for name in ("front", "left", "bottom"):
+        s = cab.side(name)
+        p, q = (s.inward.sign * (b.box().lo[s.axis] - s.value), s.inward.sign * (b.box().hi[s.axis] - s.value))
+        out.append((min(p, q), max(p, q)))
+    return out
+
+
+@pytest.mark.parametrize("facing", ["front", "right"])
+def test_a_shaped_board_fills_its_limits_or_sits_against_one_or_in_the_corner(facing: str):
+    """Decided by Florian, 2026-10-14: a board made of a shape fills its two
+    limits on an axis less its inset, or is refused; with one limit it sits
+    against it, on the side the board would lie; with none, at the scope's
+    front, left and bottom corner; and its box is its outline's. It sat at
+    the limits' lowest corner in world terms, its box the limits', so in a
+    cabinet facing elsewhere it lay elsewhere and its box missed it."""
+    van = Box.from_size(width=600, depth=500, height=300)
+    with cabinet("cab", van, front=van.side(facing)) as cab:
+        shape = rect(width=100, depth=50)
+        filled = board("filled", ply15, shape).on(cab.bottom).between(
+            cab.left.into(10), cab.left.into(110), cab.front, cab.front.into(50))
+        inset = board("inset", ply15, shape).on(cab.bottom + 20).between(
+            cab.left.into(10), cab.left.into(120), cab.front, cab.front.into(60)).inset(5)
+        against = board("against", ply15, shape).on(cab.bottom + 40).between(cab.right.into(20))
+        side = board("side", ply15).on(cab.right)
+        on_side = board("on_side", ply15, shape).on(cab.bottom + 60).between(side, cab.back.into(30))
+        corner = board("corner", ply15, shape).on(cab.bottom + 80).inset(2)
+        wrong = board("wrong", ply15, shape).on(cab.bottom + 100).between(cab.left.into(10), cab.left.into(120))
+    assert _measured(cab, filled)[:2] == [(0, 50), (10, 110)]
+    assert _measured(cab, inset)[:2] == [(5, 55), (15, 115)]
+    width = cab.width
+    assert _measured(cab, against)[:2] == [(0, 50), (width - 120, width - 20)]
+    assert _measured(cab, on_side)[:2] == [(cab.depth - 80, cab.depth - 30), (width - 115, width - 15)]
+    assert _measured(cab, corner)[:2] == [(2, 52), (2, 102)]
+    for b in (filled, inset, against, on_side, corner):
+        u0, v0, u1, v1 = b.outline.bounds
+        assert (b.box().lo[b.u_axis], b.box().lo[b.v_axis], b.box().hi[b.u_axis], b.box().hi[b.v_axis]) == (u0, v0, u1, v1)
+    with pytest.raises(LangError, match=r"the shape is 100 across on [xy], its limits less its inset leave 110"):
+        wrong.box()
+
+
 def test_edge_face_hole():
     cab = carcass()
     bottom = cab["bottom"]

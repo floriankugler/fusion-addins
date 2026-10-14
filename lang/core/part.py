@@ -334,15 +334,10 @@ class Board:
         if shape is not None:
             sb = shape.bounds
             self._outline = shape.moved(lo[u_axis] - sb[0], lo[v_axis] - sb[1])
-            # The box's sides where the shape's edges are, when they differ by rounding only (the low
-            # corner plus the width against the limit as written) [found by fuzzing, 2026-10-14: a hole
-            # into such a narrow face was refused at some places, the outline not reaching it].
-            ob = self._outline.bounds
-            for k, along in enumerate((u_axis, v_axis)):
-                if abs(ob[k] - lo[along]) < 1e-9:
-                    lo[along] = ob[k]
-                if abs(ob[k + 2] - hi[along]) < 1e-9:
-                    hi[along] = ob[k + 2]
+            # The box is the outline's [decided by Florian, 2026-10-14], also where the limits as
+            # written differ from it by rounding (the low corner plus the width) [found by fuzzing,
+            # 2026-10-14: a hole into such a narrow face was refused at some places].
+            lo[u_axis], lo[v_axis], hi[u_axis], hi[v_axis] = self._outline.bounds
         else:
             self._outline = box_shape(lo[u_axis], lo[v_axis], hi[u_axis], hi[v_axis])
         if contours.trims:
@@ -361,8 +356,14 @@ class Board:
         """The board's range on one in-plane axis, before the inset: from
         two limits; from one limit and an open contour's far side, a
         contour's stretch or the box side opposite; from a contour's
-        stretch alone; from an explicit shape; or the enclosing box. The
-        stretches closed contours leave then cut it down (tighter wins)."""
+        stretch alone; or the enclosing box. The stretches closed contours
+        leave then cut it down (tighter wins).
+
+        A board made of a shape fills its two limits less its inset, or is
+        an error; with one limit it sits against it, on the side the board
+        would lie; with none, at the scope's front, left or bottom side
+        [decided by Florian, 2026-10-14: it sat at the lowest corner in
+        world terms, its box the limits']."""
         keep: list[int] = []
         values = self._limit_values(axis, scope_box, used, keep)
         box_centre = (scope_box.lo[axis] + scope_box.hi[axis]) / 2 if scope_box is not None else None
@@ -381,8 +382,13 @@ class Board:
             raise LangError(f"two open contours limit {axis}; give one of them as a position.", self.path)
         room = stretch if stretch is not None else (
             (scope_box.lo[axis], scope_box.hi[axis]) if scope_box is not None else None)
+        size = None if shape is None else (shape.width if axis == self._u_axis else shape.height) + 2 * self._inset
         if len(values) == 2:
             a, b = sorted(values)
+            if size is not None and abs(b - a - size) > 1e-6:
+                raise LangError(f"the shape is {size - 2 * self._inset:g} across on {axis}, its limits less its inset "
+                                f"leave {b - a - 2 * self._inset:g}: a board made of a shape fills its limits; give "
+                                "one limit to place it against, or the shape that fills them.", self.path)
         elif edges:
             # The board keeps the side of its other limit, or of the middle
             # of its room, up to the contour; the trim then follows it.
@@ -404,6 +410,8 @@ class Board:
             if ends:
                 # from an open contour across the board to its room's end on the board's side
                 a, b = (v, room[1]) if ends[0].side > 0 else (room[0], v)
+                if size is not None:
+                    a, b = (v, v + size) if ends[0].side > 0 else (v - size, v)
             else:
                 centre = (room[0] + room[1]) / 2
                 # A part's face: away from the part, whichever side of the middle the face lies
@@ -416,14 +424,19 @@ class Board:
                                     self.path)
                 side = keep[0] if keep and keep[0] else (1 if v < centre else -1)
                 a, b = (v, room[1]) if side > 0 else (room[0], v)
+                if size is not None:
+                    a, b = (v, v + size) if side > 0 else (v - size, v)
         elif stretch is not None:
             a, b = stretch
-        elif shape is not None:
-            # An explicit shape carries its own extent; it sits at the box
-            # minimum, or at the origin without a box.
-            base = scope_box.lo[axis] if scope_box is not None else 0.0
-            size = shape.width if axis == self._u_axis else shape.height
-            a, b = base, base + size
+        elif size is not None:
+            # at the scope's front, left or bottom side, or at the origin without a box
+            start = next(d for d in map(self.scope.frame.direction, ("front", "left", "bottom")) if d.axis == axis)
+            if scope_box is None:
+                a, b = 0.0, size
+            elif start.sign < 0:
+                a, b = scope_box.lo[axis], scope_box.lo[axis] + size
+            else:
+                a, b = scope_box.hi[axis] - size, scope_box.hi[axis]
         elif scope_box is None:
             raise LangError(f"no limits on {axis} and no enclosing box.", self.path)
         else:
