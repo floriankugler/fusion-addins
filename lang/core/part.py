@@ -408,7 +408,12 @@ class Board:
                 centre = (room[0] + room[1]) / 2
                 # A part's face: away from the part, whichever side of the middle the face lies
                 # [found by fuzzing, 2026-10-14: a back between a bottom lying across the middle
-                # ran through it]; a position: to the far side of the room.
+                # ran through it]; a position: to the far side of the room, and at its middle
+                # an error [decided by Florian, 2026-10-14].
+                if not (keep and keep[0]) and abs(v - centre) < 1e-9:
+                    raise LangError(f"between(): the only limit on {axis}, at {Pos(axis, v)}, lies at the middle of its "
+                                    "room, so the board could lie on either side of it; give its other end too.",
+                                    self.path)
                 side = keep[0] if keep and keep[0] else (1 if v < centre else -1)
                 a, b = (v, room[1]) if side > 0 else (room[0], v)
         elif stretch is not None:
@@ -461,6 +466,7 @@ class Board:
                 used.add(i)
         positions = list(values)
         sides = [0] * len(values)
+        self._check_parts(axis, parts, scope_box, len(values))
         for i, part, offset in parts:
             lb = part.box()
             others = positions + [(p.box().lo[axis] + p.box().hi[axis]) / 2 for j, p, _ in parts if j != i]
@@ -477,9 +483,50 @@ class Board:
             used.add(i)
         if len(values) > 2:
             raise LangError(f"more than two limits on {axis}.", self.path)
+        self._check_inside(axis, parts, values, len(positions))
         if keep is not None:
             keep[:] = sides
         return values
+
+    def _check_parts(self, axis: Axis, parts: Sequence[tuple[int, Board, float]], scope_box: Box | None,
+                     positions: int) -> None:
+        """An error for boards as limits on one axis that leave it open where
+        the board lies [decided by Florian, 2026-10-14]: the same board
+        twice, two boards overlapping each other (nothing lies between
+        them), a board as the only limit lying across the middle of the
+        box (it is not clear which of its faces is meant)."""
+        for k, (_, a, _) in enumerate(parts):
+            for _, b, _ in parts[k + 1:]:
+                if a is b:
+                    raise LangError(f"between(): {a.path} is given twice on {axis}, so it is not clear which of its "
+                                    "faces is meant; give it once, and the other end another way.", self.path)
+                ab, bb = a.box(), b.box()
+                if min(ab.hi[axis], bb.hi[axis]) - max(ab.lo[axis], bb.lo[axis]) > 1e-6:
+                    raise LangError(f"between(): {a.path} and {b.path} overlap on {axis}, so nothing lies between "
+                                    "them.", self.path)
+        if len(parts) == 1 and positions == 0 and scope_box is not None:
+            pb = parts[0][1].box()
+            if abs((pb.lo[axis] + pb.hi[axis]) / 2 - (scope_box.lo[axis] + scope_box.hi[axis]) / 2) < 1e-9:
+                raise LangError(f"between(): {parts[0][1].path} is the only limit on {axis} and lies across the "
+                                "middle of the box, so it is not clear which of its faces is meant; give the board's "
+                                "other end too.", self.path)
+
+    def _check_inside(self, axis: Axis, parts: Sequence[tuple[int, Board, float]], values: Sequence[float],
+                      positions: int) -> None:
+        """An error for a limit on one axis that lies inside a board given as
+        another limit, past what `into()` reaches into it: a position, or a
+        face moved by `gap()` [decided by Florian, 2026-10-14: the board
+        came out inside its limits]."""
+        for k, (_, part, offset) in enumerate(parts):
+            pb = part.box()
+            reach = max(offset, 0.0)
+            for n, v in enumerate(values):
+                if n == positions + k or not pb.lo[axis] + reach + 1e-6 < v < pb.hi[axis] - reach - 1e-6:
+                    continue
+                what = (f"the limit at {Pos(axis, v)}" if n < positions
+                        else f"{parts[n - positions][1].path}'s face, moved by gap(),")
+                raise LangError(f"between(): {what} lies inside {part.path} on {axis}, so the board would lie "
+                                "inside it.", self.path)
 
     def _check_limits_used(self, used: set[int], t_axis: Axis) -> None:
         """An error for a `between()` limit that limited neither in-plane

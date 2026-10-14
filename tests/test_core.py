@@ -724,6 +724,53 @@ def test_a_board_between_one_board_keeps_to_its_side_of_it():
     assert build_layout()["problems"] == []
 
 
+@pytest.mark.parametrize("case, error", [
+    ("twice", r"between\(\): m\.left is given twice on y"),
+    ("overlapping", r"between\(\): m\.low and m\.high overlap on z, so nothing lies between them"),
+    ("position inside", r"between\(\): the limit at y=590 lies inside m\.right on y"),
+    ("gap inside", r"between\(\): m\.panel's face, moved by gap\(\), lies inside m\.door on x"),
+    ("middle", r"between\(\): the only limit on y, at y=300, lies at the middle of its room"),
+    ("centred board", r"between\(\): m\.divider is the only limit on y and lies across the middle of the box"),
+])
+def test_ambiguous_limits_are_refused(case: str, error: str):
+    """Decided by Florian, 2026-10-14: limits that leave it open where a
+    board lies are refused, each naming what is ambiguous: limits that
+    overlap (two boards overlapping each other, the same board twice, a
+    position or a face moved by `gap()` inside a board), a single limit at
+    the middle of the box, a board as the only limit centred in the box.
+    They put the board inside its limits, or on a side the world frame
+    chose."""
+    with module("m", Box.from_size(width=600, depth=400, height=700)) as m:
+        left = board("left", ply15).on(m.left)
+        right = board("right", ply15).on(m.right)
+        door = board("door", ply15).on(m.front)                            # x 0 to 15
+        panel = board("panel", ply15).on(door.back)                        # x 15 to 30, touching it
+        low = board("low", ply15).on(m.bottom + 100)                       # z 100 to 115
+        high = board("high", ply15).on(m.bottom + 110)                     # z 110 to 125
+        divider = board("divider", ply15).center(m.center("width"))
+        limits = {"twice": [left, left.into(5)], "overlapping": [low, high],
+                  "position inside": [right, m.left.into(590)], "gap inside": [door, panel.gap(1.5)],
+                  "middle": [m.left.into(300)], "centred board": [divider]}[case]
+        # (standing across the width for the limits on x, against the back for the others)
+        x = board("x", ply9).on(m.left + 200) if case == "gap inside" else board("x", ply9).on(m.back)
+        x.between(*limits)
+    with pytest.raises(LangError, match=error):
+        x.box()
+
+
+def test_limits_near_the_ambiguous_ones_are_kept():
+    """Decided by Florian, 2026-10-14 (see above): a board's own face moved
+    into it, a limit off the middle and a board off it are fine."""
+    with module("m", Box.from_size(width=600, depth=400, height=700)) as m:
+        left = board("left", ply15).on(m.left)
+        a = board("a", ply9).on(m.back).between(left.into(5), m.right)
+        b = board("b", ply9).on(m.back + -20).between(m.left.into(299))
+        c = board("c", ply9).on(m.back + -40).between(board("off", ply15).center(m.center("width") + 1))
+    assert (a.box().lo["y"], a.box().hi["y"]) == (10, 600)
+    assert (b.box().lo["y"], b.box().hi["y"]) == (299, 600)
+    assert (c.box().lo["y"], c.box().hi["y"]) == (0, 293.5)
+
+
 def test_a_box_as_a_limit_gives_both_ends_on_each_in_plane_axis():
     drawer = Box.from_size(width=300, depth=400, height=150, origin=(20, 30, 40))
     with module("m", Box.from_size(width=600, depth=500, height=300)):
