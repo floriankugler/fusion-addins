@@ -546,6 +546,21 @@ def test_between_a_part_and_a_position_takes_the_face_toward_the_position():
     assert (reach.box().lo["y"], reach.box().hi["y"]) == (110, 1000)   # p1's right face, 5 into it
 
 
+def test_a_board_between_one_board_keeps_to_its_side_of_it():
+    """Found by fuzzing the placement: a back between a bottom lying across
+    the box's middle ran through the bottom. Its face toward the middle is
+    its top (46 to 61: the bottom, 40 to 55: the top, the middle at 50),
+    but the back went the way that face lies from the middle, down to the
+    box's bottom. It goes from the face away from the board."""
+    for z, want in ((40, (55, 100)), (46, (0, 46))):
+        with module(f"m{z}", Box.from_size(width=600, depth=400, height=100)) as m:
+            bottom = board("bottom", ply15).on(m.bottom + z)
+            back = board("back", ply9).on(m.back).between(bottom)
+            check(no_interference)
+        assert (back.box().lo["z"], back.box().hi["z"]) == want
+    assert build_layout()["problems"] == []
+
+
 def test_a_box_as_a_limit_gives_both_ends_on_each_in_plane_axis():
     drawer = Box.from_size(width=300, depth=400, height=150, origin=(20, 30, 40))
     with module("m", Box.from_size(width=600, depth=500, height=300)):

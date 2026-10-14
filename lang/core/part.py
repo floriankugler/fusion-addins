@@ -354,7 +354,8 @@ class Board:
         contour's stretch or the box side opposite; from a contour's
         stretch alone; from an explicit shape; or the enclosing box. The
         stretches closed contours leave then cut it down (tighter wins)."""
-        values = self._limit_values(axis, scope_box, used)
+        keep: list[int] = []
+        values = self._limit_values(axis, scope_box, used, keep)
         box_centre = (scope_box.lo[axis] + scope_box.hi[axis]) / 2 if scope_box is not None else None
         edges = contours.edges_on(axis)
         # The board lies on the side of an open contour across it that its
@@ -396,7 +397,11 @@ class Board:
                 a, b = (v, room[1]) if ends[0].side > 0 else (room[0], v)
             else:
                 centre = (room[0] + room[1]) / 2
-                a, b = (v, room[1]) if v < centre else (room[0], v)
+                # A part's face: away from the part, whichever side of the middle the face lies
+                # [found by fuzzing, 2026-10-14: a back between a bottom lying across the middle
+                # ran through it]; a position: to the far side of the room.
+                side = keep[0] if keep and keep[0] else (1 if v < centre else -1)
+                a, b = (v, room[1]) if side > 0 else (room[0], v)
         elif stretch is not None:
             a, b = stretch
         elif shape is not None:
@@ -417,11 +422,15 @@ class Board:
             a, b = max(a, stretch[0]), min(b, stretch[1])
         return a, b
 
-    def _limit_values(self, axis: Axis, scope_box: Box | None, used: set[int]) -> list[float]:
+    def _limit_values(self, axis: Axis, scope_box: Box | None, used: set[int],
+                      keep: list[int] | None = None) -> list[float]:
         """The limits' values on one in-plane axis; the indexes of the limits
-        that gave one go into `used`. A part gives the face toward the
-        other limit on the axis, or toward the middle of the enclosing box
-        when there is none (or two others, which is an error below)."""
+        that gave one go into `used`, and into `keep`, for each value, the
+        way from it the board lies: away from the part whose face it is (1
+        toward the axis' positive end, -1 the other), 0 for a position. A
+        part gives the face toward the other limit on the axis, or toward
+        the middle of the enclosing box when there is none (or two others,
+        which is an error below)."""
         values: list[float] = []
         parts: list[tuple[int, Board, float]] = []
         for i, limit in enumerate(self._limits):
@@ -442,6 +451,7 @@ class Board:
                 values.append(pos.value)
                 used.add(i)
         positions = list(values)
+        sides = [0] * len(values)
         for i, part, offset in parts:
             lb = part.box()
             others = positions + [(p.box().lo[axis] + p.box().hi[axis]) / 2 for j, p, _ in parts if j != i]
@@ -452,10 +462,14 @@ class Board:
             else:
                 toward = (lb.lo[axis] + lb.hi[axis]) / 2
             # the face toward `toward`, moved by `offset` into the part
-            values.append(lb.hi[axis] - offset if toward >= (lb.lo[axis] + lb.hi[axis]) / 2 else lb.lo[axis] + offset)
+            high = toward >= (lb.lo[axis] + lb.hi[axis]) / 2
+            values.append(lb.hi[axis] - offset if high else lb.lo[axis] + offset)
+            sides.append(1 if high else -1)
             used.add(i)
         if len(values) > 2:
             raise LangError(f"more than two limits on {axis}.", self.path)
+        if keep is not None:
+            keep[:] = sides
         return values
 
     def _check_limits_used(self, used: set[int], t_axis: Axis) -> None:
