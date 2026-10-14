@@ -194,7 +194,9 @@ def as_pos(value: object, what: str = "position") -> Pos:
 class Side:
     """A position with a direction pointing inward, into the box it bounds.
     `on()` uses the direction to decide where a board's thickness goes.
-    Moving a side by a length keeps its direction."""
+    Moving a side by a length keeps its direction; scaled, it is a
+    position in a mix like any other (`0.5 * cab.bottom + 0.5 * cab.top`)
+    [found by fuzzing, 2026-10-14: it had no `*` or `/`]."""
 
     axis: Axis
     value: float
@@ -239,6 +241,18 @@ class Side:
         if isinstance(other, (int, float)):
             return Side(self.axis, self.value - other, self.inward)
         return self.position - other
+
+    def __radd__(self, other: Number) -> Side:
+        return Side(self.axis, self.value + other, self.inward)
+
+    def __mul__(self, other: Number) -> Affine:
+        return self.position * other
+
+    def __rmul__(self, other: Number) -> Affine:
+        return self.position * other
+
+    def __truediv__(self, other: Number) -> Affine:
+        return self.position / other
 
     def __repr__(self) -> str:
         return f"Side({self.axis}, {self.value:g}, inward={self.inward.name})"

@@ -35,6 +35,20 @@ def test_mix_of_positions_needs_weights_summing_to_one():
         board("x", ply15).on(Pos("z", 1) + Pos("z", 2), toward=world_frame().direction("top"))
 
 
+def test_box_sides_mix_like_other_positions():
+    """Found by fuzzing the placement: `0.5 * m.bottom + 0.5 * m.top` was a
+    TypeError where the same mix of faces or positions is a position: a box
+    side had no scaling (`*`, `/`) and no number added from the left."""
+    with module("m", Box.from_size(width=600, depth=400, height=700, origin=(0, 0, 100))) as m:
+        assert 0.5 * m.bottom + 0.5 * m.top == Pos("z", 450)
+        assert (m.bottom * 3 + m.top) / 4 == Pos("z", 275)
+        assert m.bottom / 2 + m.top / 2 == Pos("z", 450)
+        moved = 60 + m.bottom
+        assert isinstance(moved, Side) and moved == m.bottom + 60
+        shelf = board("shelf", ply15).center(0.25 * m.bottom + 0.75 * m.top)
+    assert shelf.box().lo["z"] == 625 - 7.5
+
+
 def test_mixing_axes_is_an_error():
     with pytest.raises(LangError):
         _ = Pos("x", 1) - Pos("z", 1)
