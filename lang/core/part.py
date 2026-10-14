@@ -908,7 +908,9 @@ class Board:
         t, u, v = self.t_axis, self.u_axis, self.v_axis
         rb = region.box() if isinstance(region, Board) else region
         label = region.path if isinstance(region, Board) else "box"
-        if not b.overlaps(rb):
+        # (by 0.01 mm at least on every axis, a board and its box alike [found by fuzzing, 2026-10-14:
+        # a floor 0.0036 into a side did not reach into it, its box made a pocket that deep])
+        if not b.overlaps(rb, NARROWEST - 1e-9):
             raise LangError(f"cut(): {label} does not reach into this board.", self.path)
         overlap = b.intersection(rb)
         if isinstance(region, Box):

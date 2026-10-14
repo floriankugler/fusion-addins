@@ -460,6 +460,22 @@ def test_cut_with_a_part_that_misses_or_floats_is_an_error():
             side.cut(away, at=side.inner.center)   # at= belongs to shapes only
 
 
+def test_a_cut_by_a_board_or_its_box_reaching_under_a_hundredth_in_is_refused_alike():
+    """Found by fuzzing the placement: a floor reaching 0.0036 mm into a
+    side was refused as `side.cut(floor)`, which does not reach into the
+    side (the section, narrower than 0.01 mm, is cleaned away), and made a
+    pocket 0.0036 deep as `side.cut(floor.box())`."""
+    with module("box", Box.from_size(width=400, depth=300, height=100)) as m:
+        side = board("side", ply15).on(m.left)
+        floor = board("floor", ply9).on(m.bottom + 10).between(side.into(0.0036), m.right)
+        for region in (floor, floor.box()):
+            with pytest.raises(LangError, match="does not reach into this board"):
+                side.cut(region)
+        deeper = board("deeper", ply9).on(m.bottom + 30).between(side.into(0.01), m.right)
+        side.cut(deeper.box())
+    assert len(side.ops) == 1
+
+
 def test_module_frame_follows_placement():
     # a cabinet against the driver's wall (left, -y) that opens toward the aisle
     box = Box.from_size(width=500, depth=600, height=720)
