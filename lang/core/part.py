@@ -886,8 +886,8 @@ class Board:
         if through and cut.geometry.difference(unary_union(through)).area <= 1e-6:
             raise LangError("the cut leaves nothing of the board but what pockets and holes through it take.",
                             self.path)
-        # (a piece left joined at a point only is apart, as for holes and pockets through the board,
-        # `_pieces` [found by fuzzing the checks, 2026-10-14])
+        # (a piece held on by less than 0.01 mm, by a hairline or at a point, is apart, as for holes
+        # and pockets through the board, `_pieces` [found by fuzzing, 2026-10-14])
         if _pieces(cut.geometry) > _pieces(self.outline.geometry):
             raise LangError(f"the cut{f' {name}' if name else ''} splits the board in pieces.", self.path)
         # [found by fuzzing, 2026-10-12: a cut took away all of a hole made before, which Fusion then
@@ -1752,20 +1752,19 @@ class PartLimit:
 
 
 def _pieces(g: BaseGeometry) -> int:
-    """How many pieces of 1e-6 mm2 or more `g` is in, a piece joined to the
-    rest only at a point counted apart, as an opening touching the outline
-    at a point is refused [Florian, 2026-10-12]: the more of its own pieces
-    and of those it falls in opened by `_PINCH`, which parts it where it is
-    joined narrower than that (a copy, for counting; the geometry stays as
-    it is). A through hole tangent to the board's edge that cut a corner
-    off but for that point was refused or kept as the rounding put the
-    circle 1e-15 over the edge or short of it [found by fuzzing the
-    checks, 2026-10-14]; a circle touching the edge that cuts nothing off
-    leaves one piece either way, as Fusion builds it."""
-    def count(h: BaseGeometry) -> int:
-        return len([p for p in parts_of(h) if p.area > 1e-6])
-    # (round joins: mitred ones of no limit join the cusps either side of the point again)
-    return max(count(g), count(g.buffer(-_PINCH).buffer(_PINCH)))
+    """How many pieces an outline is in, those held together by less than
+    0.01 mm counted apart: nothing narrower holds material on, and a piece
+    joined to the rest only at a point is apart, as an opening touching
+    the outline at a point is refused [Florian, 2026-10-12]. (Counted on a
+    copy shrunk by half that; the geometry stays as it is.) [Found by
+    fuzzing, 2026-10-14: a notch with its corner clipped cut a board's
+    corner free, but where the module lay 4 m out its edge came 5e-13 off
+    the board's and held the corner on by that hairline, one piece; and a
+    through hole tangent to the board's edge that cut a corner off but for
+    that point was refused or kept as the rounding put the circle 1e-15
+    over the edge or short of it.] A circle touching the edge that cuts
+    nothing off leaves one piece, as Fusion builds it."""
+    return len([p for p in parts_of(g.buffer(-NARROWEST / 2)) if p.area > 1e-6])
 
 
 def _in_plane(t_axis: Axis) -> tuple[Axis, Axis]:

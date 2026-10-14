@@ -952,6 +952,25 @@ def test_a_cut_that_leaves_a_corner_hanging_at_a_point_splits_the_board(origin: 
     assert [op.kind for op in panel.ops] == ["cut"] and len(panel.outline.polygons()) == 1
 
 
+def test_material_held_by_less_than_a_hundredth_of_a_millimetre_is_cut_free():
+    """Found by fuzzing the placement: a notch at a board's corner with its
+    own corner clipped leaves that corner's triangle of the board, cut
+    free, and was refused as splitting the board, but where the module lay
+    4 m out the notch's edge came 5e-13 mm off the board's and held the
+    triangle on by that hairline: one piece, accepted. A through pocket
+    likewise. Nothing narrower than 0.01 mm holds material on."""
+    far = -3999.9999999999995
+    for name, origin in (("near", 0.0), ("far", far)):
+        with module(name, Box.from_size(width=600, depth=400, height=100, origin=(origin, origin, 0))) as m:
+            panel = board("panel", ply15).on(m.bottom)
+            notch = rect(depth=196.47573931604643, width=20).clip(back=5, right=98.23786965802322)
+            with pytest.raises(LangError, match="splits the board in pieces"):
+                panel.cut(notch, at=panel.top.back.right, name="notch")
+            with pytest.raises(LangError, match="splits it in pieces"):
+                panel.pocket(notch, at=panel.top.back.right, depth=through)
+        assert panel.ops == [] and len(panel.outline.polygons()) == 1
+
+
 def test_a_pocket_through_the_board_may_not_leave_nothing_of_it():
     """Found by fuzzing dog bones: a circle pocket through a 53 mm square
     board, wider than the board, took all of it, which a cut may not, and
