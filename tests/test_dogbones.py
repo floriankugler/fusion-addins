@@ -524,6 +524,24 @@ def test_a_relief_takes_no_material_held_on_to_its_corner_at_a_point():
     assert areas[0] == pytest.approx(areas[1], abs=1e-6) and areas[0] == pytest.approx(39.8996, abs=1e-3)
 
 
+def test_a_wall_of_no_width_where_pockets_from_either_face_meet_is_no_corner():
+    """Found by fuzzing: a pocket into the top of a 6 mm board's corner and
+    one turned 45 degrees into its bottom, 3 deep each, meet along the
+    turned one's edge. The floor of the bottom one, less where they go
+    through together, ran along itself there, a wall of no width, which
+    the rounding kept at the origin, two 135 degree corners at its ends
+    and two more reliefs, and parted 1 mm along. The regions corners are
+    found in are opened now, so the wall parts wherever the board lies."""
+    features: list[tuple[str, int, float, float, float, float, float, float | None]] = [
+        ("pocket", 0, 0.0, 0.0, 2.0, 2.5, 0.0, 0.5), ("pocket", 1, 0.0, 0.0, 3.0, 4.0, 45.0, 0.5)]
+    for origin in ((0.0, 0.0, 0.0), (0.0, 1.0, 0.0)):
+        registry.reset()
+        m, b = _fuzzed("m", (40.0, 40.0), 6, "bottom", origin, features)
+        with m:
+            b.dogbones(tool=6, relief=0.1)
+        assert [op.name for op in _dogbones(b)] == ["pocket_0_dogbones"], origin
+
+
 def test_a_hairline_spike_two_drawings_of_a_circle_leave_is_no_corner():
     """Found by fuzzing: where a circle pocket overlaps pockets from the
     other face, the regions the corners are found in, made by booleans of

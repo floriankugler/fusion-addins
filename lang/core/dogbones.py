@@ -55,7 +55,7 @@ from .cutouts import circle_geometry
 from .errors import LangError
 from .ops import Cut, Hole, Pocket
 from .shapes import Shape, circle
-from .geometry import NARROWEST, clean, polygons_of
+from .geometry import NARROWEST, opened, polygons_of
 
 if TYPE_CHECKING:
     from .part import Board
@@ -178,10 +178,11 @@ def corners(board: Board) -> list[Corner]:
             if d0 + d1 >= t - _EPS:
                 voids.append(g0.intersection(g1))
     void = unary_union(voids) if voids else Polygon()
-    # (cleaned as every shape is: the spikes and slivers of two drawings of one
-    # circle made corners that came and went with the board's place [found by
-    # fuzzing, 2026-10-13])
-    material = clean(outline.difference(void)) if voids else outline
+    # (cleaned as every shape is, and opened, as the levels below: the spikes,
+    # slivers and walls of no width of two drawings of one edge made corners
+    # that came and went with the board's place [found by fuzzing, 2026-10-13
+    # and 14])
+    material = opened(outline.difference(void)) if voids else outline
     exteriors = [p.exterior for p in polygons_of(outline)]
 
     through: dict[tuple[float, float], Corner] = {}
@@ -195,7 +196,10 @@ def corners(board: Board) -> list[Corner]:
                 level = material
             else:
                 level = unary_union([g for g, d in cuts if d >= top - _EPS]).intersection(material)
-            level = clean(level.difference(deeper))
+            # (opened: where pockets from either face meet along an edge of one of them, a level's
+            # ring can run along itself, a wall of no width, kept or parted as the rounding fell, and
+            # its ends made corners at one place of the board only [found by fuzzing, 2026-10-14])
+            level = opened(level.difference(deeper))
             for point, a, b in _concave(level):
                 probe = _toward(point, a, b, _PROBE)
                 outside = not outline.contains(probe)

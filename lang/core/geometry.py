@@ -145,6 +145,18 @@ def _valid_pieces(poly: Polygon, walls: bool) -> list[Polygon]:
     return pieces
 
 
+def opened(g: BaseGeometry) -> BaseGeometry:
+    """`g` cleaned and opened by `SAME_POINT`: parted wherever walls or
+    hairlines of no width hold it together, also where an outer ring runs
+    along itself (which `clean`, looking for holes along other rings, does
+    not see); for regions whose corners count, as the dog bones'. Costs a
+    buffer each way, so not for every shape."""
+    pieces = [q for poly in polygons_of(clean(g)) for q in _opened(poly)]
+    if not pieces:
+        return Polygon()
+    return pieces[0] if len(pieces) == 1 else MultiPolygon(pieces)
+
+
 def _opened(poly: Polygon) -> list[Polygon]:
     """The polygon opened by `SAME_POINT`, which parts it where walls or
     hairlines of no width hold it together, each part cleaned."""
