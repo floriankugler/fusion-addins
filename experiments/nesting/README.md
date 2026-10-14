@@ -28,6 +28,12 @@ parts and on synthetic cases.
   turns per part, separate spacing to parts and to the sheet's edge, true
   circular arcs. It put the van's parts on 1 sheet in 0.01 s and 62 parts
   of the examples on mixed stock in 3 s.
+- Its weak point, seen on irregular parts (curves, concave shapes): the
+  first nest comes at once and is good, then its default search hardly
+  improves it (3 sheets at 47 % for 45 irregular parts, whatever the time
+  limit). Knapsack on one sheet fewer keeps improving: 40 of 45 parts on 2
+  sheets after 5 minutes. So a nest in the language would take the first
+  bin packing, then try one sheet fewer with knapsack for a time budget.
 
 ## Numbers
 
@@ -49,6 +55,12 @@ the true outlines: no overlaps, the gaps, the sheet each part is on.
 | Frame 1200 x 800 with a 1000 x 600 opening + 6 parts of 300 x 200, on 1300 x 900 | SVGnest, `useHoles` | 2 | | (the option does nothing) |
 | | SVGnest, `useHoles` + `holes` patch | **1** | | all six in the opening |
 | | PackingSolver | **1** | | all six in the opening, 4 ms |
+| Van + a face frame 1400 x 720 with a 1300 x 620 opening, 21 parts | PackingSolver | 2 | | `kitchen.right` in the opening; 1 sheet looks possible |
+| Irregular, 45 parts, 4.41 m² (`irregular.py`: ring and discs, curved rails, wavy shelves, rockers, coved brackets, L brackets, ovals, random concave polygons, chair sides) | SVGnest + cache + holes | 3 | 47 % | 13 evaluations in 600 s (the first 252 s) |
+| | PackingSolver, `binpacking`, polygons or arcs, grain or 4 turns or any angle | 3 | 47 % | 0.03–0.1 s, no better in 60–120 s |
+| | PackingSolver, tree search queue 64 (deterministic) | 3 | 47 % | 4 s |
+| | PackingSolver, `knapsack` on 2 sheets | 2, 40 of 45 placed | 64 % | 300 s, still improving at 215 s |
+| All examples, mixed stock, grain per part (hidden floor strips free, drawer faces across) | PackingSolver, `variable` | 5 | 76 % | best at 1.7 s; two strips turned 90 |
 
 ## SVGnest's quirks
 
@@ -114,19 +126,48 @@ Run by `ps_nest.py` (its own venv: `.venv`, `pip install packingsolver`).
   (anytime and deterministic modes, 20 s limit); a run limited by time may
   still differ on a slower machine. `sequential` mode placed nothing in
   20 s.
-- Part-in-part: works (frame case). On the examples' real parts no
-  opening can take a part (the large ones are triangles, and the grain
-  rules out the rest), so a real case needs a part with a large rectangular
-  opening.
-- **Open**: `leftovers` (fewest sheets, then the largest leftover) did not
-  push the parts to one side in any of its modes within 20 s: the van's
-  parts still reach 2366 of 2500 mm, where they fit in about 1900. Whether
-  a longer run, another mode or the `variable` objective with costs does
-  better is to be tried.
-- Not tried yet: true arcs (the layout's outlines are sampled; the
-  emitter's arc recovery could give PackingSolver the arcs), defects (used
-  parts of an offcut), quality rules, and its rectangle guillotine solver
-  for sawing full sheets into blanks for the 2000 x 1000 bed.
+- Grain per part: each part type takes its own list of turns (ranges
+  `(start, end, mirror)`; equal ends give one angle). `jobs.py` turns each
+  part so its grain runs along the sheet (the layout's `grain` when set,
+  else its longer side, `--across` its shorter one) and gives it 0 and 180;
+  parts named by `--free-parts` (hidden ones, say) get 90 degree steps or
+  any angle. In the mixed test it kept every grain along the sheet and used
+  the freedom where it had it. No example sets `grain()` yet, so the
+  fallback decided everywhere.
+- Part-in-part: works with polygons (the frame case, the face frame with
+  the van, a blob inside the ring). It fails when the part with the hole,
+  or the hole, is a full circle (`build_circle`), and in some cases where
+  both the outline and the hole have arcs: a disc never went into a ring
+  given as arcs, while the same ring as a polygon took it at once [tested
+  in isolation, 2026-10-14; probably a PackingSolver bug, not reported]. So
+  holes go in as polygons.
+- True arcs: accepted and exact (areas within 0.015 % of a 0.01 mm
+  sampling), but they gave the same nests as polygons simplified to
+  0.25 mm, so polygons are enough, and safer for holes (above). Coarser
+  polygons (1, 2, 5 mm) did not help the search either.
+- Irregular parts: the first nest interlocks shapes (wavy shelves face to
+  face, chair sides nested, rails in pairs), but the default search (tree
+  search plus "sequential single knapsack" for bin packing, per its
+  source) stops improving after its first pass on these parts; a tree
+  search with queue 64 finished in 4 s with the same 3 sheets. Knapsack
+  on a fixed number of sheets runs column generation and improves for
+  minutes (107 improvements in 300 s).
+- Offcuts with any outline and defects (a knot, a used corner): an
+  L-shaped offcut took 14 of the van's 20 parts (knapsack), all inside its
+  outline; a defect is kept clear by `item_defect_minimum_spacing`, set per
+  defect (the spacing; by default parts may touch it). A sheet type with 0
+  copies is refused, so `ps_nest.py` leaves those out.
+- Packing toward one side (an offcut strip across the sheet): **open**.
+  The `leftovers` objective did not push the parts aside in any of its
+  modes; its strip packing (`OpenDimensionX`) found nothing on the sheet's
+  own length and 3090 mm on a longer one for parts that bin packing fits
+  in 2366; a binary search on the sheet's length with bin packing
+  (`--compact`) works, but on the sheets tried it found no shorter length
+  within 3 s per step (the van's sheet is nearly full lengthwise anyway: by
+  hand the parts need about 2440 mm).
+- Not tried yet: quality rules, and sawing full sheets into blanks for the
+  2000 x 1000 bed (its rectangle guillotine solver could saw the blanks the
+  nest chooses).
 
 ## Files
 
@@ -134,12 +175,16 @@ Run by `ps_nest.py` (its own venv: `.venv`, `pip install packingsolver`).
   outline = outline less through cuts, simplified so that it never cuts
   into the part) and an SVG for SVGnest's page.
 - `cases.py`: synthetic parts (squares, a frame with an opening, mixed
-  shapes).
+  shapes, a face frame).
+- `irregular.py`: irregular parts, each with true arcs, a fine sampling for
+  the checks and a containing polygon for the solvers.
 - `jobs.py`: a parts file to a job: sheets (`2500x1250`, `2000x1000*2`, or
-  several bridged for SVGnest), grain, spacing and margin, SVGnest's
-  options and patches.
+  several bridged for SVGnest), offcuts (`--offcut "x,y ..."`) and defects,
+  grain and turns per part, spacing and margin, SVGnest's options and
+  patches.
 - `svgnest/nest.mjs`: SVGnest headless.
-- `ps_nest.py`: PackingSolver.
+- `ps_nest.py`: PackingSolver (objectives, modes, `--arcs`, `--compact`,
+  `--set` for its parameters).
 - `check.py`: checks any result against its job and draws it.
 
 ```bash

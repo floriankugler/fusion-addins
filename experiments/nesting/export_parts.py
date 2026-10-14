@@ -100,6 +100,8 @@ def export(layouts: list[Path], out: Path, tolerance: float, sheet: tuple[float,
                         "thickness": part["thickness"],
                         "grained": part["grained"],
                         "grain": part["grain"],
+                        # The grain as an axis of the outline (u is x, v is y), when set.
+                        "grain_axis": {part["axes"]["u"]: "x", part["axes"]["v"]: "y"}.get(part["grain"] or ""),
                         "area": piece.area,
                         "size": [x1 - x0, y1 - y0],
                         "vertices_true": len(piece.exterior.coords) - 1,

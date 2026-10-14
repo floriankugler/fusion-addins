@@ -4,6 +4,8 @@
 - `frame`: a 1200 x 800 frame with a 1000 x 600 opening, and small parts
   that fit in the opening.
 - `mixed`: rectangles, L shapes and triangles of assorted sizes.
+- `faceframe`: a cabinet's face frame, 1400 x 720 with a 1300 x 620
+  opening (inner corners rounded 6 for the cutter), to nest with the van.
 
     .venv/bin/python experiments/nesting/cases.py --out experiments/nesting/out/parts/cases
 """
@@ -51,12 +53,17 @@ def mixed(seed: int = 3) -> list[dict]:
     return out
 
 
+def faceframe() -> list[dict]:
+    opening = box(50, 50, 1350, 670).buffer(-6, join_style="mitre").buffer(6, quad_segs=16)
+    return [part("faceframe", Polygon(box(0, 0, 1400, 720).exterior.coords, [opening.exterior.coords]))]
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--out", type=Path, required=True)
     a = ap.parse_args()
     a.out.mkdir(parents=True, exist_ok=True)
-    for name, parts in [("squares", squares()), ("frame", frame()), ("mixed", mixed())]:
+    for name, parts in [("squares", squares()), ("frame", frame()), ("mixed", mixed()), ("faceframe", faceframe())]:
         (a.out / f"{name}.json").write_text(json.dumps({"material": name, "tolerance": 0, "parts": parts}, indent=1))
         print(name, len(parts), "parts")
 

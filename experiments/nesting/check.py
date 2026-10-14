@@ -30,6 +30,20 @@ def placed_shape(part: dict, rotation: float, translation: list[float]) -> Polyg
     return affinity.translate(poly, translation[0], translation[1])
 
 
+def sheet_outline(job: dict, sheet: int) -> Polygon:
+    """A sheet type's outline: its rectangle, or an offcut's outline."""
+    t = job["sheet_types"][sheet] if "sheet_types" in job else {}
+    if t.get("outline"):
+        return Polygon(t["outline"])
+    w, h = job["sheets"][sheet]
+    return box(0, 0, w, h)
+
+
+def sheet_defects(job: dict, sheet: int) -> list[Polygon]:
+    t = job["sheet_types"][sheet] if "sheet_types" in job else {}
+    return [Polygon(d) for d in t.get("defects", [])]
+
+
 def check(job: dict, result: dict) -> tuple[dict, list[tuple[int, int, dict, Polygon]]]:
     parts = job["parts"]
     bin_poly = Polygon(job["bin"]["rings"][0])
@@ -50,12 +64,24 @@ def check(job: dict, result: dict) -> tuple[dict, list[tuple[int, int, dict, Pol
         for item in items:
             part = parts[item["index"]]
             shape = placed_shape(part, item["rotation"], item["translation"])
-            if round(item["rotation"], 6) % 360 not in allowed:
+            own_turns = part.get("rotations")
+            if own_turns == "any" or result.get("continuous"):
+                pass
+            elif own_turns is not None:
+                if round(item["rotation"], 6) % 360 not in {round(r, 6) % 360 for r in own_turns}:
+                    problems.append(f"{part['id']}: turned {item['rotation']} (its turns {own_turns})")
+            elif round(item["rotation"], 6) % 360 not in allowed:
                 problems.append(f"{part['id']}: turned {item['rotation']} (allowed {sorted(allowed)})")
+            if part.get("grain_x") and abs(math.sin(math.radians(item["rotation"]))) > 1e-9:
+                problems.append(f"{part['id']}: grain not along the sheet (turned {item['rotation']})")
             if own_sheet is not None:
-                w, h = job["sheets"][own_sheet]
-                if not shape.within(box(0, 0, w, h).buffer(1e-6)):
-                    problems.append(f"{part['id']}: off its {w:g} x {h:g} sheet")
+                outline = sheet_outline(job, own_sheet)
+                if not shape.within(outline.buffer(1e-6)):
+                    problems.append(f"{part['id']}: off its sheet ({own_sheet})")
+                for defect in sheet_defects(job, own_sheet):
+                    if shape.distance(defect) < spacing - 1e-6:
+                        problems.append(f"{part['id']}: {shape.distance(defect):.2f} mm from a defect "
+                                        f"of sheet {own_sheet}")
                 placed.append((b, own_sheet, part, shape))
                 continue
             if not shape.within(bin_poly.buffer(1e-6)):
@@ -84,8 +110,7 @@ def check(job: dict, result: dict) -> tuple[dict, list[tuple[int, int, dict, Pol
 
     def sheet_rect(sheet: int) -> Polygon:
         if own:
-            w, h = job["sheets"][sheet]
-            return box(0, 0, w, h)
+            return sheet_outline(job, sheet)
         return rects[sheet]
 
     for _b, sheet, _p, shape in placed:
@@ -126,8 +151,8 @@ def svg(job: dict, result: dict, placed: list[tuple[int, int, dict, Polygon]], p
     rows: list[tuple[list[Polygon], Polygon | None]] = []  # (outlines, background)
     for entry in result["bins"] or [[]]:
         if isinstance(entry, dict):
-            w, h = job["sheets"][entry["sheet"]]
-            rows.append(([box(0, 0, w, h)], box(0, 0, w, h)))
+            outline = sheet_outline(job, entry["sheet"])
+            rows.append(([outline, *sheet_defects(job, entry["sheet"])], outline))
         else:
             rows.append(([box(*r) for r in job["sheet_rects"]], bin_poly))
     pad = 60
@@ -161,6 +186,12 @@ def svg(job: dict, result: dict, placed: list[tuple[int, int, dict, Polygon]], p
             out.append(f'<path d="{path_d(shape, dy)}" fill="#7aa6d8" fill-opacity="0.75" '
                        f'fill-rule="evenodd" stroke="#1d4f8a" stroke-width="1.5"/>')
             c = shape.representative_point()
+            if part.get("grain_x"):
+                # The grain: a line along the sheet's length, through the part.
+                x0, _y0, x1, _y1 = shape.bounds
+                length = min(0.6 * (x1 - x0), 300)
+                out.append(f'<line x1="{c.x - length / 2:.1f}" y1="{dy - c.y + 14:.1f}" x2="{c.x + length / 2:.1f}" '
+                           f'y2="{dy - c.y + 14:.1f}" stroke="#8a5a1d" stroke-width="3" stroke-dasharray="18 8"/>')
             size = max(10, min(40, math.sqrt(shape.area) / 6))
             out.append(f'<text x="{c.x:.1f}" y="{dy - c.y:.1f}" font-size="{size:.0f}" text-anchor="middle" '
                        f'dominant-baseline="middle" fill="#102a4a">{part["id"]}</text>')

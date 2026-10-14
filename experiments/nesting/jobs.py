@@ -10,10 +10,14 @@ side by side, `--gap` apart, bottom-aligned, joined along their bottom edge
 by bridges `--bridge` mm high, too thin for a part to cross. SVGnest
 still opens more copies of that whole polygon when the parts do not fit.
 
-Grain (`--grain long`): every part is first turned so that its longer side
-lies along x, the sheet's length, as the grain of birch plywood runs; with
-`--rotations 2` SVGnest may then only turn it by 180 degrees. `--grain free`
-leaves the parts as they are.
+Grain (`--grain long`): every part is first turned so that its grain lies
+along x, the sheet's length, as the grain of birch plywood runs: the
+layout's grain when the part has one (`grain_axis`), else its longer side,
+or its shorter side for parts named by `--across`. Each part then gets its
+own turns (`rotations` in the job): 0 and 180 for a part with grain, the
+job's `--rotations` steps (or any angle, `--free-any`) for parts named by
+`--free-parts` and for all parts with `--grain free`. SVGnest takes one
+count for all parts (`config.rotations`); ps_nest.py takes each part's.
 
 Spacing (`--offset own`, the default): the parts are grown here by half
 the spacing, mitred, and simplified by `--simplify` (the grown outline still
@@ -63,6 +67,20 @@ def bridged(sheets: list[tuple[float, float]], gap: float, bridge: float,
     return orient(shape), rects
 
 
+def turned_arcs(arcs: list | None) -> list | None:
+    """A part's arcs (irregular.py) turned by 90 degrees about the origin."""
+    if arcs is None:
+        return None
+    out = []
+    for ring in arcs:
+        if isinstance(ring, dict):
+            cx, cy, r = ring["circle"]
+            out.append({"circle": [-cy, cx, r]})
+        else:
+            out.append([[-e[1], e[0], *e[2:]] for e in ring])
+    return out
+
+
 def rings_of(p: Polygon) -> list[list[list[float]]]:
     def r(c) -> list[list[float]]:
         return [[round(x, 4), round(y, 4)] for x, y in list(c.coords)[:-1]]
@@ -74,11 +92,18 @@ def main() -> None:
     ap.add_argument("parts", type=Path, nargs="+", help="parts files; their parts are pooled")
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--sheets", nargs="+", default=["2500x1250"])
+    ap.add_argument("--offcut", action="append", default=[], metavar='"x,y x,y ..."',
+                    help="an offcut on hand, its outline (one of it; for ps_nest.py), after --sheets")
+    ap.add_argument("--defect", action="append", default=[], metavar='"i:x,y x,y ..."',
+                    help="an area of sheet type i (counting --sheets, then --offcut) to keep clear")
     ap.add_argument("--bin-polygon", default=None,
                     help='the bin as "x,y x,y ..." (an offcut), instead of --sheets')
     ap.add_argument("--gap", type=float, default=100.0)
     ap.add_argument("--bridge", type=float, default=1.0)
     ap.add_argument("--grain", choices=["long", "free"], default="long")
+    ap.add_argument("--across", nargs="*", default=[], help="parts (id prefixes) whose grain runs across their long side")
+    ap.add_argument("--free-parts", nargs="*", default=[], help="parts (id prefixes) whose grain does not matter")
+    ap.add_argument("--free-any", action="store_true", help="free parts turn by any angle, not in steps")
     ap.add_argument("--copies", type=int, default=1, help="each part this many times")
     ap.add_argument("--only", nargs="*", default=None, help="keep parts whose id starts with one of these")
     ap.add_argument("--spacing", type=float, default=10.0, help="between parts, mm")
@@ -131,14 +156,26 @@ def main() -> None:
             if a.only is not None and not any(p["id"].startswith(o) for o in a.only):
                 continue
             poly = Polygon(p["rings"][0], p["rings"][1:])
+            true = Polygon(p["true_rings"][0], p["true_rings"][1:]) if p.get("true_rings") else poly
+            arcs = p.get("arcs")
             x0, y0, x1, y1 = poly.bounds
+            names = (p["id"], f"{p.get('source')}:{p['id']}")
+            free = a.grain == "free" or any(n.startswith(f) for f in a.free_parts for n in names)
+            if p.get("grain_axis"):
+                along_y = p["grain_axis"] == "y"
+            else:
+                along_y = (y1 - y0) > (x1 - x0)
+                if any(n.startswith(f) for f in a.across for n in names):
+                    along_y = not along_y
             turned = 0
-            if a.grain == "long" and (y1 - y0) > (x1 - x0):
+            if not free and along_y:
                 poly, turned = affinity.rotate(poly, 90, origin=(0, 0)), 90
+                true = affinity.rotate(true, 90, origin=(0, 0))
+                arcs = turned_arcs(arcs)
             x0, y0, x1, y1 = poly.bounds
             w, h = x1 - x0, y1 - y0
             w, h = w + 2 * margin, h + 2 * margin
-            fits = any((w <= sw and h <= sh) if a.grain == "long" or a.rotations < 4
+            fits = any((w <= sw and h <= sh) if not free or a.rotations < 4
                        else (w <= sw and h <= sh) or (w <= sh and h <= sw) for sw, sh in sheets)
             if not fits:
                 left_out.append(f"{p['id']} {w:.0f} x {h:.0f}")
@@ -155,15 +192,34 @@ def main() -> None:
                     "source": p.get("source"),
                     "area": p["area"],
                     "turned": turned,
+                    # This part's turns in degrees, or "any"; a part with grain
+                    # has it along x here, so 0 and 180 keep it along the sheet.
+                    "rotations": ("any" if a.free_any else [i * 360 / a.rotations for i in range(a.rotations)])
+                                 if free else [0.0, 180.0],
+                    "grain_x": not free,
                     "rings": rings_of(orient(solver_poly)),
-                    "check_rings": rings_of(orient(poly)),
+                    # What PackingSolver gets as polygons: the outline that
+                    # contains the part, without the spacing.
+                    "ps_rings": rings_of(orient(poly)),
+                    "check_rings": rings_of(orient(true)),
+                    "arcs": arcs,
                 })
 
+    types = [{"width": w, "height": h, "copies": n} for w, h, n in sheet_types]
+    for text in a.offcut:
+        outline = orient(Polygon([tuple(float(v) for v in xy.split(",")) for xy in text.split()]))
+        x0, y0, x1, y1 = outline.bounds
+        assert (x0, y0) == (0, 0), "an offcut's outline starts at its bounding box's corner 0,0"
+        types.append({"width": x1, "height": y1, "copies": 1,
+                      "outline": [list(c) for c in list(outline.exterior.coords)[:-1]]})
+    for text in a.defect:
+        i, _, pts = text.partition(":")
+        types[int(i)].setdefault("defects", []).append([[float(v) for v in xy.split(",")] for xy in pts.split()])
     job = {
         "material": material,
-        "sheets": [list(s) for s in sheets],
+        "sheets": [list(s) for s in sheets] + [[t["width"], t["height"]] for t in types[len(sheets):]],
         # For solvers that take sheet types (ps_nest.py); copies -1: as many as needed.
-        "sheet_types": [{"width": w, "height": h, "copies": n} for w, h, n in sheet_types],
+        "sheet_types": types,
         "sheet_rects": rects,
         "offcut": [list(c) for c in list(Polygon([tuple(float(v) for v in xy.split(",")) for xy in a.bin_polygon.split()]).exterior.coords)[:-1]] if a.bin_polygon else None,
         "grain": a.grain,
