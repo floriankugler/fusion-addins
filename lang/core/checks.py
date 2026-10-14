@@ -115,13 +115,19 @@ _HOLE_SEGMENTS = 16
 
 
 def fits_sheet(scope: Scope) -> list[str]:
+    """Parts whose outline does not fit their material's sheet, either way
+    round. A part as large as its sheet fits, give or take 1e-6 mm: its
+    extent is a difference of world coordinates, which far from the origin
+    comes out a little larger [found by fuzzing, 2026-10-14: a part from
+    -1219.9 to -976.9 is 243.0000000000001 high]."""
     problems: list[str] = []
     for part in scope.all_parts():
         sheet = part.material.sheet
         if sheet is None:
             continue
         w, h = part.outline.width, part.outline.height
-        if not ((w <= sheet[0] and h <= sheet[1]) or (w <= sheet[1] and h <= sheet[0])):
+        a, b = w - _TOLERANCE, h - _TOLERANCE
+        if not ((a <= sheet[0] and b <= sheet[1]) or (a <= sheet[1] and b <= sheet[0])):
             problems.append(f"{part.path} ({w:g} x {h:g}) does not fit a {sheet[0]:g} x {sheet[1]:g} sheet")
     return problems
 

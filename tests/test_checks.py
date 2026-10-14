@@ -1,5 +1,6 @@
-"""`no_interference` with hardware: bodies made of world boxes against the
-parts' material and against each other."""
+"""The design checks: `no_interference` with hardware (bodies made of world
+boxes against the parts' material and against each other), and
+`fits_sheet`."""
 
 from lang import *
 from lang.core.layout_types import BoxDict, HardwareBodyLayout
@@ -98,3 +99,18 @@ def test_the_boxes_of_one_body_may_overlap_each_other():
     m.place_hardware("runner", [_body("left", _box((0, 0, 50), (100, 20, 60)), _box((50, 0, 55), (150, 20, 70)),
                                       _box((0, 0, 18), (150, 5, 50)))])            # stands on the panel
     assert no_interference(m) == []
+
+
+def test_a_part_as_large_as_its_sheet_fits_it_far_from_the_origin():
+    """Its height is a difference of world coordinates, -976.9 less
+    -1219.9, which comes out 1e-13 more than 243 [found by fuzzing,
+    2026-10-14]."""
+    with module("m", Box.from_size(width=300, depth=300, height=500, origin=(0, 0, -1220))) as m:
+        b = board("b", material("birch", t=9, sheet=(57, 243))).on(m.left).between(
+            m.bottom + 0.1, m.bottom + 243.1, m.front, m.front + 57)
+    assert b.outline.height > 243
+    assert fits_sheet(m) == []
+    with module("n", Box.from_size(width=300, depth=300, height=500)) as n:
+        board("b", material("birch", t=9, sheet=(57, 243))).on(n.left).between(n.bottom, n.bottom + 243.01,
+                                                                               n.front, n.front + 57)
+    assert fits_sheet(n) == ["n.b (57 x 243.01) does not fit a 57 x 243 sheet"]
