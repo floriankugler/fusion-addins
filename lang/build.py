@@ -22,7 +22,7 @@ import traceback
 from pathlib import Path
 
 from .core.errors import LangError
-from .core.layout import write_layout
+from .core.layout import build_layout, write_layout
 from .core.layout_types import Layout
 from .core.scope import registry
 
@@ -33,13 +33,17 @@ _LANGUAGE = (LANG_DIR, LANG_DIR.parent / "lib")     # the language and the share
 _NOT_BUILD_CODE = (*_LANGUAGE, Path(sys.prefix).resolve(), Path(sys.base_prefix).resolve())
 
 
-def run_build(build_file: str | Path, out_dir: str | Path, scene: bool = True) -> Layout:
-    """Runs the build file, writes its layout (and with `scene` the
-    preview's glTF scene) into `out_dir`, and returns the layout. Problems
-    meshing the scene are printed to stderr as `preview: ...`."""
+def layout_of(build_file: str | Path) -> Layout:
+    """Runs the build file and returns its layout, writing nothing."""
+    run(build_file)
+    return build_layout()
+
+
+def run(build_file: str | Path) -> None:
+    """Runs the build file in a fresh registry; its modules are then in
+    `registry`."""
     registry.reset()
     build_path = Path(build_file).resolve()
-    out_path = Path(out_dir)
     before = set(sys.modules)
     sys.path.insert(0, str(build_path.parent))
     try:
@@ -47,6 +51,14 @@ def run_build(build_file: str | Path, out_dir: str | Path, scene: bool = True) -
     finally:
         sys.path.pop(0)
         _forget_modules_in(build_path.parent, before)
+
+
+def run_build(build_file: str | Path, out_dir: str | Path, scene: bool = True) -> Layout:
+    """Runs the build file, writes its layout (and with `scene` the
+    preview's glTF scene) into `out_dir`, and returns the layout. Problems
+    meshing the scene are printed to stderr as `preview: ...`."""
+    run(build_file)
+    out_path = Path(out_dir)
     layout = write_layout(out_path / "layout.json")
     if scene:
         from .preview.mesh import write_scene

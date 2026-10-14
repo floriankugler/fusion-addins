@@ -34,14 +34,16 @@ from __future__ import annotations
 import gc
 import json
 import math
+import os
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Callable, cast
 
 import adsk.core
 import adsk.fusion
 
 from .loops import cross, dot, on_curve, oriented, polygon_loop
+from .nested import Matrix, NestDocPlan, plan_nest
 from .plan import (AXES, Arc, Axis, ChamferStep, CircleContour, Contour, EdgeContour, FaceRef, HardwarePlan,
                    HoleStep, Line, Loops, OutlineContour, PartPlan, Plan, PocketStep, Point3, ShapeContour, Step, Vec,
                    VGrooveStep, plan_layout)
@@ -555,3 +557,95 @@ def emit_file(path: str, design: adsk.fusion.Design | None = None,
     with open(path) as fh:
         layout: Layout = json.load(fh)
     return emit_layout(layout, design, design_type, log)
+
+
+# -- nests -------------------------------------------------------------------------------------------
+
+#: How opaque a blank's stock body is drawn, so the parts on it show.
+STOCK_OPACITY = 0.25
+
+
+def _matrix(rows: Matrix) -> adsk.core.Matrix3D:
+    """A 3 x 4 matrix in mm as Fusion's Matrix3D (translation in cm)."""
+    m = adsk.core.Matrix3D.create()
+    m.setWithArray([rows[0][0], rows[0][1], rows[0][2], rows[0][3] * MM,
+                    rows[1][0], rows[1][1], rows[1][2], rows[1][3] * MM,
+                    rows[2][0], rows[2][1], rows[2][2], rows[2][3] * MM,
+                    0.0, 0.0, 0.0, 1.0])
+    return m
+
+
+def _component_name(text: str) -> str:
+    """A path as a component name: Fusion refuses some characters in them."""
+    return "".join(" " if c in ':/\\*?"<>|' else c for c in text)
+
+
+class NestEmitter(Emitter):
+    """Draws a nest's document: per piece of stock a component, in it a
+    component per blank at its place, holding the blank's stock body and a
+    component per part, whose occurrence carries the nest's transform; the
+    part's body is drawn inside as in a module document."""
+
+    def emit_nest(self, doc: NestDocPlan) -> Report:
+        t0 = time.perf_counter()
+        self.report.checks.extend(doc.problems)
+        identity = adsk.core.Matrix3D.create()
+        for sheet in doc.sheets:
+            sheet_comp = self._placed(self.root, f"{sheet.stock} {sheet.name} ({sheet.size[0]:g} x {sheet.size[1]:g})",
+                                      identity)
+            for blank in sheet.blanks:
+                ox, oy, oz = blank.origin
+                blank_comp = self._placed(sheet_comp, f"blank {blank.name}",
+                                          _matrix([[1.0, 0.0, 0.0, ox], [0.0, 1.0, 0.0, oy], [0.0, 0.0, 1.0, oz]]))
+                self._stock_body(blank_comp, blank.name, blank.size)
+                for placed in blank.parts:
+                    self.log(f"part {placed.path} on blank {blank.name}")
+                    key = ("nest", sheet.name, blank.name, placed.path)
+                    self._components[key] = self._placed(blank_comp, _component_name(placed.path),
+                                                         _matrix(placed.transform))
+                    try:
+                        self._emit_part(replace(placed.part, component=key))
+                    except RuntimeError as error:
+                        self._problem(f"{placed.path}: the body could not be made ({error}); the part is left out.")
+        self.report.seconds = time.perf_counter() - t0
+        self.report.document = self.design.parentDocument.name
+        return self.report
+
+    def _placed(self, parent: adsk.fusion.Component, name: str, matrix: adsk.core.Matrix3D) -> adsk.fusion.Component:
+        occ = parent.occurrences.addNewComponent(matrix)
+        occ.component.name = name
+        return occ.component
+
+    def _stock_body(self, blank_comp: adsk.fusion.Component, name: str, size: tuple[float, float, float]) -> None:
+        """The blank as a body of its own, in a component drawn see-through."""
+        stock = self._placed(blank_comp, f"stock {name}", adsk.core.Matrix3D.create())
+        w, h, t = size
+        box = self.tmp.createBox(adsk.core.OrientedBoundingBox3D.create(
+            _pt((w / 2, h / 2, t / 2)), _vec((1.0, 0.0, 0.0)), _vec((0.0, 1.0, 0.0)), w * MM, h * MM, t * MM))
+        self._add_bodies(stock, [box])[0].name = f"blank {name}"
+        stock.opacity = STOCK_OPACITY
+
+
+def emit_nest(nest: object, layout: Layout, material: str | None = None, design_type: str = "direct",
+              log: Log | None = None) -> list[Report]:
+    """Draws a nest into a new document per material (or the one named)."""
+    reports: list[Report] = []
+    for doc in plan_nest(nest, layout, material):
+        design = new_document(design_type)
+        gc.disable()
+        try:
+            reports.append(NestEmitter(design, log).emit_nest(doc))
+        finally:
+            gc.enable()
+    return reports
+
+
+def emit_nest_file(path: str, material: str | None = None, design_type: str = "direct",
+                   log: Log | None = None) -> list[Report]:
+    """Draws a nest file (`nest.json`) with the layout written beside it
+    (`nest.layout.json`)."""
+    with open(path) as fh:
+        nest = json.load(fh)
+    with open(os.path.join(os.path.dirname(path), "nest.layout.json")) as fh:
+        layout: Layout = json.load(fh)
+    return emit_nest(nest, layout, material, design_type, log)

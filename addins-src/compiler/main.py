@@ -3,7 +3,9 @@
 Two commands so far:
 
 - Compile: pick a layout file written by `lang.build` and draw it into a
-  new direct-modeling document with `lang.emit`.
+  new direct-modeling document with `lang.emit`; or a nest file written by
+  `lang.nest` (`nest.json`) and draw each material's nest into a document
+  of its own (`lang.emit.nested`).
 - Snapshot: read the active document, the master, into a snapshot file
   for build files (`lang.emit.snapshot`).
 
@@ -11,6 +13,7 @@ Copy Path comes later.
 """
 import importlib
 import importlib.util
+import json
 import os
 import sys
 from types import ModuleType
@@ -77,12 +80,13 @@ class Compiler(addin.Addin):
 
     @property
     def plugin_desc(self) -> str:
-        return "Draws a layout file of the modeling language into a new document."
+        return "Draws a layout or nest file of the modeling language into new documents."
 
     @property
     def plugin_tooltip(self) -> str:
         return ("Pick a layout.json written by the modeling language's build step and "
-                "draw its parts into a new direct-modeling document.")
+                "draw its parts into a new direct-modeling document, or a nest.json written by "
+                "its nest step and draw each material's sheets, blanks and parts into a document.")
 
     @property
     def has_command_ui(self) -> bool:
@@ -113,7 +117,7 @@ class Compiler(addin.Addin):
         global _last_dir
         dialog = self.ui.createFileDialog()
         dialog.title = "Compile layout"
-        dialog.filter = "Layout files (*.json);;All files (*.*)"
+        dialog.filter = "Layout and nest files (*.json);;All files (*.*)"
         dialog.isMultiSelectEnabled = False
         dialog.initialDirectory = _last_dir or os.path.join(REPO_DIR, "out")
         if dialog.showOpen() != adsk.core.DialogResults.DialogOK:
@@ -121,9 +125,15 @@ class Compiler(addin.Addin):
         path = dialog.filename
         _last_dir = os.path.dirname(path)
         emit = load_emit_module("fusion")
-        report = emit.emit_file(path, log=lambda line: None)
+        with open(path) as fh:
+            is_nest = "materials" in json.load(fh)
+        if is_nest:
+            reports = emit.emit_nest_file(path, log=lambda line: None)
+            summary = "\n\n".join(r.summary() for r in reports)
+        else:
+            summary = emit.emit_file(path, log=lambda line: None).summary()
         self.app.activeViewport.fit()
-        self.ui.messageBox(report.summary(), "Compile layout")
+        self.ui.messageBox(summary, "Compile layout")
 
 
 class Snapshot(addin.Addin):

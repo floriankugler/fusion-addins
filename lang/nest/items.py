@@ -1,0 +1,290 @@
+"""The parts of a layout as the nest takes them: per material, each part's
+machine outline seen from its machining face, the turns it may take, and
+how it maps back into the world.
+
+A part lies on its blank with its machining face up (`machine` in the
+layout), so the nest sees its outline from that face: its (u, v) outline as
+it is where u x v points out of that face, else mirrored (u negated). The
+outline is the layout's, less the through pockets and through holes; an
+opening stays open for other parts where it could take the smallest of
+them (its inside, the spacing in from its edge, at least that part's area)
+and is filled where it could not, which spares the solver its vertices.
+
+The solver gets a polygon that contains the true outline: grown by 1.5
+times `TOLERANCE` (mitred, so rectangles stay rectangles) and simplified by
+`TOLERANCE`, at most about 0.6 mm outside it (the experiments: true arcs
+nested no better than polygons simplified to 0.25 mm). Openings go in as
+polygons, never as circles (PackingSolver puts nothing into a circular
+hole). Everything is moved so that the solver's polygon starts at (0, 0).
+
+Turns [Florian, 2026-10-14]: a part with grain keeps it along the sheet's
+length (x): turned by 0 or 180 degrees when its grain runs along its u,
+by 90 or 270 along its v. A part of a material without grain, or one whose
+grain the build left unset, turns by any 90 degree step. No part is ever
+mirrored: its machining face stays up.
+"""
+from __future__ import annotations
+
+import math
+from dataclasses import dataclass, field
+
+from shapely import Point, Polygon, affinity, union_all
+from shapely.geometry.base import BaseGeometry
+from shapely.geometry.polygon import orient
+
+from ..core.errors import LangError
+from ..core.geometry import parts_of
+from ..core.layout_types import Layout, PartLayout, Rings
+from .workshop import Workshop, fits
+
+#: How far (mm) the solver's polygon may be simplified (see the module's doc).
+TOLERANCE = 0.25
+AXES = ("x", "y", "z")
+#: Cyclic orders of the world axes: (u, v, t) in one of these is right-handed.
+_RIGHT_HANDED = {("x", "y", "z"), ("y", "z", "x"), ("z", "x", "y")}
+
+
+@dataclass(frozen=True)
+class PartFrame:
+    """How a part's world coordinates map to its nest frame: x, y in the
+    plane seen from the machining face (from the solver polygon's corner),
+    z up from the face the part lies on, the machining face at z = t."""
+    t: str
+    u: str
+    v: str
+    #: Whether u is negated (the outline seen from the machining face is mirrored).
+    mirror: bool
+    #: +1 when the machining face is the part's +t face, else -1.
+    up: int
+    #: The part's extent along t (world mm).
+    t_lo: float
+    t_hi: float
+    #: What is taken off the (possibly mirrored) u and v so the solver's polygon starts at 0.
+    x0: float
+    y0: float
+
+    def matrix(self) -> list[list[float]]:
+        """World mm to the nest frame, a 3 x 4 matrix (rows x, y, z)."""
+        def row(axis: str, scale: float, offset: float) -> list[float]:
+            r = [0.0, 0.0, 0.0, offset]
+            r[AXES.index(axis)] = scale
+            return r
+        x = row(self.u, -1.0 if self.mirror else 1.0, -self.x0)
+        y = row(self.v, 1.0, -self.y0)
+        z = row(self.t, float(self.up), -self.t_lo if self.up > 0 else self.t_hi)
+        return [x, y, z]
+
+    def placed(self, turn: float, at: tuple[float, float]) -> list[list[float]]:
+        """World mm to a blank's frame for the part turned by `turn` degrees
+        (counter-clockwise, about the nest frame's origin) and moved to `at`."""
+        c, s = _cos_sin(turn)
+        x, y, z = self.matrix()
+        rx = [c * a - s * b for a, b in zip(x, y)]
+        ry = [s * a + c * b for a, b in zip(x, y)]
+        rx[3] += at[0]
+        ry[3] += at[1]
+        return [rx, ry, z]
+
+
+@dataclass
+class Item:
+    """A part to nest."""
+    path: str
+    material: str
+    thickness: float
+    #: The machine outline in the nest frame, with every opening.
+    shape: Polygon
+    #: What the solver gets: a polygon containing `shape`, with the openings that may take parts.
+    solver: Polygon
+    #: The turns it may take, degrees.
+    turns: tuple[float, ...]
+    #: Whether its grain must run along the sheet's length.
+    grained: bool
+    frame: PartFrame
+    #: The machining face (world name), which faces up.
+    up: str
+    area: float = field(init=False)
+
+    def __post_init__(self) -> None:
+        self.area = float(self.shape.area)
+
+    def placed(self, turn: float, at: tuple[float, float], solver: bool = False) -> Polygon:
+        """Its outline (or the solver's polygon) turned and moved as on a blank."""
+        return turned(self.solver if solver else self.shape, turn, at)
+
+    def size(self, turn: float) -> tuple[float, float]:
+        """The solver polygon's extent turned by `turn`: (along x, along y)."""
+        x0, y0, x1, y1 = turned(self.solver, turn).bounds
+        return x1 - x0, y1 - y0
+
+
+def turned(shape: Polygon, turn: float, at: tuple[float, float] = (0.0, 0.0)) -> Polygon:
+    """`shape` turned by `turn` degrees counter-clockwise about the origin,
+    then moved by `at`; a quarter turn exactly."""
+    c, s = _cos_sin(turn)
+    out = affinity.affine_transform(shape, [c, -s, s, c, at[0], at[1]])
+    assert isinstance(out, Polygon)
+    return out
+
+
+@dataclass(frozen=True)
+class LeftOut:
+    path: str
+    material: str
+    why: str
+
+
+@dataclass
+class Parts:
+    """A layout's parts by material, and those left out of the nest."""
+    by_material: dict[str, list[Item]]
+    left_out: list[LeftOut]
+
+
+def parts_of_layout(layout: Layout, spacing: float, material: str | None = None) -> Parts:
+    """The layout's parts to nest, by material (all, or the one named), and
+    those left out (`nest(False)`, manual, slats)."""
+    frame = {name: (value[1], 1 if value[0] == "+" else -1) for name, value in layout["frame"].items()}
+    raw: dict[str, list[tuple[PartLayout, Polygon, PartFrame]]] = {}
+    left_out: list[LeftOut] = []
+    for module in layout["modules"]:
+        for part in module["parts"]:
+            if material is not None and part["material"] != material:
+                continue
+            if not part["nest"]:
+                why = "slat" if part["kind"] == "slat" else "manual" if part["manual"] else "nest(False)"
+                left_out.append(LeftOut(part["path"], part["material"], why))
+                continue
+            shape, pf = _machine_outline(part, frame)
+            raw.setdefault(part["material"], []).append((part, shape, pf))
+    by_material: dict[str, list[Item]] = {}
+    for name, entries in raw.items():
+        smallest = min(shape.area for _p, shape, _f in entries)
+        by_material[name] = [_item(part, shape, pf, spacing, smallest) for part, shape, pf in entries]
+    return Parts(by_material, left_out)
+
+
+def check_sizes(parts: Parts, workshop: Workshop) -> None:
+    """Refuses parts that no blank takes: larger than the bed with its
+    margins, or than every piece of stock on hand for their material. The
+    message names each and how to leave it out."""
+    assert workshop.bed is not None
+    bed = workshop.bed
+    problems: list[str] = []
+    for name, items in parts.by_material.items():
+        stock = [(s.length, s.width) for s in workshop.sheets_for(name)] + \
+                [(o.length, o.width) for o in workshop.offcuts_for(name)]
+        if not stock:
+            raise LangError(f"No stock on hand for {name}: give a sheet for it (the workshop file's [[sheet]], "
+                            f"or --sheet '{name}:2470x1240').")
+        for item in items:
+            blanks = [(w + 2 * workshop.margin, h + 2 * workshop.margin) for w, h in map(item.size, item.turns)]
+            x0, y0, x1, y1 = item.shape.bounds
+            size = f"{item.path} ({x1 - x0:.0f} x {y1 - y0:.0f})"
+            if not any(fits(bw, bh, bed) for bw, bh in blanks):
+                problems.append(f"{size} does not fit the bed {bed[0]:g} x {bed[1]:g} with its margins; "
+                                "nest(False) saws it by hand")
+            elif not any(bw <= sl + 1e-6 and bh <= sw + 1e-6 for bw, bh in blanks if fits(bw, bh, bed)
+                         for sl, sw in stock):
+                problems.append(f"{size} fits no stock on hand for {name}" +
+                                (" with its grain along the stock's" if item.grained else ""))
+    if problems:
+        raise LangError("These parts cannot be nested:\n  " + "\n  ".join(problems))
+
+
+# -- one part ------------------------------------------------------------------------------
+
+def _machine_outline(part: PartLayout, frame: dict[str, tuple[str, int]]) -> tuple[Polygon, PartFrame]:
+    axes = part["axes"]
+    t, u, v = axes["t"], axes["u"], axes["v"]
+    machine_axis, up = frame[part["machine"]]
+    if machine_axis != t:
+        raise LangError(f"{part['path']}: its machining face {part['machine']} is not a big face.")
+    handed = 1 if (u, v, t) in _RIGHT_HANDED else -1
+    mirror = handed * up < 0
+    outline = _polygons(part["outline"])
+    openings: list[BaseGeometry] = []
+    for op in part["ops"]:
+        if op["kind"] == "pocket" and frame[op["face"]][0] == t and op["depth"] >= part["thickness"] - 1e-6:
+            openings += _polygons(op["shape"])
+        elif op["kind"] == "hole" and op["through"] and frame[op["face"]][0] == t:
+            openings.append(Point(op["u"], op["v"]).buffer(op["d"] / 2, quad_segs=16))
+    shape = union_all(outline)
+    if openings:
+        shape = shape.difference(union_all(openings))
+    pieces = [p for p in parts_of(shape) if p.area > 1e-6]
+    if len(pieces) != 1:
+        raise LangError(f"{part['path']}: its machine outline is in {len(pieces)} pieces; the nest takes a part "
+                        "in one.")
+    shape = pieces[0]
+    if mirror:
+        shape = affinity.scale(shape, -1.0, 1.0, origin=(0, 0))
+    assert isinstance(shape, Polygon)
+    shape = orient(shape)
+    lo, hi = part["box"]["min"][AXES.index(t)], part["box"]["max"][AXES.index(t)]
+    pf = PartFrame(t, u, v, mirror, up, lo, hi, 0.0, 0.0)
+    return shape, pf
+
+
+def _item(part: PartLayout, shape: Polygon, pf: PartFrame, spacing: float, smallest: float) -> Item:
+    # Openings that cannot take the smallest part are filled.
+    kept = [ring for ring in shape.interiors
+            if Polygon(ring).buffer(-spacing, join_style="mitre").area >= smallest - 1e-6]
+    solid = Polygon(shape.exterior, kept)
+    grown = solid.buffer(1.5 * TOLERANCE, join_style="mitre", mitre_limit=10)
+    simple = grown.simplify(TOLERANCE, preserve_topology=True)
+    if not isinstance(simple, Polygon) or simple.is_empty:
+        raise LangError(f"{part['path']}: its outline could not be simplified for the nest.")
+    simple = orient(simple)
+    if not simple.buffer(1e-6).contains(solid):
+        raise LangError(f"{part['path']}: the nest's outline would cut into the part.")
+    x0, y0, _x1, _y1 = simple.bounds
+    simple = affinity.translate(simple, -x0, -y0)
+    shape = affinity.translate(shape, -x0, -y0)
+    pf = PartFrame(pf.t, pf.u, pf.v, pf.mirror, pf.up, pf.t_lo, pf.t_hi, x0, y0)
+    grained = part["grained"] and part["grain"] is not None
+    if not grained:
+        turns: tuple[float, ...] = (0.0, 90.0, 180.0, 270.0)
+    elif part["grain"] == pf.u:
+        turns = (0.0, 180.0)
+    elif part["grain"] == pf.v:
+        turns = (90.0, 270.0)
+    else:
+        raise LangError(f"{part['path']}: its grain {part['grain']} is not in its plane.")
+    return Item(part["path"], part["material"], part["thickness"], shape, simple, turns, grained, pf,
+                part["machine"])
+
+
+def _polygons(rings: Rings) -> list[Polygon]:
+    """Rings as the layout writes them: an exterior (counter-clockwise),
+    then its holes (clockwise), then the next polygon."""
+    out: list[Polygon] = []
+    shell: list[list[float]] | None = None
+    holes: list[list[list[float]]] = []
+    for ring in rings:
+        if _ring_area(ring) > 0:
+            if shell is not None:
+                out.append(Polygon(shell, holes))
+            shell, holes = ring, []
+        else:
+            holes.append(ring)
+    if shell is not None:
+        out.append(Polygon(shell, holes))
+    return out
+
+
+def _ring_area(ring: list[list[float]]) -> float:
+    a = 0.0
+    for (x0, y0), (x1, y1) in zip(ring, ring[1:] + ring[:1]):
+        a += x0 * y1 - x1 * y0
+    return a / 2
+
+
+def _cos_sin(turn: float) -> tuple[float, float]:
+    """cos and sin of a turn in degrees, exact for the quarter turns."""
+    quarter = {0.0: (1.0, 0.0), 90.0: (0.0, 1.0), 180.0: (-1.0, 0.0), 270.0: (0.0, -1.0)}
+    exact = quarter.get(turn % 360.0)
+    if exact is not None:
+        return exact
+    a = math.radians(turn)
+    return math.cos(a), math.sin(a)

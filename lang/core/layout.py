@@ -5,6 +5,7 @@ The layout file is the contract between the language and its consumers
 """
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -67,6 +68,13 @@ def _export_value(value: object) -> ExportValue | float | str:
     except LangError:
         return str(value)
     return {"axis": pos.axis, "value": pos.value}
+
+
+def layout_hash(layout: Layout) -> str:
+    """The hash of a layout's content, whatever its formatting: a nest
+    records the layout it nested by it (`lang.nest`)."""
+    text = json.dumps(layout, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(text.encode()).hexdigest()[:16]
 
 
 def write_layout(path: str | Path) -> Layout:
