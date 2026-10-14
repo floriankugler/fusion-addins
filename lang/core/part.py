@@ -334,6 +334,15 @@ class Board:
         if shape is not None:
             sb = shape.bounds
             self._outline = shape.moved(lo[u_axis] - sb[0], lo[v_axis] - sb[1])
+            # The box's sides where the shape's edges are, when they differ by rounding only (the low
+            # corner plus the width against the limit as written) [found by fuzzing, 2026-10-14: a hole
+            # into such a narrow face was refused at some places, the outline not reaching it].
+            ob = self._outline.bounds
+            for k, along in enumerate((u_axis, v_axis)):
+                if abs(ob[k] - lo[along]) < 1e-9:
+                    lo[along] = ob[k]
+                if abs(ob[k + 2] - hi[along]) < 1e-9:
+                    hi[along] = ob[k + 2]
         else:
             self._outline = box_shape(lo[u_axis], lo[v_axis], hi[u_axis], hi[v_axis])
         if contours.trims:

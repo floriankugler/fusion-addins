@@ -326,6 +326,22 @@ def test_shapes_name_their_plane():
         rect(width=10)
 
 
+def test_a_shaped_board_s_box_lies_where_its_shape_s_edges_do():
+    """Found by fuzzing the placement: a board made of a rect between
+    limits as far apart as the rect is wide had its far edge at 110.2
+    where its box's side was at 110.19999999999999 (its low corner plus the
+    width, against the limit as written), so at that place a hole into
+    that narrow face was refused: the outline did not reach the face. Its
+    box takes the outline's edges where they differ by rounding only."""
+    for k, y in enumerate((0.0, 0.1)):
+        with module(f"m{k}", Box.from_size(width=600, depth=400, height=100, origin=(0, y, 0))) as m:
+            panel = board("panel", ply15, rect(width=100, depth=50)).on(m.bottom).between(
+                m.left.into(10.1), m.left.into(110.1), m.front, m.front.into(50))
+            panel.hole(d=8, at=panel.right.front(25), depth=20)
+        assert panel.box().hi["y"] == panel.outline.bounds[3]
+        assert panel.box().hi["y"] == pytest.approx(y + 110.1)
+
+
 def test_edge_face_hole():
     cab = carcass()
     bottom = cab["bottom"]
