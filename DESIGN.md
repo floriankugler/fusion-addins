@@ -219,7 +219,7 @@ is implemented. [Florian]
 | `mitres.md` | Mitred corners as a joint |
 | `lipping.md` | Lipping and edge banding |
 | `standard-library.md` | `lang/std`: building blocks on the public API only |
-| `nesting.md` | Nesting in the language, with stock and the machine's bed |
+| `nesting.md` | Nesting in the language with PackingSolver: sheets of several sizes sawn into blanks for the bed, offcuts, grain, parts in openings (tried in `experiments/nesting/`) |
 | `cam.md` | A CAM plan from the layout, built by an add-in |
 | `slots.md` | `slot()`, spelled like `hole()` |
 | `runs.md` | Tubes, ducts and keep-outs |

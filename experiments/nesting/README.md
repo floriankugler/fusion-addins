@@ -132,6 +132,17 @@ and the room between parts.
   material comes out this close; at most about 5 saw cuts per sheet; one
   big leftover is better than several small ones.
 
+Stock and the bed are given when it is run [Florian, 2026-10-14]: `--bed`,
+`--sheet` once for each size on hand (`2470x1240`, or `1525x1525*2` for
+two), `--offcut` once for each offcut. An offcut the bed takes goes on it
+as it is; a larger one is sawn like a sheet and offers its own bed-sized
+pieces to the nest next to free (else the nest's blanks, sized for full
+sheets, did not fit it and it went unused). With sheets of several sizes
+the sawing picks the cheapest (by area); refill empties only sheets bought,
+never an offcut. The blank grid includes the stock's and the bed's own
+sizes, so a sheet the bed takes whole can be one blank. Results for these
+are in `design/proposals/nesting.md`.
+
 ### Cuts per sheet and the leftover (`sawing.py`)
 
 - The solver's cutting tree is first made as simple as it can be, from
