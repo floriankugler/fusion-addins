@@ -51,10 +51,11 @@ def clean(g: BaseGeometry) -> BaseGeometry:
     Florian, 2026-10-13]: points nearer than `SAME_POINT` to the one before;
     spikes, where a ring runs out and back along itself; pieces and holes
     narrower than `NARROWEST` on average (twice their area over their
-    length: the crescents between two drawings of one arc, hairlines); and
-    walls of no width, where a hole runs along another ring for more than
-    `NARROWEST` (a band cut across a shape exactly as tall leaves one piece
-    held by two such walls instead of two pieces): they are opened. An
+    length: the crescents between two drawings of one arc, hairlines), a
+    narrow piece opened first, so that wider ones a hairline joins stay;
+    and walls of no width, where a hole runs along another ring for more
+    than `NARROWEST` (a band cut across a shape exactly as tall leaves one
+    piece held by two such walls instead of two pieces): they are opened. An
     invalid geometry is made valid first, its shells united and its holes
     taken out (a move rounds where two rings nearly touch into a crossing).
 
@@ -98,7 +99,10 @@ def clean(g: BaseGeometry) -> BaseGeometry:
 def _clean_polygon(poly: Polygon, walls: bool = True) -> list[Polygon] | None:
     """The polygon's clean pieces, or None when it has nothing to clean."""
     if _narrow(poly.exterior):
-        return []
+        # (narrow on average, it may be wider pieces that a hairline of no width joins: two
+        # slivers of a box beside a pocket, 0.09 mm wide, joined along the pocket's side 6e-14
+        # apart, went with it [found by fuzzing the checks, 2026-10-14])
+        return _opened(poly) if walls else []
     exterior = _without_spikes(poly.exterior)
     holes: list[LinearRing | list[tuple[float, float]]] = []
     changed = exterior is not None
@@ -121,16 +125,22 @@ def _clean_polygon(poly: Polygon, walls: bool = True) -> list[Polygon] | None:
             return None                 # (cleaning would make it worse; leave it as it was)
         poly = made
     if walls and len(poly.interiors) > 0 and _has_walls(poly):
-        opened = poly.buffer(-SAME_POINT, join_style="mitre", mitre_limit=1e6).buffer(
-            SAME_POINT, join_style="mitre", mitre_limit=1e6)
-        pieces: list[Polygon] = []
-        for piece in polygons_of(opened):
-            again = _clean_polygon(piece, walls=False)
-            pieces.extend([piece] if again is None else again)
-        return pieces
+        return _opened(poly)
     if _narrow(poly.exterior):
         return []
     return [poly] if changed else None
+
+
+def _opened(poly: Polygon) -> list[Polygon]:
+    """The polygon opened by `SAME_POINT`, which parts it where walls or
+    hairlines of no width hold it together, each part cleaned."""
+    opened = poly.buffer(-SAME_POINT, join_style="mitre", mitre_limit=1e6).buffer(
+        SAME_POINT, join_style="mitre", mitre_limit=1e6)
+    pieces: list[Polygon] = []
+    for piece in polygons_of(opened):
+        again = _clean_polygon(piece, walls=False)
+        pieces.extend([piece] if again is None else again)
+    return pieces
 
 
 def _narrow(ring: LinearRing) -> bool:

@@ -87,6 +87,21 @@ def test_a_band_cut_across_a_shape_exactly_as_tall_parts_it():
     assert sorted(p.area for p in parted.polygons()) == pytest.approx([134 * 135, 134 * 135])
 
 
+def test_wider_pieces_a_hairline_joins_stay():
+    """Found by fuzzing the checks: a hardware box 0.09 longer than the
+    pocket it stands in at either end, as wide as it, its sides 6e-14 off
+    the pocket's. What the pocket leaves of the box is the two ends, joined
+    along one side by a hairline 89 mm long: narrow on average, it went
+    altogether, and the box's overlap with the board was not reported.
+    Opened, the two ends stay, their vertices where they were."""
+    piece = box(248.93532181880647, -253.53000500000002, 338.61817343027985, -251.52999499999999)
+    pocket = box(249.02674762454316, -253.53000499999996, 338.5267476245432, -251.52999499999999)
+    ends = sorted(polygons_of(clean(piece.difference(pocket))), key=lambda p: p.bounds)
+    assert [p.bounds for p in ends] == [(248.93532181880647, -253.53000500000002, 249.02674762454316, -251.52999499999999),
+                                        (338.5267476245432, -253.53000500000002, 338.61817343027985, -251.52999499999999)]
+    assert clean(box(0, 0, 10, 0.005).union(box(0, 0, 1e-14, 30))).is_empty     # narrow all over: it goes
+
+
 def test_clean_keeps_what_is_meant_as_it_is():
     """A circle cut touching the board's edge (Fusion builds it), a rounded
     rectangle with a hole, a slot: nothing to clean, the same geometry."""
