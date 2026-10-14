@@ -4,6 +4,7 @@ boxes against the parts' material and against each other), and
 
 from lang import *
 from lang.core.layout_types import BoxDict, HardwareBodyLayout
+from lang.core.scope import registry
 from helpers import ply18
 
 
@@ -114,3 +115,50 @@ def test_a_part_as_large_as_its_sheet_fits_it_far_from_the_origin():
         board("b", material("birch", t=9, sheet=(57, 243))).on(n.left).between(n.bottom, n.bottom + 243.01,
                                                                                n.front, n.front + 57)
     assert fits_sheet(n) == ["n.b (57 x 243.01) does not fit a 57 x 243 sheet"]
+
+
+def test_a_pocket_and_a_hole_that_make_room_together_leave_a_pin_clear():
+    """A pocket 10 deep from the top and a hole 8 deep from the bottom: a
+    pin through both hits nothing, though neither spans the panel alone
+    [found by fuzzing, 2026-10-14]; one wider than the hole hits the
+    material around it."""
+    with module("m", Box.from_size(width=300, depth=300, height=100)) as m:
+        panel = board("panel", ply18).on(m.bottom)
+        for x in (50, 150):
+            panel.pocket(rect(depth=20, width=20), at=panel.top.front(x - 10).left(40), depth=10)   # down to z 8
+            panel.add_hole(panel.bottom, (x, 50), 10, 8)                                          # up to z 8
+    m.place_hardware("pins", [_body("through", _pin(50, 50, 6, -5, 25)), _body("wider", _pin(150, 50, 12, -5, 25))])
+    assert no_interference(m) == ["m.pins.wider overlaps m.panel"]
+
+
+def test_parallel_boards_with_room_made_in_each_do_not_overlap():
+    """Two boards lapped where they overlap, each pocketed 4 deep from the
+    face toward the other, 8 mm of their thicknesses shared: neither
+    pocket spans the 8 mm, together they make room [found by fuzzing,
+    2026-10-14]. Pocketed 3 deep each, they meet."""
+    for depth, expected in ((4, []), (3, ["m.a overlaps m.b"])):
+        registry.reset()
+        with module("m", Box.from_size(width=100, depth=300, height=100)) as m:
+            a = board("a", ply18).on(m.bottom).between(m.front, m.front + 200)                 # z 0 to 18
+            b = board("b", ply18).on(m.bottom + 10).between(m.front + 100, m.back)             # z 10 to 28
+            a.pocket(rect(depth=100, width=100), at=a.top.back, depth=depth)
+            b.pocket(rect(depth=100, width=100), at=b.bottom.front, depth=depth)
+        assert no_interference(m) == expected
+
+
+def test_a_divider_notched_clear_of_the_material_beside_its_groove_does_not_overlap():
+    """A divider standing 5 mm into a shelf, half of its end in a pocket 5
+    deep and the other half notched clear of the shelf: each has material
+    where the boxes meet, and their outlines cross, but not where the
+    other's material is [found by fuzzing, 2026-10-14]. Without the notch
+    it stands on the shelf's material beside the pocket."""
+    for notched, expected in ((True, []), (False, ["m.shelf overlaps m.divider"])):
+        registry.reset()
+        with module("m", Box.from_size(width=300, depth=300, height=100)) as m:
+            shelf = board("shelf", ply18).on(m.bottom)
+            shelf.pocket(rect(depth=40, width=50), at=shelf.top.front(40).left, depth=5)      # x 40 to 80, y 0 to 50
+            divider = board("divider", ply18).on(Pos("x", 50), toward=m.back).between(
+                m.left, m.left + 100, m.bottom + 13, m.bottom + 60)
+            if notched:
+                divider.cut(rect(width=50, height=6), at=divider.outer.right.bottom)           # y 50 to 100, z 13 to 19
+        assert no_interference(m) == expected
