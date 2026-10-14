@@ -1,7 +1,7 @@
 """Positions, lengths and the algebra between them.
 
 A `Pos` is a coordinate on one world axis, in millimetres. Lengths are plain
-floats. The rules (DESIGN.md, Placement and references):
+floats. The rules (design/placement.md):
 
 - position +/- length gives a position;
 - position - position gives a length (same axis only);

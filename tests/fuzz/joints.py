@@ -13,11 +13,11 @@ tenons with settings drawn from their ranges and a little beyond, made
 from either board, and after tenons optionally a second joint in their
 gaps or through them.
 
-`run_pair` checks what every joint promises (DESIGN.md, "Joints and
-hardware"): no other error than a LangError; a refused join changes no
-board; a join from the side equals the join from the shelf; an accepted
-one plans, draws and meshes, leaves every board in one piece, lets no two
-boards share material, cuts no blind pocket or hole as deep as its board,
+`run_pair` checks what every joint promises (design/joints.md): no
+other error than a LangError; a refused join changes no board; a join
+from the side equals the join from the shelf; an accepted one plans,
+draws and meshes, leaves every board in one piece, lets no two boards
+share material, cuts no blind pocket or hole as deep as its board,
 sinks no countersink past a board's edge, and a connector's operations
 lie within its contact. A join across a
 pocket made before, in the side's face or the shelf's end where they meet,
@@ -588,7 +588,7 @@ def _within_problems(b: Built, contacts: list[Contact], before: list[tuple[str, 
             if region.is_empty:
                 continue
             # A Cabineo 8 M6's threaded-insert collar reaches past the
-            # shelf's face by 1.35 mm, as in the add-in (DESIGN.md, kept).
+            # shelf's face by 1.35 mm, as in the add-in (design/joints.md, kept).
             collar = (getattr(op, "name", None) or "").endswith("_collar")
             fits = False
             for c in contacts:

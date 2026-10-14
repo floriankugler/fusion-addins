@@ -1,6 +1,6 @@
-"""A van built against its master document: the floor battens from DESIGN.md
-("Master index and floor battens") and the drawer cabinet standing in the
-master's kitchen box.
+"""A van built against its master document: the floor battens
+(design/placement.md, "Contours as limits") and the drawer cabinet
+standing in the master's kitchen box.
 
 The master is the sample that tools/van_master.py builds in Fusion; its
 snapshot is van_snapshot.json next to this file. Nothing below names a
