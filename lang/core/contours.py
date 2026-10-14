@@ -93,6 +93,8 @@ class Contour:
         """A closed contour as an area in (a, b)."""
         if not self.closed:
             raise LangError(f"contour {self.name!r} is open; this needs a closed one.")
+        if len(self.points) < 3:
+            raise LangError(f"contour {self.name!r} is closed around nothing ({len(self.points)} points).")
         return _area(make_valid(Polygon(self.coords(a, b))))
 
     def gap(self, n: float) -> ContourLimit:

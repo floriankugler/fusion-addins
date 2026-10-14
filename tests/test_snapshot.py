@@ -53,6 +53,27 @@ def test_chain_refuses_two_chains_and_branches():
         chain([])
 
 
+def test_chain_takes_a_curve_shorter_than_the_tolerance_as_a_point():
+    """A curve 0.004 mm long between two others is where they meet: its
+    ends, meeting each other, made a loop at the join, refused as "4 curves
+    meet". Fuzzing found it."""
+    a = [(0.0, 0.0, 0.0), (10.0, 0.0, 0.0)]
+    tiny = [(10.0, 0.0, 0.0), (10.004, 0.0, 0.0)]
+    b = [(10.004, 0.0, 0.0), (10.0, 7.0, 0.0)]
+    assert chain([a, tiny, b]) == ([(0.0, 0.0, 0.0), (10.0, 0.0, 0.0), (10.0, 7.0, 0.0)], False)
+    with pytest.raises(ChainError, match="no curves"):
+        chain([tiny])
+
+
+def test_chain_refuses_curves_closing_around_nothing():
+    """The same line drawn twice is no closed contour: it was one of two
+    points, which a board then failed on with shapely's error. Fuzzing
+    found it."""
+    line = [(0.0, 0.0, 0.0), (100.0, 0.0, 0.0)]
+    with pytest.raises(ChainError, match="close around nothing"):
+        chain([line, line])
+
+
 # -- collecting names --------------------------------------------------------------
 
 def test_collector_skips_double_underscore_and_reports_duplicates():

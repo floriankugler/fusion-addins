@@ -51,11 +51,15 @@ def _fmt(p: Point3) -> str:
 def chain(polylines: Sequence[Sequence[Point3]], tolerance: float = JOIN_TOLERANCE) -> tuple[list[Point3], bool]:
     """Orders sampled curves into one chain: the points in order and
     whether the chain is closed (a closed chain does not repeat its first
-    point). Curves may run either way. Raises ChainError when the curves
-    are empty, branch, or form several chains."""
-    curves = [list(c) for c in polylines if len(c) >= 2 and math.dist(c[0], c[-1]) + math.dist(c[0], c[1]) > 0]
+    point). Curves may run either way; a curve no longer than the
+    tolerance is a point its neighbours meet at. Raises ChainError when the
+    curves are empty, branch, form several chains, or close around
+    nothing."""
+    # (a curve that short, its ends meeting each other, made a loop at the join and was taken
+    # for a branch: "4 curves meet" [found by fuzzing, 2026-10-14])
+    curves = [list(c) for c in polylines if len(c) >= 2 and max(math.dist(c[0], p) for p in c) > tolerance]
     if not curves:
-        raise ChainError("no curves (construction curves do not count)")
+        raise ChainError(f"no curves (construction curves, and curves no longer than {tolerance:g} mm, do not count)")
     # Endpoints that meet share a node.
     nodes: list[Point3] = []
 
@@ -103,6 +107,9 @@ def chain(polylines: Sequence[Sequence[Point3]], tolerance: float = JOIN_TOLERAN
         here = b if a == here else a
     if closed:
         points.pop()   # back at the start
+        if len(points) < 3:
+            # (the same line twice was a closed contour of two points [found by fuzzing, 2026-10-14])
+            raise ChainError(f"the curves close around nothing ({len(points)} points; one drawn twice?)")
     return points, closed
 
 

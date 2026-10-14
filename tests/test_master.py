@@ -269,6 +269,16 @@ def test_an_offset_is_the_same_with_points_along_its_edges():
     assert round_offset(more, 1).symmetric_difference(round_offset(corners, 1)).area == 0
 
 
+def test_a_closed_contour_around_nothing_is_an_error():
+    """A closed contour of two points (a snapshot's sketch of one line
+    drawn twice, before the writer refused it) is a LangError, not
+    shapely's. Fuzzing found it."""
+    twice = _contour("twice", [(0, 0), (100, 0)], True)
+    b = board("b", ply15).center(Pos("z", 0)).between(twice, Pos("x", 0), Pos("x", 50), Pos("y", 0), Pos("y", 50))
+    with pytest.raises(LangError, match="closed around nothing"):
+        b.box()
+
+
 def test_an_end_picks_one_piece_of_a_cut_up_board(van: Master):
     """A batten along the wall is cut in two by the wheel arch: with both
     ends it is an error that names the pieces, one end takes its piece."""
