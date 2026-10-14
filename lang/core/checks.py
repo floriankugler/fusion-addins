@@ -212,14 +212,15 @@ def inside(contour: Contour, gap: float = 0.0) -> Check:
     along its plane's normal (a plan-view outline from above), with at
     least `gap` of clearance: `check(inside(van.contour("Bodenumriss"),
     gap=5))`. A part in the contour's plane is taken by its outline, any
-    other by its box."""
+    other by its box. A part may reach 1e-6 mm past the contour (or into
+    the clearance), the tolerance of the other checks, measured as a
+    distance [found by fuzzing, 2026-10-14: by area, a board 1627 long
+    1e-9 into the clearance was outside]."""
     if not contour.closed:
         raise LangError(f"inside(): contour {contour.name!r} is open; the check needs a closed one.")
     n = contour.normal_axis
     others: list[Axis] = [a for a in AXES if a != n]
-    allowed = contour.polygon(others[0], others[1])
-    if gap:
-        allowed = allowed.buffer(-gap)
+    allowed = contour.polygon(others[0], others[1]).buffer(_TOLERANCE - gap)
 
     def check(scope: Scope) -> list[str]:
         problems: list[str] = []

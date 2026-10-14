@@ -1,8 +1,9 @@
 """The design checks: `no_interference` with hardware (bodies made of world
-boxes against the parts' material and against each other), and
-`fits_sheet`."""
+boxes against the parts' material and against each other), `fits_sheet`
+and `inside(contour)`."""
 
 from lang import *
+from lang.core.contours import Contour
 from lang.core.layout_types import BoxDict, HardwareBodyLayout
 from lang.core.scope import registry
 from helpers import ply18
@@ -176,3 +177,16 @@ def test_a_box_reaching_past_a_large_hole_overlaps_the_material_around_it():
     m.place_hardware("pins", [_body(name, _pin(x, 100, 2 * (50 + past) / 2 ** 0.5, -5, 25))
                               for name, x, past in (("past", 100, 0.05), ("on", 250, 0.0), ("inside", 400, -0.01))])
     assert no_interference(m) == ["m.pins.past overlaps m.panel"]
+
+
+def test_a_long_board_touching_a_contour_is_inside_it():
+    """A board 2390 long, 1e-9 past the contour or into its clearance,
+    touches it; by area, 2.39e-6 mm2 outside, it was not inside [found by
+    fuzzing, 2026-10-14]. 0.001 past, it is not."""
+    floor = Contour("floor", ((0, 0, 0), (2400, 0, 0), (2400, 1200, 0), (0, 1200, 0)), True, (0, 0, 0), (0, 0, 1))
+    for gap in (0.0, 5.0):
+        for past, expected in ((1e-9, []), (1e-3, ["m.b is not inside floor"])):
+            registry.reset()
+            with module("m", Box.from_size(width=1200, depth=2400, height=100)) as m:
+                board("b", ply18).on(m.bottom).between(Pos("x", 5), Pos("x", 2395), Pos("y", gap - past), Pos("y", 600))
+            assert [p.split(" with")[0].split(" (")[0] for p in inside(floor, gap=gap)(m)] == expected
