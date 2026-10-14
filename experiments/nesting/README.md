@@ -62,6 +62,92 @@ the true outlines: no overlaps, the gaps, the sheet each part is on.
 | | PackingSolver, `knapsack` on 2 sheets | 2, 40 of 45 placed | 64 % | 300 s, still improving at 215 s |
 | All examples, mixed stock, grain per part (hidden floor strips free, drawer faces across) | PackingSolver, `variable` | 5 | 76 % | best at 1.7 s; two strips turned 90 |
 
+## Sheets larger than the bed: blanks
+
+Florian's sheets are about 2470 x 1240, the bed 2000 x 1000, so every sheet
+is sawn into blanks (straight cuts right through, kerf 4) before it goes on
+the machine; offcuts on hand are used as they are [Florian, 2026-10-14].
+`blanks.py` tries two ways, both with PackingSolver, against a baseline that
+nests on whole sheets as if the bed were large enough. Blanks keep the
+sheet's grain along x; 10 mm between parts and to every blank's edge.
+Material used = sheets x sheet area less the pieces left whole as stock
+(at least 200 mm across and 0.1 m²); the rest of a sheet is kerf, waste
+and the room between parts.
+
+- `patterns`: sawing patterns of up to three cuts whose pieces all fit the
+  bed (104 from a grid of cut positions: 2000, 1800, 1600, 1470 and half
+  across, 1000, 800 and half along), each tried with N = 1, 2, ...
+  sheets' worth of its blanks (bin packing, 3 s a try, 3 patterns at a
+  time). Every sheet is then sawn the same way, and the blanks the nest
+  leaves whole go back to stock.
+- `twostep`: nest first on blank sizes from a grid (400 to 2000 by 1000
+  to 1240) priced by area plus 50 000 mm² each (`variable` objective), cut
+  each blank down to its parts, then saw the blanks out of sheets with
+  PackingSolver's guillotine solver for rectangles (three stages, the kerf,
+  grain fixed). Then `refill`: the parts of the sheet with the fewest are
+  nested into the room left on the others (used blanks first, with their
+  parts as defects; then stock pieces, cut down to what they take), and
+  when all fit that sheet is dropped.
+
+| Parts | Strategy | Sheets | Left as stock | Material used | Time |
+|---|---|---|---|---|---|
+| 62 (9.26 m², 3.0 sheets of area) | baseline, no bed limit | 4 | – | (12.25 m² of sheets) | 0.5 s |
+| | patterns (12 of 104 nest at all) | 5 | 1.49 m² | 13.82 m² | 42 s |
+| | twostep + refill | 5 | 3.34 m² | **11.97 m²** | 20 s nest, 0.0 s saw, 10 s refill |
+| | twostep, offcuts on hand 1250 x 600, 900 x 450, 1600 x 300 | 5 + the 3 offcuts | 4.94 m² | 10.37 m² of sheets | the same |
+| 124 (18.53 m², 6.0 sheets) | baseline, no bed limit | 8 | – | (24.5 m² of sheets) | 40 s |
+| | patterns (8 of 104 nest) | 10 | 3.46 m² | 27.17 m² | 77 s |
+| | twostep + refill | 10 (11 sawn) | 6.05 m² | 24.58 m² | 40 s nest, 10 s refill |
+| | twostep, blanks by area alone, + refill | 10 | 6.41 m² | **24.22 m²** | the same |
+
+- **Nest first, saw after uses no more material than nesting whole sheets
+  would**: the bed costs a sheet or two more to buy, which come back as
+  stock pieces (about one sheet's worth here). The guillotine solver saws
+  the blanks in no time (0.0 s), so the cost is the nest.
+- The number of sheets depends on the settings (the blank grid, the price
+  per blank, whether blanks are cut down): 5 to 7 for 62 parts, the
+  material within 5 %. The nest does not know how its blanks will pack into
+  sheets. Since a run takes 20 to 40 s, trying a few settings and keeping
+  the best is affordable (as Florian guessed); refill takes back a sheet
+  now and then (11 to 10 above). Leaving blanks uncut when the freed strip
+  would be under 150 mm made it worse (6 sheets instead of 5): bigger
+  blanks pack worse.
+- The nest needs its time: 3 s found nothing for 62 parts on 30 blank
+  sizes, 8 s gave 6 sheets, 20 s 5 (the blanks' cost went from 13.27 m²
+  at 3.9 s to 12.71 at 27 s). Two runs of the same job gave the same
+  result.
+- Patterns are simpler to saw (every sheet alike: a rip at 1000, then each
+  strip in two, 1233 + 1233 and 2000 + 466) but use 12 to 15 % more
+  material, and most patterns cannot take every part at all (no blank long
+  or wide enough). Twostep's sheets are each sawn their own way, 3 to 9
+  pieces per sheet.
+- Offcuts on hand go in first (cost 1 against a sheet's 3 million: cost 0
+  is refused); all three were used.
+- PackingSolver bug found here: a part that fits a sheet but not within
+  `item_bin_minimum_spacing` is placed anyway, centred, the gap shrunk on
+  both sides (a 410 high rectangle in a 413 high sheet with spacing 10:
+  1.5 mm above and below); `ps_nest.py` now shrinks every sheet by the
+  margin itself.
+- Not done: trimming the factory edges (the guillotine solver takes trims),
+  limiting the number of cuts per sheet, valuing one big leftover above
+  several small ones, and choosing among settings automatically.
+
+## Pushing the parts to one side
+
+- Sliding the parts of a finished nest toward a corner (`blanks.gravity`)
+  gains nothing on PackingSolver's nests: each part already rests on its
+  neighbours (the van's sheet 2366 mm before and after; an irregular sheet
+  1779 to 1716).
+- The `leftovers` objective and its strip packing do not work (above).
+- A search on the sheet's length (`ps_nest.py --compact`, bin packing on
+  ever shorter sheets) works where the sheet has room: the irregular nest's
+  last sheet from 1779 to 1348 mm in 10 s (7 tries of 5 s), the examples'
+  emptiest sheet from 2466 to 2122 mm in 21 s. On a full sheet it finds
+  nothing shorter.
+- With blanks it comes by itself: twostep cuts each blank down to its
+  parts, so a last sheet keeps its rest whole (1114 x 1240 and
+  1352 x 264 on the run with offcuts).
+
 ## SVGnest's quirks
 
 Run headless by `svgnest/nest.mjs`, which loads its files unchanged into a
@@ -185,6 +271,10 @@ Run by `ps_nest.py` (its own venv: `.venv`, `pip install packingsolver`).
 - `svgnest/nest.mjs`: SVGnest headless.
 - `ps_nest.py`: PackingSolver (objectives, modes, `--arcs`, `--compact`,
   `--set` for its parameters).
+- `blanks.py`: sheets sawn into blanks for the bed: `patterns`, `twostep`
+  (with `--refill`), `baseline`; draws each sheet with its blanks, stock
+  and waste. `out/compare_blanks.sh` and `compare_blanks2.sh` are the
+  runs in the table (not committed: out/ is ignored).
 - `check.py`: checks any result against its job and draws it.
 
 ```bash

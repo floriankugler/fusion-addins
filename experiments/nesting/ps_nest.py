@@ -7,8 +7,9 @@ experiments/nesting/.venv) and write a result check.py reads.
 Each sheet of the job is a bin type of its own, with its count (`2500x1250*2`;
 no count: as many as needed) and its area as cost. Parts are the job's true
 rings (`check_rings`) with their holes; spacing between parts and to the
-sheet's edge are PackingSolver's own (`item_item_minimum_spacing`, the bin
-type's `item_bin_minimum_spacing`). Turns: each part's own (`rotations` in the job: 0
+sheet's edge: PackingSolver's `item_item_minimum_spacing`, and each sheet
+shrunk by the margin (its `item_bin_minimum_spacing` is not kept, see
+`sheet_shape`). Turns: each part's own (`rotations` in the job: 0
 and 180 for a part with grain, steps or any angle for one without), or any
 angle for all (`--continuous`), never mirrored. Parts with arcs (irregular.py) go in as true arcs with `--arcs`,
 else as the polygon that contains them (`ps_rings`).
@@ -77,11 +78,16 @@ def item_shape(part: dict, arcs: bool, holes: bool) -> psi.ShapeWithHoles:
     return psi.ShapeWithHoles(rings[0], rings[1:] if holes else [])
 
 
-def sheet_shape(t: dict) -> psi.Shape:
-    """A sheet type: a rectangle, or an offcut's outline."""
+def sheet_shape(t: dict, margin: float) -> psi.Shape:
+    """A sheet type, a rectangle or an offcut's outline, shrunk by the margin
+    to the edge. PackingSolver's own `item_bin_minimum_spacing` is not used:
+    a part that fits the sheet but not within the spacing is placed anyway,
+    centred, the gaps shrunk alike on both sides (a 410 high rectangle in a
+    413 high sheet with spacing 10: 1.5 above and below) [2026-10-14]."""
     if t.get("outline"):
-        return shape_of(t["outline"])
-    return psi.build_rectangle(t["width"], t["height"])
+        inner = Polygon(t["outline"]).buffer(-margin, join_style="mitre")
+        return shape_of([list(c) for c in list(orient(inner).exterior.coords)[:-1]])
+    return psi.build_rectangle(margin, t["width"] - margin, margin, t["height"] - margin)
 
 
 def solve(job: dict, indices: list[int], sheet_types: list[dict], objective, a,
@@ -100,10 +106,10 @@ def solve(job: dict, indices: list[int], sheet_types: list[dict], objective, a,
         if t["copies"] == 0:
             continue
         type_of.append(k)
-        kwargs = {"copies": t["copies"], "item_bin_minimum_spacing": job["margin"]}
+        kwargs = {"copies": t["copies"]}
         if t.get("cost") is not None:
             kwargs["cost"] = t["cost"]
-        bin_type = b.add_bin_type(sheet_shape(t), **kwargs)
+        bin_type = b.add_bin_type(sheet_shape(t, job["margin"]), **kwargs)
         for defect in t.get("defects", []):
             d = b.add_defect(bin_type, -1, psi.ShapeWithHoles(shape_of(defect), []))
             # A defect (a knot, a used corner) is kept as far off as another part.
