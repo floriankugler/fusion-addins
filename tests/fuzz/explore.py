@@ -91,7 +91,7 @@ CHECKS: dict[str, Check] = {
     "drawers": (hardware.drawer_cases(), hardware.run_case),
     "corners": (corners.corner_op_cases(), corners.run_case),
     "dogbones": (corners.corner_op_cases().filter(lambda c: c.op == "dogbones"), corners.run_case),
-    "chamfers": (corners.corner_op_cases().filter(lambda c: c.op != "dogbones"), corners.run_case),
+    "board_chamfers": (corners.corner_op_cases().filter(lambda c: c.op != "dogbones"), corners.run_case),
     "checks": (checks.scenes(), checks.run_case),
 }
 
