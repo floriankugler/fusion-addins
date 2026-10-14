@@ -33,6 +33,7 @@ import corners  # noqa: E402
 import fuzzing  # noqa: E402
 import hardware  # noqa: E402
 import joints  # noqa: E402
+import placement  # noqa: E402
 import snapshots  # noqa: E402
 from lang.core.errors import LangError  # noqa: E402
 
@@ -98,6 +99,7 @@ CHECKS: dict[str, Check] = {
     "contours": (contours.contour_cases(), contours.run_case),
     "chains": (snapshots.chain_cases(), snapshots.chain_problems),
     "snapshots": (snapshots.master_cases(), snapshots.snapshot_problems),
+    "placement": (placement.placement_cases(), placement.run_case),
 }
 
 
