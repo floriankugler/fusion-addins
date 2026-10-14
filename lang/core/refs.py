@@ -214,13 +214,16 @@ class Side:
     def outward(self) -> Direction:
         return -self.inward
 
-    def into(self, n: float) -> Pos:
-        """A position `n` inside the box, past this side."""
-        return Pos(self.axis, self.value + self.inward.sign * n)
+    def into(self, n: float) -> Side:
+        """This side moved `n` into the box, its inward direction kept, so a
+        board lies on it with its thickness inward, `on(cab.bottom.into(60))`
+        [decided by Florian, 2026-10-14: it was a bare position, which
+        needed toward=]. `+` and `-` move it along the world axis instead."""
+        return Side(self.axis, self.value + self.inward.sign * n, self.inward)
 
-    def gap(self, n: float) -> Pos:
-        """A position `n` outside the box, before this side."""
-        return Pos(self.axis, self.value - self.inward.sign * n)
+    def gap(self, n: float) -> Side:
+        """This side moved `n` out of the box, its inward direction kept."""
+        return Side(self.axis, self.value - self.inward.sign * n, self.inward)
 
     @overload
     def __add__(self, other: Number) -> Side: ...

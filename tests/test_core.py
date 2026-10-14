@@ -115,6 +115,28 @@ def test_on_puts_thickness_inward():
     assert left.show_face.name == "left"
 
 
+def test_a_side_moved_into_or_out_of_its_box_is_a_side():
+    """Decided by Florian, 2026-10-14: `side.into(n)` and `side.gap(n)` are
+    the side moved, its inward direction kept, so a board lies on them with
+    its thickness inward without toward= (`on(cab.bottom.into(60))`); they
+    were bare positions. `+` and `-` stay world arithmetic: `cab.left + 100`
+    moves toward the world axis' positive end, which in a cabinet facing
+    the van's right is out of the box."""
+    van = Box.from_size(width=600, depth=500, height=700)
+    with cabinet("cab", van, front=van.right) as cab:
+        raised = board("raised", ply15).on(cab.bottom.into(60))
+        partition = board("partition", ply15).on(cab.left.into(100))
+        lid = board("lid", ply15).on(cab.top.gap(5))
+        moved = cab.left + 100
+    assert isinstance(cab.left.into(100), Side) and isinstance(cab.top.gap(5), Side)
+    assert (raised.box().lo["z"], raised.box().hi["z"]) == (60, 75)
+    assert cab.left.axis == "x" and cab.left.value == 500                       # the cabinet's left is +x
+    assert (partition.box().lo["x"], partition.box().hi["x"]) == (385, 400)    # 100 in, thickness inward
+    assert (lid.box().lo["z"], lid.box().hi["z"]) == (690, 705)                # 5 above, thickness down
+    assert moved.value == 600 and moved.inward == cab.left.inward              # out of the box, world +x
+    assert cab.left.into(100).position == Pos("x", 400) and cab.left.gap(5) - cab.left == 5
+
+
 def test_between_parts_uses_nearest_faces_and_box_defaults():
     cab = carcass()
     bottom = cab["bottom"]
