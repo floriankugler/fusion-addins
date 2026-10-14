@@ -1,5 +1,6 @@
 """Reading the master's snapshot, and contours as limits (fixture:
 examples/van_snapshot.json, the snapshot of tools/van_master.py)."""
+import math
 from pathlib import Path
 
 import pytest
@@ -185,6 +186,51 @@ def test_a_board_across_a_contour_fits_over_its_whole_thickness():
     # beside the notch, the board reaches the contour's edge
     beside = board("beside", ply15).center(Pos("x", 50)).between(notched, Pos("z", 0), Pos("z", 50))
     assert beside.box().hi["y"] == pytest.approx(500)
+
+
+def test_an_open_contour_across_the_board_keeps_clear_over_its_whole_thickness():
+    """A dip of the contour between the board's faces stops the board at
+    its bottom; the tighter of the contour's crossings at the two faces ran
+    the board 75 mm into it. Fuzzing found it."""
+    dip = _contour("dip", [(0, 500), (90, 500), (100, 400), (110, 500), (200, 500)], False)
+    b = board("b", ply15).center(Pos("x", 100)).between(dip, Pos("y", 0), Pos("z", 0), Pos("z", 50))
+    assert b.box().hi["y"] == pytest.approx(400)
+
+
+def test_an_open_contours_clearance_keeps_the_board_on_its_side():
+    """The clearance to an open contour across the board does not carry
+    the board past it: with the board's other limit inside the clearance it
+    is an error, and where the clearance passes the middle of the room, the
+    board lies beyond the clearance on the middle's side. They made a board
+    inside the clearance, and one from the room's far end across the
+    contour. Fuzzing found both."""
+    edge = _contour("edge", [(0, 45), (200, 45)], False)
+    inside_it = board("inside_it", ply15).center(Pos("x", 100)).between(edge.gap(10), Pos("y", 50), Pos("z", 0),
+                                                                      Pos("z", 50))
+    with pytest.raises(LangError, match="clearance reaches past the board's other limit"):
+        inside_it.box()
+    with module("m", Box({"x": 0, "y": 0, "z": 0}, {"x": 200, "y": 100, "z": 50})):
+        b = board("b", ply15).center(Pos("x", 100)).between(edge.gap(10))
+    assert (b.box().lo["y"], b.box().hi["y"]) == pytest.approx((55, 100))
+
+
+def test_an_open_contours_clearance_counts_at_a_face_whichever_way_it_runs():
+    """A contour that only just crosses the board's far face keeps the
+    board its clearance there too, and a contour bending under the board
+    gives the same end run either way. The offset contour fell short of the
+    face ("the clearance moves it off the board"), and so did one run of
+    the bent contour, not the other. Fuzzing found both."""
+    slant = [(0.0, 100.0), (107.55, 110.0)]
+    bent = [(630.0, 23.2), (230.0, 23.2), (211.5, 20.8), (167.7, 20.8), (149.1, 23.2), (50.0, 23.2)]
+    for i, points in enumerate([slant, slant[::-1]]):
+        b = board(f"slant{i}", ply15).center(Pos("x", 100)).between(
+            _contour("slant", points, False).gap(3), Pos("y", 300), Pos("z", 0), Pos("z", 50))
+        # 3 from the contour's end at the face's corner, the arc a polygon a little inside
+        assert b.box().lo["y"] == pytest.approx(110 + math.sqrt(3 ** 2 - 0.05 ** 2), abs=0.015)
+    for i, points in enumerate([bent, bent[::-1]]):
+        b = board(f"bent{i}", material("thick", t=40)).center(Pos("x", 134)).between(
+            _contour("bent", points, False).into(17), Pos("y", 1000), Pos("z", 0), Pos("z", 50))
+        assert b.box().lo["y"] == pytest.approx(6.2)
 
 
 def test_an_end_picks_one_piece_of_a_cut_up_board(van: Master):

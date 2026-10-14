@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import cast
+from typing import NamedTuple, cast
 
 from shapely import make_valid
 from shapely.geometry import LineString, MultiPolygon, Polygon
@@ -110,6 +110,14 @@ class ContourLimit:
     gap: float = 0.0
 
 
+class End(NamedTuple):
+    """Where an open contour across the board puts the board's end on an
+    axis, and the side of it the board lies on (+1: toward higher values)."""
+    value: float
+    side: int
+    name: str
+
+
 def as_contour_limit(limit: Contour | ContourLimit) -> ContourLimit:
     return limit if isinstance(limit, ContourLimit) else ContourLimit(limit)
 
@@ -166,19 +174,26 @@ class _OpenEdge:
     def removed(self, u: Axis) -> BaseGeometry:
         """The region beyond the contour (grown by the clearance), in the
         board's (u, v)."""
-        # Run along b in increasing order, then extend both ends along b and
-        # close the region on the far side.
-        pts = [(b, a) for a, b in self.points_ab]
-        if pts[0][0] > pts[-1][0]:
-            pts.reverse()
-        lo_b, hi_b = pts[0][0] - _FAR, pts[-1][0] + _FAR
-        far_a = self.lo - _FAR if self.side > 0 else self.hi + _FAR
-        ring = [(lo_b, pts[0][1])] + pts + [(hi_b, pts[-1][1]), (hi_b, far_a), (lo_b, far_a)]
-        region = _offset(_area(make_valid(Polygon(ring))), self.limit.gap)
+        region = _beyond([(b, a) for a, b in self.points_ab], self.side, self.limit.gap)
         # (b, a) -> (u, v)
         if self.a == u:
             return _swap(region)
         return region
+
+
+def _beyond(points: list[Point2], side: int, gap: float) -> BaseGeometry:
+    """What lies beyond an open contour, away from the board (`side` +1:
+    the board toward higher second coordinates), grown by the clearance:
+    the contour given as (b, a) points, run along b in increasing order,
+    extended along b past both ends and closed far away on that side."""
+    pts = list(points)
+    if pts[0][0] > pts[-1][0]:
+        pts.reverse()
+    values = [p[1] for p in pts]
+    lo_b, hi_b = pts[0][0] - _FAR, pts[-1][0] + _FAR
+    far_a = min(values) - _FAR if side > 0 else max(values) + _FAR
+    ring = [(lo_b, pts[0][1])] + pts + [(hi_b, pts[-1][1]), (hi_b, far_a), (lo_b, far_a)]
+    return _offset(_area(make_valid(Polygon(ring))), gap)
 
 
 def _swap(g: BaseGeometry) -> BaseGeometry:
@@ -188,7 +203,7 @@ def _swap(g: BaseGeometry) -> BaseGeometry:
 
 class ContourLimits:
     """The contour limits of one board, classified against its plane. The
-    board asks it for values, stretches and far ends per in-plane axis, and
+    board asks it for ends, stretches and edges per in-plane axis, and
     for the trim of its outline."""
 
     def __init__(self, limits: Sequence[ContourLimit], t: Axis, t_lo: float, t_hi: float,
@@ -242,39 +257,45 @@ class ContourLimits:
     def edges_on(self, axis: Axis) -> list[_OpenEdge]:
         return self.edges[axis]
 
-    def values(self, axis: Axis, reference: float | None) -> list[float]:
-        """Positions on `axis` from open contours in perpendicular planes:
-        where each crosses the two faces, the tighter of the two. The board
-        lies on the side of `reference`."""
-        out: list[float] = []
+    def ends(self, axis: Axis, reference: float | None, explicit: bool) -> list[End]:
+        """The board's ends on `axis` from open contours in perpendicular
+        planes. The board lies on the side of `reference`: its other limit
+        on the axis (`explicit`), else an open contour in its plane there or
+        the middle of its room. It keeps the clearance over its whole
+        thickness: what lies beyond the contour, grown by the clearance, is
+        projected onto the axis from the band between the board's faces,
+        and the board ends where that stops, on the stretch its other limit
+        lies in. (The tighter of the contour's crossings at the two faces
+        missed it bending toward the board between them; its offset could
+        pass the other limit or the room's middle, which put the board
+        across the contour, and fell short of a face the contour only just
+        crossed, or not, as the contour ran [found by fuzzing, 2026-10-14].)"""
+        out: list[End] = []
         for limit, line in self.crossings[axis]:
             name = limit.contour.name
-            raw = [self._crossing(name, line, t) for t in (self.t_lo, self.t_hi)]
+            for t in (self.t_lo, self.t_hi):
+                self._crossing(name, line, t)
             if reference is None:
                 raise LangError(f"contour {name!r}: give another limit on {axis} so the side the board "
                                 "is on is known.", self.path)
-            side = 1 if reference > max(raw) else -1 if reference < min(raw) else 0
+            reach = abs(limit.gap) + 1.0
+            lo, hi = min(line.bounds[1], reference) - reach, max(line.bounds[3], reference) + reach
+            band = shapely_box(self.t_lo, lo, self.t_hi, hi)
+            within = [float(c[1]) for part in parts_of(line.intersection(band))
+                      for c in cast(Sequence[Sequence[float]], getattr(part, "coords", []))]
+            side = 1 if reference > max(within) else -1 if reference < min(within) else 0
             if side == 0:
                 raise LangError(f"contour {name!r} crosses the board between its other limits on {axis}.",
                                 self.path)
-            if limit.gap:
-                raw = self._offset_crossings(limit, line, raw, side)
-            out.append(max(raw) if side > 0 else min(raw))
+            beyond = _beyond([(float(t), float(s)) for t, s in line.coords], side, limit.gap)
+            free = _free(band.intersection(beyond), lo, hi)
+            if explicit:
+                free = [p for p in free if p[0] - 1e-9 <= reference <= p[1] + 1e-9]
+            if not free:
+                what = "past the board's other limit" if explicit else "over all of the board's room"
+                raise LangError(f"contour {name!r}: its clearance reaches {what} on {axis}.", self.path)
+            out.append(End(min(p[0] for p in free) if side > 0 else max(p[1] for p in free), side, name))
         return out
-
-    def _offset_crossings(self, limit: ContourLimit, line: LineString, raw: list[float],
-                          side: int) -> list[float]:
-        """The crossings of the line offset by the clearance, measured in
-        its plane: toward the board for a gap, away from it for into."""
-        toward = side if limit.gap > 0 else -side
-        for distance in (abs(limit.gap), -abs(limit.gap)):
-            moved = line.offset_curve(distance)
-            if not isinstance(moved, LineString) or moved.is_empty:
-                continue
-            values = [_crossings(moved, t) for t in (self.t_lo, self.t_hi)]
-            if all(len(v) == 1 for v in values) and (values[0][0] - raw[0]) * toward > 0:
-                return [v[0] for v in values]
-        raise LangError(f"contour {limit.contour.name!r}: the clearance moves it off the board.", self.path)
 
     def _crossing(self, name: str, line: LineString, t: float) -> float:
         values = _crossings(line, t)

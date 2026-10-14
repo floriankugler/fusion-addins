@@ -343,9 +343,14 @@ class Board:
         stretches closed contours leave then cut it down (tighter wins)."""
         values = self._limit_values(axis, scope_box, used)
         box_centre = (scope_box.lo[axis] + scope_box.hi[axis]) / 2 if scope_box is not None else None
-        reference = sum(values) / len(values) if values else box_centre
-        values += contours.values(axis, reference)
         edges = contours.edges_on(axis)
+        # The board lies on the side of an open contour across it that its
+        # other limit is on, or an open contour in its plane, or the middle
+        # of its room.
+        reference = sum(values) / len(values) if values else (edges[0].lo + edges[0].hi) / 2 if edges \
+            else box_centre
+        ends = contours.ends(axis, reference, explicit=bool(values))
+        values += [end.value for end in ends]
         stretch = contours.stretch(axis, values, box_centre)
         if len(values) + len(edges) > 2:
             raise LangError(f"more than two limits on {axis}.", self.path)
@@ -373,8 +378,12 @@ class Board:
             v = values[0]
             if room is None:
                 raise LangError(f"only one limit on {axis} and no enclosing box to supply the other.", self.path)
-            centre = (room[0] + room[1]) / 2
-            a, b = (v, room[1]) if v < centre else (room[0], v)
+            if ends:
+                # from an open contour across the board to its room's end on the board's side
+                a, b = (v, room[1]) if ends[0].side > 0 else (room[0], v)
+            else:
+                centre = (room[0] + room[1]) / 2
+                a, b = (v, room[1]) if v < centre else (room[0], v)
         elif stretch is not None:
             a, b = stretch
         elif shape is not None:
@@ -387,6 +396,10 @@ class Board:
             raise LangError(f"no limits on {axis} and no enclosing box.", self.path)
         else:
             a, b = scope_box.lo[axis], scope_box.hi[axis]
+        for end in ends:
+            if (a < end.value - 1e-9) if end.side > 0 else (b > end.value + 1e-9):
+                raise LangError(f"contour {end.name!r} lies across the board between its limits on {axis}; "
+                                "give a limit on the side of it meant.", self.path)
         if stretch is not None:
             a, b = max(a, stretch[0]), min(b, stretch[1])
         return a, b
