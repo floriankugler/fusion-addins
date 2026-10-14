@@ -9,9 +9,9 @@ library (`standard-library.md`).
 Solid wood glued along a narrow face, either lipping (10 x 12 on a 12 mm
 board, say) or banding (0.5 to 2 mm). For construction they are the same
 thing in different thicknesses [Florian]. The strip's material is solid wood
-given by its cross-section, as a slat's [Florian]: `oak = section("oak", 10,
-12)`. `side.lip(side.front, side.top, using=oak)` [spelling open; it may be a
-standard-library function instead]:
+given by its cross-section, as a slat's [Florian]: `oak = slat_material("oak",
+10, 12)` (`slats.md`). `side.lip(side.front, side.top, using=oak)` [spelling
+open; it may be a standard-library function instead]:
 
 - The lipping takes its thickness off the board and puts a slat of the
   section in its place [Florian]. The board keeps its placement box and the

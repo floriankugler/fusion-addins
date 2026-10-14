@@ -31,7 +31,7 @@ Proposed:
 - There is nothing to recognise: the layout already says what each
   operation is (a dog bone is a dog bone; a hole's diameter, depth, face and
   whether it goes through are exact) and what is hand work (bevels, mitres,
-  lipping), which stays out of the plan. Auto Setup's rules and tabs
+  lipping, slats), which stays out of the plan. Auto Setup's rules and tabs
   (`lib/auto_setup/`) are split into a Fusion-free layer that both use, as
   the joints were split into settings, layout and emitter. The tool data
   (diameters, flute lengths) are read from the templates outside Fusion, or
@@ -46,7 +46,8 @@ Proposed:
   way to register it. Florian has no standard procedure for this yet, so it
   is worked out with nesting and CAM [Florian].
 - The hand-work list per part comes from the same step: bevels and mitres,
-  lipping and banding, roundovers (notes on edges), hardware to fit.
+  lipping and banding, roundovers (notes on edges), hardware to fit, and,
+  once slats take operations, those (slats are made by hand, `slats.md`).
 - With tool data known, the checks can refuse features narrower than the
   smallest cutter (`design/checks.md`).
 - Slots carry their centre line in the layout (`design/operations.md`), so
