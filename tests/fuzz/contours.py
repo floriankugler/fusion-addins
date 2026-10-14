@@ -35,14 +35,16 @@ in the world by a `Variant`: those axes on any of the world's, anywhere.
   comes out the same in the board's frame, or is refused both times.
 
 Decided by Florian (2026-10-14): an open contour that runs back along
-itself (`overhangs`) is refused, and a clearance may come out up to about
-a hundredth more than asked, never less (`_tolerance`). Known and open
-(`spiked`): whether a clearance is kept to a spike of an open contour.
+itself (`overhangs`) is refused, and so is one that runs straight back
+over itself, a spike, for more than 0.01 mm (`spike`); a clearance may
+come out up to about a hundredth more than asked, never less
+(`_tolerance`).
 """
 from __future__ import annotations
 
 import math
 import traceback
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
@@ -713,6 +715,8 @@ def expected(case: ContourCase, variant: Variant | None = None) -> Expected:
                 raise Refusal("the chord runs diagonally")
             if runs_back([p[_along(spec, points)] for p in points]) > NARROWEST:
                 raise Refusal("an open contour runs back along itself")
+            if spike(points) > NARROWEST:
+                raise Refusal("an open contour runs straight back over itself")
             # the axis it limits is the one across its chord; it runs along the other
             axis, along = (1, 1) if du < dv else (2, 0)
             edges[axis].append((i, limit, points, along))
@@ -725,6 +729,8 @@ def expected(case: ContourCase, variant: Variant | None = None) -> Expected:
         else:
             if runs_back([p[0] for p in points]) > NARROWEST:
                 raise Refusal("an open contour runs back along itself")
+            if spike(points) > NARROWEST:
+                raise Refusal("an open contour runs straight back over itself")
             crossings[s].append((i, limit, points))
 
     extents: dict[int, Range] = {}
@@ -842,6 +848,10 @@ def _values(case: ContourCase, axis: int) -> tuple[list[float], list[int]]:
         else:
             ends.append((room[1] - case.end_t, room[1]) if limit.value > 0 else (room[0], room[0] + case.end_t))
     positions = list(values)
+    # (a position inside an end board leaves it open where the board lies [decided by Florian,
+    # 2026-10-14, as `between()` has it])
+    if any(lo + 1e-6 < p < hi - 1e-6 for p in positions for lo, hi in ends):
+        raise Refusal("a position lies inside an end board")
     away = [0] * len(values)
     centre = (room[0] + room[1]) / 2
     for j, (lo, hi) in enumerate(ends):
@@ -920,10 +930,10 @@ def _limit_problems(case: ContourCase, got: Outcome, regions: dict[int, Region])
                 problems.append(f"the board reaches {outside:.3g} mm2 past {what}")
             elif g > 0:
                 near = shape.distance(region.contour)
-                if near < g - _slack(g):
-                    problem = f"the board comes {near:.4g} near {what}, its gap is {g:g}"
-                    problems.append(f"{KNOWN} a spike; {problem}" if not spec.closed and spiked(polyline(spec))
-                                    else problem)
+                # (a spike no longer than NARROWEST, which is not refused, is nothing meant)
+                short = spike(polyline(spec)) if not spec.closed else 0.0
+                if near < g - _slack(g) - short:
+                    problems.append(f"the board comes {near:.4g} near {what}, its gap is {g:g}")
         else:
             past = clean(shape.difference(region.bounded).difference(region.contour.buffer(-g + _slack(g))))
             if past.area > 1e-6:
@@ -931,21 +941,37 @@ def _limit_problems(case: ContourCase, got: Outcome, regions: dict[int, Region])
     return problems
 
 
-#: Known and open (2026-10-14): an open contour with a spike, a stretch
-#: that runs out and straight back along itself (here across the way it
-#: runs, which the overhang rule leaves alone). The region beyond it, an
-#: area, has nothing of the spike, so a board keeps its clearance from the
-#: rest of the contour and may cross the spike. Whether a clearance is kept
-#: to a spike, or such a contour refused, is Florian's to decide.
-def spiked(points: list[Point2]) -> bool:
-    """Whether the polyline runs straight back along itself somewhere."""
+def spike(points: list[Point2]) -> float:
+    """How far the polyline runs straight back over itself at its longest
+    spike: at each vertex where it turns straight back (within 1e-3 rad),
+    the shorter of the straight runs into and out of it; 0 where it never
+    does. `between()` refuses an open contour with a spike longer than
+    `NARROWEST` [decided by Florian, 2026-10-14]."""
     pts = [p for i, p in enumerate(points) if i == 0 or p != points[i - 1]]
-    for a, b, c in zip(pts, pts[1:], pts[2:]):
-        d1, d2 = (b[0] - a[0], b[1] - a[1]), (c[0] - b[0], c[1] - b[1])
-        n = math.hypot(*d1) * math.hypot(*d2)
-        if n and (d1[0] * d2[0] + d1[1] * d2[1]) / n < -math.cos(1e-3):
-            return True
-    return False
+    steps = [(b[0] - a[0], b[1] - a[1]) for a, b in zip(pts, pts[1:])]
+    lengths = [math.hypot(*d) for d in steps]
+
+    def parallel(i: int, j: int) -> float:
+        return (steps[i][0] * steps[j][0] + steps[i][1] * steps[j][1]) / (lengths[i] * lengths[j])
+
+    longest = 0.0
+    for k in range(len(steps) - 1):
+        if parallel(k, k + 1) < -math.cos(1e-3):
+            back = [i for i in range(k, -1, -1)]
+            ahead = [i for i in range(k + 1, len(steps))]
+            run_in = sum(lengths[i] for i in _while(back, lambda i: parallel(i, k) > math.cos(1e-3)))
+            run_out = sum(lengths[i] for i in _while(ahead, lambda i: parallel(i, k + 1) > math.cos(1e-3)))
+            longest = max(longest, min(run_in, run_out))
+    return longest
+
+
+def _while(items: list[int], keep: Callable[[int], bool]) -> list[int]:
+    out: list[int] = []
+    for i in items:
+        if not keep(i):
+            break
+        out.append(i)
+    return out
 
 
 def _inside_problems(case: ContourCase, built: Built) -> list[str]:

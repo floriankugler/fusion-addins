@@ -11,12 +11,14 @@ way the board's plane meets it:
   last point), the board keeps the side its other limit on that axis is
   on, and the edge follows the contour, `batten.between(top, profile)`.
   It must run one way along its chord's axis: one that runs back along
-  itself, an overhang, is an error (a lip is a closed contour).
+  itself, an overhang, is an error (a lip is a closed contour), and so is
+  one that runs straight back over itself, a spike, in any direction.
 - In a perpendicular plane, the board fits over its whole thickness: its
   section across that plane, from one big face to the other, keeps clear
   of the contour. A closed contour gives a stretch on the axis the two
   planes share, `batten.between(top, profile, floor_outline)`; an open one
-  a position on it, and must run one way through the board's thickness.
+  a position on it, and must run one way through the board's thickness,
+  without a spike.
 
 `contour.gap(n)` keeps n mm of clearance, measured in the contour's
 plane; `contour.into(n)` reaches n mm past it. All of it is polyline math
@@ -304,6 +306,7 @@ class ContourLimits:
                                 "is unclear.", self.path)
             a, b = (self.u, self.v) if du < dv else (self.v, self.u)
             self._one_way(c, b, "along its chord")
+            self._no_spike(c)
             self.edges[a].append(_OpenEdge(limit, a, b, self.path))
             return
         s: Axis = next(x for x in AXES if x not in (n, self.t))
@@ -311,6 +314,7 @@ class ContourLimits:
             self.sections[s].append((c.name, round_offset(c.polygon(self.t, s), -limit.gap)))
         else:
             self._one_way(c, self.t, "through the board's thickness")
+            self._no_spike(c)
             self.crossings[s].append((limit, LineString(c.coords(self.t, s))))
 
     def _one_way(self, c: Contour, along: Axis, way: str) -> None:
@@ -323,6 +327,18 @@ class ContourLimits:
         if back > _BACK:
             raise LangError(f"contour {c.name!r} runs back along {along} by {back:g} mm, an overhang; an open "
                             f"contour must run one way {way}: draw a lip as a closed contour.", self.path)
+
+    def _no_spike(self, c: Contour) -> None:
+        """An open contour must not run straight back over itself, in any
+        direction, for more than `_BACK`: such a spike encloses nothing the
+        board could keep clear of, so it is refused, as a line drawn twice
+        is in a closed sketch [decided by Florian, 2026-10-14; the board kept
+        its clearance from the rest of the contour and crossed the spike]."""
+        length, at = _spike(c.points)
+        if length > _BACK:
+            where = ", ".join(f"{v:g}" for v in at)
+            raise LangError(f"contour {c.name!r} runs straight back over itself for {length:g} mm, a spike at "
+                            f"({where}); draw an open contour once along its way.", self.path)
 
     # -- per axis -----------------------------------------------------------------
 
@@ -473,6 +489,30 @@ def _crossings(line: LineString, t: float) -> list[float]:
         coords = cast(Sequence[Sequence[float]], getattr(part, "coords", []))
         values.update(round(float(c[1]), 9) for c in coords)
     return sorted(values)
+
+
+def _spike(points: Sequence[Point3]) -> tuple[float, Point3]:
+    """The longest stretch a polyline runs straight back over itself, and
+    where it turns: at each vertex where it reverses (within 1e-3 rad), the
+    shorter of the straight runs into and out of it; 0 where it never turns
+    straight back."""
+    pts = [p for i, p in enumerate(points) if i == 0 or math.dist(p, points[i - 1]) > 1e-9]
+    steps = [tuple(q - p for p, q in zip(a, b)) for a, b in zip(pts, pts[1:])]
+    units = [tuple(x / math.hypot(*d) for x in d) for d in steps]
+    lengths = [math.hypot(*d) for d in steps]
+
+    def along(k: int, way: int) -> float:
+        """The straight run of steps from step k on, going `way` (-1 back)."""
+        run, j = 0.0, k
+        while 0 <= j < len(units) and sum(x * y for x, y in zip(units[j], units[k])) > math.cos(1e-3):
+            run, j = run + lengths[j], j + way
+        return run
+
+    best: tuple[float, Point3] = (0.0, pts[0])
+    for k in range(len(units) - 1):
+        if sum(x * y for x, y in zip(units[k], units[k + 1])) < -math.cos(1e-3):
+            best = max(best, (min(along(k, -1), along(k + 1, 1)), pts[k + 1]))
+    return best
 
 
 def _runs_back(values: Sequence[float]) -> float:

@@ -322,6 +322,23 @@ def test_an_open_contour_may_run_back_by_less_than_is_meant():
         c.box()
 
 
+def test_an_open_contour_with_a_spike_is_refused():
+    """An open contour that runs straight back over itself, a spike (here
+    43 mm out and back across the way it runs, which the overhang rule
+    leaves alone), encloses nothing the board could keep clear of: it is
+    refused, as a line drawn twice is in a closed sketch; back over itself
+    by no more than 0.01 mm is not meant, and stays [decided by Florian,
+    2026-10-14; the board kept its clearance from the rest of the contour
+    and crossed the spike]."""
+    spiked = _contour("spiked", [(0, 0), (100, 0), (100, 43), (100, 0), (200, 0)], False)
+    b = board("b", ply15).center(Pos("z", 0)).between(spiked, Pos("y", 100), Pos("x", 0), Pos("x", 200))
+    with pytest.raises(LangError, match=r"runs straight back over itself for 43 mm, a spike at \(100, 43, 0\)"):
+        b.box()
+    tiny = _contour("tiny", [(0, 0), (100, 0), (100, 0.005), (100, 0), (200, 0)], False)
+    c = board("c", ply15).center(Pos("z", 0)).between(tiny, Pos("y", 100), Pos("x", 0), Pos("x", 200))
+    assert c.box().lo["y"] == pytest.approx(0, abs=0.01)
+
+
 def test_inside_offsets_a_contour_as_between_does_for_a_board_across_it():
     """Found by fuzzing the contours: `between()` offsets the clearance of a
     contour across a board in the board's own axes (its thickness first),
