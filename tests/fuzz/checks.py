@@ -26,17 +26,20 @@ them), boards across each other from the preview's meshes (manifold
 booleans), hardware boxes exactly. The checks' verdicts and the pairs they
 name must match it, and the same verdicts must come out of both builds.
 
-What counts (mm): an overlap at least `ACROSS` deep along an axis and
-`WIDE` wide in a plane must be reported; one at most `TOUCH` deep (or a
-mesh film up to `FILM` thick) never; in between either (`clean` takes out
-what is narrower than 0.01 mm, so an overlap that narrow in a board's plane
-is not material). `inside_box`, `fits_sheet` and `inside(contour)` alike,
-from the placement boxes, the outlines' extents and the shadows.
+What counts (mm), as Florian decided (2026-10-14): an overlap deeper than
+1e-6 in every direction, in a board's plane as across its thickness, so
+one at least `ACROSS` deep every way must be reported (from the meshes,
+`MESHED` thick), one at most `TOUCH` deep never, in between either (as is
+a mesh film up to `FILM` thick, which cannot be told from an overlap as
+thin; boards across each other whose extents touch or lie apart are
+silent). `inside_box`, `fits_sheet` and
+`inside(contour)` alike, from the material's extent (a tab past the
+placement box included, a cut across an end not), the outlines' extents
+and the shadows.
 
-Known and open (marked `KNOWN`, 2026-10-14): an overlap narrower than 0.01
-mm in a board's plane is not reported, though one as thin across the
-thickness is; and material a part has past its placement box (a tab, a
-tenon) is not looked at."""
+Known and open (marked `KNOWN`): `no_interference` does not look at
+material a part has past its placement box (a tab, a tenon), until
+pockets and holes in narrow faces count (Florian, 2026-10-14)."""
 from __future__ import annotations
 
 import math
@@ -70,18 +73,18 @@ from lang.core.shapes import slot_shape
 from lang.emit.plan import LayoutFrame, PartFrame, pieces
 from lang.preview.mesh import mesh_part
 
-#: An overlap along an axis (the boards' thickness, a box's sides) at least
-#: this deep must be reported: ten times the checks' tolerance of 1e-6.
+#: An overlap at least this deep in every direction (along an axis, in a
+#: board's plane) must be reported: ten times the checks' tolerance of 1e-6.
 ACROSS = 1e-5
-#: An overlap in a board's plane at least this wide must be reported:
-#: `clean` takes out pieces narrower than 0.01 mm on average, and a
-#: triangle 0.025 wide is 0.01 wide on average.
-WIDE = 0.025
+#: The same from the meshes of boards across each other: a shared piece
+#: this thick on average (its holes drawn with 256 sides around them).
+MESHED = 1e-3
 #: An overlap at most this deep in some direction is touching, which is
 #: never reported (rounding at 6 m is 1e-12).
 TOUCH = 1e-7
 #: The meshes' booleans leave a film where faces coincide (joints.py
-#: measured 3.6e-6): a shared volume no thicker than this is touching.
+#: measured 3.6e-6): a shared volume no thicker than this cannot be told
+#: from touching, nor from an overlap as thin.
 FILM = 1e-4
 #: Sides of the polygons a hole's circle is drawn with, inside and around
 #: it: the truth lies between the two (a sagitta of r * 1.2e-6; for the
@@ -684,8 +687,6 @@ class _Solid:
     hi: dict[Axis, float]
     outline: BaseGeometry
     bands: list[tuple[float, float, BaseGeometry, BaseGeometry]]
-    #: How far the circles drawn inside the holes lie inside them at most.
-    sagitta: float = 0.0
 
 
 def _rings_polygon(rings: list[list[list[float]]]) -> BaseGeometry:
@@ -703,7 +704,6 @@ def _circle(u: float, v: float, r: float, around: bool, sides: int = _CIRCLE) ->
 def _solid(part: PartLayout, frame: LayoutFrame) -> _Solid:
     pf = PartFrame(part, frame)
     bands: list[tuple[float, float, BaseGeometry, BaseGeometry]] = []
-    sagitta = 0.0
     for op in part["ops"]:
         if op["kind"] != "pocket" and op["kind"] != "hole":
             continue
@@ -718,9 +718,8 @@ def _solid(part: PartLayout, frame: LayoutFrame) -> _Solid:
         else:
             r = op["d"] / 2
             bands.append((lo, hi, _circle(op["u"], op["v"], r, False), _circle(op["u"], op["v"], r, True)))
-            sagitta = max(sagitta, r * (1 - math.cos(math.pi / _CIRCLE)))
     return _Solid(part["path"], pf.t_axis, pf.u_axis, pf.v_axis, dict(pf.lo), dict(pf.hi),
-                  _rings_polygon(part["outline"]), bands, sagitta)
+                  _rings_polygon(part["outline"]), bands)
 
 
 def _prism(path: str, box: BoxDict, t: Axis) -> _Solid:
@@ -778,15 +777,16 @@ def _width(g: BaseGeometry) -> float:
 def _in_one_plane(a: _Solid, b: _Solid, window: BaseGeometry | None = None) -> Truth:
     """Two solids in one plane (or a part and a box), slab by slab between
     the ends of their pockets' and holes' bands: an overlap at least
-    `ACROSS` thick and `WIDE` wide is reported, one no thicker than `TOUCH`
-    or narrower than that (and the holes' sagitta) is not."""
+    `ACROSS` thick and wide is reported, one no thicker than `TOUCH` or
+    narrower than that is not (with the holes' circles drawn inside them,
+    more material than there is: within their sagitta of a circle, it is
+    either)."""
     t = a.t
     t0, t1 = max(a.lo[t], b.lo[t]), min(a.hi[t], b.hi[t])
     if t1 - t0 <= TOUCH or _apart(a, b) >= -TOUCH:
         return Truth("silent")
     ends = sorted({t0, t1} | {e for s in (a, b) for band in s.bands for e in band[:2] if t0 < e < t1})
-    narrow = TOUCH + 2 * max(a.sagitta, b.sagitta)
-    reported, silent, thin, wide, some = False, True, math.inf, False, False
+    reported, silent = False, True
     shared: list[BaseGeometry] = []
     for s0, s1 in zip(ends, ends[1:]):
         mid = (s0 + s1) / 2
@@ -794,27 +794,17 @@ def _in_one_plane(a: _Solid, b: _Solid, window: BaseGeometry | None = None) -> T
         more = _areas(_at(a, mid, False).intersection(_at(b, mid, False)))
         if window is not None:
             less, more = _areas(less.intersection(window)), _areas(more.intersection(window))
-        if s1 - s0 > TOUCH and _wider(more, narrow):
+        if s1 - s0 > TOUCH and _wider(more, TOUCH):
             silent = False
-            thin = min(thin, s1 - s0)
             shared.append(more)
-            wide = wide or _wider(more, 0.009)
-            some = some or _wider(more, 1e-4)
-        if s1 - s0 >= ACROSS and _wider(less, WIDE):
+        if s1 - s0 >= ACROSS and _wider(less, ACROSS):
             reported = True
     what = f"{t1 - t0:.3g} thick, {max((_width(g) for g in shared), default=0.0):.3g} wide on average"
     if reported:
         return Truth("reported", what)
     if silent:
         return Truth("silent")
-    # (between: steady when the overlap is thick enough not to be near the checks' 1e-6, and
-    # narrow enough in the plane that `clean` takes it out wherever it lies)
-    known = None
-    if thin >= 1e-4 and some:
-        known = (f"{KNOWN} an overlap {what} in the boards' plane is not reported: `clean` takes out what is "
-                 "narrower than 0.01 mm there, though an overlap as thin across the thickness is reported "
-                 "(2026-10-14, open)")
-    return Truth("either", what, known, thin >= 1e-4 and not wide)
+    return Truth("either", what, steady=False)
 
 
 def _box_window(a: _Solid, b: _Solid) -> BaseGeometry:
@@ -832,9 +822,10 @@ def _parallel_truth(a: _Solid, b: _Solid) -> Truth:
 
 
 #: Material a part has outside its placement box, as a joint's tenons:
-#: the checks look at it within the box only (DESIGN.md, the drawer
-#: cabinet's floors; 2026-10-14, open).
-_GROWTH = f"{KNOWN} the overlap lies outside the placement boxes, which the checks do not look past (open)"
+#: `no_interference` looks at it within the box only until pockets and
+#: holes in narrow faces count, or every box joint would overlap (decided
+#: by Florian, 2026-10-14: open till then).
+_GROWTH = f"{KNOWN} the overlap lies outside the placement boxes, which no_interference does not look past yet"
 
 
 def _bodies_truth(boxes_a: list[_Solid], boxes_b: list[_Solid]) -> Truth:
@@ -916,9 +907,9 @@ class _Meshes:
 
 def _across_truth(a: _Solid, b: _Solid, meshes: _Meshes) -> Truth:
     """Two parts across each other, from their meshes: a shared piece
-    `WIDE` thick is reported (each part's thickness lies in the other's
-    plane, so `clean` may take out anything thinner), one no thicker than
-    the booleans' film is not."""
+    `MESHED` thick on average is reported; one no thicker than the
+    booleans' film may be the film or an overlap as thin, which counts
+    from 1e-6: either, unless their extents lie apart or touch."""
     if _apart(a, b) >= -TOUCH:
         return Truth("silent")
     more = (meshes.get(a.path, False), meshes.get(b.path, False))
@@ -928,9 +919,9 @@ def _across_truth(a: _Solid, b: _Solid, meshes: _Meshes) -> Truth:
     shared = _shared(more[0], more[1])
     thickest = max((th for _, th in shared), default=0.0)
     if thickest <= FILM:
-        return Truth("silent")
+        return Truth("either", f"{thickest:.3g} thick", steady=False)
     less = _shared(fewer[0], fewer[1])
-    if max((th for _, th in less), default=0.0) >= WIDE:
+    if max((th for _, th in less), default=0.0) >= MESHED:
         what = f"{max(v for v, _ in less):.3g} mm3, {thickest:.3g} thick"
         import trimesh
         lo = [max(a.lo[x], b.lo[x]) for x in AXES]
@@ -940,14 +931,10 @@ def _across_truth(a: _Solid, b: _Solid, meshes: _Meshes) -> Truth:
         region = trimesh.creation.box(extents=[h - l for l, h in zip(lo, hi)])
         region.apply_translation([(l + h) / 2 for l, h in zip(lo, hi)])
         inside_boxes = _shared(fewer[0], fewer[1], region)
-        if max((th for _, th in inside_boxes), default=0.0) < WIDE:
+        if max((th for _, th in inside_boxes), default=0.0) < MESHED:
             return Truth("either", what, _GROWTH, False)
         return Truth("reported", what)
-    known = None
-    if thickest >= 1e-3:
-        known = (f"{KNOWN} an overlap {thickest:.2g} mm thick of boards across each other is not reported: in "
-                 "one board's plane it is narrower than the 0.01 mm `clean` keeps (2026-10-14, open)")
-    return Truth("either", f"{thickest:.3g} thick", known, False)
+    return Truth("either", f"{thickest:.3g} thick", steady=False)
 
 
 # -- judging a build ---------------------------------------------------------------------------
@@ -1032,21 +1019,30 @@ def judge(scene: Scene, pl: Placement, built: Built) -> Judged:
             d = built.scope.frame.direction(name)
             i = pl.perm.index(AXES.index(d.axis))
             out[f"box {m.group(1)} {i} {d.sign * pl.signs[i]:+d}"] = float(amount)
+    # (where the material lies [Florian, 2026-10-14]: the plank's ranges and its tab, as drawn, or
+    # where a cut or a rounded taper took an end, the outline's extent as built)
     bounds = _scene_bounds(scene.planks, [x for item in scene.items for body in item.bodies for x in body])
+    module_box = built.scope.box
+    assert module_box is not None
     for k, x in built.boards.items():
         p = scene.planks[k]
-        tab = _tab_ranges(p)
+        kept = [p.features[n] for n in built.kept[k]]
+        drawn = not any(f.kind in ("cut", "notch") for f in kept) and \
+            not (p.outline == "taper" and any(f.kind == "fillet" for f in kept))
+        tab = _tab_ranges(p) or {}
+        lo, hi = _extent(solids[x.path])
         for i in range(3):
             for side in (-1, 1):
-                edge = bounds[i][0] - scene.margins[2 * i] if side < 0 else bounds[i][1] + scene.margins[2 * i + 1]
-                reach = p.range(i)[0] if side < 0 else p.range(i)[1]
-                amount = side * (reach - edge)
+                if drawn:
+                    edge = bounds[i][0] - scene.margins[2 * i] if side < 0 else bounds[i][1] + scene.margins[2 * i + 1]
+                    end = 0 if side < 0 else 1
+                    reach = (min if side < 0 else max)([p.range(i)[end]] + ([tab[i][end]] if i in tab else []))
+                    amount = side * (reach - edge)
+                else:
+                    axis, outward = AXES[pl.perm[i]], side * pl.signs[i]
+                    amount = module_box.lo[axis] - lo[axis] if outward < 0 else hi[axis] - module_box.hi[axis]
                 key = f"box {x.path} {i} {side:+d}"
                 truth = _amount_truth(amount)
-                if tab is not None and truth.verdict != "reported" and i in tab:
-                    with_tab = side * ((min if side < 0 else max)(reach, tab[i][0 if side < 0 else 1]) - edge)
-                    if _amount_truth(with_tab).verdict == "reported":
-                        truth = Truth("either", f"{with_tab:.3g}", _GROWTH, False)
                 record(key, key in out, truth, f"{x.path} reaching out of the box ({amount:.3g} {i}{side:+d})")
                 if key in out and truth.verdict == "reported" and abs(out[key] - amount) > max(1e-5 * amount, 1e-5):
                     problems.append(f"inside_box says {x.path} reaches out by {out[key]:g}, it is {amount:.6g} [{key}]")
@@ -1115,23 +1111,23 @@ def _tab_ranges(p: Plank) -> dict[int, Range] | None:
 
 def _shadow_truth(s: _Solid, n: Axis, a: Axis, b: Axis, allowed: BaseGeometry) -> Truth:
     """A part's shadow against the allowed area: its outline in the
-    contour's plane, its box across it (as `inside()` documents), or past
-    its box by a tab (known)."""
+    contour's plane, across it the extent of its outline (a tab past its
+    box included [Florian, 2026-10-14]) and its thickness. Reported where
+    it reaches `ACROSS` out and more than 1e-5 mm2 lies beyond the checks'
+    1e-6 mm (which they count from 1e-6 mm2), silent where nothing reaches
+    out farther than touching."""
     if s.t == n:
         shadow = s.outline
-        grown = None
     else:
-        shadow = shapely_box(s.lo[a], s.lo[b], s.hi[a], s.hi[b])
-        (lo, hi) = _extent(s)
-        grown = shapely_box(lo[a], lo[b], hi[a], hi[b])
+        lo, hi = _extent(s)
+        shadow = shapely_box(lo[a], lo[b], hi[a], hi[b])
     off = _areas(shadow.difference(allowed))
-    if _wider(off, WIDE):
+    beyond = _areas(shadow.difference(allowed.buffer(2e-6)))
+    if _wider(off, ACROSS) and beyond.area >= 1e-5:
         return Truth("reported", f"{_width(off):.3g} out, {off.area:.3g} mm2")
-    if grown is not None and _wider(_areas(grown.difference(allowed)), WIDE):
-        return Truth("either", "past its box", _GROWTH, False)
     if not _wider(off, TOUCH):
         return Truth("silent")
-    return Truth("either", f"{_width(off):.3g} out", steady=_width(off) >= 1e-4 and not 0.5e-6 <= off.area <= 2e-6)
+    return Truth("either", f"{_width(off):.3g} out", steady=False)
 
 
 # -- the case ---------------------------------------------------------------------------------
