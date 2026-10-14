@@ -671,6 +671,23 @@ def test_a_depth_past_the_opposite_face_is_an_error():
     assert len(left.ops) == 2
 
 
+def test_a_depth_that_does_not_reach_into_the_board_is_an_error():
+    """Found by fuzzing the placement: `to(left.outer, -20)` on a 15 mm
+    board made a hole -5 deep, accepted where the number -5 is refused;
+    and `to(left.outer, -15)` was 0 deep at some places and 2e-15 at
+    others, refused or not. A depth under 0.01 mm reaches nothing either
+    way."""
+    for name, y in (("at0", 0.0), ("far", 0.1)):
+        with module(name, Box.from_size(width=600, depth=400, height=700, origin=(0, y, 0))) as m:
+            left = board("left", ply15).on(m.left)
+            for depth in (to(left.outer, -20), to(left.outer, -15), to(left.outer, -14.995), -5, 0.005):
+                with pytest.raises(LangError, match="does not reach into the board"):
+                    left.hole(d=5, at=left.inner.center, depth=depth)
+            left.hole(d=5, at=left.inner.center, depth=to(left.outer, -14.99))
+        hole = left.ops[0]
+        assert isinstance(hole, Hole) and hole.depth == pytest.approx(0.01)
+
+
 def test_to_names_a_face_of_the_board_itself():
     with module("m", Box.from_size(width=600, depth=400, height=700)) as m:
         left = board("left", ply15).on(m.left)

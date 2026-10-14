@@ -638,7 +638,9 @@ class Board:
         through. Through and `to()` measure the board from `face` to the
         opposite face: its thickness from a big face, its length or width
         from a narrow one. A depth reaching past the opposite face is an
-        error."""
+        error, and so is one under 0.01 mm, which reaches nothing, as a
+        number or as `to()` [found by fuzzing, 2026-10-14: `to(side.outer,
+        -20)` on a 15 mm board made a hole -5 deep]."""
         b = self.box()
         extent = b.hi[face.axis] - b.lo[face.axis]
         if isinstance(depth, Through):
@@ -656,9 +658,13 @@ class Board:
             if depth.offset > 1e-9:
                 raise LangError(f"depth to({depth.face!r}, {depth.offset:g}) reaches past that face, out of the "
                                 "board; use through, or a negative offset to stop short of it.", self.path)
+            if extent + depth.offset < NARROWEST - 1e-9:
+                raise LangError(f"depth to({depth.face!r}, {depth.offset:g}) does not reach into the board: that face "
+                                f"is {extent:g} from the {face.name} face.", self.path)
             return extent + depth.offset, f"to({depth.face}, {depth.offset:g})", abs(depth.offset) < 1e-9
-        if depth <= 0:
-            raise LangError(f"depth must be positive, got {depth}.", self.path)
+        if depth < NARROWEST - 1e-9:
+            raise LangError(f"depth {depth:g} does not reach into the board: a depth is at least {NARROWEST:g} mm.",
+                            self.path)
         if depth > extent + 1e-6:
             raise LangError(f"depth {depth:g} reaches past the opposite face, {extent:g} from the {face.name} "
                             "face; use through to go all the way.", self.path)
