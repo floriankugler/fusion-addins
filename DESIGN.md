@@ -609,7 +609,12 @@ proposed]
     narrower is meant, and the snapshot rounds points to 1e-4 mm); one that
     does runs back along itself, an overhang such as a lip, and is an error
     that says to draw the lip as a closed contour. The whole contour counts,
-    whichever part takes it. [decided by Florian, 2026-10-14]
+    whichever part takes it. Nor may it run straight back over itself, in
+    any direction, for more than 0.01 mm (a spike, measured at the vertex
+    where it turns as the shorter of the straight runs into and out of
+    it): a spike encloses nothing the part could keep clear of, so it is an
+    error, as a line drawn twice is in a closed sketch. [decided by Florian,
+    2026-10-14]
   - `contour.gap(n)` keeps n of clearance, measured in the contour's plane
     with round joins, so it is exact at corners (GEOS offsets the area given
     in one form, without points along its edges, so the same contour gives
@@ -754,8 +759,15 @@ proposed]
   in the contour's plane by its outline, any other by its outline's extent
   and its thickness), both by where the material lies, so a tenon or a box
   joint's fingers past the placement box count and an end cut away does
-  not [decided by Florian, 2026-10-14]; a part may reach 1e-6 mm out
-  (`inside()` also needs more than 1e-6 mm2 outside).
+  not [decided by Florian, 2026-10-14]; a part may reach 1e-6 mm out, and
+  anything further counts, however little its area (`inside()` needed
+  more than 1e-6 mm2 outside too) [decided by Florian, 2026-10-14].
+  `inside()` measures a part as `between()` places it, so the two agree:
+  the clearance offset by the same call in the part's own axes (a
+  mirrored area, which GEOS simplifies otherwise by up to a hundredth of
+  the gap, put boards `between()` had placed 0.005 mm into it), and a part
+  across the contour from 1e-6 mm inside its faces, as `between()` holds
+  it [found by fuzzing, 2026-10-14].
 - The sample master is built by `tools/van_master.py` in Fusion (rebuild it
   rather than keep a saved document); its snapshot is
   `examples/van_snapshot.json`, the test fixture, and `examples/van.py` is
@@ -825,7 +837,9 @@ proposed]
   overlap. A hole is its circle within a quarter of the tolerance (up to
   430 mm across); a pocket's or an outline's arcs are their polygons, so
   something touching such an arc from inside meets the chords' slivers, up
-  to 3.8e-5 r deep, and counts. Not looked at yet: material past the
+  to 3.8e-5 r deep, and counts (left so for now [Florian, 2026-10-14]: no
+  example or mount does it; drawing the arcs finer in the check, or round
+  pockets as holes, would cure it). Not looked at yet: material past the
   placement box (tenons, fingers, a floor grown into its grooves) and
   pockets and holes in narrow faces; looking past the boxes would report
   every box joint, whose fingers clear each other only through their
@@ -2744,15 +2758,16 @@ cleaned away (taken as it is now); and two circle pockets from either
 face of a board, half its thickness each, covered all of it and left
 nothing, which neither was refused for alone: pockets and holes from
 opposite faces that meet as deep as the board together go through there
-now, held to what a pocket through it is. Open, for Florian: an open
-contour with a spike, running out and straight back across the way it
-runs, keeps its clearance from the rest of the contour, not from the
-spike (refuse it, as a line drawn back over itself?); a round pocket's or
-an outline's arcs are their polygons in `no_interference`, so a box
-touching such an arc from inside meets the chords' slivers (3.8e-5 r)
-and is reported, which no example does; and `inside()` also needs more
-than 1e-6 mm2 outside, so a corner poking less than about 1e-3 mm out is
-not reported.
+now, held to what a pocket through it is. Three more, decided by Florian
+the same day: an open contour with a spike, running out and straight back
+across the way it runs, kept its clearance from the rest of the contour
+and let the board cross the spike (refused now, beyond 0.01 mm); a round
+pocket's or an outline's arcs are their polygons in `no_interference`, so
+a box touching such an arc from inside meets the chords' slivers (3.8e-5
+r) and is reported, which no example does (left so for now, noted under
+"Joints and hardware"); and `inside()` also needed more than 1e-6 mm2
+outside, so a corner poking about 1e-4 mm out passed (anything more than
+1e-6 mm out counts now).
 
 1. `core`: the position algebra, box, board with `on`, `between` and `center`,
    scopes and paths, and layout JSON output with world transforms. With unit
