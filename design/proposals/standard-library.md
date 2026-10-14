@@ -17,8 +17,8 @@ Proposed:
   (`from lang import *`), each with a test and an example: the drawer box
   (box joints, grooved floor, slide machining, moved from
   `examples/drawer_cabinet.py`), the drawer cabinet, a carcass with a choice
-  of connectors, lipping and banding. It replaces the `catalog/` folder the
-  first draft planned for Florian's cabinet functions.
+  of connectors. It replaces the `catalog/` folder the first draft planned
+  for Florian's cabinet functions.
 - The rule makes the standard library a test of the core: a building block
   that needs an internal shows something the core lacks. A test can enforce
   the rule by checking the imports.
@@ -27,5 +27,6 @@ Proposed:
   protocols. The standard library composes and adds no geometry of its own.
 - Cabinet types for one build stay in that build's repo
   (`build-repo.md`); `lang/std` holds what is reused across builds.
-- Lipping is a good first item: if it can be written with slats and a cut,
-  the core is enough, else it shows what to add.
+- Lipping was proposed as the first item, but it is a core operation
+  (`lipping.md`): it reads the board's outline, which the public API should
+  not grow for it [decided]. The drawer box is the first item instead.
