@@ -128,9 +128,57 @@ and the room between parts.
   both sides (a 410 high rectangle in a 413 high sheet with spacing 10:
   1.5 mm above and below); `ps_nest.py` now shrinks every sheet by the
   margin itself.
-- Not done: trimming the factory edges (the guillotine solver takes trims),
-  limiting the number of cuts per sheet, valuing one big leftover above
-  several small ones, and choosing among settings automatically.
+- Florian [2026-10-14]: not worth trying several settings when the
+  material comes out this close; at most about 5 saw cuts per sheet; one
+  big leftover is better than several small ones.
+
+### Cuts per sheet and the leftover (`sawing.py`)
+
+- The solver's cutting tree is first made as simple as it can be: two
+  rests side by side become one (a bigger leftover), and a blank takes a
+  rest too small to keep along (no cut) when it still fits the bed. A
+  node with k pieces takes k - 1 cuts. A rest at least 200 mm across and
+  0.1 m² is stock, smaller ones waste.
+- PackingSolver limits cuts per stage only (1-cuts per sheet, 2-cuts per
+  strip), not per sheet, so the sawing is tried with 10 settings (two or
+  three stages, cross cuts or rips first, with and without a limit per
+  stage; about a second each) and the plan kept is, in this order: no
+  sheet over 5 cuts; fewest sheets; the largest single piece of stock;
+  fewest cuts. The solver's objective is "fewest sheets, then the largest
+  leftover on the last one".
+- Refill respects the budget: it cuts into a stock piece only on a sheet
+  with two cuts to spare, and only cuts off what is worth keeping or what
+  the bed does not take.
+
+| Parts | Sheets | Cuts per sheet | Stock | Largest piece | Material used |
+|---|---|---|---|---|---|
+| 62 | 5 | 5, 3, 5, 5, 2 | 3.05 m² in 5 pieces | 1294 x 1240 | 12.27 m² (11.97 without the limit) |
+| 62 + offcuts on hand | 5 + 3 | 4, 2, 2, 2, 2 | 4.97 m² in 8 | 1114 x 1240 | 10.35 m² |
+| 124 | 11 | 2 to 4 | 9.47 m² in 17 | 1294 x 1240 | 24.22 m² |
+
+The limit costs little material. The last sheet keeps its leftover as one
+piece across the sheet (more than half of it); the other sheets keep
+strips where the blanks do not tile them (515 x 1240, 305 x 1240,
+1172 x 248). The plans could be simpler still: the simplifying joins
+pieces side by side only, it does not rearrange the tree (a sheet sawn
+with 5 cuts, cross cuts first, would take 3 with the rip first).
+
+Ways to rank leftovers, for Florian to choose [proposed 2026-10-14]:
+
+1. In order, no weights (what `sawing.py` does): fewest sheets, then the
+   largest single piece, then fewest cuts.
+2. A threshold for what counts as stock at all, tied to what the shop
+   cuts (say 300 mm across and 0.25 m²); below it a rest is waste, and a
+   blank takes it along instead of a cut.
+3. One number when a single score is needed: the sum of the stock pieces'
+   areas squared (one piece of 1 m² scores 1, two of 0.5 m² score 0.5),
+   after the number of sheets.
+4. Prefer pieces across the whole sheet (full width or full length):
+   they store and reuse best.
+
+Not done: trimming the factory edges (the guillotine solver takes trims),
+rearranging a plan to fewer cuts, and refill when the cut budget is
+spent.
 
 ## Pushing the parts to one side
 
@@ -272,8 +320,10 @@ Run by `ps_nest.py` (its own venv: `.venv`, `pip install packingsolver`).
 - `ps_nest.py`: PackingSolver (objectives, modes, `--arcs`, `--compact`,
   `--set` for its parameters).
 - `blanks.py`: sheets sawn into blanks for the bed: `patterns`, `twostep`
-  (with `--refill`), `baseline`; draws each sheet with its blanks, stock
-  and waste. `compare_blanks.sh` (the settings) and `compare_blanks2.sh`
+  (with `--refill`, `--max-cuts`), `baseline`; draws each sheet with its
+  blanks, stock and waste.
+- `sawing.py`: the sawing plan: the guillotine solver's tree, made
+  simpler, its cuts counted, the best of a few settings. `compare_blanks.sh` (the settings) and `compare_blanks2.sh`
   (with refill fixed, and offcuts) are the runs in the table.
 - `check.py`: checks any result against its job and draws it.
 

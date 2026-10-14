@@ -17,8 +17,10 @@ are. Two strategies:
 - `twostep`: nest first, on blank sizes from a grid priced by area (plus
   `--blank-cost` each, for the sawing), then push each blank's parts into
   its corner and cut the blank down to them, then saw the blanks out of
-  sheets with PackingSolver's guillotine solver for rectangles. What is
-  left of a sheet stays one piece where it can.
+  sheets with PackingSolver's guillotine solver for rectangles (sawing.py:
+  a few settings tried, at most `--max-cuts` cuts per sheet, the largest
+  piece of stock kept). What is left of a sheet stays one piece where it
+  can.
 
 `baseline` nests on whole sheets as if the bed were large enough, for
 comparison. Each run writes `summary.json`, a job and result per strategy
@@ -39,6 +41,7 @@ import packingsolver.rectangleguillotine as rg
 from shapely import Polygon, STRtree, affinity, box
 
 import ps_nest
+import sawing
 
 
 def solver_args(**kw) -> argparse.Namespace:
@@ -238,41 +241,24 @@ def candidate_blanks(sheet, bed, lengths, widths, per_blank: float) -> list[dict
     return out
 
 
-def saw(blanks: list[tuple[float, float]], sheet, kerf, seconds: float, objective: str = "binpacking"):
-    """Cut the blanks (fixed orientation: the grain) out of as few sheets as
-    the guillotine solver finds, three stages, `kerf` apart; `leftovers`:
-    then with the largest piece left over on the last sheet."""
-    b = rg.InstanceBuilder()
-    b.set_objective(ps.Objective.BinPackingWithLeftovers if objective == "leftovers" else ps.Objective.BinPacking)
-    b.set_cut_thickness(int(kerf))
-    b.set_number_of_stages(3)
-    b.add_bin_type(int(sheet[0]), int(sheet[1]), copies=-1)
-    for w, h in blanks:
-        b.add_item_type(int(math.ceil(w)), int(math.ceil(h)), oriented=True, copies=1)
-    params = rg.OptimizeParameters()
-    params.time_limit = seconds
-    params.verbosity_level = 0
-    out = rg.optimize(b.build(), params)
-    sol = out.solution
-    sheets = []
-    for k in range(sol.number_of_different_bins()):
-        sb = sol.bin(k)
-        leaves = [{"item": n.item_type_id, "rect": [n.l, n.b, n.r - n.l, n.t - n.b]}
-                  for n in sb.nodes if not n.children and n.item_type_id != -2]
-        for _ in range(sb.copies):
-            sheets.append(leaves)
-    return sheets
-
-
 # --- refilling -------------------------------------------------------------
 
-def refill(job: dict, sheets: list[dict], seconds: float, kerf: float) -> tuple[list[dict], list[str]]:
+def clip_to_bed(w: float, h: float, bed) -> tuple[float, float]:
+    """The largest piece of w x h, from its corner, that fits the bed."""
+    if fits_bed(w, h, bed):
+        return w, h
+    options = [(min(w, bed[0]), min(h, bed[1])), (min(w, bed[1]), min(h, bed[0]))]
+    return max(options, key=lambda o: o[0] * o[1])
+
+
+def refill(job: dict, sheets: list[dict], seconds: float, kerf: float, bed, max_cuts: int) -> tuple[list[dict], list[str]]:
     """Take the parts off the sheet with the least of them and nest them
     into the room left on the others: their used blanks first (the parts
     already there as defects, kept the spacing off; almost free), then their
-    stock pieces (priced by area), each cut down to what it then holds, its
-    rest staying stock. When all fit, that sheet is not needed; again while
-    it works."""
+    stock pieces (priced by area, as far as they fit the bed, on sheets with
+    two cuts to spare), each then cut down to what it holds where what it
+    frees is worth keeping. When all fit, that sheet is not needed; again
+    while it works."""
     log = []
     while len(sheets) > 1:
         area = lambda s: sum(job["parts"][i["index"]]["area"] for p in s["pieces"] if p.get("bin")
@@ -290,6 +276,10 @@ def refill(job: dict, sheets: list[dict], seconds: float, kerf: float) -> tuple[
                 if p.get("kind") == "waste":
                     continue
                 _x, _y, w, h = p["rect"]
+                if not p.get("bin"):
+                    if s["cuts"] + 2 > max_cuts:
+                        continue
+                    w, h = clip_to_bed(w, h, bed)
                 if min(w, h) < 2 * job["margin"] + 10:
                     continue
                 defects = [[list(c) for c in list(placed(job, item).exterior.coords)[:-1]]
@@ -314,14 +304,24 @@ def refill(job: dict, sheets: list[dict], seconds: float, kerf: float) -> tuple[
             into_stock += 1
             x, y, w, h = piece["rect"]
             shapes = [placed(job, it) for it in b["items"]]
-            w2 = min(w, math.ceil(max(sh.bounds[2] for sh in shapes) + job["margin"]))
-            h2 = min(h, math.ceil(max(sh.bounds[3] for sh in shapes) + job["margin"]))
-            piece.update(rect=[x, y, w2, h2], bin={"items": b["items"]}, kind="used")
-            # The rest of the piece: a strip to the right, then one above.
-            for rest in ([x + w2 + kerf, y, w - w2 - kerf, h], [x, y + h2 + kerf, w2, h - h2 - kerf]):
-                if rest[2] > 0 and rest[3] > 0:
-                    useful = min(rest[2], rest[3]) >= 200 and rest[2] * rest[3] >= 0.1e6
-                    sheets[si]["pieces"].append({"rect": rest, "bin": None, "kind": "stock" if useful else "waste"})
+            bw, bh = clip_to_bed(w, h, bed)
+            w2 = min(bw, math.ceil(max(sh.bounds[2] for sh in shapes) + job["margin"]))
+            h2 = min(bh, math.ceil(max(sh.bounds[3] for sh in shapes) + job["margin"]))
+            # Cut off to the right, then above, what is worth keeping or what
+            # the bed does not take; anything else stays with the blank.
+            right = [x + w2 + kerf, y, w - w2 - kerf, h]
+            if right[2] > 0 and (sawing.useful(right[2], right[3]) or not fits_bed(w, h, bed)):
+                sheets[si]["pieces"].append({"rect": right, "bin": None,
+                                             "kind": "stock" if sawing.useful(right[2], right[3]) else "waste"})
+                sheets[si]["cuts"] += 1
+                w = w2
+            above = [x, y + h2 + kerf, w, h - h2 - kerf]
+            if above[3] > 0 and (sawing.useful(above[2], above[3]) or not fits_bed(w, h, bed)):
+                sheets[si]["pieces"].append({"rect": above, "bin": None,
+                                             "kind": "stock" if sawing.useful(above[2], above[3]) else "waste"})
+                sheets[si]["cuts"] += 1
+                h = h2
+            piece.update(rect=[x, y, w, h], bin={"items": b["items"]}, kind="used")
         log.append(f"sheet {k}: its {len(moving)} parts moved into the room on the others, "
                    f"{into_stock} stock pieces cut into ({time.perf_counter() - t0:.1f} s)")
         sheets = sheets[:k] + sheets[k + 1:]
@@ -418,11 +418,12 @@ def run_patterns(job, a, offcuts, out: Path) -> dict:
     best = ok[0]
     sheets, on_offcuts = assign_sheets(best, offcuts)
     for sh in sheets:
+        sh["cuts"] = 3
         for piece in sh["pieces"]:
             piece["kind"] = "used" if piece.get("bin") else "stock"
     sawn = len(sheets)
     if a.refill > 0:
-        sheets, log = refill(job, sheets, a.refill, a.kerf)
+        sheets, log = refill(job, sheets, a.refill, a.kerf, a.bed, a.max_cuts)
         for line in log:
             print(f"  refill: {line}")
     stock = sum(p["rect"][2] * p["rect"][3] for sh in sheets for p in sh["pieces"] if p["kind"] == "stock")
@@ -473,29 +474,36 @@ def run_twostep(job, a, offcuts, out: Path) -> dict:
         h = math.ceil(y1) if t["height"] - y1 >= a.min_strip else t["height"]
         blanks.append({"chosen": [t["width"], t["height"]], "size": [w, h], "items": items})
     t_shrink = time.perf_counter() - t0 - t_nest
-    cut = saw([tuple(b["size"]) for b in blanks], a.sheet, a.kerf, a.saw_seconds, a.saw_objective)
+    plan, tried = sawing.best_plan([tuple(b["size"]) for b in blanks], a.sheet, a.bed, a.kerf,
+                                   a.max_cuts, a.saw_seconds)
     t_saw = time.perf_counter() - t0 - t_nest - t_shrink
     sheets = []
-    for leaves in cut:
+    for tree in plan["plans"]:
         pieces = []
-        for leaf in leaves:
-            x, y, w, h = leaf["rect"]
-            if leaf["item"] >= 0:
-                b = blanks[leaf["item"]]
-                pieces.append({"rect": [x, y, w, h], "bin": {"items": b["items"]}, "kind": "used"})
+        for leaf in sawing.leaves(tree):
+            x, y, w, h = leaf.rect
+            if leaf.blank >= 0:
+                # The blank's parts, measured from the piece's corner (it may
+                # have taken a rest along on its left or below).
+                dx, dy = leaf.origin[0] - x, leaf.origin[1] - y
+                items = [dict(i, translation=[i["translation"][0] + dx, i["translation"][1] + dy])
+                         for i in blanks[leaf.blank]["items"]]
+                pieces.append({"rect": [x, y, w, h], "bin": {"items": items}, "kind": "used"})
             else:
-                useful = min(w, h) >= 200 and w * h >= 0.1e6
-                pieces.append({"rect": [x, y, w, h], "bin": None, "kind": "stock" if useful else "waste"})
-        sheets.append({"pieces": pieces})
+                pieces.append({"rect": [x, y, w, h], "bin": None,
+                               "kind": "stock" if sawing.useful(w, h) else "waste"})
+        sheets.append({"pieces": pieces, "cuts": sawing.cuts(tree)})
+    print(f"  saw: {plan['setting']}, cuts per sheet {plan['cuts']} "
+          f"({len(tried)} settings tried, {sum(1 for r in tried if r['over'] == 0)} within {a.max_cuts} cuts)")
     sawn = len(sheets)
     if a.refill > 0:
-        sheets, log = refill(job, sheets, a.refill, a.kerf)
+        sheets, log = refill(job, sheets, a.refill, a.kerf, a.bed, a.max_cuts)
         for line in log:
             print(f"  refill: {line}")
     stock = sum(p["rect"][2] * p["rect"][3] for s in sheets for p in s["pieces"] if p["kind"] == "stock")
     elapsed = time.perf_counter() - t0
     draw(job, sheets, a.sheet, out / "twostep.svg",
-         f"twostep: {len(sheets)} sheets", on_offcuts)
+         f"twostep: {len(sheets)} sheets, cuts {[sh['cuts'] for sh in sheets]}", on_offcuts)
     used_pieces = [p for s in sheets for p in s["pieces"] if p.get("bin")]
     btypes = [{"width": p["rect"][2], "height": p["rect"][3], "copies": 1} for p in used_pieces]
     btypes += [{"width": o["size"][0], "height": o["size"][1], "copies": 1} for o in on_offcuts]
@@ -504,10 +512,16 @@ def run_twostep(job, a, offcuts, out: Path) -> dict:
     (out / "twostep_job.json").write_text(json.dumps(checked_job(job, btypes)))
     (out / "twostep_result.json").write_text(json.dumps({"bins": rbins, "unplaced": []}))
     used = len(sheets) * a.sheet[0] * a.sheet[1] - stock  # blanks, kerf and waste
+    stock_pieces = sorted((p["rect"] for sh in sheets for p in sh["pieces"] if p["kind"] == "stock"),
+                          key=lambda r: -r[2] * r[3])
+    largest = stock_pieces[0] if stock_pieces else None
     print(f"twostep: {len(sheets)} sheets (sawn {sawn}), {len(used_pieces)} blanks (+{len(on_offcuts)} offcuts), "
-          f"{stock / 1e6:.2f} m2 left as stock, {used / 1e6:.2f} m2 used; "
-          f"nest {t_nest:.1f} s (best at {best_at:.1f} s), push {t_shrink:.1f} s, saw {t_saw:.1f} s")
+          f"cuts {[sh['cuts'] for sh in sheets]}, {stock / 1e6:.2f} m2 left as stock in {len(stock_pieces)} pieces"
+          + (f" (largest {largest[2]:.0f} x {largest[3]:.0f})" if largest else "")
+          + f", {used / 1e6:.2f} m2 used; nest {t_nest:.1f} s (best at {best_at:.1f} s), saw {t_saw:.1f} s")
     return {"strategy": "twostep", "sheets": len(sheets), "used_area": used, "blanks": [b["size"] for b in blanks],
+            "cuts": [sh["cuts"] for sh in sheets], "saw_setting": plan["setting"],
+            "stock_pieces": [r[2:] for r in stock_pieces],
             "pieces_per_sheet": [len(sh["pieces"]) for sh in sheets],
             "chosen": [b["chosen"] for b in blanks], "stock_area": stock, "seconds": elapsed,
             "nest_seconds": t_nest, "nest_best_at": best_at, "push_seconds": t_shrink, "saw_seconds": t_saw}
@@ -542,10 +556,11 @@ def main() -> None:
     ap.add_argument("--blank-widths", type=float, nargs="+", default=[250, 400, 600, 800, 1000, 1240])
     ap.add_argument("--blank-cost", type=float, default=50_000, help="mm2 added to each blank's cost (sawing)")
     ap.add_argument("--nest-seconds", type=float, default=20.0)
-    ap.add_argument("--saw-seconds", type=float, default=10.0)
+    ap.add_argument("--saw-seconds", type=float, default=1.0, help="per saw setting tried")
     ap.add_argument("--no-gravity", dest="gravity", action="store_false")
-    ap.add_argument("--min-strip", type=float, default=150.0, help="cut a blank down only to free a strip this wide")
-    ap.add_argument("--saw-objective", choices=["binpacking", "leftovers"], default="binpacking")
+    ap.add_argument("--min-strip", type=float, default=0.0,
+                    help="cut a blank down only to free a strip this wide (150 made it worse: 6 sheets for 5)")
+    ap.add_argument("--max-cuts", type=int, default=5, help="saw cuts per sheet at most")
     ap.add_argument("--refill", type=float, default=0.0, metavar="SECONDS",
                     help="then move the emptiest sheet's parts into the room on the others, this long a try")
     a = ap.parse_args()
