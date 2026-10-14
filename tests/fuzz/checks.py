@@ -1172,8 +1172,10 @@ def run_case(scene: Scene) -> list[str]:
     if first.kept != second.kept:
         differ = first.refused.keys() ^ second.refused.keys()
         why = [first.refused.get(key) or second.refused.get(key) or "" for key in differ]
-        if all("splits it in pieces" in w for w in why):
-            return problems + [f"{_PINCHED} {why[0]}"]
+        # (and what a hole kept at one place only makes of the operations after it)
+        split = [w for w in why if "splits it in pieces" in w]
+        if split:
+            return problems + [f"{_PINCHED} {split[0]}"]
         return problems + [f"placed otherwise, the planks keep other features: {first.kept} against {second.kept}"]
     for key in sorted(first.said.keys() & second.said.keys()):
         one, two = first.truths[key], second.truths[key]
