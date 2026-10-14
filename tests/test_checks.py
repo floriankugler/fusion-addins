@@ -236,3 +236,30 @@ def test_a_divider_or_a_box_a_little_into_a_board_overlaps_it():
         m.place_hardware("pin", [_body("pin", _box((200 - into, 100, 5), (220, 120, 10)))])
         assert no_interference(m) == expected
 
+
+def test_a_part_reaches_out_of_its_box_where_its_material_does():
+    """Decided by Florian, 2026-10-14: `inside_box` takes a part's outline
+    where it lies, not its placement box. A tenon grown 12 past the end of
+    a shelf flush with the module's side reaches out of the module by 12
+    (it was inside); a board placed 10 past the back, its last 10 cut off,
+    does not (it reached out by 10)."""
+    with module("m", Box.from_size(width=300, depth=300, height=200)) as m:
+        shelf = board("shelf", ply18).on(m.bottom).between(m.left + 20, m.right)
+        shelf.add_to_outline(Shape(shapely_box(100, 290, 150, 312)))       # a tenon out of the right end (y)
+        cut = board("cut", ply18).on(m.top).between(Pos("x", 0), Pos("x", 310))
+        cut.add_cut(Shape(shapely_box(300, -1, 311, 301)))                  # its last 10 on x cut off
+    assert inside_box(m) == ["m.shelf reaches out of m's box: right by 12"]
+
+
+def test_a_part_across_a_contour_is_inside_it_where_its_material_is():
+    """Decided by Florian, 2026-10-14: `inside()` takes a part across the
+    contour's plane by its outline's extent and its thickness, not its
+    placement box: a standing board with a tenon 5 past the contour is not
+    inside it; one placed 10 past it, its last 10 cut off, is."""
+    floor = Contour("floor", ((0, 0, 0), (300, 0, 0), (300, 300, 0), (0, 300, 0)), True, (0, 0, 0), (0, 0, 1))
+    with module("m", Box.from_size(width=300, depth=300, height=200)) as m:
+        tenoned = board("tenoned", ply18).on(m.left).between(Pos("x", 0), Pos("x", 300))       # y 0 to 18
+        tenoned.add_to_outline(Shape(shapely_box(300, 50, 305, 80)))        # (x, z): 5 past the back on x
+        cut = board("cut", ply18).on(m.right).between(Pos("x", 0), Pos("x", 310))
+        cut.add_cut(Shape(shapely_box(300, -1, 311, 201)))                  # its last 10 on x cut off
+    assert [p.split(" (")[0] for p in inside(floor)(m)] == ["m.tenoned is not inside floor"]
