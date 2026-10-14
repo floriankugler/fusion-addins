@@ -35,10 +35,8 @@ from the placement boxes, the outlines' extents and the shadows.
 
 Known and open (marked `KNOWN`, 2026-10-14): an overlap narrower than 0.01
 mm in a board's plane is not reported, though one as thin across the
-thickness is; material a part has past its placement box (a tab, a
-tenon) is not looked at; and a through hole tangent to the board's edge
-that cuts a corner off but for that point is refused at one place and
-kept at another."""
+thickness is; and material a part has past its placement box (a tab, a
+tenon) is not looked at."""
 from __future__ import annotations
 
 import math
@@ -1138,13 +1136,6 @@ def _shadow_truth(s: _Solid, n: Axis, a: Axis, b: Axis, allowed: BaseGeometry) -
 
 # -- the case ---------------------------------------------------------------------------------
 
-#: A through hole tangent to the board's edge that cuts a corner off but for
-#: the point where it touches the edge splits the board at one place and
-#: not at another, as the rounding falls (2026-10-14, open; outside the
-#: checks).
-_PINCHED = (f"{KNOWN} a through hole or pocket that leaves a piece hanging at a point is refused at one place "
-            "and kept at another:")
-
 def _attempt(scene: Scene, pl: Placement) -> Judged | None:
     """The scene built at one placement and judged; None when the
     language refuses to build it (a plank's placement)."""
@@ -1170,13 +1161,10 @@ def run_case(scene: Scene) -> list[str]:
         return [] if first is None and second is None else ["the scene is refused at one placement only"]
     problems = first.problems + [p for p in second.problems if p not in first.problems]
     if first.kept != second.kept:
-        differ = first.refused.keys() ^ second.refused.keys()
-        why = [first.refused.get(key) or second.refused.get(key) or "" for key in differ]
-        # (and what a hole kept at one place only makes of the operations after it)
-        split = [w for w in why if "splits it in pieces" in w]
-        if split:
-            return problems + [f"{_PINCHED} {split[0]}"]
-        return problems + [f"placed otherwise, the planks keep other features: {first.kept} against {second.kept}"]
+        differ = sorted(first.refused.keys() ^ second.refused.keys())
+        why = "; ".join(first.refused.get(key) or second.refused.get(key) or "" for key in differ)
+        return problems + [f"placed otherwise, the planks keep other features: {first.kept} against {second.kept} "
+                           f"({why})"]
     for key in sorted(first.said.keys() & second.said.keys()):
         one, two = first.truths[key], second.truths[key]
         if one.verdict != "either" and two.verdict != "either" and one.verdict != two.verdict:
