@@ -496,16 +496,20 @@ class Board:
 
     def _inner_outer(self, which: str) -> Face:
         """The big face toward (inner) or away from (outer) the enclosing
-        scope's centre; an error when the board straddles that centre."""
+        scope's centre; an error when the board straddles that centre. A
+        face on the centre, within a nanometre, does not straddle it, and
+        the inner face is then that one [found by fuzzing, 2026-10-14: a
+        board with its top face on the centre had its bottom face for the
+        inner one, and at some places rounding put the face across]."""
         b = self.box()
         t = self.t_axis
         sb = self.scope.box
         if sb is None:
             raise LangError(f"{which}: no enclosing box to decide inner and outer.", self.path)
         centre = (sb.lo[t] + sb.hi[t]) / 2
-        if b.lo[t] < centre < b.hi[t]:
+        if b.lo[t] + 1e-9 < centre < b.hi[t] - 1e-9:
             raise LangError(f"{which} is ambiguous: the board straddles the centre on {t}.", self.path)
-        toward_centre = self.scope.frame.direction_of(t, 1 if centre > b.hi[t] else -1)
+        toward_centre = self.scope.frame.direction_of(t, 1 if centre > (b.lo[t] + b.hi[t]) / 2 else -1)
         return Face(self, toward_centre if which == "inner" else -toward_centre)
 
     @property

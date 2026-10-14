@@ -145,6 +145,27 @@ def test_inner_outer_ambiguous_for_a_shelf_at_mid_height():
         assert shelf.top.value == 367.5
 
 
+def test_the_inner_face_of_a_board_with_a_face_on_the_middle_faces_the_middle():
+    """Found by fuzzing the placement: a board whose top face lay on its
+    module's middle had its bottom face for its inner one (the one toward
+    the middle), and one whose bottom face lay there its bottom face too,
+    so a frame binding the axis the other way swapped them; at some places
+    rounding put the face a hair across the middle, and both faces were
+    refused as ambiguous."""
+    for name, origin in (("at0", 0.0), ("far", 1234.1)):
+        with module(name, Box.from_size(width=600, depth=400, height=30, origin=(0, 0, origin))) as m:
+            low = board("low", ply15).on(m.bottom)
+            high = board("high", ply15).on(m.top)
+            mid = board("mid", ply15).on(m.bottom + 7.5)             # 7.5 to 22.5, across the middle at 15
+        assert low.inner.name == "top" and low.outer.name == "bottom"
+        assert high.inner.name == "bottom" and high.outer.name == "top"
+        with pytest.raises(LangError, match="ambiguous"):
+            mid.inner
+    with module("hair", Box.from_size(width=600, depth=400, height=30, origin=(0, 0, 12.3))) as m:
+        low = board("low", ply15).on(m.bottom)            # its top at 27.3, the middle at 27.299999999999997
+    assert low.inner.name == "top"
+
+
 def test_show_and_grain_take_objects():
     with module("m", Box.from_size(width=600, depth=500, height=720)) as m:
         a = board("a", ply15).on(m.left).show(m.right).grain("height")
