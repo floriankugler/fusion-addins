@@ -205,3 +205,34 @@ def test_a_board_whose_outline_only_touches_where_another_crosses_it_meets_nothi
         panel.add_cut(Shape(shapely_box(15, -1, 401, 9)))           # the front 9 mm notched away from x = 15
         board("side", material("birch", t=6)).on(m.left).between(m.front + 15)   # within the notch
     assert no_interference(m) == []
+
+
+def test_an_overlap_deeper_than_a_micrometre_counts_in_the_plane_as_across_the_thickness():
+    """Decided by Florian, 2026-10-14: an overlap counts where it is deeper
+    than 1e-6 mm in every direction, in a board's plane as across its
+    thickness; touching is within 1e-6 mm. Two boards side by side 0.005
+    into each other were not reported (what is narrower than 0.01 mm in a
+    board's plane was cleaned away), two stacked 0.005 into each other
+    were. Within 5e-7, neither is."""
+    for into, expected in ((0.005, ["m.a overlaps m.side_by_side", "m.a overlaps m.stacked"]), (5e-7, [])):
+        registry.reset()
+        with module("m", Box.from_size(width=300, depth=600, height=100)) as m:
+            board("a", ply18).on(m.bottom).between(m.front, m.front + 200)                         # z 0 to 18
+            board("side_by_side", ply18).on(m.bottom).between(m.front + 200 - into, m.front + 400)
+            board("stacked", ply18).on(m.bottom + 18 - into).between(m.front, m.front + 100)
+        assert no_interference(m) == expected
+
+
+def test_a_divider_or_a_box_a_little_into_a_board_overlaps_it():
+    """Decided by Florian, 2026-10-14 (as above): a divider standing 0.005
+    into a shelf, its end narrower than 0.01 mm in the divider's plane
+    there, was not reported, nor a hardware box reaching 0.005 into the
+    shelf's edge; both are. 5e-7 in, they touch."""
+    for into, expected in ((0.005, ["m.shelf overlaps m.divider", "m.pin.pin overlaps m.shelf"]), (5e-7, [])):
+        registry.reset()
+        with module("m", Box.from_size(width=300, depth=300, height=100)) as m:
+            board("shelf", ply18).on(m.bottom).between(m.front, m.front + 200)                     # z 0 to 18
+            board("divider", ply18).on(Pos("x", 50), toward=m.back).between(m.bottom + 18 - into, m.top)
+        m.place_hardware("pin", [_body("pin", _box((200 - into, 100, 5), (220, 120, 10)))])
+        assert no_interference(m) == expected
+
