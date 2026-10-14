@@ -31,6 +31,9 @@ Not goals:
 
 - A general-purpose CAD language.
 - Replacing Fusion. It stays the kernel, the viewer, and the place for nesting and CAM.
+  Nesting and the choice of CAM operations may move into the language, with
+  Fusion keeping toolpaths and post-processing; see "Nesting" and "CAM"
+  under "Still to do" [2026-10-14]. Generating G-code stays a non-goal.
 - Describing parts that are curved in 3D (bent or upholstered parts). Those stay
   hand-modeled and are referenced by name. Boards bent about one axis may
   come in, see "Bent boards" under "Still to do" [2026-10-13].
@@ -2850,7 +2853,9 @@ Added by Florian 2026-10-13:
   Multi Arrange then nests as a rigid group, keeping their arrangement, as
   its own groups do now (a group name per part, set by hand in its
   dialog). The compiler would write the group into the `lang`/`part`
-  attribute next to the grain.
+  attribute next to the grain. If nesting moves into the language (see
+  "Nesting" below, 2026-10-14), its nester takes the groups too, and the
+  attribute stays as the route to Multi Arrange.
 - **Bent boards**: a board bent about one axis, such as one piece running
   from a cabinet's front round a corner (radius 80, say) into its side, a
   front stepping back 100 mm in a smooth S, a panel curved all over, or a
@@ -2934,6 +2939,265 @@ Added by Florian 2026-10-13:
     0.3). The layout's point rings give Fusion no clothoid exactly: it
     would carry the curves, or tangent arcs fitted within 0.01 mm,
     recovered as arcs are now.
+
+Added by Florian 2026-10-14, worked out by Claude the same day. Nothing is
+built; everything is proposed, and only the points marked [Florian] are
+his. The items fall into two groups: shapes beyond square boards
+(chamfers at any angle, bevels, tilted boards, mitred corners, lipping)
+and the way from the model to the machine (nesting, CAM). A standard
+library holds what is composed from the language rather than added to it.
+They depend on each other in this order: slats (proposed under
+Primitives, not built) before lipping; bevels before mitres and before
+fitted ends on tilted boards; tilted boards before mitres at angles other
+than 90 degrees; nesting before CAM. The work follows that order
+[Florian]. The spellings below are working titles, to be settled in a
+detailed plan for each item's implementation [Florian].
+
+- **Chamfers at any angle**. What exists [checked 2026-10-14]: corners
+  of the outline are rounded by `fillet()` and `shape.rounded()`, and cut
+  off by `chamfer()` on an edge through the board (`panel.front.left`),
+  at 45 degrees, `size` along both edges. `shape.clip(top=, back=)` cuts
+  a corner with two lengths, but only on a shape before it is placed. A
+  chamfer along an edge at a big face (`side.front.inner`, a face's
+  outline, an operation's rim) is a 45 degree rim chamfer, shallower than
+  the board is thick. Proposed: both kinds also take two lengths in place
+  of `size`, each named by the face it is measured on, as `clip()` names
+  its edges: `panel.chamfer(panel.front.left, front=30, left=80)`, and
+  `side.chamfer(side.front.inner, front=4, inner=8)`, which is 4 into
+  the thickness and 8 across the inner face. An angle is given as two
+  lengths [open: whether `angle=` with one length is worth having too].
+  A corner chamfer is part of the outline, so the machine cuts it at any
+  angle. A rim chamfer at an angle other than 45 degrees needs a V-bit of
+  that angle, which Auto Setup does not recognise (it takes 45 degree
+  flanks only). So it gets a template of its own or is hand work (see
+  "Bevels" below) [open].
+- **Bevels and hand work**: a narrow face cut at an angle through the
+  whole thickness, which a sloped front and a mitred corner need. Today a
+  chamfer as deep as the board is thick is refused. Proposed: `bevel()`,
+  an ordered operation. `side.bevel(side.top, 30, long=side.outer)` tilts
+  the top narrow face 30 degrees from square, about its edge at the outer
+  face, which keeps its full size (the long point). `side.bevel(side.top,
+  to=plane)` tilts it until it lies in a plane or in another part's face,
+  so that an end fits a part at an angle. Bevels are not machined: the
+  machine cuts the larger contour and the bevel is cut by hand afterwards
+  [Florian]. So a part has two shapes. Its true shape is what the preview,
+  the module documents and every check use. Its machine outline is the
+  outline at the face where it reaches furthest, which nesting and CAM
+  take. A bevel goes on a hand-work list per part (which edge, angle, which
+  face has the long point), together with lipping and the roundover notes
+  proposed under Primitives. An operation near a bevel must lie on the
+  true face. The emitter gets one new instruction, a wedge cut off the
+  body, and the mesher one boolean. The end cut of a slat (`.miter(end,
+  angle)` under Primitives) is the same operation and would be spelled
+  `bevel()` too.
+- **Tilted boards**: boards that lie in no plane of their scope's frame,
+  turned about one of its axes [Florian: usually about one axis].
+  Florian's case is an overhead cabinet whose front slopes, so the cabinet
+  is shallower at the bottom: the sides are cut to the slope and the front
+  sits between their sloped edges. Today every board lies in a plane of
+  the world axes, at every level: a position is a coordinate on one axis,
+  the layout names each part's axes by world axis, contacts and crossings
+  run along world axes, and a tilted master plane is an error where it
+  is used as a position. Proposed:
+  - A tilted plane is a reference: a master `Plane` (origin and normal,
+    already in the snapshot), or the face of a cut at an angle.
+    `side.trim(a, b, name=)` is such a cut, a new operation: a straight cut
+    through two anchors on a big face, taking off the side the board's
+    centre is not on. It is `clip()` for a placed board, its ends given by
+    anchors.
+  - `.on()` a tilted face or plane gives the board that plane, and
+    `toward=` says which way the thickness goes, as on a bare plane.
+    `.between()` takes limits on the axis the board shares with its scope
+    (the axis it is turned about) as now. On the tilted axis it takes
+    planes and faces: the board ends where its material meets them over
+    its whole thickness, the tighter of its two faces, as a contour in a
+    perpendicular plane limits a board now. Its ends stay square, inside
+    the limits; `bevel(end, to=limit)` fits an end to its limit.
+  - A tilted board's faces are named by the nearest direction, the rule
+    already proposed for hand-modeled bodies, so the sloped front keeps
+    `front`, `back`, `top` and the rest. A tilt of 45 degrees is an error
+    that names the part; `inner` and `outer` work as before.
+  - Underneath, the layout carries a rotation per part instead of axis
+    names, which is a new layout version. The plan and the mesher place
+    the outline with it; the emitter already builds bodies from world
+    geometry. A contact may run at an angle across the board that is met
+    face-on, so a tilted board standing edge-on on a square one (the
+    front's ends on the sides) joins as now, with its connectors turned in
+    the side's face, which the machine cuts as easily as square ones. A
+    board that meets another at an angle (the top's front edge against the
+    sloped front) is no contact. It is fixed by hand (screws, glue) or
+    mitred. `no_interference` checks pairs with a tilted part through the
+    preview's meshes. Hardware on tilted parts comes later.
+  - A part turned about two axes stays out of scope and is hand-modeled.
+
+  ```python
+  left = board("left", ply15).on(cab.left).between(cab.top, cab.bottom, cab.back, cab.front)
+  left.trim(left.inner.front.top, left.inner.front(100).bottom, name="slope")  # 100 shallower at the bottom
+  right = board("right", ply15).on(cab.right).between(cab.top, cab.bottom, cab.back, cab.front)
+  right.trim(right.inner.front.top, right.inner.front(100).bottom, name="slope")
+  front = (board("front", ply15)
+           .on(left.slope, toward=cab.back)   # flush with the sloped edges, between the sides
+           .between(left, right, top, bottom))
+  front.join(left, right, using=domino("5x30", count=2))  # contacts along the slope
+  ```
+
+- **Mitred corners** (Florian's "angled boards"): two boards meeting at an
+  angle along an edge, each end cut to the plane that halves the angle,
+  glued. Proposed as a joint, the sharp sibling of `bend()`. The legs are
+  placed as for a bend, their outer faces meeting in a line, each reaching
+  the corner, and `front.join(side, using=miter())` cuts both ends to the
+  halving plane, which makes one bevel on each, the long points at the
+  outer faces. Like any bevel it is hand work: the mitre cannot be
+  machined, so the machine cuts the larger contour and the mitre is cut by
+  hand later [Florian]. So each board's machine outline is that of its
+  outer face. At 90 degrees both boards stay square to the frame and need
+  bevels only; any other angle needs a tilted board. No connectors in a
+  mitre for now (glue and tape; Dominos square to the mitre would be hand
+  work too) [open]. A mitre on a lipped edge or on a bent board is an
+  error. The two boards stay two parts, so this is a joint and not a bend.
+- **Lipping and edge banding**: solid wood glued along a narrow face,
+  either lipping (10 x 12 on a 12 mm board, say) or banding (0.5 to 2
+  mm). For construction they are the same thing in different thicknesses
+  [Florian]. The strip's material is solid wood given by its
+  cross-section, as a slat's [Florian]: `oak = section("oak", 10, 12)`.
+  `side.lip(side.front, side.top, using=oak)` [spelling open; it may be a
+  standard-library function instead, see below]:
+  - The lipping takes its thickness off the board and puts a slat of the
+    section in its place [Florian]. The board keeps its placement box and
+    the slat lies inside it, as tenons and grooves keep the box, so
+    `side.front` stays the finished face that hinges, gaps and limits
+    measure from. The slat is named after the board and face
+    (`side.lip_front`), its grain runs along it, and it goes on the cut
+    list by section and length. The section must be at least as wide as
+    the board is thick; a wider one is trimmed flush (a hand-work note).
+  - Where two lipped faces meet, the strips are either mitred or butted;
+    both happen [Florian]. Mitred, both are bevelled at the corner, which
+    is hand work like any mitre. Butted, one runs through and the other
+    butts against it. The call chooses, `corners="miter"` or `"butt"`,
+    with the strip on the face lipped first running through [proposed].
+  - Only on a straight edge of the outline: not along a fillet or other
+    curve (banding could follow curves later), not on a bevelled or
+    mitred edge, not on a bent board [Florian]. On a tilted board it works
+    in the board's own frame.
+  - Ordered like a cut: an operation made before it where the strip goes
+    is an error, and so is a join at a lipped face.
+  - The board is machined to its cut-back outline; glue-up and flush
+    trimming go on the hand-work list. Whether thin banding (0.5 mm) cuts
+    the board back or is left out of the geometry is a choice per material
+    [open].
+- **Standard library**: the core language kept apart from higher-level
+  building blocks, drawer boxes among them [Florian]. Today `lang/core`
+  holds the primitives, and `lang/joints` and `lang/hardware` plug into it
+  through two protocols, `Joint` for `join(using=)` and `Mountable` for
+  `mount()`, so the core knows no joint or hardware type. The drawer box
+  and the drawer cabinet are functions in `examples/drawer_cabinet.py`
+  ("later the catalog", from the review of 2026-10-12), and "Project
+  structure" plans a `catalog/` for Florian's cabinet functions. Proposed:
+  - `lang/std/` takes the place of `catalog/`. It holds building blocks
+    written only with the public API (`from lang import *`), each with a
+    test and an example: the drawer box (box joints, grooved floor, slide
+    machining, moved from `examples/drawer_cabinet.py`), the drawer
+    cabinet, a carcass with a choice of connectors, lipping and banding.
+  - The rule makes the standard library a test of the core: a building
+    block that needs an internal shows something the core lacks. A test
+    can enforce the rule by checking the imports.
+  - Joints and hardware stay in the language. They work out geometry from
+    catalogue data that the core cannot express, and they plug in through
+    the protocols. The standard library composes and adds no geometry of
+    its own.
+  - Cabinet types for one build stay in that build's repo; `lang/std`
+    holds what is reused across builds.
+  - Lipping is a good first item: if it can be written with slats and a
+    cut, the core is enough, else it shows what to add.
+- **Nesting** in the language. Florian's points: nesting as part of the
+  language, its output either the real parts or a nested view; nesting per
+  material; parts marked to be left out of the nest; the stock pieces on
+  hand given, and the cuts that waste least found, within the size of the
+  machine's bed; SVGnest as a solver to look at [Florian]. Today Multi
+  Arrange nests compiled parts in Fusion after a compile, with Fusion's
+  Arrange as a black-box solver (grain, groups, machining face up, several
+  sheets, reading the `lang`/`part` attribute), and `fits_sheet` checks
+  each part against its material's sheet size. Proposed: nesting is a
+  step after the layout, in plain Python, over the layouts of all a
+  build's modules.
+  - Input: the parts' machine outlines (see "Bevels"), by material. The
+    grain allows two turns (0 and 180 degrees), a material without grain
+    any turn; no part is flipped, since its machining face goes up.
+    Manufacturing groups (above) are nested rigid. Left out: slats, which
+    go on the cut list by length, and boards marked `.nest(False)` (strips
+    ripped on the saw, say), a property modifier like `.manual()`, which
+    go on the cut list by size; a rule may set it for a whole kind of
+    part.
+  - Stock: a stock file per build or workshop, with full sheets per
+    material (a count, or as many as needed), offcuts on hand (rectangles,
+    or outlines kept from earlier nests) and the machine's bed (size,
+    spacing between parts, margin). The bed is 2000 x 1000 and the sheets
+    are 2500 x 1250, so every full sheet is first sawn into blanks that
+    fit the bed. The nest chooses the blanks together with the parts on
+    them, to waste least [Florian]: straight cuts right through, as a
+    panel or track saw makes them. `fits_sheet` then checks against the
+    bed too. A part larger than the bed is sawn by hand (`.nest(False)`)
+    or machined in two setups, moved between them [open].
+  - Output: a nest file committed next to the layouts: the stock piece
+    each part comes from, its placement on it, and the leftovers worth
+    keeping as offcuts. A changed nest then shows in a diff. The preview
+    gets a nest view (sheets with their parts, grain, labels, the waste
+    per sheet). The emitter writes either the module documents as now or a
+    nested document per material, each sheet a stock body and each part
+    flat on it with its machining face up, named by path. CAM goes there.
+  - Cut sheets are pinned. A van is built over weeks, so a sheet marked as
+    cut keeps its nest; later nests take only the parts not cut yet and
+    report parts that changed after they were cut [open].
+  - Solver, to be measured on the van's real parts (sheets used, time,
+    whether the same input gives the same nest) [open]: SVGnest (MIT,
+    JavaScript, true-shape nesting with no-fit polygons and a genetic
+    algorithm; it runs in the browser or in node, as the viewer's tests
+    do, but nests into one bin per run, so several sheets and offcuts
+    need a loop or the multi-sheet code of its sibling Deepnest);
+    jagua-rs (Rust, a collision-detection engine for irregular cutting and
+    packing that supports bin packing; its optimiser sparrow targets strip
+    packing); Fusion's Arrange through Multi Arrange stays as the fallback.
+- **CAM** from the language. Florian's points: since the Fusion geometry
+  is generated again on every compile, the CAM setups have to be made
+  again too; Auto Setup helps, but it analyses the geometry to work back
+  to the operations, while the language knows them; construction, nesting
+  and CAM setup should be one chain; no G-code, but an output like the
+  layout file that a Fusion add-in compiles into a CAM setup [Florian].
+  Today Auto Setup recognises holes, pockets, contours, rim chamfers,
+  V-grooves and dog bones on selected bodies, chooses templates and
+  tools by rules (each hole bored with the widest cutter 1 mm smaller,
+  drilled only where no cutter fits; blind holes over twice the cutter as
+  pockets; through holes over 30 as contours; checks of pocket corner
+  radii and flute lengths; tabs by contour length, away from concave
+  corners; operations by widest tool, then by kind; the V-bit last), and
+  builds the setup from templates Florian exported. Proposed:
+  - A CAM plan per nested sheet, written from the layout and the nest:
+    setups (the stock, the work coordinates at its corner, top or flipped
+    side) and operations in order, each with its template kind and label,
+    its tool and the features it machines, named by part path and
+    operation (contours, pockets with depths, holes, dog bones, chamfers,
+    V-grooves), plus tab positions. No toolpaths.
+  - There is nothing to recognise: the layout already says what each
+    operation is (a dog bone is a dog bone; a hole's diameter, depth, face
+    and whether it goes through are exact) and what is hand work (bevels,
+    mitres, lipping), which stays out of the plan. Auto Setup's rules and
+    tabs (`lib/auto_setup/`) are split into a Fusion-free layer that both
+    use, as the joints were split into settings, layout and emitter. The
+    tool data (diameters, flute lengths) are read from the templates
+    outside Fusion, or kept in a tool file [open].
+  - A CAM emitter in the compiler add-in builds the setups in the nested
+    document from the plan. It binds each operation to geometry the
+    emitter made (bodies by path, edges and faces by position, as
+    chamfers are found now). Fusion generates the toolpaths and posts them
+    as before. Auto Setup stays for hand-modeled parts.
+  - The preview can show the plan: which tool cuts what, the tabs, the
+    flips.
+  - Parts machined from both faces need a flipped setup of their sheet and
+    a way to register it. Florian has no standard procedure for this yet,
+    so it is worked out with nesting and CAM [Florian].
+  - The hand-work list per part comes from the same step: bevels and
+    mitres, lipping and banding, roundovers (notes on edges, see
+    Primitives), hardware to fit.
 
 (Operations, the half lap, the connectors and the tenons are done; the
 assembly experiment from question 2 was dropped as a priority on
