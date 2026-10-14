@@ -267,7 +267,13 @@ proposed]
   inner face of the left side). `inner` and `outer` are sugar that resolves only
   when unambiguous; a shelf at mid height has two inner faces and errors. Each
   board has a `show` face, the visible one, which decides the machine side and
-  the chamfer side. [proposed]
+  the chamfer side: what `show()` names, else the outer face, else, for a
+  board across its scope's middle, the face toward the scope's top, else its
+  back, else its right, named in the scope's own terms [decided by Florian
+  2026-10-14; it was the face toward the world axis' positive end, so a
+  divider showed its left in a cabinet facing the van's right and its right
+  in one facing its front]. `show()` is frozen once the show face is used,
+  not when the placement is, so `side.show(side.inner)` works.
 - Parts register in the current scope under their name, so `d.face` works
   without assigning it, and paths come for free. [proposed]
 - The language's naming is structural, by construction. The geometric resolver
@@ -500,19 +506,38 @@ proposed]
   side's middle (a carcass side, a bottom between the sides, a back); a
   foot or a cleat in a corner does not count. [2026-10-12]
 - Which side the thickness goes: `.on()` a module side puts the thickness
-  inward; `.on()` a bare plane requires a side. Limits missing from `.between()`
+  inward, also a side moved into or out of the box (`on(cab.bottom.into(60))`);
+  `.on()` a bare plane requires a side. Limits missing from `.between()`
   default to the enclosing scope's box. When a part is given as a limit, its
   face toward the board is meant: the face toward the other limit on that
-  axis, or toward the middle of the enclosing box when it is the only one.
-  [proposed; the rule for two limits fixed 2026-10-12: it used to judge
+  axis, or toward the middle of the enclosing box when it is the only one;
+  the board then lies on the far side of that face from the part. A single
+  position as a limit leaves the board on the side of it the box's middle is
+  on. [proposed; the rule for two limits fixed 2026-10-12: it used to judge
   every part against the box's middle, so a shelf between two partitions
   on one side of the middle ran through the second one] A box as a limit
   gives both ends on each in-plane axis, `between(drawer_box)`. A limit that
   limits neither in-plane axis (a position on the thickness axis, a board
-  parallel to this one) is an error rather than being dropped.
+  parallel to this one) is an error rather than being dropped. So are limits
+  that leave it open where the board lies, each error naming what is
+  ambiguous [decided by Florian 2026-10-14; they put the board inside its
+  limits, or on the side the world frame chose]: the same board twice on an
+  axis; two boards overlapping each other on it (nothing lies between them);
+  a position, or a board's face moved by `gap()`, lying inside a board given
+  as another limit, past what its `into()` reaches; a single limit at the
+  middle of the box (the board could lie on either side); and a board as the
+  only limit whose middle is the box's (not clear which face is meant).
 - The constructor is `board(name, material, shape=None)`; the placement
   modifiers are `.on(ref, toward=)`, `.between(*limits)`, `.center(pos)`,
-  `.inset(n)`, `.grain(along)`, `.show(face)`, `.manual()`. `.inset(n)` shrinks
+  `.inset(n)`, `.grain(along)`, `.show(face)`, `.manual()`. A board made of
+  a shape is placed by its limits [decided by Florian 2026-10-14]: between
+  two limits on an axis it fills them less its inset, or it is an error
+  naming both widths; with one limit it sits against it, on the side the
+  board would lie; with none, at the scope's front, left and bottom side (or
+  the origin without a box); and its box is its outline's. (It sat at the
+  limits' or the box's lowest corner in world terms with its box the
+  limits', so in a cabinet facing elsewhere it lay elsewhere, and its box
+  could miss it.) `.inset(n)` shrinks
   the outline by `n` on every side of its box, which is how an inset front
   gets its gap; there are no one-off modifiers such as margin or lift,
   because `.on(box.bottom + slide.recess)` already says lift. [proposed]
@@ -577,11 +602,20 @@ proposed]
     of an interrupted batten are two parts, each given one end:
     `between(..., floor_outline, floor_front)` and `... floor_back)`.
     [decided 2026-10-11]
+  - An open contour must run one way: along its chord's axis in the part's
+    plane, and through the part's thickness in a perpendicular plane. Run
+    from its first point toward its last, no point may lie more than 0.01
+    mm behind the furthest the contour has reached along that axis (nothing
+    narrower is meant, and the snapshot rounds points to 1e-4 mm); one that
+    does runs back along itself, an overhang such as a lip, and is an error
+    that says to draw the lip as a closed contour. The whole contour counts,
+    whichever part takes it. [decided by Florian, 2026-10-14]
   - `contour.gap(n)` keeps n of clearance, measured in the contour's plane
     with round joins, so it is exact at corners (GEOS offsets the area given
     in one form, without points along its edges, so the same contour gives
     the same part however its points run; the clearance is at least n and
-    up to about a hundredth more, which is open); `contour.into(n)` reaches
+    up to about a hundredth more, which is accepted [decided by Florian,
+    2026-10-14]); `contour.into(n)` reaches
     past it. Stretches from closed contours cut every other range down
     (tighter wins). A contour that splits the part in two, leaves nothing,
     lies in a tilted plane or is not planar is an error.
@@ -604,12 +638,18 @@ proposed]
   [decided as a need; the rules are proposed]
   - position +/- length gives a position;
   - position - position gives a length;
-  - a weighted mix of positions whose weights add up to 1 gives a position;
+  - a weighted mix of positions whose weights add up to 1 gives a position,
+    also with positions taken away: `a + b - c` [decided by Florian
+    2026-10-14; it was a TypeError]; a length taken from a sum of positions
+    whose weights do not add up to 1 is an error saying so;
   - anything else (a bare sum of two positions, mixing axes) is an error.
   This only works for flat, parallel references.
-- `+` and `-` move along the axis. Fits against a part use `.into(n)` and
-  `.gap(n)`, which need no sign convention and also work on contours, by
-  offsetting the curve. [proposed]
+- `+` and `-` move along the world axis (`cab.bottom + 60` is 60 inside only
+  where the world's top is its axis's positive end, the van's). Fits that
+  hold in any frame use `.into(n)` and `.gap(n)`, which need no sign
+  convention and also work on contours, by offsetting the curve; on a box
+  side they give a side, its inward direction kept, so a board lies on them
+  without `toward=` [decided by Florian 2026-10-14]. [proposed]
 - A cut starts at the face of the board it is declared on. One extrude through two
   panels becomes a loop over both. [proposed]
 
@@ -711,7 +751,11 @@ proposed]
   with their names and the contours as lines (`m` toggles them). Checks:
   `inside_box` keeps a module's parts inside its box, `inside(contour,
   gap=)` keeps them inside a closed contour seen along its normal (a part
-  in the contour's plane by its outline, any other by its box).
+  in the contour's plane by its outline, any other by its outline's extent
+  and its thickness), both by where the material lies, so a tenon or a box
+  joint's fingers past the placement box count and an end cut away does
+  not [decided by Florian, 2026-10-14]; a part may reach 1e-6 mm out
+  (`inside()` also needs more than 1e-6 mm2 outside).
 - The sample master is built by `tools/van_master.py` in Fusion (rebuild it
   rather than keep a saved document); its snapshot is
   `examples/van_snapshot.json`, the test fixture, and `examples/van.py` is
@@ -766,12 +810,27 @@ proposed]
   `no_interference` reports a hardware body whose boxes reach into a
   part's material (`cab.drawer1.runners.left overlaps cab.drawer1.back`)
   and two hardware bodies whose boxes overlap, of one item or of two; a
-  body is the union of its boxes, so its own boxes may overlap, and
-  touching never counts. A part's material is its outline minus its
-  pockets and its holes where they span the range in question along its
-  thickness, so a latch in its hole or a runner's coupling in the front
-  board's cut-out is not reported (holes and pockets in narrow faces are
-  not counted yet). The examples are clean.
+  body is the union of its boxes, so its own boxes may overlap. An overlap
+  counts where it is deeper than 1e-6 mm in every direction, in a board's
+  plane as across its thickness, and touching is within 1e-6 mm, as in
+  `inside_box` and `inside()` [decided by Florian, 2026-10-14; the material
+  was cleaned before, which took out overlaps narrower than 0.01 mm in a
+  board's plane while ones as thin across the thickness counted]. A part's
+  material is its outline minus its pockets and holes, looked at slab by
+  slab between the ends of their ranges along the thickness, so a latch in
+  its hole, a runner's coupling in the front board's cut-out, or a pin
+  through a pocket from one face and a hole from the other is not
+  reported; boards across each other are looked at cell by cell, where the
+  stretches each has material along the axis their planes share must
+  overlap. A hole is its circle within a quarter of the tolerance (up to
+  430 mm across); a pocket's or an outline's arcs are their polygons, so
+  something touching such an arc from inside meets the chords' slivers, up
+  to 3.8e-5 r deep, and counts. Not looked at yet: material past the
+  placement box (tenons, fingers, a floor grown into its grooves) and
+  pockets and holes in narrow faces; looking past the boxes would report
+  every box joint, whose fingers clear each other only through their
+  grooves in narrow faces, so both come together [Florian, 2026-10-14].
+  The examples are clean.
 - The first joint is the **half lap** (`lang/joints/laps.py`) [decided and
   implemented 2026-10-11]: `long.join(battens, using=half_lap(toward=
   floor.top))` laps the board with each board named, all of which it must
@@ -2549,7 +2608,7 @@ the face tolerance off a board's edge was refused at the origin only; a
 notch left a narrow face 6e-14 askew, and a hole into its other end was
 then off the board; `clean` dropped a strip 0.2 by 7 mm with a hairline
 tail 175 mm long. Left open by the fuzzing (marked `known:` in the
-check), decided by Florian the same day, to be implemented next: a board
+check), decided by Florian the same day and implemented (below): a board
 across its scope's middle without `show()` showed the world's positive
 face (it shows its top, else back, else right face in the scope's own
 frame); a shaped board that does not fill its limits less its inset, or
@@ -2597,7 +2656,7 @@ closed contour of two points, which then failed in shapely. Tried and
 dropped: an exact offset of its own, which GEOS unites wrongly, without an
 error, where its pieces' edges nearly coincide. Decided by Florian the
 same day: an open contour that runs back along itself (an overhang) is
-refused (to be implemented next); clearances up to about a hundredth more
+refused (implemented, below); clearances up to about a hundredth more
 than asked (never less), so that a mirrored contour can differ by that
 much, are accepted; the rules chosen while fixing are confirmed (see
 "Contour limits"). Every example's plan is unchanged.
@@ -2630,7 +2689,7 @@ where it touches was refused at one place and kept at another, as was the
 same circle cut: refused everywhere now, a corner held on at a point being
 apart (a circle that only touches the edge is kept, as Fusion builds it).
 No example's plan or check results change. Decided by Florian the same
-day, to be implemented next: an overlap narrower than 0.01 mm in a
+day and implemented (below): an overlap narrower than 0.01 mm in a
 board's plane was not reported (`clean` takes such pieces out of the
 material), while one as thin across the thickness was, down to 1e-6;
 anything deeper than 1e-6 in every direction counts. And material outside
@@ -2666,6 +2725,34 @@ takes about 30 s (16 without the fuzz tests, whose fast budget is about
 14 s); the long profile 16 minutes, its slowest checks (box joints,
 placement, cutouts, offsets, dog bones, the design checks) 80 to 100 s
 each.
+
+The same day, Florian's decisions on the twelve, implemented by the same
+three agents and merged (the rules as they now read are in "Names and
+paths", "Placement and references", "Contour limits", "Master document"
+and "Joints and hardware"): the default show face, shaped boards placed by
+their limits, ambiguous limits refused, `into()` and `gap()` sides and
+`a + b - c` (placement); an overlap deeper than 1e-6 mm in every direction
+counted by `no_interference`, its material no longer cleaned first, and
+`inside_box` and `inside()` taking the outline's extent (checks); an open
+contour that runs back along itself refused, and the clearance's
+hundredth accepted (contours). Each fuzz harness checks its decided rules
+from the outside and marks nothing of them known; no example's plan or
+check results changed, and none needed a change. On the way: a floor
+reaching exactly 0.01 mm into a side made a pocket as
+`side.cut(floor.box())` but was refused as `side.cut(floor)`, its section
+cleaned away (taken as it is now); and two circle pockets from either
+face of a board, half its thickness each, covered all of it and left
+nothing, which neither was refused for alone: pockets and holes from
+opposite faces that meet as deep as the board together go through there
+now, held to what a pocket through it is. Open, for Florian: an open
+contour with a spike, running out and straight back across the way it
+runs, keeps its clearance from the rest of the contour, not from the
+spike (refuse it, as a line drawn back over itself?); a round pocket's or
+an outline's arcs are their polygons in `no_interference`, so a box
+touching such an arc from inside meets the chords' slivers (3.8e-5 r)
+and is reported, which no example does; and `inside()` also needs more
+than 1e-6 mm2 outside, so a corner poking less than about 1e-3 mm out is
+not reported.
 
 1. `core`: the position algebra, box, board with `on`, `between` and `center`,
    scopes and paths, and layout JSON output with world transforms. With unit
