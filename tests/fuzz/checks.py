@@ -452,7 +452,15 @@ def scenes(draw: st.DrawFn) -> Scene:
         if bodies:
             items.append(Item(tuple(bodies), draw(st.integers(0, 4)) == 0))
     margin = st.one_of(sizes(0, 50), sizes(0, 50), _OFFSETS.map(lambda d: -d))
-    margins = (draw(margin), draw(margin), draw(margin), draw(margin), draw(margin), draw(margin))
+    drawn = [draw(margin) for _ in range(6)]
+    bounds = _scene_bounds(planks, boxes)
+    for i in range(3):
+        # (a box shrunk past nothing on an axis is none: its ends, swapped where they cross, were
+        # another box than the reckoning's [a survey, 2026-10-14: a plank 3 thick, margins -2.02
+        # and -1.30]; then the margins go outward, and a box thinner than its boards stays)
+        if bounds[i][1] - bounds[i][0] + drawn[2 * i] + drawn[2 * i + 1] < 0.5:
+            drawn[2 * i], drawn[2 * i + 1] = abs(drawn[2 * i]), abs(drawn[2 * i + 1])
+    margins = (drawn[0], drawn[1], drawn[2], drawn[3], drawn[4], drawn[5])
     contour = draw(st.one_of(st.none(), _contours(planks, boxes)))
     return Scene(tuple(planks), tuple(items), margins, contour,
                  (draw(_placements(len(planks))), draw(_placements(len(planks)))))
@@ -508,6 +516,7 @@ class Built:
 
 def _world(pl: Placement, i: int, r: Range) -> tuple[Axis, float, float]:
     """A range on scene axis `i` as the world axis and range it becomes."""
+    assert r[0] <= r[1], f"a range from {r[0]} back to {r[1]}"
     axis = AXES[pl.perm[i]]
     a, b = pl.signs[i] * r[0] + pl.offset[pl.perm[i]], pl.signs[i] * r[1] + pl.offset[pl.perm[i]]
     return axis, min(a, b), max(a, b)
