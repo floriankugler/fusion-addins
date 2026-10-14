@@ -273,8 +273,8 @@ Run by `ps_nest.py` (its own venv: `.venv`, `pip install packingsolver`).
   `--set` for its parameters).
 - `blanks.py`: sheets sawn into blanks for the bed: `patterns`, `twostep`
   (with `--refill`), `baseline`; draws each sheet with its blanks, stock
-  and waste. `out/compare_blanks.sh` and `compare_blanks2.sh` are the
-  runs in the table (not committed: out/ is ignored).
+  and waste. `compare_blanks.sh` (the settings) and `compare_blanks2.sh`
+  (with refill fixed, and offcuts) are the runs in the table.
 - `check.py`: checks any result against its job and draws it.
 
 ```bash
