@@ -153,13 +153,16 @@ def _material(part: Board, region: Box) -> Shape:
 def _hole_shape(hole: Hole) -> Shape:
     """A hole's circle as a polygon whose sides touch the circle from
     outside, so a box in the hole with its corners on the circle does not
-    hit the slivers of material a polygon inside the circle would leave."""
+    hit the slivers of material a polygon inside the circle would leave;
+    one side a degree, so it takes no more than 3.8e-5 r beyond the circle
+    [found by fuzzing, 2026-10-14: with 64 sides, 0.06 mm around a 100 mm
+    hole, and a box reaching that far past the circle did not count]."""
     n = 4 * _HOLE_SEGMENTS
     r = hole.d / 2 / math.cos(math.pi / n)
     return Shape(Point(hole.u, hole.v).buffer(r, quad_segs=_HOLE_SEGMENTS))
 
 
-_HOLE_SEGMENTS = 16
+_HOLE_SEGMENTS = 90
 
 
 def fits_sheet(scope: Scope) -> list[str]:

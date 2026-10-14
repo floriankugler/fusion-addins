@@ -162,3 +162,17 @@ def test_a_divider_notched_clear_of_the_material_beside_its_groove_does_not_over
             if notched:
                 divider.cut(rect(width=50, height=6), at=divider.outer.right.bottom)           # y 50 to 100, z 13 to 19
         assert no_interference(m) == expected
+
+
+def test_a_box_reaching_past_a_large_hole_overlaps_the_material_around_it():
+    """A square pin in a 100 mm hole, its corners 0.05 past the circle,
+    reaches into the panel; on the circle or inside it, it does not. The
+    hole was drawn with 64 sides around the circle, which took up to 0.06
+    mm more than the hole there [found by fuzzing, 2026-10-14]."""
+    with module("m", Box.from_size(width=500, depth=500, height=100)) as m:
+        panel = board("panel", ply18).on(m.bottom)
+        for x in (100, 250, 400):
+            panel.add_hole(panel.top, (x, 100), 100, through)
+    m.place_hardware("pins", [_body(name, _pin(x, 100, 2 * (50 + past) / 2 ** 0.5, -5, 25))
+                              for name, x, past in (("past", 100, 0.05), ("on", 250, 0.0), ("inside", 400, -0.01))])
+    assert no_interference(m) == ["m.pins.past overlaps m.panel"]
