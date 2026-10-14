@@ -30,9 +30,10 @@ an outline in the two measures of its plane):
   to stay as they were), and written otherwise: placement modifiers,
   `between()`'s limits, boards and operations in another order where the
   order must not matter, boards resolved in another order, `side + n` for
-  `side.into(n)`, an alias for a side, a board for its face, a mix of
-  positions or a box's middle spelt another way, a box for its four sides,
-  an anchor measured from the opposite edge or given as a position, its
+  `side.into(n)`, `on()` a side moved without `toward=`, an alias for a
+  side, a board for its face, a mix of positions (`a + b - c` among them)
+  or a box's middle spelt another way, a box for its four sides, an
+  anchor measured from the opposite edge or given as a position, its
   edges in the other order, a depth `to()` the other face for its number,
   a row spread from its other end, an edge named from its other face.
 
@@ -44,12 +45,17 @@ is centred on what `center()` names; between two limits it reaches from
 one to the other, less its inset; between a board it touches that board's
 face and reaches into it no further than `into()` says; with one limit, it
 reaches to the box's side away from it; its inner face is the one toward
-its scope's middle; an operation lies where its anchor says, as deep as
-its depth says, and a row has as many holes as fit; a refused operation
-changes nothing; and the layout plans, draws and meshes.
-
-Differences that are known and open are reported with `boards.KNOWN` (see
-`SHAPED`, `MIDDLE`, `CENTRED`, `OVERLAPPING`, `STRADDLING`).
+its scope's middle, and across the middle without `show()` it shows its
+top, else back, else right; a board made of a shape has its outline's box
+and fills its two limits less its inset, sits against a single one, or at
+its scope's front, left or bottom side; limits that leave it open where a
+board lies are refused, and only such ones (`_ambiguity` works them out
+again: a board twice, boards overlapping, a position or a face moved by
+`gap()` inside a board, a single limit at the box's middle, a board as the
+only limit centred in it) [the rules decided by Florian, 2026-10-14]; an
+operation lies where its anchor says, as deep as its depth says, and a row
+has as many holes as fit; a refused operation changes nothing; and the
+layout plans, draws and meshes.
 """
 from __future__ import annotations
 
@@ -65,7 +71,7 @@ from hypothesis import strategies as st
 from shapely import affinity
 from shapely.geometry.base import BaseGeometry
 
-from boards import KNOWN, _pipeline_problems  # pyright: ignore[reportPrivateUsage]
+from boards import _pipeline_problems  # pyright: ignore[reportPrivateUsage]
 from fuzzing import floats, fresh, sizes
 from lang import Box, Frame, LangError, Pos, Side, board, cabinet, check, inside_box, material, module, \
     no_interference, rect, scope, set_frame, spread, through, to
@@ -511,17 +517,34 @@ def _extra(draw: st.DrawFn, d: _Draft, name: str) -> tuple[BoardSpec, int]:
             limits.append(part(draw(st.integers(0, len(d.specs) - 1))))     # perhaps parallel: refused
         else:
             limits.append(draw(_ref_on(d, draw(st.sampled_from([m for m in range(3) if m != t] + [t] * (pick == 5))), 0)))
+    if draw(st.integers(0, 19)) == 0:
+        # limits that leave it open where the board lies (refused): a board twice, a single
+        # limit at the box's middle, a board centred in the box as the only one
+        m = draw(st.sampled_from([m for m in range(3) if m != t]))
+        others = [i for i in range(len(d.specs)) if d.t0[i] == m]
+        options = [[mid(side(LOW[m]), side(HIGH[m]))]]
+        if others:
+            j = draw(st.sampled_from(others))
+            options += [[part(j), part(j, draw(_by(-5, 5)))], [part(j)]]
+            # (a board centred between two others, a divider halfway, lies across the middle)
+            options += [[part(j)] for j in others if d.specs[j].center and d.specs[j].at.by == 0.5]
+        limits = draw(st.sampled_from(options))
     shape: tuple[float, float] | None = None
     inset = draw(st.one_of(st.just(0.0), st.just(0.0), _mm(30)))
     if draw(st.integers(0, 9)) == 0:
         shape = (draw(sizes(20, 400)), draw(sizes(20, 400)))
-        if draw(st.booleans()):
-            inset = 0.0
+        fit = draw(st.sampled_from(["fill", "fill", "one", "none", "as drawn"]))
+        if fit == "fill":
+            # between limits as far apart as the shape is wide, less its inset
             limits = []
             for m, size in zip([m for m in range(3) if m != t], shape):
                 start = draw(st.one_of(st.just(0.0), _mm(200)))
                 end = draw(st.sampled_from([LOW[m], HIGH[m]]))
-                limits += [side(end, start), side(end, start + size)]
+                limits += [side(end, start), side(end, start + size + 2 * inset)]
+        elif fit == "one":
+            limits = [draw(_ref_on(d, m, 0)) for m in range(3) if m != t and draw(st.booleans())]
+        elif fit == "none":
+            limits = []
     return BoardSpec(name, draw(_thickness()), at, center, toward, tuple(limits), inset, shape,
                      draw(st.sampled_from([None, None, "inner", "outer", LOW[t], HIGH[t]])),
                      draw(st.sampled_from([None, None, *[EXTENT[m] for m in range(3) if m != t]]))), t
@@ -680,8 +703,12 @@ class Built:
     rows: dict[str, tuple[float, float, float, int, list[float]]] = field(
         default_factory=dict[str, tuple[float, float, float, int, list[float]]])
     problems: list[str] = field(default_factory=list[str])
-    #: Why each board was refused, for reading.
+    #: Why each board was refused, for reading, and by board.
     why: list[str] = field(default_factory=list[str])
+    reasons: dict[int, str] = field(default_factory=dict[int, str])
+    #: The outline's bounds of each board made of a shape, as placed.
+    placed: dict[int, tuple[float, float, float, float]] = field(
+        default_factory=dict[int, tuple[float, float, float, float]])
 
     def pick(self, n: int) -> int:
         """A spelling of `n`: the first as written, any another way."""
@@ -780,6 +807,8 @@ def _place_all(b: Built, indexes: range) -> None:
         try:
             x.box()
             x.show_face                 # ("inner" or "outer" of a board across the middle is refused here)
+            if b.case.boards[i].shape is not None:
+                b.placed[i] = x.outline.bounds
         except LangError as e:
             _refuse(b, i, e)
 
@@ -813,6 +842,7 @@ def _refuse(b: Built, i: int, e: LangError) -> None:
     b.boards[i] = None
     b.refused.append(e.path or f"{b.case.boards[i].name} (no path): {e}")
     b.why.append(str(e))
+    b.reasons.setdefault(i, str(e))
 
 
 def _make_bay(b: Built, bay: BaySpec) -> None:
@@ -929,14 +959,16 @@ def _position(b: Built, r: Ref) -> Any:
         a, c, f = _position(b, r.a), _position(b, r.b), r.by
         if f == 0.5:
             spellings: list[Callable[[], Any]] = [lambda: (a + c) / 2, lambda: a + (c - a) / 2, lambda: (c + a) / 2,
-                                                  lambda: 0.5 * a + 0.5 * c, lambda: (a + c) * 0.5]
+                                                  lambda: 0.5 * a + 0.5 * c, lambda: (a + c) * 0.5,
+                                                  lambda: a + c - c + (c - a) / 2]
             if (r.a.kind == r.b.kind == "side" and r.a.of == r.b.of and r.a.by == r.b.by == 0
                     and OPPOSITE[r.a.name] == r.b.name):
                 box, extent = b.boxes[r.a.of], EXTENT[MEASURE[r.a.name]]
                 assert box is not None
                 spellings.append(lambda: box.center(extent))
         else:
-            spellings = [lambda: a + (c - a) * f, lambda: (1 - f) * a + f * c, lambda: c + (a - c) * (1 - f)]
+            spellings = [lambda: a + (c - a) * f, lambda: (1 - f) * a + f * c, lambda: c + (a - c) * (1 - f),
+                         lambda: c + a - c + (c - a) * f]
         return spellings[b.pick(len(spellings))]()
     raise AssertionError(r.kind)
 
@@ -1024,11 +1056,13 @@ def _on(b: Built, x: Board, spec: BoardSpec) -> None:
         sign = s.inward.sign
         opposite = _side_of(b, Ref("side", OPPOSITE[r.name], r.of))
         if r.by == 0:
-            [lambda: x.on(s), lambda: x.on(s.position, toward=opposite), lambda: x.on(s.into(0), toward=s.inward)][
-                b.pick(3)]()
+            [lambda: x.on(s), lambda: x.on(s.position, toward=opposite), lambda: x.on(s.into(0), toward=s.inward),
+             lambda: x.on(s.into(0))][b.pick(4)]()
         else:
+            # (a side moved into or out of its box is a side: no toward= needed)
             [lambda: x.on(s + sign * r.by), lambda: x.on(s.into(r.by), toward=opposite),
-             lambda: x.on(s.into(r.by), toward=s.inward)][b.pick(3)]()
+             lambda: x.on(s.into(r.by), toward=s.inward), lambda: x.on(s.into(r.by)), lambda: x.on(s.gap(-r.by))][
+                b.pick(5)]()
         return
     if r.kind == "face":
         f = _board(b, r.of).face(r.name)
@@ -1281,20 +1315,6 @@ class _Local:
         return tuple(self.coord(a, values[a]) for a in sorted(values, key=lambda a: self.of_axis[a]))
 
 
-@dataclass(frozen=True)
-class _Known:
-    """A value that may differ for a reason known and open."""
-    value: Any
-    why: str
-
-
-#: Known and open (2026-10-14), Florian's to decide: what a board
-#: straddling its scope's middle shows by default (its face toward the
-#: world's positive end of its thickness axis, so another name in another
-#: frame).
-STRADDLING = f"{KNOWN} the default show face of a board across its scope's middle is the world's"
-
-
 def _summary(b: Built) -> dict[str, Any]:
     assert b.module is not None
     loc = _Local(b.module)
@@ -1304,13 +1324,7 @@ def _summary(b: Built) -> dict[str, Any]:
             continue
         bx = x.box()
         layout = x.to_layout()
-        show: Any = loc.name(layout["show"])
-        machine: Any = loc.name(layout["machine"])
-        if x._show is None:  # pyright: ignore[reportPrivateUsage]
-            try:
-                x.face("outer")
-            except LangError:
-                show, machine = _Known(show, STRADDLING), _Known(machine, STRADDLING)
+        show, machine = loc.name(layout["show"]), loc.name(layout["machine"])
         grain = layout["grain"]
         out[x.path] = ("board", loc.of_axis[x.t_axis], tuple(loc.span(a, bx.lo[a], bx.hi[a]) for a in
                                                               sorted(AXES, key=lambda a: loc.of_axis[a])),
@@ -1373,32 +1387,25 @@ def _op_summary(loc: _Local, x: Board, op: Op) -> tuple[Any, ...]:
     return (op.kind,)
 
 
-def _difference(a: Any, c: Any) -> tuple[str, bool] | None:
+def _difference(a: Any, c: Any) -> str | None:
     """The first difference between two summaries' values, give or take
-    1e-6 mm (shapes: what `clean` takes away), and whether it is known;
-    None when they agree."""
-    if isinstance(a, _Known) or isinstance(c, _Known):
-        why = a.why if isinstance(a, _Known) else c.why if isinstance(c, _Known) else ""
-        p = a.value if isinstance(a, _Known) else a
-        q = c.value if isinstance(c, _Known) else c
-        found = _difference(p, q)
-        return None if found is None else (f"{why}: {found[0]}", True)
+    1e-6 mm (shapes: what `clean` takes away); None when they agree."""
     if isinstance(a, BaseGeometry) and isinstance(c, BaseGeometry):
         d = a.symmetric_difference(c)
         if d.area > 1e-6 and clean(d).area > 1e-6:
-            return f"the shapes differ by {d.area:.3g} mm2", False
+            return f"the shapes differ by {d.area:.3g} mm2"
         return None
     if isinstance(a, float) and isinstance(c, float):
-        return None if math.isclose(a, c, abs_tol=1e-6) else (f"{a!r} against {c!r}", False)
+        return None if math.isclose(a, c, abs_tol=1e-6) else f"{a!r} against {c!r}"
     if isinstance(a, (tuple, list)) and isinstance(c, (tuple, list)):
         if len(a) != len(c):
-            return f"{len(a)} items against {len(c)}: {_short(a)} against {_short(c)}", False
+            return f"{len(a)} items against {len(c)}: {_short(a)} against {_short(c)}"
         for p, q in zip(a, c):
             found = _difference(p, q)
             if found is not None:
                 return found
         return None
-    return None if a == c else (f"{_short(a)} against {_short(c)}", False)
+    return None if a == c else f"{_short(a)} against {_short(c)}"
 
 
 def _short(v: Any) -> str:
@@ -1411,7 +1418,7 @@ def _short(v: Any) -> str:
 def _promises(b: Built) -> list[str]:
     """What the boards and operations of the case built as written must
     be (see the module's docstring)."""
-    problems: list[str] = []
+    problems: list[str] = _ambiguity_promises(b)
     for i, x in enumerate(b.boards):
         if x is not None:
             problems += _board_promises(b, i, x)
@@ -1453,8 +1460,7 @@ def _board_promises(b: Built, i: int, x: Board) -> list[str]:
         want = (plane, plane + spec.t) if sign > 0 else (plane - spec.t, plane)
         if abs(lo_t - want[0]) > 1e-6 or abs(hi_t - want[1]) > 1e-6:
             problems.append(f"{x.path} lies at {lo_t:g} to {hi_t:g} on {t}, on() names {want[0]:g} to {want[1]:g}")
-    if spec.shape is None:
-        problems += _limit_promises(b, i, x)
+    problems += _limit_promises(b, i, x) if spec.shape is None else _shape_promises(b, i, x)
     sb = x.scope.box
     if sb is not None:
         c = (sb.lo[t] + sb.hi[t]) / 2
@@ -1462,6 +1468,12 @@ def _board_promises(b: Built, i: int, x: Board) -> list[str]:
             inner, outer = x.inner, x.outer
             if abs(inner.value - c) > abs(outer.value - c) + 1e-9:
                 problems.append(f"{x.path}'s inner face ({inner.name}) faces away from its scope's middle")
+        elif spec.show is None:
+            # across the middle: top, else back, else right, in its scope's terms
+            want = next(n for n in ("top", "back", "right") if _scope(x).frame.direction(n).axis == t)
+            if x.show_face.name != want:
+                problems.append(f"{x.path} lies across its scope's middle and shows its {x.show_face.name} face, "
+                                f"not its {want}")
     return problems
 
 
@@ -1488,8 +1500,6 @@ def _limit_promises(b: Built, i: int, x: Board) -> list[str]:
     sb = x.scope.box
     n = spec.inset
     for axis in (x.u_axis, x.v_axis):
-        if _overlapping(x, axis):
-            continue                    # (OVERLAPPING)
         lo, hi = bx.lo[axis] - n, bx.hi[axis] + n
         ends: list[float] = []
         for limit in b.given.get(i, []):
@@ -1548,109 +1558,135 @@ def _op_promises(x: Board, key: str, op: Op, where: Where, depth: float, thru: b
     return problems
 
 
-# -- known and open -------------------------------------------------------------------------------
+# -- the rules decided on 2026-10-14 -------------------------------------------------------------
 
-#: Known and open (2026-10-14), Florian's to decide; each makes a board's
-#: place depend on the world frame or the module's place.
-SHAPED = (f"{KNOWN} a board with a shape that does not fill its limits less its inset on an axis (or has none) "
-          "sits at their lowest corner in world terms")
-MIDDLE = f"{KNOWN} a single limit at the middle of the box leaves the board either half, by the world axis"
-CENTRED = f"{KNOWN} a board as the only limit, centred in the box, gives its face toward the world axis' end"
-OVERLAPPING = (f"{KNOWN} limits that overlap (two boards, a position or a board's face moved by gap() inside "
-               "a board) put the board inside them")
+#: What the language says when it refuses limits that leave it open where a
+#: board lies (`Board._check_parts`, `_check_inside`, `_extent`).
+AMBIGUOUS = ("is given twice on", "overlap on", "lies inside", "lies at the middle of its room",
+             "lies across the middle of the box")
 
 
-def _known(x: Board) -> str | None:
-    """Why the board's place may differ by frame or place, if it may."""
-    t = x._t_axis  # pyright: ignore[reportPrivateUsage]
-    sb = x.scope.box
-    if t is None:
+def _limits_on(b: Built, i: int, axis: Axis) -> tuple[list[float], list[tuple[Board, float]]] | None:
+    """Board i's limits on an axis as given: the positions (a box's two
+    sides among them) and the boards with their `into()` offsets; None
+    when one of them cannot be read (a board left out)."""
+    positions: list[float] = []
+    parts: list[tuple[Board, float]] = []
+    try:
+        for limit in b.given.get(i, []):
+            if isinstance(limit, Box):
+                positions += [limit.lo[axis], limit.hi[axis]]
+            elif isinstance(limit, (Board, PartLimit)):
+                p, k = (limit, 0.0) if isinstance(limit, Board) else (limit.part, limit.offset)
+                if p.t_axis == axis:
+                    parts.append((p, k))
+            else:
+                pos = as_pos(limit)
+                if pos.axis == axis:
+                    positions.append(pos.value)
+    except LangError:
         return None
-    for axis in AXES:
-        if axis == t:
-            continue
-        try:
-            if _overlapping(x, axis):
-                return OVERLAPPING
-        except LangError:
-            continue
-        try:
-            values = x._limit_values(axis, sb, set())  # pyright: ignore[reportPrivateUsage]
-        except LangError:
-            continue
-        shape = x._shape  # pyright: ignore[reportPrivateUsage]
-        if shape is not None:
-            plane: list[Axis] = [a for a in AXES if a != t]
-            placed = shape.in_plane(plane[0], plane[1])
-            size = placed.width if axis == plane[0] else placed.height
-            inset = x._inset  # pyright: ignore[reportPrivateUsage]
-            if len(values) < 2 or abs(max(values) - min(values) - 2 * inset - size) > 1e-6:
-                return SHAPED
-        if sb is None or len(values) != 1:
-            continue
-        centre = (sb.lo[axis] + sb.hi[axis]) / 2
-        if abs(values[0] - centre) < 1e-6:
-            return MIDDLE
-        for limit in x._limits:  # pyright: ignore[reportPrivateUsage]
-            p = limit if isinstance(limit, Board) else limit.part if isinstance(limit, PartLimit) else None
-            if p is not None and p.t_axis == axis and abs((p.box().lo[axis] + p.box().hi[axis]) / 2 - centre) < 1e-6:
-                return CENTRED
+    return positions, parts
+
+
+def _ambiguity(b: Built, i: int) -> str | None:
+    """Which of the rules on ambiguous limits board i's limits break, worked
+    out again from what they are: the same board twice, two boards
+    overlapping, a position or another board's face (toward the other limit,
+    moved by its offset) inside a board past its `into()`, a single
+    position at the box's middle, a board as the only limit centred in the
+    box; None when none, or when the board's limits cannot be read."""
+    x = b.made_boards[i]
+    t = x._t_axis if x is not None else None  # pyright: ignore[reportPrivateUsage]
+    if x is None or t is None or any(b.boards[j] is None for j in deps(b.case.boards[i])):
+        return None
+    sb = x.scope.box
+    plane: list[Axis] = [a for a in AXES if a != t]
+    for axis in plane:
+        found = _limits_on(b, i, axis)
+        if found is None:
+            return None
+        positions, parts = found
+        boxes = [p.box() for p, _ in parts]
+        for k in range(len(parts)):
+            for n in range(k + 1, len(parts)):
+                if parts[k][0] is parts[n][0]:
+                    return "twice"
+                if min(boxes[k].hi[axis], boxes[n].hi[axis]) - max(boxes[k].lo[axis], boxes[n].lo[axis]) > 1e-6:
+                    return "overlap"
+        if len(positions) + len(parts) > 2:
+            continue                    # (more than two limits: refused otherwise)
+        middle = None if sb is None else (sb.lo[axis] + sb.hi[axis]) / 2
+        faces: list[float] = []
+        for k, (_, offset) in enumerate(parts):
+            pb = boxes[k]
+            mid = (pb.lo[axis] + pb.hi[axis]) / 2
+            others = positions + [(q.lo[axis] + q.hi[axis]) / 2 for n, q in enumerate(boxes) if n != k]
+            toward = others[0] if len(others) == 1 else middle if middle is not None else mid
+            faces.append(pb.hi[axis] - offset if toward >= mid else pb.lo[axis] + offset)
+        for k, (_, offset) in enumerate(parts):
+            reach = max(offset, 0.0)
+            for v in positions + [f for n, f in enumerate(faces) if n != k]:
+                if boxes[k].lo[axis] + reach + 1e-6 < v < boxes[k].hi[axis] - reach - 1e-6:
+                    return "inside"
+        if middle is not None and len(parts) == 1 and not positions and \
+                abs((boxes[0].lo[axis] + boxes[0].hi[axis]) / 2 - middle) < 1e-9:
+            return "centred"
+        if middle is not None and len(positions) == 1 and not parts and abs(positions[0] - middle) < 1e-9:
+            return "middle"
     return None
 
 
-def _overlapping(x: Board, axis: Axis) -> bool:
-    """Whether the board's limits on an axis overlap: two boards, or a
-    position or another board's face (moved by its `gap()`) inside a board
-    beyond its `into()`."""
-    spans: list[tuple[float, float, float]] = []
-    for limit in x._limits:  # pyright: ignore[reportPrivateUsage]
-        if isinstance(limit, (Board, PartLimit)):
-            p, k = (limit, 0.0) if isinstance(limit, Board) else (limit.part, limit.offset)
-            if p.t_axis == axis:
-                spans.append((p.box().lo[axis], p.box().hi[axis], max(k, 0.0)))
-    values = x._limit_values(axis, x.scope.box, set())  # pyright: ignore[reportPrivateUsage]
-    return any(min(a[1], c[1]) - max(a[0], c[0]) > 1e-6 for k, a in enumerate(spans) for c in spans[k + 1:]) or \
-        any(lo + k + 1e-6 < v < hi - k - 1e-6 for lo, hi, k in spans for v in values)
-
-
-def _known_boards(b: Built) -> dict[str, str]:
-    """The paths of the boards whose place may differ for a known reason,
-    and of the boards placed by them, with the reason."""
-    reasons: dict[int, str] = {}
+def _ambiguity_promises(b: Built) -> list[str]:
+    """A board whose limits leave it open where it lies is refused, and a
+    board is refused for that only when they do."""
+    problems: list[str] = []
     for i, x in enumerate(b.made_boards):
-        why = _known(x) if x is not None else None
-        if why is not None:
-            reasons[i] = why
-    if any(i < b.case.first_bay for i in reasons):
-        why = next(reasons[i] for i in sorted(reasons))
-        for i in range(b.case.first_bay, b.case.first_extra):
-            reasons.setdefault(i, why)
-    grown = True
-    while grown:
-        grown = False
-        for i, spec in enumerate(b.case.boards):
-            if i not in reasons:
-                found = next((reasons[j] for j in deps(spec) if j in reasons), None)
-                if found is not None:
-                    reasons[i] = found
-                    grown = True
-    out: dict[str, str] = {}
-    for i, why in reasons.items():
-        x = b.made_boards[i]
-        if x is not None:
-            out[x.path] = why
-    for op in [*b.case.ops, *(o for spec in b.case.boards for o in spec.ops)]:
-        # (a board cut by a known one, or an operation placed by one's face)
-        named = {op.other} if op.kind == "cut_part" else set()
-        for r in [*(v.ref for _, v in op.at.edges if v is not None and v.ref is not None), *(op.row or ())[:2]]:
-            if r.kind in ("part", "face", "op"):
-                named.add(r.of)
-        x = b.made_boards[op.board]
-        for j in named:
-            other = b.made_boards[j]
-            if x is not None and other is not None and other.path in out:
-                out.setdefault(x.path, out[other.path])
-    return out
+        if x is None:
+            continue
+        why = _ambiguity(b, i)
+        refused = b.reasons.get(i, "")
+        if why is not None and b.boards[i] is not None:
+            problems.append(f"{x.path} was placed though its limits are ambiguous ({why})")
+        elif why is None and any(a in refused for a in AMBIGUOUS) and \
+                all(b.boards[j] is not None for j in deps(b.case.boards[i])):
+            problems.append(f"{x.path} was refused as ambiguous, which its limits are not: {refused}")
+    return problems
+
+
+def _shape_promises(b: Built, i: int, x: Board) -> list[str]:
+    """A board made of a shape: its box is its outline's; it fills its two
+    limits on an axis less its inset, sits against a single one, or at the
+    scope's front, left or bottom side without one."""
+    spec = b.case.boards[i]
+    placed = b.placed.get(i)
+    bx = x.box()
+    u, v = x.u_axis, x.v_axis
+    if placed is None:
+        return []
+    problems: list[str] = []
+    if any(abs(p - q) > 1e-9 for p, q in zip(placed, (bx.lo[u], bx.lo[v], bx.hi[u], bx.hi[v]))):
+        problems.append(f"{x.path}'s box is not its outline's {placed}")
+    sb = x.scope.box
+    n = spec.inset
+    for axis in (u, v):
+        found = _limits_on(b, i, axis)
+        if found is None:
+            continue
+        positions, parts = found
+        lo, hi = bx.lo[axis] - n, bx.hi[axis] + n
+        ends = positions + [p.box().lo[axis] + k if abs(hi - (p.box().lo[axis] + k)) <= abs(lo - (p.box().hi[axis] - k))
+                            else p.box().hi[axis] - k for p, k in parts]
+        if len(ends) == 2 and (abs(lo - min(ends)) > 1e-6 or abs(hi - max(ends)) > 1e-6):
+            problems.append(f"{x.path}'s shape does not fill its limits on {axis}")
+        if len(ends) == 1 and min(abs(lo - ends[0]), abs(hi - ends[0])) > 1e-6:
+            problems.append(f"{x.path}'s shape does not sit against its limit on {axis}")
+        if not ends and sb is not None:
+            start = next(d for d in map(x.scope.frame.direction, LOW) if d.axis == axis)
+            at = sb.lo[axis] if start.sign < 0 else sb.hi[axis]
+            if abs((lo if start.sign < 0 else hi) - at) > 1e-6:
+                problems.append(f"{x.path}'s shape does not sit at its scope's {start.name} on {axis}")
+    return problems
 
 
 # -- checking -----------------------------------------------------------------------------------
@@ -1659,7 +1695,6 @@ def _known_boards(b: Built) -> dict[str, str]:
 class Attempt:
     summary: dict[str, Any]
     problems: list[str]
-    known: dict[str, str]
     paths: dict[str, str]           # op key -> the path of its board
     #: The preview's volume of each board (mm3), where the pipeline ran.
     volumes: dict[str, float] = field(default_factory=dict[str, float])
@@ -1671,7 +1706,7 @@ def _attempt(case: PlacementCase, how: How, first: bool, pipeline: bool) -> Atte
         try:
             summary = _summary(b)
         except LangError as e:
-            return Attempt({}, [f"the layout failed: {e}"], {}, {})
+            return Attempt({}, [f"the layout failed: {e}"], {})
         problems = list(b.problems)
         if first:
             problems += _promises(b)
@@ -1681,7 +1716,7 @@ def _attempt(case: PlacementCase, how: How, first: bool, pipeline: bool) -> Atte
             problems += [p for p in _pipeline_problems(meshes) if p not in layout]
         paths = {f"op {k}": x.path for k in b.made if (x := b.made_boards[_spec_of(case, k).board]) is not None}
         volumes = {path: float(mesh.volume) for path, mesh in meshes.items() if mesh is not None}
-        return Attempt(summary, problems, _known_boards(b), paths, volumes)
+        return Attempt(summary, problems, paths, volumes)
 
 
 def ways(case: PlacementCase) -> list[How]:
@@ -1704,8 +1739,6 @@ def run_case(case: PlacementCase) -> list[str]:
     if problems:
         return problems
     first = attempts[0]
-    known = {**first.known, **attempts[1].known, **attempts[2].known}
-    found_known: list[str] = []
     for k, other in ((1, attempts[1]), (2, attempts[2])):
         way = ("moved" + (" and facing another side" if case.kind == "cabinet" else "") if k == 1 else
                f"in the world frame {WORLD_FRAMES[case.frame]}{', mirrored the other way' if case.flip else ''}, "
@@ -1713,26 +1746,17 @@ def run_case(case: PlacementCase) -> list[str]:
         for key in sorted(set(first.summary) | set(other.summary)):
             a, c = first.summary.get(key, "missing"), other.summary.get(key, "missing")
             found = _difference(a, c)
-            if found is None:
-                continue
-            text, is_known = found
-            path = first.paths.get(key, key)
-            why = known.get(path) or next((w for p, w in known.items() if p in text or p in repr(a) or p in repr(c)), None)
-            if is_known:
-                found_known.append(text)
-            elif why is not None:
-                found_known.append(f"{why}: {key} {way}: {text}")
-            else:
-                return [f"{way}, {key} comes out otherwise: {text}"]
+            if found is not None:
+                return [f"{way}, {key} comes out otherwise: {found}"]
     for path, volume in first.volumes.items():
         # (the meshes' booleans round more far from the origin, in the same frame too: 0.4 mm3 of a 16 mm
         # hole's cut from a strip 0.33 mm wide 3.4 m out, 0.5 mm3 from one 1.8 mm wide 4 m out; a face mixed
         # up costs more)
         other = attempts[2].volumes.get(path)
-        if other is not None and abs(other - volume) > 1.0 + 1e-4 * volume and path not in known:
+        if other is not None and abs(other - volume) > 1.0 + 1e-4 * volume:
             return [f"in the world frame {WORLD_FRAMES[case.frame]} the preview meshes {path} {other:.6g} mm3, "
                     f"not {volume:.6g}"]
-    return found_known[:1]
+    return []
 
 
 def apply(case: PlacementCase, name: str) -> None:
