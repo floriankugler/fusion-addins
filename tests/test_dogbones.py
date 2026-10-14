@@ -502,6 +502,28 @@ def test_dog_bones_come_in_the_order_of_the_operations_wherever_the_board_lies()
         assert [op.name for op in _dogbones(b)] == ["pocket_1_dogbones", "cut_2_dogbones", "cut_3_dogbones"], place
 
 
+def test_a_relief_takes_no_material_held_on_to_its_corner_at_a_point():
+    """Found by fuzzing: two pockets from either face of a 6 mm board,
+    3 deep, crossing at 45 degrees, go through where they meet; the
+    reliefs of that make corners of their own, and the relief of one of
+    those met a piece of 7.4 mm2 that touches the corner's material at a
+    point only. With the board at the origin shapely made them two pieces;
+    1 mm along, one, and the relief took that piece too. A piece held on
+    at a point is apart."""
+    features: list[tuple[str, int, float, float, float, float, float, float | None]] = [
+        ("pocket", 0, 0.0, 0.0, 59.0, 2.0, 45.0, 0.5), ("pocket", 1, 0.0, 40.0, 2.0, 57.0, 45.0, 0.5)]
+    areas: list[float] = []
+    for origin in ((0.0, 0.0, 0.0), (0.0, 1.0, 0.0)):
+        registry.reset()
+        m, b = _fuzzed("m", (40.0, 40.0), 6, "bottom", origin, features)
+        with m:
+            b.dogbones(tool=6, relief=0.1)
+            b.dogbones(tool=6, relief=0.1)                 # the corners the first one's reliefs made
+        (second,) = [op for op in _dogbones(b) if op.name == "dogbones_dogbones"]
+        areas.append(second.shape.geometry.area)
+    assert areas[0] == pytest.approx(areas[1], abs=1e-6) and areas[0] == pytest.approx(39.8996, abs=1e-3)
+
+
 def test_a_hairline_spike_two_drawings_of_a_circle_leave_is_no_corner():
     """Found by fuzzing: where a circle pocket overlaps pockets from the
     other face, the regions the corners are found in, made by booleans of

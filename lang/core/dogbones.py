@@ -356,6 +356,19 @@ def _names(c: Corner, target: Target) -> bool:
     return c.on_outline
 
 
+def _near_part(g: BaseGeometry, p: Point, near: float) -> BaseGeometry:
+    """What of `g` is held on to the part near `p` by more than a point:
+    a piece that touches it at a point only is apart, whether shapely
+    made the two one polygon or two [found by fuzzing, 2026-10-14: a
+    piece of 7.4 mm2 touching the corner's material at a point was its
+    own at one place of the board and another's at the next]."""
+    opened = g.buffer(-_ON, join_style="mitre", mitre_limit=1e6)
+    parts = [h for h in polygons_of(opened) if h.distance(p) < near + _ON]
+    if not parts or len(parts) == len(polygons_of(opened)):
+        return g
+    return g.intersection(unary_union(parts).buffer(2 * _ON, join_style="mitre", mitre_limit=1e6))
+
+
 def _relief_shape(c: Corner, request: Request) -> Shape:
     """The corner's relief: the add-in's circle, less any material it
     reaches that is not the corner's own (the piece of the circle on the
@@ -370,7 +383,8 @@ def _relief_shape(c: Corner, request: Request) -> Shape:
     radius = (request.tool / 2) / math.sin(c.angle) + request.relief / 2
     sagitta = radius * (1 - math.cos(math.pi / 360))           # the whole degrees' (`circle_geometry`)
     near = 2 * sagitta / math.sin(max((math.pi - c.angle) / 2, MAX_STEP / 2)) + _ON
-    own = unary_union([g for g in polygons_of(disc.geometry.intersection(c.level)) if g.distance(p) < near])
+    own = _near_part(unary_union([g for g in polygons_of(disc.geometry.intersection(c.level)) if g.distance(p) < near]),
+                     p, near)
     excess = disc.geometry.intersection(c.keep).difference(own)
     if excess.area <= _SLIVER:
         return disc
