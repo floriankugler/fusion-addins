@@ -27,6 +27,7 @@ from hypothesis import strategies as st  # noqa: E402
 from hypothesis.errors import NonInteractiveExampleWarning  # noqa: E402
 
 import boards  # noqa: E402
+import checks  # noqa: E402
 import corners  # noqa: E402
 import fuzzing  # noqa: E402
 import hardware  # noqa: E402
@@ -91,6 +92,7 @@ CHECKS: dict[str, Check] = {
     "corners": (corners.corner_op_cases(), corners.run_case),
     "dogbones": (corners.corner_op_cases().filter(lambda c: c.op == "dogbones"), corners.run_case),
     "chamfers": (corners.corner_op_cases().filter(lambda c: c.op != "dogbones"), corners.run_case),
+    "checks": (checks.scenes(), checks.run_case),
 }
 
 
