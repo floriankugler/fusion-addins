@@ -503,6 +503,14 @@ def test_each_part_s_transform_puts_it_flat_on_its_blank():
 
 # -- the emitter's reading -------------------------------------------------------------------------------
 
+def test_moved_facts_put_the_machining_face_up():
+    from lang.emit.nested import moved_facts
+    from lang.emit.plan import PartFacts
+    quarter = [[0.0, -1.0, 0.0, 5.0], [0.0, 0.0, 1.0, 0.0], [-1.0, 0.0, 0.0, 15.0]]    # y up, x along -y
+    facts = moved_facts(PartFacts("birch 15", 15, "board", True, (0.0, 1.0, 0.0), (-1.0, 0.0, 0.0)), quarter)
+    assert facts.up == (0.0, 0.0, 1.0) and facts.grain == (-1.0, 0.0, 0.0)
+
+
 def test_the_emitter_reads_the_nest_version_the_nest_writes():
     assert EMIT_NEST_VERSION == NEST_VERSION
 
@@ -520,6 +528,11 @@ def test_the_emitter_plans_a_document_per_material_with_blanks_where_the_nest_pu
                 assert blank.size == (b["rect"][2], b["rect"][3], m["thickness"])
                 assert blank.origin[:2] == (b["rect"][0], sheet.origin[1] + b["rect"][1])
                 assert [p.path for p in blank.parts] == [p["path"] for p in b["parts"]]
+                for placed, p in zip(blank.parts, b["parts"]):     # the blank's transform, moved to the blank
+                    point = (12.5, -3.0, 7.0)
+                    on_blank, in_doc = apply(p["transform"], point), apply(placed.transform, point)
+                    assert in_doc == pytest.approx((on_blank[0] + blank.origin[0], on_blank[1] + blank.origin[1],
+                                                    on_blank[2]))
     assert [d.material for d in plan_nest(nest, layout, "birch 12")] == ["birch 12"]
     with pytest.raises(ValueError, match="no material"):
         plan_nest(nest, layout, "oak 20")

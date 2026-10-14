@@ -43,7 +43,7 @@ import adsk.core
 import adsk.fusion
 
 from .loops import cross, dot, on_curve, oriented, polygon_loop
-from .nested import Matrix, NestDocPlan, plan_nest
+from .nested import Matrix, NestDocPlan, PlacedPartPlan, moved_facts, plan_nest
 from .plan import (AXES, Arc, Axis, ChamferStep, CircleContour, Contour, EdgeContour, FaceRef, HardwarePlan,
                    HoleStep, Line, Loops, OutlineContour, PartPlan, Plan, PocketStep, Point3, ShapeContour, Step, Vec,
                    VGrooveStep, plan_layout)
@@ -575,53 +575,75 @@ def _matrix(rows: Matrix) -> adsk.core.Matrix3D:
     return m
 
 
-def _component_name(text: str) -> str:
-    """A path as a component name: Fusion refuses some characters in them."""
-    return "".join(" " if c in ':/\\*?"<>|' else c for c in text)
-
-
 class NestEmitter(Emitter):
     """Draws a nest's document: per piece of stock a component, in it a
-    component per blank at its place, holding the blank's stock body and a
-    component per part, whose occurrence carries the nest's transform; the
-    part's body is drawn inside as in a module document."""
+    component per blank holding the blank's stock body (see-through) and
+    its parts' bodies. Each part is drawn where the layout has it, in a
+    scratch component, as in a module document; its finished body is
+    copied into its blank's component moved by the nest's transform, with
+    its facts moved along (`nested.moved_facts`), and the drawing dropped."""
 
     def emit_nest(self, doc: NestDocPlan) -> Report:
         t0 = time.perf_counter()
         self.report.checks.extend(doc.problems)
         identity = adsk.core.Matrix3D.create()
+        scratch_occ = self.root.occurrences.addNewComponent(identity)
+        scratch_occ.component.name = "drawing"
+        self._components[("drawing",)] = scratch_occ.component
         for sheet in doc.sheets:
-            sheet_comp = self._placed(self.root, f"{sheet.stock} {sheet.name} ({sheet.size[0]:g} x {sheet.size[1]:g})",
-                                      identity)
+            sheet_comp = self._placed(self.root, f"{sheet.stock} {sheet.name} ({sheet.size[0]:g} x {sheet.size[1]:g})")
             for blank in sheet.blanks:
-                ox, oy, oz = blank.origin
-                blank_comp = self._placed(sheet_comp, f"blank {blank.name}",
-                                          _matrix([[1.0, 0.0, 0.0, ox], [0.0, 1.0, 0.0, oy], [0.0, 0.0, 1.0, oz]]))
-                self._stock_body(blank_comp, blank.name, blank.size)
+                blank_comp = self._placed(sheet_comp, f"blank {blank.name}")
+                self._stock_body(blank_comp, blank.name, blank.origin, blank.size)
                 for placed in blank.parts:
                     self.log(f"part {placed.path} on blank {blank.name}")
-                    key = ("nest", sheet.name, blank.name, placed.path)
-                    self._components[key] = self._placed(blank_comp, _component_name(placed.path),
-                                                         _matrix(placed.transform))
                     try:
-                        self._emit_part(replace(placed.part, component=key))
+                        self._emit_part(replace(placed.part, component=("drawing",), facts=None))
+                        self._move_into(scratch_occ.component, blank_comp, placed)
                     except RuntimeError as error:
                         self._problem(f"{placed.path}: the body could not be made ({error}); the part is left out.")
+        scratch_occ.deleteMe()
+        del self._components[("drawing",)]
         self.report.seconds = time.perf_counter() - t0
         self.report.document = self.design.parentDocument.name
         return self.report
 
-    def _placed(self, parent: adsk.fusion.Component, name: str, matrix: adsk.core.Matrix3D) -> adsk.fusion.Component:
-        occ = parent.occurrences.addNewComponent(matrix)
+    def _placed(self, parent: adsk.fusion.Component, name: str) -> adsk.fusion.Component:
+        occ = parent.occurrences.addNewComponent(adsk.core.Matrix3D.create())
         occ.component.name = name
+        self._components[("nest", str(len(self._components)))] = occ.component
         return occ.component
 
-    def _stock_body(self, blank_comp: adsk.fusion.Component, name: str, size: tuple[float, float, float]) -> None:
+    def _move_into(self, scratch: adsk.fusion.Component, blank_comp: adsk.fusion.Component,
+                   placed: PlacedPartPlan) -> None:
+        drawn = [b for b in scratch.bRepBodies if b.name == placed.path]
+        if len(drawn) != 1:
+            raise RuntimeError(f"{len(drawn)} bodies drawn")
+        copy = self.tmp.copy(drawn[0])
+        if not self.tmp.transform(copy, _matrix(placed.transform)):
+            raise RuntimeError("the body could not be moved")
+        body = self._add_bodies(blank_comp, [copy])[0]
+        body.name = placed.path
+        if placed.part.facts is not None:
+            facts = moved_facts(placed.part.facts, placed.transform)
+            body.attributes.add(ATTRIBUTE_GROUP, ATTRIBUTE_NAME, json.dumps({
+                "path": placed.path, "kind": facts.kind, "material": facts.material, "thickness": facts.thickness,
+                "grained": facts.grained, "grain": list(facts.grain) if facts.grain else None,
+                "up": list(facts.up),
+            }))
+        if self.parametric:
+            scratch.features.removeFeatures.add(drawn[0])
+        else:
+            drawn[0].deleteMe()
+
+    def _stock_body(self, blank_comp: adsk.fusion.Component, name: str, origin: tuple[float, float, float],
+                    size: tuple[float, float, float]) -> None:
         """The blank as a body of its own, in a component drawn see-through."""
-        stock = self._placed(blank_comp, f"stock {name}", adsk.core.Matrix3D.create())
-        w, h, t = size
+        stock = self._placed(blank_comp, f"stock {name}")
+        (x, y, z), (w, h, t) = origin, size
         box = self.tmp.createBox(adsk.core.OrientedBoundingBox3D.create(
-            _pt((w / 2, h / 2, t / 2)), _vec((1.0, 0.0, 0.0)), _vec((0.0, 1.0, 0.0)), w * MM, h * MM, t * MM))
+            _pt((x + w / 2, y + h / 2, z + t / 2)), _vec((1.0, 0.0, 0.0)), _vec((0.0, 1.0, 0.0)),
+            w * MM, h * MM, t * MM))
         self._add_bodies(stock, [box])[0].name = f"blank {name}"
         stock.opacity = STOCK_OPACITY
 

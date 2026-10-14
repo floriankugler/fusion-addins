@@ -5,16 +5,19 @@ and unit tested, like `plan`; `fusion.emit_nest` draws it.
 
 Where things go in the document (mm): the pieces of stock one above the
 other along y, `GAP` apart, each blank at its place on its piece, z = 0 the
-blank's underside; a part's body is drawn where the layout has it, in a
-component whose occurrence carries the nest's transform (world to the
-blank's frame), so the part's own steps are the module documents'.
+blank's underside. A part is drawn where the layout has it, with the
+module documents' own steps, and its finished body is then moved into
+place by `transform` (world to the document) and its facts with it
+(`moved_facts`); every component sits at the origin. [Drawing inside a
+component whose occurrence is moved failed: Fusion read the profiles in
+the other space, "the path is tangent to the profile", 2026-10-14.]
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from .plan import PartPlan, plan_layout
+from .plan import PartFacts, PartPlan, Vec, plan_layout
 
 if TYPE_CHECKING:
     from ..core.layout_types import Layout
@@ -32,7 +35,7 @@ Matrix = list[list[float]]      # 3 x 4, rows x, y, z, mm
 class PlacedPartPlan:
     path: str
     part: PartPlan
-    #: World mm to the blank's frame.
+    #: World mm to the document's, where the part lies on its blank.
     transform: Matrix
 
 
@@ -93,8 +96,10 @@ def plan_nest(nest: Any, layout: Layout, material: str | None = None) -> list[Ne
                     path = str(p["path"])
                     if path not in parts:
                         raise ValueError(f"the nest places {path}, which the layout does not have.")
-                    blank.parts.append(PlacedPartPlan(path, parts[path], [[float(v) for v in row]
-                                                                          for row in p["transform"]]))
+                    rows = [[float(v) for v in row] for row in p["transform"]]
+                    rows[0][3] += bx
+                    rows[1][3] += y + by
+                    blank.parts.append(PlacedPartPlan(path, parts[path], rows))
                 sheet.blanks.append(blank)
             sheets.append(sheet)
             y += width + GAP
@@ -109,3 +114,16 @@ def apply(matrix: Matrix, point: tuple[float, float, float]) -> tuple[float, flo
     """A world point (mm) in the frame `matrix` maps to."""
     x, y, z = (r[0] * point[0] + r[1] * point[1] + r[2] * point[2] + r[3] for r in matrix)
     return x, y, z
+
+
+def turn(matrix: Matrix, v: Vec) -> Vec:
+    """A world direction in the frame `matrix` maps to."""
+    x, y, z = (r[0] * v[0] + r[1] * v[1] + r[2] * v[2] for r in matrix)
+    return x, y, z
+
+
+def moved_facts(facts: PartFacts, matrix: Matrix) -> PartFacts:
+    """A part's facts for its body moved by `matrix`: its machining face
+    up, its grain along the blank."""
+    return PartFacts(facts.material, facts.thickness, facts.kind, facts.grained,
+                     turn(matrix, facts.grain) if facts.grain is not None else None, turn(matrix, facts.up))
