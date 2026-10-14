@@ -361,6 +361,27 @@ def test_one_stations_rule_in_lib():
             refused()
 
 
+def test_the_add_ins_specs_in_cm_have_every_length_in_cm():
+    """The add-ins read the hatch hinges', sliding brackets' and ball
+    catches' specs through `in_cm()`: every length (a float, or a tuple of
+    them) a tenth, counts and angles (ints) and names as they are. A length
+    added to a spec and left out of `in_cm()` would reach Fusion ten times
+    too large."""
+    import dataclasses
+    from lib import ball_catches, hatch_hinges, sliding_brackets
+
+    def tenth(value: object) -> object:
+        if isinstance(value, tuple):
+            return tuple(tenth(v) for v in value)  # type: ignore[reportUnknownVariableType]
+        return value / 10 if isinstance(value, float) else value
+
+    specs = [*hatch_hinges.HINGE_SPECS, *sliding_brackets.BRACKETS.values(), *ball_catches.CATCHES.values()]
+    for spec in specs:
+        cm = spec.in_cm()
+        for f in dataclasses.fields(spec):
+            assert getattr(cm, f.name) == tenth(getattr(spec, f.name)), (spec.name, f.name)
+
+
 # -- the slide's mount: plan, check everything, then drill (review findings 23, 24) ------------------------
 
 def _bay() -> tuple[Scope, Scope, dict[str, Board]]:
