@@ -292,6 +292,36 @@ def test_a_closed_contour_around_nothing_is_an_error():
         b.box()
 
 
+def test_an_open_contour_that_runs_back_along_itself_is_refused():
+    """An open contour that runs back along the way it runs, an overhang,
+    leaves the board no clear side: it is refused, in the board's plane
+    (along its chord) and across it (through the board's thickness), with
+    a word to draw a lip as a closed contour [decided by Florian,
+    2026-10-14]."""
+    lip = _contour("lip", [(0, 0), (100, 0), (100, 20), (90, 20), (90, 10), (200, 10)], False)
+    flat = board("flat", ply15).center(Pos("z", 0)).between(lip, Pos("y", 100), Pos("x", 0), Pos("x", 200))
+    with pytest.raises(LangError, match=r"runs back along x by 10 mm.*along its chord: draw a lip as a closed"):
+        flat.box()
+    # (a board far from the lip too: a contour runs one way or not, whichever board takes it)
+    across = board("across", ply15).center(Pos("x", 150)).between(lip, Pos("y", 100), Pos("z", 0), Pos("z", 50))
+    with pytest.raises(LangError, match=r"runs back along x by 10 mm.*through the board's thickness"):
+        across.box()
+
+
+def test_an_open_contour_may_run_back_by_less_than_is_meant():
+    """Back 0.005 mm (the snapshot rounds to 1e-4 mm, and nothing narrower
+    than 0.01 mm is meant) is still one way; back 0.006 mm twice lies 0.012
+    behind the furthest the contour reached, which is an overhang [decided
+    by Florian, 2026-10-14]."""
+    near = _contour("near", [(0, 0), (100, 0), (99.995, 5), (200, 5)], False)
+    b = board("b", ply15).center(Pos("z", 0)).between(near, Pos("y", 100), Pos("x", 0), Pos("x", 200))
+    assert b.box().lo["y"] == pytest.approx(0)
+    twice = _contour("twice", [(0, 0), (100, 0), (99.994, 5), (99.988, 10), (200, 10)], False)
+    c = board("c", ply15).center(Pos("z", 0)).between(twice, Pos("y", 100), Pos("x", 0), Pos("x", 200))
+    with pytest.raises(LangError, match="runs back along x by 0.012 mm"):
+        c.box()
+
+
 def test_an_end_picks_one_piece_of_a_cut_up_board(van: Master):
     """A batten along the wall is cut in two by the wheel arch: with both
     ends it is an error that names the pieces, one end takes its piece."""

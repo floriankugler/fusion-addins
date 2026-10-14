@@ -10,11 +10,13 @@ way the board's plane meets it:
   at: it limits the axis across its chord (the line from its first to its
   last point), the board keeps the side its other limit on that axis is
   on, and the edge follows the contour, `batten.between(top, profile)`.
+  It must run one way along its chord's axis: one that runs back along
+  itself, an overhang, is an error (a lip is a closed contour).
 - In a perpendicular plane, the board fits over its whole thickness: its
   section across that plane, from one big face to the other, keeps clear
   of the contour. A closed contour gives a stretch on the axis the two
   planes share, `batten.between(top, profile, floor_outline)`; an open one
-  a position on it.
+  a position on it, and must run one way through the board's thickness.
 
 `contour.gap(n)` keeps n mm of clearance, measured in the contour's
 plane; `contour.into(n)` reaches n mm past it. All of it is polyline math
@@ -38,7 +40,7 @@ from .box import Box
 from .directions import AXES, Axis
 from .errors import LangError
 from .shapes import Shape
-from .geometry import clean, parts_of, polygons_of
+from .geometry import NARROWEST, clean, parts_of, polygons_of
 
 Point3 = tuple[float, float, float]
 Point2 = tuple[float, float]
@@ -50,6 +52,9 @@ _PLANAR = 0.01
 #: A closed contour must hold the board this far inside its faces, so that
 #: a contour edge lying exactly in a face does not count as crossing it.
 _INSIDE = 1e-6
+#: How far (mm) an open contour may run back along the way it runs: nothing
+#: narrower is meant, and the snapshot rounds its points to 1e-4.
+_BACK = NARROWEST
 
 
 @dataclass(frozen=True, eq=False)
@@ -298,13 +303,26 @@ class ContourLimits:
                 raise LangError(f"contour {c.name!r}: its chord runs diagonally, so the axis it limits "
                                 "is unclear.", self.path)
             a, b = (self.u, self.v) if du < dv else (self.v, self.u)
+            self._one_way(c, b, "along its chord")
             self.edges[a].append(_OpenEdge(limit, a, b, self.path))
             return
         s: Axis = next(x for x in AXES if x not in (n, self.t))
         if c.closed:
             self.sections[s].append((c.name, round_offset(c.polygon(self.t, s), -limit.gap)))
         else:
+            self._one_way(c, self.t, "through the board's thickness")
             self.crossings[s].append((limit, LineString(c.coords(self.t, s))))
+
+    def _one_way(self, c: Contour, along: Axis, way: str) -> None:
+        """An open contour must run one way along `along`: no point of it
+        more than `_BACK` behind the furthest it has reached, run from its
+        first point toward its last. One that runs back along itself, an
+        overhang, leaves the board no clear side: it is refused [decided by
+        Florian, 2026-10-14]."""
+        back = _runs_back([p[AXES.index(along)] for p in c.points])
+        if back > _BACK:
+            raise LangError(f"contour {c.name!r} runs back along {along} by {back:g} mm, an overhang; an open "
+                            f"contour must run one way {way}: draw a lip as a closed contour.", self.path)
 
     # -- per axis -----------------------------------------------------------------
 
@@ -455,6 +473,17 @@ def _crossings(line: LineString, t: float) -> list[float]:
         coords = cast(Sequence[Sequence[float]], getattr(part, "coords", []))
         values.update(round(float(c[1]), 9) for c in coords)
     return sorted(values)
+
+
+def _runs_back(values: Sequence[float]) -> float:
+    """How far a run of coordinates goes back behind the furthest it has
+    reached, run from its first toward its last (0 when it runs one way)."""
+    sign = 1.0 if values[-1] >= values[0] else -1.0
+    furthest, back = -math.inf, 0.0
+    for v in values:
+        furthest = max(furthest, sign * v)
+        back = max(back, furthest - sign * v)
+    return back
 
 
 def _free(blocked: BaseGeometry, lo: float, hi: float) -> list[tuple[float, float]]:
