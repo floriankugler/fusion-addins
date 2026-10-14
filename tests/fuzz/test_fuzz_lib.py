@@ -37,9 +37,10 @@ def test_stations_are_spread_evenly_from_end_to_end(length: float, count: int, e
     assert all(_close(length - a, b, length) for a, b in zip(got, reversed(got)))
     if 2 * end < length:
         # (within rounding: the rule keeps the floats of the copies it replaced, end +
-        # index * spacing, whose last can lie an ulp past the stretch)
+        # index * spacing, whose last can lie an ulp past the stretch, and on a stretch
+        # of 5e-324 the stations round onto each other)
         slack = 1e-9 * max(1.0, length)
-        assert all(-slack <= a < b <= length + slack for a, b in zip(got, got[1:]))
+        assert all(-slack <= a <= b + slack and b <= length + slack for a, b in zip(got, got[1:]))
 
 
 @given(_lengths, _counts, _ends)
