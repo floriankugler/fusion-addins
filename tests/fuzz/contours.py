@@ -1039,4 +1039,20 @@ def _attempt(case: ContourCase, variant: Variant, check: bool) -> tuple[list[str
     return problems, got
 
 
-__all__ = ["ContourCase", "ContourSpec", "KNOWN", "LimitSpec", "Variant", "contour_cases", "expected", "run_case"]
+def apply(case: ContourCase, name: str) -> None:
+    """Builds the case as it is built first, as module `name`: for the
+    Fusion batch check (`fusion_batch.py contours`)."""
+    build(case, case.base, name).board.box()
+
+
+def accepted(case: ContourCase) -> bool:
+    """Whether the case's board is accepted and keeps every promise, known
+    items included."""
+    if run_case(case):
+        return False
+    with fresh():
+        return outcome(build(case, case.base)).refused is None
+
+
+__all__ = ["ContourCase", "ContourSpec", "KNOWN", "LimitSpec", "Variant", "accepted", "apply", "contour_cases",
+           "expected", "run_case"]

@@ -10,6 +10,7 @@ comes out in two), and only this finds those.
     .venv/bin/python tests/fuzz/fusion_batch.py joints out/fuzz/joints --count 40 --seed 1
     .venv/bin/python tests/fuzz/fusion_batch.py hardware out/fuzz/hardware --count 36 --seed 1
     .venv/bin/python tests/fuzz/fusion_batch.py corners out/fuzz/corners --count 40 --seed 1
+    .venv/bin/python tests/fuzz/fusion_batch.py contours out/fuzz/contours --count 40 --seed 1
 
 `build` draws boards until `count` pass every check of
 `boards.run_cutout`, builds them into one layout (modules `m0`, `m1`...)
@@ -22,8 +23,9 @@ of `joints.check` (pairs, corners, crossings, frames) the same way,
 `hardware` cabinets with hardware mounted that pass every check of
 `hardware.run_case` (hinges, latches, sliding brackets, hatch hinges, ball
 catches, slides), `corners` boards with dog bones and chamfers that
-pass every check of `corners.run_case`, and `rebuild` builds any kind of
-cases file again. Then, in Fusion, `fusion_check.check([...])`
+pass every check of `corners.run_case`, `contours` boards limited by the
+master's contours that pass every check of `contours.run_case`, and
+`rebuild` builds any kind of cases file again. Then, in Fusion, `fusion_check.check([...])`
 with those paths (without `.json`), and back here
 
     .venv/bin/python tests/fuzz/fusion_batch.py explain out/fuzz/batch [more paths]
@@ -50,10 +52,12 @@ from hypothesis import strategies as st  # noqa: E402
 from shapely.geometry import Polygon  # noqa: E402
 
 import boards  # noqa: E402
+import contours  # noqa: E402
 import corners  # noqa: E402
 import hardware  # noqa: E402
 import joints  # noqa: E402
 from boards import BoardCase, CutoutCall, Feature  # noqa: E402
+from contours import ContourCase, ContourSpec, LimitSpec, Variant  # noqa: E402
 from corners import CornerOpCase  # noqa: E402
 from hardware import CatchCase, DoorCase, DrawerCase, HatchCase, PanelCase  # noqa: E402
 from joints import CornerCase, CrossCase, FrameCase, JointCase, JointSpec, PairCase  # noqa: E402
@@ -182,7 +186,24 @@ def draw_corner_cases(count: int, at: int) -> list[CornerOpCase]:
     return found
 
 
-Case = BoardCase | JointCase | hardware.Case | CornerOpCase
+def draw_contour_cases(count: int, at: int) -> list[ContourCase]:
+    """`count` boards limited by contours that are accepted and keep every
+    promise, the same ones for the same `at`."""
+    found: list[ContourCase] = []
+
+    @settings(max_examples=count * 60, database=None, deadline=None, phases=[Phase.generate],
+              suppress_health_check=[HealthCheck.too_slow, HealthCheck.filter_too_much])
+    @seed(at)
+    @given(contours.contour_cases())
+    def collect(case: ContourCase) -> None:
+        if len(found) < count and case not in found and contours.accepted(case):
+            found.append(case)
+
+    collect()
+    return found
+
+
+Case = BoardCase | JointCase | hardware.Case | CornerOpCase | ContourCase
 
 
 def build_cases(cases: Sequence[Case]) -> Layout:
@@ -197,6 +218,8 @@ def build_cases(cases: Sequence[Case]) -> Layout:
             hardware.apply(case, f"m{i}")
         elif isinstance(case, CornerOpCase):
             corners.apply(case, f"m{i}")
+        elif isinstance(case, ContourCase):
+            contours.apply(case, f"m{i}")
         else:
             joints.apply(case, f"m{i}")
     layout = build_layout()
@@ -221,7 +244,8 @@ def read_cases(path: Path) -> list[Case]:
     names = {"BoardCase": BoardCase, "CutoutCall": CutoutCall, "Feature": Feature, "PairCase": PairCase,
              "JointSpec": JointSpec, "CornerCase": CornerCase, "CrossCase": CrossCase, "FrameCase": FrameCase,
              "DoorCase": DoorCase, "PanelCase": PanelCase, "HatchCase": HatchCase, "CatchCase": CatchCase,
-             "DrawerCase": DrawerCase, "CornerOpCase": CornerOpCase}
+             "DrawerCase": DrawerCase, "CornerOpCase": CornerOpCase, "ContourCase": ContourCase,
+             "ContourSpec": ContourSpec, "LimitSpec": LimitSpec, "Variant": Variant}
     return [eval(line.split(": ", 1)[1], names) for line in path.read_text().splitlines() if line.strip()]
 
 
@@ -332,6 +356,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     cornered.add_argument("out", type=Path)
     cornered.add_argument("--count", type=int, default=40)
     cornered.add_argument("--seed", type=int, default=0)
+    limited = commands.add_parser("contours", help="draw boards limited by contours into one layout")
+    limited.add_argument("out", type=Path)
+    limited.add_argument("--count", type=int, default=40)
+    limited.add_argument("--seed", type=int, default=0)
     examples = commands.add_parser("examples", help="build every example")
     examples.add_argument("out_dir", type=Path)
     explain_ = commands.add_parser("explain", help="list the bodies Fusion made differently")
@@ -357,6 +385,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             boards_ = draw_corner_cases(args.count, args.seed)
         write(args.out, build_cases(boards_), boards_)
         print(f"{len(boards_)} boards -> {args.out}.json")
+    elif args.command == "contours":
+        with fresh():
+            limited_ = draw_contour_cases(args.count, args.seed)
+        write(args.out, build_cases(limited_), limited_)
+        print(f"{len(limited_)} boards -> {args.out}.json")
     elif args.command == "rebuild":
         cases = read_cases(args.cases)
         write(args.out, build_cases(cases), cases)

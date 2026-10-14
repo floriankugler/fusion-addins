@@ -56,6 +56,17 @@ def test_a_batch_builds_again_from_its_cases(tmp_path: Path):
     assert json.loads((tmp_path / "batch.volumes.json").read_text())["m0.panel"] > 0
 
 
+def test_a_contour_batch_builds_again_from_its_cases(tmp_path: Path):
+    cases = fusion_batch.draw_contour_cases(1, 0)
+    assert len(cases) == 1
+    fusion_batch.write(tmp_path / "batch", fusion_batch.build_cases(cases), cases)
+    again = fusion_batch.read_cases(tmp_path / "batch.cases.txt")
+    assert again == cases
+    fusion_batch.write(tmp_path / "again", fusion_batch.build_cases(again))
+    assert (tmp_path / "again.json").read_text() == (tmp_path / "batch.json").read_text()
+    assert json.loads((tmp_path / "batch.volumes.json").read_text())["m0.board"] > 0
+
+
 def test_examples_build_as_lang_build_builds_them(tmp_path: Path):
     folder = tmp_path / "builds"
     folder.mkdir()
