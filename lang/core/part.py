@@ -109,6 +109,8 @@ class Board:
         self._inset: float = 0.0
         self._grain: Axis | None = None
         self._show: str | Direction | None = None
+        #: Whether the show face was read; from then on `show()` is frozen.
+        self._show_used = False
         self.manual_part: bool = False
         self._set: set[str] = set()
         # resolved
@@ -222,8 +224,19 @@ class Board:
     def show(self, face: Face | Side | Direction | InnerOuter) -> Self:
         """The visible big face: `"inner"` or `"outer"` relative to the
         enclosing box, a box side or direction (`show(cab.front)`), or one
-        of this board's own faces (`side.show(side.inner)`)."""
-        self._placement("show")
+        of this board's own faces (`side.show(side.inner)`).
+
+        It does not change the board's box, so unlike the other modifiers
+        it may come after the placement is used, until the show face is
+        used [found by fuzzing, 2026-10-14: `side.show(side.inner)` was
+        always refused, since naming the inner face resolves the
+        placement]."""
+        if self._show_used:
+            raise LangError("show() after the show face was used (by an operation, a joint or the layout); give it "
+                            "before them.", self.path)
+        if "show" in self._set:
+            raise LangError("show() given twice.", self.path)
+        self._set.add("show")
         if isinstance(face, str):
             self._show = one_of(face, InnerOuter, "show()", self.path)
         else:
@@ -515,6 +528,7 @@ class Board:
 
     @property
     def show_face(self) -> Face:
+        self._show_used = True
         if self._show is not None:
             return self.face(self._show)
         try:

@@ -590,6 +590,21 @@ def test_show_takes_a_side_of_an_enclosing_box_in_its_own_terms():
     assert back.face(world_frame().direction("left")).name == "back"     # named in the cabinet's frame
 
 
+def test_show_takes_the_board_s_own_inner_face():
+    """Found by fuzzing the placement: `side.show(side.inner)`, the form
+    show()'s docstring gives, was always refused, since naming the inner
+    face resolves the placement, which froze show(). It is frozen once the
+    show face is used instead."""
+    with module("m", Box.from_size(width=600, depth=400, height=700)) as m:
+        side = board("side", ply15).on(m.left)
+        side.show(side.inner)
+        other = board("other", ply15).on(m.right)
+        other.hole(d=5, depth=5)                  # at the show face's centre: it is used
+    assert side.show_face.name == "right" and side.to_layout()["show"] == "right"
+    with pytest.raises(LangError, match="show\\(\\) after the show face was used"):
+        other.show(other.inner)
+
+
 # -- review fixes: depths --------------------------------------------------------------
 
 def test_a_depth_past_the_opposite_face_is_an_error():
