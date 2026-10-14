@@ -134,11 +134,16 @@ and the room between parts.
 
 ### Cuts per sheet and the leftover (`sawing.py`)
 
-- The solver's cutting tree is first made as simple as it can be: two
-  rests side by side become one (a bigger leftover), and a blank takes a
-  rest too small to keep along (no cut) when it still fits the bed. A
-  node with k pieces takes k - 1 cuts. A rest at least 200 mm across and
-  0.1 m² is stock, smaller ones waste.
+- The solver's cutting tree is first made as simple as it can be, from
+  the leaves up: two rests side by side become one (a bigger leftover);
+  pieces holding blanks, and rests too small to keep, side by side become
+  one blank when the bed takes them together (two blanks the nest made
+  apart but the saw put side by side are machined as one: Florian spotted
+  two 591 high blanks, 1416 x 646 together, cut apart); and a rest too
+  small to keep along a piece cut further is taken along by the pieces
+  beside it, when every blank that grows still fits the bed (a 17 mm
+  strip along three blanks). A node with k pieces takes k - 1 cuts. A
+  rest at least 200 mm across and 0.1 m² is stock, smaller ones waste.
 - PackingSolver limits cuts per stage only (1-cuts per sheet, 2-cuts per
   strip), not per sheet, so the sawing is tried with 10 settings (two or
   three stages, cross cuts or rips first, with and without a limit per
@@ -152,16 +157,18 @@ and the room between parts.
 
 | Parts | Sheets | Cuts per sheet | Stock | Largest piece | Material used |
 |---|---|---|---|---|---|
-| 62 | 5 | 5, 3, 5, 5, 2 | 3.05 m² in 5 pieces | 1294 x 1240 | 12.27 m² (11.97 without the limit) |
-| 62 + offcuts on hand | 5 + 3 | 4, 2, 2, 2, 2 | 4.97 m² in 8 | 1114 x 1240 | 10.35 m² |
-| 124 | 11 | 2 to 4 | 9.47 m² in 17 | 1294 x 1240 | 24.22 m² |
+| 62 | 5 | 3, 3, 3, 3, 2 | 3.17 m² in 6 pieces | 1294 x 1240 | 12.14 m² |
+| 62 + offcuts on hand | 5 + 3 | 3, 2, 2, 2, 2 | 4.97 m² in 8 | 1114 x 1240 | 10.35 m² |
+| 124 | 11 | 2 (7 sheets), 3, 3, 4, 2 | 9.65 m² in 17 | 1294 x 1240 | 24.04 m² |
 
-The limit costs little material. The last sheet keeps its leftover as one
+Before blanks merged and waste was taken along, the same runs needed
+5, 3, 5, 5, 2 cuts (62 parts), 4, 2, 2, 2, 2 and 2 to 4. The limit costs
+little material. The last sheet keeps its leftover as one
 piece across the sheet (more than half of it); the other sheets keep
 strips where the blanks do not tile them (515 x 1240, 305 x 1240,
-1172 x 248). The plans could be simpler still: the simplifying joins
-pieces side by side only, it does not rearrange the tree (a sheet sawn
-with 5 cuts, cross cuts first, would take 3 with the rip first).
+1172 x 248). The simplifying does not reorder the cuts (a plan with
+the rip first where the solver cut across first), so a plan may still
+take a cut more than it could.
 
 Ways to rank leftovers, for Florian to choose [proposed 2026-10-14]:
 
@@ -177,8 +184,7 @@ Ways to rank leftovers, for Florian to choose [proposed 2026-10-14]:
    they store and reuse best.
 
 Not done: trimming the factory edges (the guillotine solver takes trims),
-rearranging a plan to fewer cuts, and refill when the cut budget is
-spent.
+reordering a plan's cuts, and refill when the cut budget is spent.
 
 ## Pushing the parts to one side
 

@@ -482,13 +482,15 @@ def run_twostep(job, a, offcuts, out: Path) -> dict:
         pieces = []
         for leaf in sawing.leaves(tree):
             x, y, w, h = leaf.rect
-            if leaf.blank >= 0:
-                # The blank's parts, measured from the piece's corner (it may
-                # have taken a rest along on its left or below).
-                dx, dy = leaf.origin[0] - x, leaf.origin[1] - y
-                items = [dict(i, translation=[i["translation"][0] + dx, i["translation"][1] + dy])
-                         for i in blanks[leaf.blank]["items"]]
-                pieces.append({"rect": [x, y, w, h], "bin": {"items": items}, "kind": "used"})
+            if leaf.blanks:
+                # The parts of the blanks the piece holds, measured from the
+                # piece's corner (it may hold several blanks, and rests).
+                items = []
+                for bi, (ox, oy) in leaf.blanks:
+                    items += [dict(i, translation=[i["translation"][0] + ox - x, i["translation"][1] + oy - y])
+                              for i in blanks[bi]["items"]]
+                pieces.append({"rect": [x, y, w, h], "bin": {"items": items}, "kind": "used",
+                               "blanks": len(leaf.blanks)})
             else:
                 pieces.append({"rect": [x, y, w, h], "bin": None,
                                "kind": "stock" if sawing.useful(w, h) else "waste"})
