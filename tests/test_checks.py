@@ -194,6 +194,33 @@ def test_a_long_board_touching_a_contour_is_inside_it():
             assert [p.split(" with")[0].split(" (")[0] for p in inside(floor, gap=gap)(m)] == expected
 
 
+def test_a_corner_poking_past_a_contour_is_outside_it_however_little_its_area():
+    """Decided by Florian, 2026-10-14: `inside()` reports a part reaching
+    more than 1e-6 mm past the contour, as `no_interference` counts an
+    overlap that deep. It also needed more than 1e-6 mm2 outside, so a
+    board's corner 1e-4 past the contour's chamfered corner, 5e-9 mm2,
+    passed as inside."""
+    floor = Contour("floor", ((0, 0, 0), (2400, 0, 0), (2400, 1100, 0), (2300, 1200, 0), (0, 1200, 0)), True,
+                    (0, 0, 0), (0, 0, 1))
+    for past, expected in ((5e-7, []), (1e-4, ["m.b is not inside floor"])):
+        registry.reset()
+        with module("m", Box.from_size(width=1200, depth=2400, height=100)) as m:
+            board("b", ply18).on(m.bottom).between(Pos("x", 2245), Pos("x", 2350 + past), Pos("y", 1100), Pos("y", 1150))
+        assert [p.split(" (")[0] for p in inside(floor)(m)] == expected, past
+
+
+def test_a_part_is_outside_a_contour_its_clearance_leaves_nothing_of():
+    """Found by fuzzing the checks: measured by how far it reaches past the
+    contour less its clearance, a board 6 thick across a contour 6 high,
+    with 5 mm of clearance, which leaves nothing, was inside (the distance
+    to nothing is 0)."""
+    wall = Contour("wall", ((0, -5, 0), (0, 45, 0), (0, 45, 6), (0, -5, 6)), True, (0, 0, 0), (1, 0, 0))
+    with module("m", Box.from_size(width=40, depth=40, height=6)) as m:
+        board("b", material("birch", t=6)).on(m.bottom)
+    assert [p.split(" (")[0] for p in inside(wall, gap=5)(m)] == ["m.b is not inside wall with 5 mm clearance"]
+    assert inside(wall, gap=2)(m) != [] and inside(wall)(m) == []
+
+
 def test_a_board_whose_outline_only_touches_where_another_crosses_it_meets_nothing_there():
     """Found by fuzzing the placement: `no_interference` looks at boards
     across each other cell by cell, and a cell lying in a notch of a

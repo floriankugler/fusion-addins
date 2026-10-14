@@ -5,6 +5,7 @@ import math
 from functools import cache
 from typing import TYPE_CHECKING
 
+from shapely import affinity
 from shapely.geometry import MultiPolygon, Point
 from shapely.geometry import box as shapely_box
 from shapely.geometry.base import BaseGeometry
@@ -275,23 +276,55 @@ def inside(contour: Contour, gap: float = 0.0) -> Check:
     2026-10-14], and its thickness). A part may reach 1e-6 mm past the
     contour (or into the clearance), the tolerance of the other checks,
     measured as a distance [found by fuzzing, 2026-10-14: by area, a
-    board 1627 long 1e-9 into the clearance was outside]."""
+    board 1627 long 1e-9 into the clearance was outside]; anything further
+    out counts, however little its area, as an overlap that deep does in
+    `no_interference` [decided by Florian, 2026-10-14: a corner 1e-4 past
+    the contour, 5e-9 mm2, was inside]."""
     if not contour.closed:
         raise LangError(f"inside(): contour {contour.name!r} is open; the check needs a closed one.")
     n = contour.normal_axis
     others: list[Axis] = [a for a in AXES if a != n]
-    # (offset as between() offsets a clearance, however the contour's points run)
-    allowed = round_offset(contour.polygon(others[0], others[1]), _TOLERANCE - gap)
+    offsets: dict[tuple[Axis, Axis], BaseGeometry] = {}
+
+    def allowed_for(part: Board) -> BaseGeometry:
+        """The clearance offset as `between()` offsets it for this part, the
+        same call in the same axis order, so the two agree however GEOS
+        simplifies it (a mirrored area simplifies otherwise, a hundredth of
+        the gap [found by fuzzing, 2026-10-14]), with the tolerance, in x,
+        y, z order."""
+        order: tuple[Axis, Axis] = (others[0], others[1])
+        if part.t_axis != n:
+            s: Axis = next(x for x in others if x != part.t_axis)
+            order = (part.t_axis, s)
+        if order not in offsets:
+            grown = round_offset(contour.polygon(*order), -gap).buffer(_TOLERANCE)
+            offsets[order] = grown if order == (others[0], others[1]) else \
+                affinity.affine_transform(grown, [0, 1, 1, 0, 0, 0])
+        return offsets[order]
 
     def check(scope: Scope) -> list[str]:
         problems: list[str] = []
         for part in scope.all_parts():
-            shadow = footprint(_extent(part), part.outline, part.t_axis, n)
-            outside = shadow.difference(allowed).area
-            if outside > 1e-6:
+            allowed = allowed_for(part)
+            extent = _extent(part)
+            if part.t_axis != n:
+                # (across the contour, as `between()` holds it: from just inside its faces, where
+                # a steep contour edge lets the faces themselves reach a little further)
+                extent = Box({**extent.lo, part.t_axis: extent.lo[part.t_axis] + _TOLERANCE},
+                             {**extent.hi, part.t_axis: extent.hi[part.t_axis] - _TOLERANCE}, extent.frame)
+            shadow = footprint(extent, part.outline, part.t_axis, n)
+            outside = shadow.difference(allowed)
+            if outside.is_empty:
+                continue
+            # (how far past the tolerance it reaches, which a rounding along the edge leaves at 0;
+            # all of it where the clearance leaves nothing of the contour)
+            beyond = math.inf if allowed.is_empty else max(
+                (allowed.distance(Point(c)) for g in polygons_of(outside) for c in g.exterior.coords), default=0.0)
+            if beyond > 1e-9:
+                how = "the clearance leaves nothing" if allowed.is_empty else f"{_TOLERANCE + beyond:.3g} mm out"
                 clearance = f" with {gap:g} mm clearance" if gap else ""
                 problems.append(f"{part.path} is not inside {contour.name}{clearance} "
-                                f"({outside:.0f} mm² outside)")
+                                f"({how}, {outside.area:.3g} mm² outside)")
         return problems
 
     check.__name__ = f"inside({contour.name})"

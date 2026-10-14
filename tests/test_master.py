@@ -322,6 +322,23 @@ def test_an_open_contour_may_run_back_by_less_than_is_meant():
         c.box()
 
 
+def test_inside_offsets_a_contour_as_between_does_for_a_board_across_it():
+    """Found by fuzzing the contours: `between()` offsets the clearance of a
+    contour across a board in the board's own axes (its thickness first),
+    `inside()` in x, y, z order; for a board whose thickness runs along y
+    that is the mirrored area, which GEOS simplifies otherwise (here 0.016
+    mm for 26 mm), so `inside()` found boards `between()` had placed 0.005
+    mm into the clearance. It offsets in each board's axes now."""
+    heptagon = Shape(Polygon([(169.6, -3.7), (106.4, 184.5), (-18.1, 176.5), (-98.2, 40.7), (-197.6, -70.4),
+                              (-9.9, -91.6), (78.3, -66.4)])).rounded(2)
+    (ring,) = heptagon.rings()
+    c = _contour("seven", [(x, y) for x, y in ring], True)
+    with module("m", Box(lo={"x": -250, "y": -150, "z": 0}, hi={"x": 250, "y": 250, "z": 50})) as m:
+        for k, y in enumerate(range(-30, 140, 3)):
+            board(f"b{k}", ply15).center(Pos("y", y)).between(c.gap(26), Pos("z", 0), Pos("z", 50))
+    assert inside(c, gap=26)(m) == []
+
+
 def test_an_end_picks_one_piece_of_a_cut_up_board(van: Master):
     """A batten along the wall is cut in two by the wheel arch: with both
     ends it is an error that names the pieces, one end takes its piece."""
