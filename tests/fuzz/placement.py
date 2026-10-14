@@ -306,10 +306,17 @@ def _origin() -> st.SearchStrategy[tuple[float, float, float]]:
     return st.one_of(st.just((0.0, 0.0, 0.0)), st.tuples(far, far, far))
 
 
+def _mm(hi: float) -> st.SearchStrategy[float]:
+    """A distance from 0 to `hi` (mm), as `sizes` draws them, but none
+    under 0.01 mm but 0 (see `_by`)."""
+    return sizes(0, hi).map(lambda v: 0.0 if v < 0.01 else v)
+
+
 def _by(lo: float, hi: float) -> st.SearchStrategy[float]:
     """How far a plane is moved (mm): none, or at least 0.01 mm, as nothing
     narrower is meant (a limit 1e-6 out of the box is out of it or not by
-    the rounding of the place, within the checks' tolerance)."""
+    the rounding of the place, within the checks' tolerance, and a bottom
+    1e-9 above the box's lies on its side or not for `interior`)."""
     return floats(lo, hi).map(lambda v: 0.0 if abs(v) < 0.01 else v)
 
 
@@ -350,7 +357,7 @@ def _carcass(draw: st.DrawFn, d: _Draft) -> None:
     behind = (side("front", door_t + gap),) if door == "overlay" else ()
     toekick = draw(st.one_of(st.none(), st.none(), st.tuples(sizes(20, 120), sizes(30, 150))))
     shelf_t = draw(_thickness())
-    dado = draw(st.one_of(st.none(), st.tuples(sizes(30, 600), sizes(0, 40), sizes(50, 800), sizes(1, t - 1))))
+    dado = draw(st.one_of(st.none(), st.tuples(sizes(30, 600), _mm(40), sizes(50, 800), sizes(1, t - 1))))
     sides: list[int] = []
     for name in ("left", "right"):
         ops: tuple[OpSpec, ...] = ()
@@ -370,7 +377,7 @@ def _carcass(draw: st.DrawFn, d: _Draft) -> None:
         if toekick is not None and draw(st.booleans()):
             at, toward = Ref("op", "toekick.top", left), "top"
         else:
-            at, toward = side("bottom", draw(st.one_of(st.just(0.0), sizes(0, 120)))), None
+            at, toward = side("bottom", draw(st.one_of(st.just(0.0), _mm(120)))), None
         bottom = d.add(BoardSpec("bottom", t, at, toward=toward,
                                  limits=tuple(draw(st.permutations([*across, *behind])))), 2)
     if draw(st.integers(0, 9)) < 8:
@@ -381,10 +388,10 @@ def _carcass(draw: st.DrawFn, d: _Draft) -> None:
         k = len(d.specs)
         cuts = (OpSpec("cut_part", left, other=k), OpSpec("cut_part", right, other=k)) if groove else ()
         back = d.add(BoardSpec("back", draw(st.sampled_from([9.0, 6.0, 12.0])),
-                               side("back", draw(st.one_of(st.just(0.0), sizes(0, 30)))),
+                               side("back", draw(st.one_of(st.just(0.0), _mm(30)))),
                                limits=tuple(draw(st.permutations(limits))), ops=cuts), 0)
     if dado is not None:
-        limits = [Ref("op", "dado.floor", left), Ref("op", "dado.floor", right), side("front", draw(sizes(0, 40)))]
+        limits = [Ref("op", "dado.floor", left), Ref("op", "dado.floor", right), side("front", draw(_mm(40)))]
         limits += [part(back)] if back is not None else []
         d.add(BoardSpec("shelf", shelf_t, mid(Ref("op", "dado.bottom", left), Ref("op", "dado.top", right)),
                         center=True, limits=tuple(draw(st.permutations(limits)))), 2)
@@ -392,7 +399,7 @@ def _carcass(draw: st.DrawFn, d: _Draft) -> None:
         low = face(bottom, "top") if bottom is not None else side("bottom")
         high = face(top, "bottom") if top is not None else side("top")
         ends = [part(left, -1), part(right, -1)] if draw(st.booleans()) else [part(left), part(right)]
-        limits = ends + ([part(back)] if back is not None else []) + [side("front", draw(sizes(0, 40)))]
+        limits = ends + ([part(back)] if back is not None else []) + [side("front", draw(_mm(40)))]
         d.add(BoardSpec("shelf", shelf_t, mid(low, high, draw(_fraction())), center=True,
                         limits=tuple(draw(st.permutations(limits))), show=draw(st.sampled_from([None, "top"]))), 2)
     if draw(st.integers(0, 9)) < 3:
@@ -427,8 +434,8 @@ def _bay(draw: st.DrawFn, d: _Draft) -> BaySpec:
     elif mirrored:
         d.bay_names = {**{n: n for n in MEASURE}, "left": "right", "right": "left"}
     face_t = draw(_thickness())
-    shrink = (face_t + draw(sizes(0, 5)), draw(sizes(0, 30)), draw(sizes(0, 15)), draw(sizes(0, 15)),
-              draw(sizes(0, 40)), draw(sizes(0, 15)))
+    shrink = (face_t + draw(_mm(5)), draw(_mm(30)), draw(_mm(15)), draw(_mm(15)),
+              draw(_mm(40)), draw(_mm(15)))
     d.add(BoardSpec("face", face_t, side("front", of=1), limits=(Ref("box", of=1),),
                     inset=draw(st.one_of(st.just(1.5), floats(0, 4))), scope=1), 0)
     if draw(st.booleans()):
@@ -441,15 +448,15 @@ def _bay(draw: st.DrawFn, d: _Draft) -> BaySpec:
             limits = [part(lft), part(rgt), side("bottom", of=2), side("top", of=2)]
             ends.append(d.add(BoardSpec(name, t, side(name, of=2), limits=tuple(draw(st.permutations(limits))),
                                         scope=1), 0))
-        g = draw(st.one_of(st.just(0.0), sizes(0, 5)))
+        g = draw(st.one_of(st.just(0.0), _mm(5)))
         limits = [part(lft, g), part(rgt, g), part(ends[0], g), part(ends[1], g)]
         k = len(d.specs)
         cuts = tuple(OpSpec("cut_part", i, other=k) for i in (lft, rgt, *ends)) if g else ()
-        d.add(BoardSpec("floor", 9.0, side("bottom", draw(sizes(0, 20)), of=2), limits=tuple(draw(st.permutations(limits))),
+        d.add(BoardSpec("floor", 9.0, side("bottom", draw(_mm(20)), of=2), limits=tuple(draw(st.permutations(limits))),
                         scope=1, ops=cuts), 2)
     index = draw(st.integers(0, (len(bays) if bays else split - 1)))
     return BaySpec(split, index, front, left, shrink, extent, bays, kind == "module", mirrored,
-                   draw(st.one_of(st.just(0.0), sizes(0, 30))))
+                   draw(st.one_of(st.just(0.0), _mm(30))))
 
 
 @st.composite
@@ -461,7 +468,7 @@ def _ref_on(draw: st.DrawFn, d: _Draft, measure: int, scope: int) -> Ref:
         options: list[st.SearchStrategy[Ref]] = [
             st.builds(side, st.sampled_from(names) if scope == 0 else st.sampled_from(
                 [n for n, m in d.bay_names.items() if m in names]),
-                st.one_of(st.just(0.0), sizes(0, 200), _by(-20, 20)), st.just(scope))]
+                st.one_of(st.just(0.0), _mm(200), _by(-20, 20)), st.just(scope))]
         faces = [(i, n) for i in range(len(d.specs)) for n in MEASURE if MEASURE[d.module_name(i, n)] == measure]
         if faces:
             options.append(st.sampled_from(faces).flatmap(
@@ -480,7 +487,7 @@ def _extra(draw: st.DrawFn, d: _Draft, name: str) -> tuple[BoardSpec, int]:
     center = False
     if kind == "side":
         n = draw(st.sampled_from(list(MEASURE)))
-        at, t = side(n, draw(st.one_of(st.just(0.0), sizes(0, 300), _by(-20, 20)))), MEASURE[n]
+        at, t = side(n, draw(st.one_of(st.just(0.0), _mm(300), _by(-20, 20)))), MEASURE[n]
     elif kind == "face" and d.specs:
         i = draw(st.integers(0, len(d.specs) - 1))
         n = draw(st.sampled_from([n for n in MEASURE if MEASURE[n] == d.t[i]] * 3 + list(MEASURE)))
@@ -505,14 +512,14 @@ def _extra(draw: st.DrawFn, d: _Draft, name: str) -> tuple[BoardSpec, int]:
         else:
             limits.append(draw(_ref_on(d, draw(st.sampled_from([m for m in range(3) if m != t] + [t] * (pick == 5))), 0)))
     shape: tuple[float, float] | None = None
-    inset = draw(st.one_of(st.just(0.0), st.just(0.0), sizes(0, 30)))
+    inset = draw(st.one_of(st.just(0.0), st.just(0.0), _mm(30)))
     if draw(st.integers(0, 9)) == 0:
         shape = (draw(sizes(20, 400)), draw(sizes(20, 400)))
         if draw(st.booleans()):
             inset = 0.0
             limits = []
             for m, size in zip([m for m in range(3) if m != t], shape):
-                start = draw(st.one_of(st.just(0.0), sizes(0, 200)))
+                start = draw(st.one_of(st.just(0.0), _mm(200)))
                 end = draw(st.sampled_from([LOW[m], HIGH[m]]))
                 limits += [side(end, start), side(end, start + size)]
     return BoardSpec(name, draw(_thickness()), at, center, toward, tuple(limits), inset, shape,
@@ -527,7 +534,7 @@ def _value(d: _Draft, i: int, measure: int) -> st.SearchStrategy[Value | None]:
     its shelf)."""
     names = [n for n in MEASURE if MEASURE[n] == measure]
     fraction = st.builds(Value, _fraction(), st.one_of(st.just(0.0), _by(-5, 5)))
-    mm = st.builds(Value, st.just(0.0), st.one_of(sizes(0, 100), floats(0, 400)))
+    mm = st.builds(Value, st.just(0.0), st.one_of(_mm(100), _by(0, 400)))
     own = st.builds(Value, st.just(0.0), st.just(0.0), st.builds(face, st.just(i), st.sampled_from(names),
                                                                     _by(-200, 0)))
     options = [fraction, fraction, mm, own, st.none()]
@@ -580,8 +587,8 @@ def _op(draw: st.DrawFn, d: _Draft, k: int) -> OpSpec:
     if kind == "row":
         at = draw(_at(d, i, 2))
         m = MEASURE[at.edges[0][0]]
-        start = face(i, LOW[m], -draw(sizes(0, 80)))
-        end = face(i, HIGH[m], -draw(sizes(0, 80)))
+        start = face(i, LOW[m], -draw(_mm(80)))
+        end = face(i, HIGH[m], -draw(_mm(80)))
         pitch = draw(st.one_of(st.sampled_from([32.0, 64.0, 100.0]), sizes(10, 300)))
         return OpSpec(kind, i, at, d=draw(sizes(2, 10)), depth=draw(_depths(thick)),
                       row=(start, end, pitch if draw(st.booleans()) else 0.0, draw(st.integers(1, 6))))
