@@ -38,7 +38,7 @@ from .box import Box
 from .directions import AXES, Axis
 from .errors import LangError
 from .shapes import Shape
-from .geometry import parts_of, polygons_of
+from .geometry import clean, parts_of, polygons_of
 
 Point3 = tuple[float, float, float]
 Point2 = tuple[float, float]
@@ -150,7 +150,10 @@ def round_offset(area: BaseGeometry, distance: float) -> BaseGeometry:
         return area
     polygons = [Polygon(_ring_without_edge_points(p.exterior.coords),
                         [_ring_without_edge_points(h.coords) for h in p.interiors]) for p in polygons_of(area)]
-    return shapely.normalize(polygons[0] if len(polygons) == 1 else MultiPolygon(polygons)).buffer(distance)
+    grown = shapely.normalize(polygons[0] if len(polygons) == 1 else MultiPolygon(polygons)).buffer(distance)
+    # (cleaned: an area shrunk by half its width leaves a sliver of no width, invalid [found by
+    # fuzzing, 2026-10-14: a slot 1 mm wide shrunk by 0.5])
+    return clean(grown)
 
 
 def _ring_without_edge_points(coords: Iterable[Sequence[float]]) -> list[Point2]:

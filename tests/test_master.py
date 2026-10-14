@@ -254,6 +254,19 @@ def test_a_clearance_does_not_depend_on_how_the_contours_points_run():
     assert lows[1] == pytest.approx(lows[0], abs=1e-9)
 
 
+def test_an_area_shrunk_by_half_its_width_leaves_nothing_valid():
+    """Found by fuzzing the contours: a slot 1 mm wide, turned 66.2
+    degrees, shrunk by 0.5 left GEOS's sliver of no width along its
+    spine, an invalid polygon; what an offset leaves is cleaned now, so
+    nothing is left."""
+    from shapely import affinity
+    from lang.core.contours import round_offset
+    slot = affinity.rotate(rect(depth=10, width=1).rounded(0.5).geometry, 66.2, origin=(0, 0))
+    shrunk = round_offset(slot, -0.5)
+    assert shrunk.is_valid and shrunk.area < 1e-6
+    assert round_offset(slot, -0.25).is_valid and round_offset(slot, -0.25).area > 4
+
+
 def test_an_offset_is_the_same_with_points_along_its_edges():
     """Points added along the edges of an area do not change its offset:
     simplified away, the points Douglas-Peucker split at stayed, and the
