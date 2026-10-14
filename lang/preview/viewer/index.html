@@ -47,6 +47,12 @@
     padding: 0 3px; border-radius: 2px; white-space: nowrap; }
   .flabel .alias { color: #a08463; }
   .plabel.selected, .flabel.selected { color: var(--accent); }
+  #nestView { position: absolute; inset: 0 var(--side) 0 0; background: #fff; overflow: auto; padding: 12px;
+    box-sizing: border-box; }
+  #nestView svg { width: 100%; height: auto; }
+  #nestView g.part { cursor: pointer; }
+  #nestView g.part.selected path { fill: #f0a830; }
+  #nestInfo.stale { color: var(--accent); }
   /* a big face's name sits under the part's name, which marks the same spot */
   .labels.with-names .flabel.big { margin-top: 19px; }
 </style>
@@ -59,11 +65,16 @@
 </head>
 <body>
 <div id="view"></div>
+<div id="nestView" hidden></div>
 <div id="side">
   <h1>Layout preview</h1>
   <div class="row"><label for="design">design</label><select id="design" style="flex:1;min-width:0"></select></div>
   <div id="status">loading…</div>
   <div id="selected">click a part for its path</div>
+
+  <h2>Nest</h2>
+  <div id="nestInfo" class="keys">no nest</div>
+  <div class="row"><button id="nestShow" disabled>show nest</button><button id="nestRun">nest again</button></div>
 
   <h2>SpaceMouse</h2>
   <div id="smStatus" class="keys">connecting…</div>
@@ -124,6 +135,7 @@
     <div><span>section axis</span><kbd>x</kbd> <kbd>y</kbd> <kbd>z</kbd></div>
     <div><span>move section (shift: coarse)</span><kbd>[</kbd> <kbd>]</kbd></div>
     <div><span>flip section</span><kbd>\</kbd></div>
+    <div><span>nest view on / off</span><kbd>k</kbd></div>
     <div><span>deselect</span><kbd>esc</kbd></div>
   </div>
 </div>
@@ -139,7 +151,7 @@ import { LineGeometry } from 'three/addons/lines/LineGeometry.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { attachSpaceMouse } from './spacemouse.js';
 import { AXIS, ISO, UP, share, disposeTree, clearGroup } from './scene-utils.js';
-import { layoutVersionProblem, setHidden as markHidden, toggleHides, isolate as isolatePaths, LoadTracker } from './state.js';
+import { layoutVersionProblem, setHidden as markHidden, toggleHides, isolate as isolatePaths, LoadTracker, nestStatusText } from './state.js';
 
 const $ = (id) => document.getElementById(id);
 const view = $('view');
@@ -1079,6 +1091,7 @@ window.addEventListener('keydown', (e) => {
     case '[': section.pos = Math.max(0, section.pos - step); section.on = true; applySection(); break;
     case ']': section.pos = Math.min(1, section.pos + step); section.on = true; applySection(); break;
     case '\\': section.flip = !section.flip; applySection(); break;
+    case 'k': if (!$('nestShow').disabled) showNest(!nestShown); break;
     case 'Escape': select(null); break;
     default: return;
   }
@@ -1275,6 +1288,8 @@ function pathsOf(names) {
 }
 
 window.preview = {
+  /** The nest view on or off (`k`); true when a nest is shown. */
+  nest: (on = true) => { if ($('nestShow').disabled) on = false; showNest(on); return nestShown; },
   /** The camera: {eye, target, fov}. */
   camera: cameraState,
   /** Sets the camera: eye and target as [x, y, z] mm, fov in degrees; each optional. */
@@ -1376,6 +1391,9 @@ function openDesign(name) {
   design = name;
   wanted = null;
   version = designUrl = shownBuild = null;
+  nestVersion = null;
+  $('nestView').replaceChildren();
+  showNest(false);
   const view = views.get(name);
   hidden.clear();
   for (const path of view?.hidden ?? []) hidden.add(path);
@@ -1420,8 +1438,57 @@ async function update(d) {
     version = d.version;
     await load();
   }
+  if (design === d.name) await updateNest(d.nest ?? { state: 'none' });
   if (design === d.name) tracker.reported({ builds: d.builds, state: d.state, version: d.version, log: buildLog });
 }
+
+// -- the nest view ---------------------------------------------------------------
+//
+// The design's nest (python -m lang.nest, or the Nest button) drawn by the
+// nest step as nest.svg; a part clicked in it is selected in the model.
+
+let nestShown = false;
+let nestVersion = null;         // the nest file's version on screen
+
+async function updateNest(n) {
+  const info = $('nestInfo');
+  info.textContent = nestStatusText(n);
+  info.className = 'keys' + (n.state === 'stale' || n.state === 'failed' ? ' stale' : '');
+  const has = n.state === 'ok' || n.state === 'stale';
+  $('nestShow').disabled = !has;
+  $('nestRun').disabled = n.state === 'running';
+  if (!has && nestShown) showNest(false);
+  if (has && n.version !== nestVersion) {
+    const url = designUrl;
+    const text = await (await fetch(url + 'nest.svg', { cache: 'no-store' })).text();
+    if (url !== designUrl) return;
+    nestVersion = n.version;
+    const view = $('nestView');
+    view.innerHTML = text;
+    for (const g of view.querySelectorAll('g.part')) {
+      g.addEventListener('click', () => { select(g.dataset.path); draw(); markNestSelection(); });
+    }
+    markNestSelection();
+  }
+}
+
+function markNestSelection() {
+  for (const g of $('nestView').querySelectorAll('g.part')) g.classList.toggle('selected', g.dataset.path === selectedPath);
+}
+
+function showNest(on) {
+  nestShown = on;
+  $('nestView').hidden = !on;
+  $('nestShow').textContent = on ? 'show model' : 'show nest';
+  if (on) markNestSelection();
+}
+
+$('nestShow').onclick = () => showNest(!nestShown);
+$('nestRun').onclick = async () => {
+  $('nestRun').disabled = true;
+  $('nestInfo').textContent = nestStatusText({ state: 'running' });
+  await fetch('nest?design=' + encodeURIComponent(design), { method: 'POST' });
+};
 
 // -- reload loop ---------------------------------------------------------------
 

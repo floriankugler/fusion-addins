@@ -24,6 +24,13 @@ camera, or shows the build's error.
 
 Given a single build file, it builds into --out itself, on every save,
 whether a page shows it or not.
+
+The nest view: a design's nest (`python -m lang.nest`, written into its
+out directory as `nest.json` and `nest.svg`) is shown when there is one,
+marked stale when its layout is not the one built last; the page's Nest
+button (POST /nest?design=...) nests the design again, with the workshop
+file beside its build file, one nest at a time. Nests are never run on a
+save: one takes seconds to minutes.
 """
 from __future__ import annotations
 
@@ -49,6 +56,7 @@ VIEWER_DIR = Path(__file__).parent / "viewer"
 REPO = Path(__file__).resolve().parents[2]
 SHOWN = 3.0     # seconds a page counts as open after it last asked for its design
 TIMEOUT = 120.0  # seconds a build may take before it is stopped and counts as failed
+NEST_TIMEOUT = 900.0  # seconds a nest may take
 
 # Read as text, not parsed, so that a file stays listed while an edit
 # leaves it unparsable.
@@ -85,6 +93,8 @@ class Design:
     building: bool = False
     ok: bool = False                # whether its last build went through
     builds: int = 0                 # builds finished since the server started
+    nesting: bool = False           # a nest running or asked for
+    nest_failed: bool = False       # whether the last nest asked for failed
 
     @property
     def version(self) -> str | None:
@@ -155,8 +165,28 @@ class Designs:
             state = None if design is None else {
                 "name": name, "url": design.url, "version": design.version, "builds": design.builds,
                 "state": "building" if design.stale or design.building else "ok" if design.ok else "failed",
+                "nest": nest_state(design),
             }
             return {"folder": self.folder.name, "designs": list(self.designs), "design": state}
+
+    def ask_nest(self, name: str) -> bool:
+        """Asks for the design's nest; False when there is no such design."""
+        with self.cond:
+            design = self.designs.get(name)
+            if design is None:
+                return False
+            design.nesting, design.nest_failed = True, False
+            self.cond.notify_all()
+            return True
+
+    def nest_forever(self) -> None:
+        while True:
+            with self.cond:
+                while (design := next((d for d in self.designs.values() if d.nesting), None)) is None:
+                    self.cond.wait()
+            ok = renest(design.file, design.out)
+            with self.cond:
+                design.nesting, design.nest_failed = False, not ok
 
     def next_build(self) -> Design | None:
         """A stale design that a page shows; given a single build file, that
@@ -180,6 +210,67 @@ class Designs:
                 design.builds += 1
 
 
+def nest_state(design: Design) -> dict[str, Any]:
+    """The design's nest as the page shows it: `none`, `running`, `failed`
+    (the log), `ok` or `stale` (its layout is not the one built last), and
+    its version (the nest file's time) for the page to reload it."""
+    path = design.out / "nest.json"
+    if design.nesting:
+        return {"state": "running"}
+    if design.nest_failed:
+        return {"state": "failed", "log": _read(design.out / "nest.log")}
+    try:
+        nest = json.loads(path.read_text())
+        version = str(path.stat().st_mtime_ns)
+    except (OSError, ValueError):
+        return {"state": "none"}
+    return {"state": "ok" if nest.get("layout_hash") == _layout_hash(design.out / "layout.json") else "stale",
+            "version": version}
+
+
+_hashes: dict[Path, tuple[int, str | None]] = {}
+
+
+def _layout_hash(path: Path) -> str | None:
+    """The hash of a built layout (`lang.core.layout.layout_hash`), kept
+    while the file is unchanged."""
+    from lang.core.layout import layout_hash
+    try:
+        mtime = path.stat().st_mtime_ns
+    except OSError:
+        return None
+    cached = _hashes.get(path)
+    if cached is None or cached[0] != mtime:
+        try:
+            cached = (mtime, layout_hash(json.loads(path.read_text())))
+        except (OSError, ValueError):
+            cached = (mtime, None)
+        _hashes[path] = cached
+    return cached[1]
+
+
+def _read(path: Path) -> str:
+    try:
+        return path.read_text()
+    except OSError:
+        return ""
+
+
+def renest(build_file: Path, out_dir: Path) -> bool:
+    """Nests the design into `out_dir` (`python -m lang.nest`), its output
+    in nest.log there."""
+    command = [sys.executable, "-m", "lang.nest", str(build_file), "--out", str(out_dir)]
+    try:
+        result = subprocess.run(command, capture_output=True, text=True, cwd=str(REPO), timeout=NEST_TIMEOUT)
+        log, ok = (result.stdout + result.stderr).strip(), result.returncode == 0
+    except subprocess.TimeoutExpired:
+        log, ok = f"error: the nest took longer than {NEST_TIMEOUT:g} s and was stopped.", False
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "nest.log").write_text(log + "\n")
+    print(f"{build_file.stem}: nest {'ok' if ok else 'FAILED'}", flush=True)
+    return ok
+
+
 class _Handler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *args: Any, designs: Designs, **kwargs: Any):
         self.designs = designs
@@ -197,6 +288,16 @@ class _Handler(http.server.SimpleHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def do_POST(self) -> None:
+        url = urlsplit(self.path)
+        if url.path != "/nest":
+            self.send_error(404)
+            return
+        ok = self.designs.ask_nest(parse_qs(url.query).get("design", [""])[0])
+        self.send_response(200 if ok else 404)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
 
     def translate_path(self, path: str) -> str:
         path = path.split("?", 1)[0].split("#", 1)[0]
@@ -257,6 +358,7 @@ def main(argv: list[str] | None = None) -> int:
     server = http.server.ThreadingHTTPServer(("127.0.0.1", args.port), handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     threading.Thread(target=designs.build_forever, daemon=True).start()
+    threading.Thread(target=designs.nest_forever, daemon=True).start()
     what = source if designs.single else f"{len(designs.designs)} build files in {source}"
     print(f"preview at http://127.0.0.1:{args.port}/  ({what})", flush=True)
 

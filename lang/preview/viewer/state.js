@@ -15,6 +15,19 @@ export function layoutVersionProblem(layout) {
   return `layout version ${version ?? 'missing'}, this viewer reads ${LAYOUT_VERSION}`;
 }
 
+// -- the nest ---------------------------------------------------------------
+
+/** The nest's state as the side panel says it (`nest` in status.json). */
+export function nestStatusText(nest) {
+  switch (nest?.state) {
+    case 'ok': return 'nest of this layout';
+    case 'stale': return 'nest of an older layout: nest again';
+    case 'running': return 'nesting… (seconds to minutes)';
+    case 'failed': return 'the nest failed:\n' + (nest.log ?? '').trim();
+    default: return 'no nest: python -m lang.nest, or nest again';
+  }
+}
+
 // -- hidden parts ----------------------------------------------------------
 //
 // `hidden` is the Set of the hidden parts' paths. The page changes it only

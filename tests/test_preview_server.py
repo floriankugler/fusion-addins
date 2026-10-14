@@ -2,10 +2,11 @@
 of a folder are build files, which designs a change makes stale, which
 ones it builds, a build that fails or runs too long keeping the last good
 one, and the files it serves."""
+import json
 import os
 from pathlib import Path
 
-from lang.preview.__main__ import VIEWER_DIR, Designs, _Handler, rebuild, scan  # type: ignore[reportPrivateUsage]
+from lang.preview.__main__ import VIEWER_DIR, Designs, _Handler, nest_state, rebuild, renest, scan  # type: ignore[reportPrivateUsage]
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
 
@@ -104,7 +105,8 @@ def test_only_the_designs_pages_show_are_built(tmp_path: Path):
     assert designs.next_build() is None                  # no page open
     state = designs.status("van", page="a")
     assert state["designs"] == ["cabinet", "shelf", "van"]
-    assert state["design"] == {"name": "van", "url": "out/van/", "version": None, "builds": 0, "state": "building"}
+    assert state["design"] == {"name": "van", "url": "out/van/", "version": None, "builds": 0, "state": "building",
+                               "nest": {"state": "none"}}
     assert designs.next_build() is designs.designs["van"]
     designs.status("cabinet", page="a")                  # the page switched
     assert designs.next_build() is designs.designs["cabinet"]
@@ -146,6 +148,37 @@ def test_a_build_that_runs_too_long_is_stopped_and_keeps_the_last_good_one(tmp_p
     assert not rebuild(build, out, timeout=1.0)
     assert (out / "version.txt").read_text() == good
     assert "took longer than 1 s and was stopped" in (out / "build.log").read_text()
+
+
+def test_the_nest_state_says_whether_the_nest_is_the_built_layout_s(tmp_path: Path):
+    path = write(tmp_path, "cabinet.py", CABINET)
+    designs = Designs(path, tmp_path / "out")
+    design = designs.designs["cabinet"]
+    assert nest_state(design) == {"state": "none"}
+    assert rebuild(path, design.out)
+    write(tmp_path, "workshop.toml", "bed = [2000, 1000]\nseconds = 0.3\n[[sheet]]\nsize = [2470, 1240]\n")
+    assert designs.ask_nest("cabinet") and not designs.ask_nest("gone")
+    assert nest_state(design) == {"state": "running"}
+    assert renest(path, design.out)
+    design.nesting = False
+    state = nest_state(design)
+    assert state["state"] == "ok" and state["version"]
+    assert {"nest.json", "nest.svg", "nest.layout.json", "nest.log"} <= {p.name for p in design.out.iterdir()}
+    layout = json.loads((design.out / "layout.json").read_text())
+    layout["modules"][0]["parts"][0]["thickness"] = 18.0          # built again since
+    (design.out / "layout.json").write_text(json.dumps(layout))
+    assert nest_state(design)["state"] == "stale"
+
+
+def test_a_failed_nest_says_why(tmp_path: Path):
+    path = write(tmp_path, "cabinet.py", CABINET)
+    out = tmp_path / "out"
+    assert not renest(path, out)                                   # no workshop: no bed
+    designs = Designs(path, out)
+    design = designs.designs["cabinet"]
+    design.nest_failed = True
+    state = nest_state(design)
+    assert state["state"] == "failed" and "No bed given" in state["log"]
 
 
 def _handler(out: Path) -> _Handler:

@@ -2,7 +2,7 @@
 // the promises of preview.loaded() and preview.open().
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { LAYOUT_VERSION, layoutVersionProblem, setHidden, toggleHides, isolate, LoadTracker } from '../state.js';
+import { LAYOUT_VERSION, layoutVersionProblem, setHidden, toggleHides, isolate, LoadTracker, nestStatusText } from '../state.js';
 
 // Whether a promise settled, without waiting for it: 'pending', or
 // ['resolved', value] / ['rejected', message].
@@ -26,6 +26,15 @@ test('the layout version the page reads', () => {
   assert.equal(layoutVersionProblem({ version: 7 }), 'layout version 7, this viewer reads 6');
   assert.equal(layoutVersionProblem({}), 'layout version missing, this viewer reads 6');
   assert.equal(layoutVersionProblem(null), 'layout version missing, this viewer reads 6');
+});
+
+test('the nest state as the side panel says it', () => {
+  assert.equal(nestStatusText({ state: 'ok' }), 'nest of this layout');
+  assert.match(nestStatusText({ state: 'stale' }), /older layout/);
+  assert.match(nestStatusText({ state: 'running' }), /nesting/);
+  assert.equal(nestStatusText({ state: 'failed', log: 'error: no bed\n' }), 'the nest failed:\nerror: no bed');
+  assert.match(nestStatusText({ state: 'none' }), /no nest/);
+  assert.match(nestStatusText(undefined), /no nest/);
 });
 
 test('setHidden hides and shows paths', () => {
