@@ -253,7 +253,7 @@ def test_a_sharp_cutout_gets_dog_bones_in_its_corners():
         panel.dogbones()
     build_layout()
     (relief,) = _dogbones(panel)
-    assert relief.name == "cutout_dogbones" and isinstance(relief, Cut)
+    assert relief.name == "openings_dogbones" and isinstance(relief, Cut)
     # each relief without the part in the opening: the cutout's check for
     # operations in its opening passes
     lobe = corner_relief((0.0, 0.0), (1.0, 0.0), (0.0, 1.0), 6.0, 0.1).geometry.difference(
@@ -519,7 +519,7 @@ def test_a_relief_takes_no_material_held_on_to_its_corner_at_a_point():
         with m:
             b.dogbones(tool=6, relief=0.1)
             b.dogbones(tool=6, relief=0.1)                 # the corners the first one's reliefs made
-        (second,) = [op for op in _dogbones(b) if op.name == "dogbones_dogbones"]
+        (second,) = [op for op in _dogbones(b) if op.name == "outline_dogbones_dogbones"]
         areas.append(second.shape.geometry.area)
     assert areas[0] == pytest.approx(areas[1], abs=1e-6) and areas[0] == pytest.approx(39.8996, abs=1e-3)
 

@@ -14,7 +14,7 @@ design; the overview is `DESIGN.md`. Code: `lang/core/part.py`,
   wood panel is a board. Slats are not built yet (see
   `design/proposals/slats.md`).
 - The operations per board are the layout: `cut` (through, changes the
-  outline), `pocket` and `hole` (2D shape plus depth plus face), `chamfer`,
+  outline), `pocket`, `hole` and `slot` (2D shape plus depth plus face), `chamfer`,
   `fillet`, `cutout`, `dogbones`, V-grooves (made by joints), and what joins
   and hardware add. A cut starts at the face of the board it is declared on.
 - Operations on a narrow face can be written (`side.front.right(50)` as an
@@ -39,9 +39,10 @@ design; the overview is `DESIGN.md`. Code: `lang/core/part.py`,
   exists. `shape.rounded(r)` rounds every corner with r, convex and concave
   alike (the inside corners of a cut in the shape and of a board with it as
   its outline), with exact arcs. Half the narrow width rounds the ends
-  fully, so `rect(depth=80, width=12).rounded(6)` is a slot; a larger r, or
-  one too large for an edge between two corners, is an error, and so is any
-  operation given a shape without area.
+  fully, so `rect(depth=80, width=12).rounded(6)` has a slot's shape (a slot
+  open at the board's edge is a `cut()` of one; others are `slot()`, see
+  below); a larger r, or one too large for an edge between two corners, is
+  an error, and so is any operation given a shape without area.
 - **Clipping a corner**: `shape.clip(top=380, back=120)` cuts off the corner
   where the two named edges meet, each value the length of the cut along
   that edge; a rectangle's edges are named as the frame names its plane, a
@@ -93,6 +94,63 @@ shape = rect(depth=500, height=720).clip(top=380, back=120)   # the top back cor
   holes, and reliefs that split the board; pockets and holes from opposite
   faces that meet as deep as the board are held to what a pocket through it
   is. A refused operation changes nothing.
+
+## Slots
+
+`slot()` is to slots what `hole()` is to holes: vents in rows, slotted
+screw holes for adjustable mounting, pass-throughs for straps and cables
+[decided]. Both of its forms measure between the centres of its round ends
+[decided]:
+
+- `side.slot(8, start, end, depth=...)` runs between two anchors on one
+  face, the centres of its round ends, at any angle. One between two edges
+  needs no arithmetic: `side.slot(8, side.inner.bottom(z).front(40),
+  side.inner.bottom(z).back(40), depth=through)`.
+- `side.slot(8, at=..., centres=52, along="height", depth=...)` is centred
+  on `at=`, as a hole is (the show face's centre by default), its end
+  centres 52 apart, so 60 long overall [decided]: catalogues give overall
+  lengths, so the keyword says centre to centre. `along=` takes what
+  `grain()` takes, an extent name or a side, direction or face
+  (`along=cab.top`), and must lie in the face's plane.
+
+```python
+for z in spread(back.bottom + 60, back.top - 60, pitch=20):     # vents, centred across the back
+    back.slot(6, at=back.inner.bottom(z), centres=120, along="width", depth=through)
+
+a, b = side.inner.front(40).bottom(100), side.inner.front(40).bottom(140)
+side.slot(12, a, b, depth=4, name="mount_head")                 # a stepped mounting slot:
+side.slot(6, a, b, depth=through, name="mount")                 # two calls, the same anchors
+```
+
+- It takes `chamfer=` and `name=` like a hole and `depth=` like a pocket,
+  with a pocket's `floor` and edges (its bounding box; at an angle the
+  arcs' extremes). Its ends are arcs, so it needs no dog bones; where it
+  meets another pocket or slot, `dogbones()` finds the corners as for any
+  pocket. A stepped slot, for a screw head, is two calls with the same
+  anchors [decided].
+- Big faces only [decided]: a slot in a narrow face is a `pocket()` of a
+  rounded rectangle.
+- Both end centres lie on the board's outline, give or take 0.001 mm, as a
+  hole's centre must [decided]; unlike a hole's they may lie in a pocket
+  made before, so the narrow part of a stepped slot goes through the wide
+  one. The rest of the slot may run over the edge and cuts what it reaches;
+  through the board that leaves the outline as it was, as a through hole
+  does. A slot open at the edge is a `cut()`.
+- Refused besides, as for a pocket and: both forms mixed, one anchor, the
+  anchors on two faces or on another board, a width under 0.01 mm, end
+  centres less than 0.01 mm apart (a round hole is `hole()`). Two anchors
+  on one axis but for float noise (1e-9) are put onto it, so a straight
+  slot has straight sides. Errors call it a slot.
+- In the layout a slot is a pocket of its shape that also carries `slot`,
+  its centre line (the centres of its ends in the face's frame) and width
+  [decided], for the CAM plan (`design/proposals/cam.md`); the preview and
+  the emitter draw the pocket, its ends recovered as arcs. Joints cut their
+  slots so too (`Board.add_slot`): Domino slots, Clamex P-10 access slots,
+  Cabineo reliefs.
+- Machining: Auto Setup cuts a slot as a pocket and wants a tool at least
+  0.1 mm narrower than it (`TOOL_CLEARANCE` in `lib/auto_setup/rules.py`),
+  so make a slot at least 0.1 mm wider than the cutter that clears it.
+  Nothing checks this yet, since the language knows no tools [decided].
 
 ## Cutting with a part or a box
 
@@ -184,6 +242,7 @@ its narrow faces, V-grooves.
   them (`aligned=True`: each rounded tip reaches the next row's base line;
   `along=` the extent the columns run along, the longer side by default;
   `start=` the corner, by default the bottom, front, left one).
+- It is named `openings` unless `name=` says otherwise.
 - `radius=` (8) rounds every corner of the openings, `chamfer=` puts a 45
   degree chamfer on their rims at the face cut from, `depth=` makes it a
   pocket (`to(side.outer, -3)` leaves 3 mm), and a region shape with `at=`
@@ -243,7 +302,8 @@ Rules:
   now, is one the call made, which a second `dogbones()` relieves.
 - Reliefs go in as operations named after the operation the corner belongs
   to (the last whose contour runs through it), `toekick_dogbones`, or
-  `dogbones` for the outline's own corners: a through cut where the corner
+  `outline_dogbones` for the outline's own corners and those of unnamed
+  operations: a through cut where the corner
   is one of the outline (cuts, notches, laps, tenon roots), else a pocket
   from the face the corner is seen from, as deep as what lies beside it (the
   pocket's depth; through for a through pocket); a corner on a pocket's

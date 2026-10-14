@@ -36,8 +36,8 @@ def test_a_full_cutout_keeps_the_border_from_the_inner_face():
     with cab:
         side.cutout(chamfer=1)
     cut, chamfer = side.ops
-    assert isinstance(cut, Cut) and cut.name == "cutout"
-    assert isinstance(chamfer, Chamfer) and chamfer.what == "cutout" and chamfer.size == 1
+    assert isinstance(cut, Cut) and cut.name == "openings"
+    assert isinstance(chamfer, Chamfer) and chamfer.what == "openings" and chamfer.size == 1
     assert chamfer.face == side.inner.world_name == "right"          # not the show face
     assert side.machine_face.world_name == "right"
     # the border is 20 wide, the corners rounded with 8
@@ -173,7 +173,7 @@ def test_keep_leaves_material_where_a_shelf_meets_the_side():
         assert _material(left, (250, 307), (250, 300 - 19), (250, 315 + 19), (250, 300 - 21)) == \
             [True, True, True, False]
         right.cutout(keep=[shelf])
-        with pytest.raises(LangError, match="across the cutout 'cutout'"):
+        with pytest.raises(LangError, match="across the cutout 'openings'"):
             board("shelf2", ply15).on(Pos("z", 500), toward=cab.top).between(left, right).join(
                 right, using=screws(count=2))
 
@@ -187,7 +187,7 @@ def test_pieces_too_small_for_the_radius_are_left_out_and_noted():
                     around=0)
     assert _material(side, (250, 25), (250, 500)) == [True, False]
     problems = build_layout()["modules"][0]["problems"]
-    assert problems == ["cab.left: cutout 'cutout' left out 1 piece(s) too small for the 8 mm corner radius."]
+    assert problems == ["cab.left: cutout 'openings' left out 1 piece(s) too small for the 8 mm corner radius."]
 
 
 def test_a_region_limits_the_cutout():
@@ -280,8 +280,8 @@ def test_pieces_rounded_as_a_router_would_keep_their_new_arcs_off_a_large_arc():
         back = board("back", material("birch", t=9), Shape(box(0, 0, 631, 1124)).rounded(197.5322915245099)).on(m.back)
         inner, outer = back.big_faces()[1], back.big_faces()[0]
         back.cutout(inner, pattern=triangles(9, 5, 27.5), border=7.809625022994677, around=27.5, radius=11,
-                    depth=to(outer, -1), name="cutout")
-    op = back.op("cutout").op
+                    depth=to(outer, -1), name="openings")
+    op = back.op("openings").op
     assert isinstance(op, Pocket)
     for piece in polygons_of(op.shape.geometry):
         reached = piece.buffer(-10.89, quad_segs=64).buffer(10.89, quad_segs=64)
@@ -318,7 +318,7 @@ def test_material_kept_around_a_box_keeps_its_width_where_a_piece_is_rounded_as_
         keep = [Box({"x": u0, "y": 0, "z": v0}, {"x": u1, "y": 12, "z": v1}) for u0, v0, u1, v1 in boxes]
         outer = next(f for f in side.big_faces() if f.direction == side.show_face.direction)
         side.cutout(pattern=triangles(3, 3, 25.0, aligned=True), around=around, depth=to(outer, -2), keep=keep)
-    op = side.op("cutout").op
+    op = side.op("openings").op
     assert isinstance(op, Pocket)
     for u0, v0, u1, v1 in boxes:
         assert op.shape.geometry.distance(shapely_box(u0, v0, u1, v1)) >= around - 1e-3
@@ -337,7 +337,7 @@ def test_a_channel_narrower_than_the_cutter_is_not_cut_out():
         rail = board("rail", ply12).on(m.bottom)
         keep = Box({"x": 1762.6, "y": 43.06, "z": 0}, {"x": 1912.2, "y": 120, "z": 12})
         rail.cutout(border=36, around=6.5, radius=3, depth=10, keep=keep)
-    op = rail.op("cutout").op
+    op = rail.op("openings").op
     assert isinstance(op, Pocket)
     assert len(polygons_of(op.shape.geometry)) == 2
     assert op.shape.geometry.intersection(shapely_box(1762.6, 36, 1912.2, 37)).area == 0
@@ -358,7 +358,7 @@ def test_a_line_meeting_a_large_arc_keeps_its_place_where_a_piece_is_rounded_as_
         pocket = affinity.rotate(shapely_box(85 - 41.25, 428.5 - 15.92, 85 + 41.25, 428.5 + 15.92), 30, origin=(85, 428.5))
         panel.add_pocket(panel.big_faces()[0], Shape(pocket), 5.5)
         panel.cutout(around=28, radius=4, depth=8)
-    op = panel.op("cutout").op
+    op = panel.op("openings").op
     assert isinstance(op, Pocket)
     assert op.shape.geometry.distance(pocket) >= 28 - 1e-3
 
@@ -464,7 +464,7 @@ def test_openings_touching_the_outline_at_a_point_are_an_error():
         with pytest.raises(LangError, match="touches the board's outline at a point only"):
             panel.cutout(pattern=triangles(4, 3, 20), border=0, radius=0)
         panel.cutout(pattern=triangles(4, 3, 20), border=10, radius=0)     # with a border
-    assert panel.has_operation("cutout")
+    assert panel.has_operation("openings")
 
 
 def test_pocket_openings_touching_the_outline_at_a_point_are_an_error_too():
@@ -477,9 +477,9 @@ def test_pocket_openings_touching_the_outline_at_a_point_are_an_error_too():
         panel = board("panel", ply15).on(m.bottom)
         with pytest.raises(LangError, match="touches the board's outline at a point only"):
             panel.cutout(pattern=triangles(6, 1, 5), border=0, radius=0, depth=5, chamfer=1)
-        assert not panel.has_operation("cutout") and panel.ops == []
+        assert not panel.has_operation("openings") and panel.ops == []
         panel.cutout(pattern=triangles(6, 1, 5), border=10, radius=0, depth=5, chamfer=1)
-    assert panel.has_operation("cutout")
+    assert panel.has_operation("openings")
 
 
 def test_an_opening_that_touches_itself_at_a_point_is_an_error():
@@ -497,7 +497,7 @@ def test_an_opening_that_touches_itself_at_a_point_is_an_error():
         with pytest.raises(LangError, match=r"an opening touches itself at a point only \(x 13.7886, y 27.2236\)"):
             panel.cutout(border=0, around=2, radius=8, depth=3)
         panel.cutout(border=0, around=3, radius=8, depth=3)
-    assert panel.has_operation("cutout")
+    assert panel.has_operation("openings")
 
 
 def test_an_offset_closing_a_hole_leaves_no_speck_of_it():
@@ -612,7 +612,7 @@ def test_a_border_next_to_a_notch_by_a_rounded_corner_keeps_its_width():
         panel.add_cut(Shape(affinity.rotate(shapely_box(341.5, 17, 343.5, 23), 45, origin=(342.5, 20))))
         (outline,) = panel.outline.polygons()
         panel.cutout(border=20, around=20, radius=0)
-    op = panel.op("cutout").op
+    op = panel.op("openings").op
     assert isinstance(op, Cut)
     assert op.shape.geometry.distance(outline.exterior) >= 20 - 0.03
 

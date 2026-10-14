@@ -106,7 +106,7 @@ def test_a_rounded_slot_cuts_and_pockets():
     with module("m", Box.from_size(width=400, depth=300, height=100)) as m:
         with board("panel", ply15).on(m.bottom).show(m.top) as panel:
             before = panel.outline.area
-            panel.cut(rect(depth=80, width=12).rounded(6), at=panel.top.center, name="slot")
+            panel.cut(rect(depth=80, width=12).rounded(6), at=panel.top.center, name="oblong")
             panel.pocket(rect(depth=60, width=10).rounded(5), at=panel.top.front(20), depth=5, name="groove")
     slot = 80 * 12 - 4 * CORNER * 36
     assert panel.outline.area == pytest.approx(before - slot, abs=0.02)

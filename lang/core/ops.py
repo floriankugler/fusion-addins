@@ -28,6 +28,15 @@ class Cut:
     kind: Literal["cut"] = "cut"
 
 
+@dataclass(frozen=True)
+class SlotLine:
+    """A slot's centre line: the centres of its round ends, in the frame of
+    the face it is cut from, and its width."""
+    start: tuple[float, float]
+    end: tuple[float, float]
+    width: float
+
+
 @dataclass
 class Pocket:
     shape: Shape
@@ -36,6 +45,8 @@ class Pocket:
     depth_spec: str
     name: str | None = None
     chamfer: float = 0.0
+    #: For a slot (`Board.slot`), its centre line; its `shape` is the slot.
+    slot: SlotLine | None = None
     kind: Literal["pocket"] = "pocket"
 
 

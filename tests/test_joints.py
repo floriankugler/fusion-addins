@@ -71,7 +71,7 @@ def test_a_lap_that_fails_on_the_other_board_cuts_neither():
     below, cut after the long board's, would cut it in two."""
     g, (a,), long = _grid()
     with g:
-        a.cut(rect(width=10, height=16), at=a.front.top, name="slot")
+        a.cut(rect(width=10, height=16), at=a.front.top, name="notch")
         before = state(long, a)
         with pytest.raises(LangError, match=r"^grid\.long: half_lap with grid\.cross0: grid\.cross0: the cut lap_long "
                                             r"splits the board in pieces"):

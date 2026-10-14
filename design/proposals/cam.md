@@ -49,3 +49,7 @@ Proposed:
   lipping and banding, roundovers (notes on edges), hardware to fit.
 - With tool data known, the checks can refuse features narrower than the
   smallest cutter (`design/checks.md`).
+- Slots carry their centre line in the layout (`design/operations.md`), so
+  a slot as wide as a cutter can be cut in one pass along it (Fusion's 2D
+  Slot) instead of as a pocket; then the 0.1 mm a slot is now made wider
+  than its cutter no longer applies.

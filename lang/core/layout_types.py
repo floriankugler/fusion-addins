@@ -1,11 +1,12 @@
-"""The layout file's shape, version 3.
+"""The layout file's shape, version 4.
 
 This is the contract between the language and its consumers (the preview
 mesher, the Fusion emitter, the viewer page). Bump LAYOUT_VERSION on
 incompatible changes; `lang.emit.plan` and the viewer repeat it and refuse
 other versions.
 
-Version 3 (2026-10-12): every key below is written; the top-level
+Version 4 (2026-10-14): a pocket carries `slot`, its centre line when it
+is a slot. Version 3 (2026-10-12): every key below is written; the top-level
 `problems` list every problem once, the modules' repeat their own; a
 depth through a narrow face is the part's extent across it. Version 2
 layouts were written while parts gained `machine`, `grained` and `faces`
@@ -15,7 +16,7 @@ from __future__ import annotations
 
 from typing import Literal, NotRequired, TypedDict
 
-LAYOUT_VERSION = 3
+LAYOUT_VERSION = 4
 
 #: One or more polygons as rings of [u, v] points, one polygon after the
 #: other: its exterior ring, counter-clockwise, then its holes, clockwise.
@@ -42,6 +43,14 @@ class CutLayout(TypedDict):
     shape: Rings
 
 
+class SlotLayout(TypedDict):
+    """A slot's centre line: the centres of its round ends, as [u, v] in
+    the frame of the face it is cut from, and its width."""
+    start: list[float]
+    end: list[float]
+    width: float
+
+
 class PocketLayout(TypedDict):
     kind: Literal["pocket"]
     name: str | None
@@ -53,6 +62,8 @@ class PocketLayout(TypedDict):
     depth_spec: str
     chamfer: float
     shape: Rings
+    #: The centre line of a slot (`shape` is the slot itself), else None.
+    slot: SlotLayout | None
 
 
 class HoleLayout(TypedDict):

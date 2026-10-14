@@ -524,7 +524,7 @@ def test_layout_json_roundtrip(tmp_path: Path) -> None:
     cab.export("worktop", cab.top)
     cab.check(no_interference)
     layout = write_layout(tmp_path / "layout.json")
-    assert layout["version"] == 3
+    assert layout["version"] == 4
     module_layout = layout["modules"][0]
     assert module_layout["exports"] == {"worktop": {"axis": "z", "value": 720.0}}
     assert [p["path"] for p in module_layout["parts"]] == ["cab.left", "cab.right", "cab.bottom", "cab.back"]
@@ -941,7 +941,7 @@ def test_through_a_narrow_face_reaches_across_the_board():
     with module("m", Box.from_size(width=600, depth=400, height=700)) as m:
         left = board("left", ply15).on(m.left)
         left.hole(d=8, at=left.front.bottom(50), depth=through, name="pin")
-        left.pocket(rect(width=5, height=20), at=left.back.center, depth=through, name="slot")
+        left.pocket(rect(width=5, height=20), at=left.back.center, depth=through, name="mortise")
     hole, slot = (op.op for op in left.ops if isinstance(op, EdgeOp))
     assert isinstance(hole, Hole) and isinstance(slot, Pocket)
     assert (hole.depth, hole.through, slot.depth) == (400, True, 400)

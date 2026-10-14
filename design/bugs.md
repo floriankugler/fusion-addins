@@ -15,8 +15,13 @@ when it is fixed or decided.
   rounded 496) opens onto the outline as polygons but would be a hole on the
   true arcs, and `fit` draws that ring crossing itself.
 - **Rim chamfers Fusion refuses**: along the short edges (0.06 to 0.34 mm) a
-  cutout's mitred fallback inset leaves, and rim chamfers larger than a
-  fillet's radius. The emitter leaves the loop sharp and reports it.
+  cutout's mitred fallback inset leaves, rim chamfers larger than a
+  fillet's radius, and a rim that a shallower pocket from the same face,
+  made before, cuts into pieces at its corner (a 3 mm slot chamfered 1 mm,
+  its end 2 mm out of a 1.3 mm pocket's corner; found with a Fusion batch
+  of slots, 2026-10-14; the same slot fully inside the pocket, or crossing
+  its edge elsewhere, is chamfered). The emitter leaves the loop sharp and
+  reports it.
 - **Slivers at arc ends.** Two drawings of one circle coincide but for a
   sliver at an arc's end, between whole degrees, up to r (1 - cos 0.5
   degrees) thick (0.019 mm at a radius of 500). Harmless while something

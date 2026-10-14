@@ -42,9 +42,10 @@ from lib import connector_data as data
 
 from ..core.contact import Contact
 from ..core.errors import LangError, one_of
+from ..core.geometry import NARROWEST
 from ..core.part import Board, Face
 from ..core.refs import DepthSpec, PosLike, through, to
-from ..core.shapes import circle, slot_shape
+from ..core.shapes import circle
 from .common import (EPS, ContactGeometry, FaceChoice, Naming, SpacedJoint, Spacing, check_across, check_along,
                      check_gaps, face_choice, hidden_face, make_spacing, opposite_face, pick_face, start_index)
 from .tenons import Tenons
@@ -138,8 +139,8 @@ class Domino(SpacedJoint):
                             else to(opposite_face(c.face), -self.remaining))
         for i, (s, length) in enumerate(zip(stations, self._lengths(c, stations))):
             half_span = (length - h) / 2
-            shape = slot_shape(g.on_face(s - half_span, centre), g.on_face(s + half_span, centre), h)
-            f.add_pocket(c.face, shape, depth, name=naming(f, f"domino_{e.name}_{naming.number(i)}"))
+            f.add_slot(c.face, g.on_face(s - half_span, centre), g.on_face(s + half_span, centre), h, depth,
+                       name=naming(f, f"domino_{e.name}_{naming.number(i)}"))
         if self.marks is None:
             return
         reference = self._reference(e)
@@ -182,8 +183,8 @@ def domino(size: DominoSize, *, count: int | None = None, at: Sequence[PosLike] 
     spacing = make_spacing("domino", count, at, end=end, default_end=data.DOMINO_STOP_LATCH)
     if spec.thickness + height_offset <= 0:
         raise LangError("domino: height_offset leaves no slot.")
-    if spec.width + length_offset - (spec.thickness + height_offset) <= EPS:
-        raise LangError("domino: length_offset leaves the slot no longer than it is high.")
+    if spec.width + length_offset - (spec.thickness + height_offset) < NARROWEST - EPS:
+        raise LangError(f"domino: length_offset leaves the slot less than {NARROWEST:g} mm longer than it is high.")
     if fence is not None and fence <= 0:
         raise LangError("domino: fence must be positive.")
     if remaining is not None and remaining < 0:
@@ -233,8 +234,8 @@ class Clamex(SpacedJoint):
             if len(centres) == 1:
                 e.add_hole(access, g.on_board(s, centres[0]), width, e.thickness / 2, name)
             else:
-                shape = slot_shape(g.on_board(s, centres[0]), g.on_board(s, centres[-1]), width)
-                e.add_pocket(access, shape, e.thickness / 2, name)
+                e.add_slot(access, g.on_board(s, centres[0]), g.on_board(s, centres[-1]), width, e.thickness / 2,
+                           name)
             for suffix, offset in (("a", -0.5), ("b", 0.5)):
                 at = g.on_face(s + offset * data.CLAMEX_GUIDE_SPACING, g.middle)
                 f.add_hole(c.face, at, self.guide_d, guide_depth, naming(f, f"clamex_{e.name}_{n}{suffix}"))
@@ -326,8 +327,8 @@ class Cabineo(SpacedJoint):
                 e.add_hole(access, g.on_board(s, centre), data.CABINEO_ACCESS_DIAMETER, self.access_depth,
                            naming(e, base + letter))
             if self.surface == "flush":
-                shape = slot_shape(g.on_board(s, 0.0), g.on_board(s, centres[-1]), data.CABINEO_FLUSH_RELIEF_WIDTH)
-                e.add_pocket(access, shape, data.CABINEO_FLUSH_RELIEF_DEPTH, naming(e, base + "_relief"))
+                e.add_slot(access, g.on_board(s, 0.0), g.on_board(s, centres[-1]), data.CABINEO_FLUSH_RELIEF_WIDTH,
+                           data.CABINEO_FLUSH_RELIEF_DEPTH, naming(e, base + "_relief"))
             elif self.surface == "anti-break":
                 depth, widening = self.anti_break
                 circles = [circle(data.CABINEO_ACCESS_DIAMETER + 2 * widening, g.on_board(s, centre))

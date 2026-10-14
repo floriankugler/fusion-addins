@@ -3,7 +3,7 @@
 A board is created with its identity (`board(name, material)`), placed with
 order-free modifiers (`on`, `between`, `center`, `inset`, `grain`, `show`,
 `manual`) and machined with ordered operations (`cut`, `pocket`, `hole`,
-`chamfer`, `fillet`). Every modifier returns the board. Placement is
+`slot`, `chamfer`, `fillet`). Every modifier returns the board. Placement is
 resolved lazily the first time a face, the box or the layout is asked for;
 from then on the placement modifiers are frozen.
 
@@ -35,7 +35,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from collections.abc import Sequence
-from typing import Literal, Protocol, Self, Union
+from typing import Literal, Protocol, Self, Union, overload
 
 import shapely
 from shapely import affinity
@@ -59,16 +59,19 @@ from .errors import LangError, one_of
 from .faces import Anchor, Edge, Face, Operation, Outline
 from .geometry import NARROWEST, clean, parts_of, polygons_of
 from .layout_types import (ChamferLayout, CutLayout, EdgeOpLayout, HoleLayout, OpLayout,
-                           PartLayout, PocketLayout, Rings, VGrooveLayout)
+                           PartLayout, PocketLayout, Rings, SlotLayout, VGrooveLayout)
 from .material import Material
-from .ops import MIN_CHAMFER, Chamfer, Cut, EdgeOp, Hole, Op, Pocket, VGroove
+from .ops import MIN_CHAMFER, Chamfer, Cut, EdgeOp, Hole, Op, Pocket, SlotLine, VGroove
 from .refs import Affine, DepthSpec, HasPosition, Pos, PosLike, Side, Through, ToFace, as_pos, through
-from .shapes import Shape, box_shape
+from .shapes import Shape, box_shape, slot_shape
 
 Point2 = tuple[float, float]
 #: How far a point may lie off a face and still be on it, mm (the add-ins'
 #: 1e-4 cm): `hole_fits`.
 ON_FACE_TOLERANCE = 1e-3
+#: How near (mm) two anchors may come to one axis and be put onto it, so
+#: that a slot between them runs straight along it: float noise only.
+_ON_AXIS = 1e-9
 #: How near (mm) an opening may come to itself before it touches itself.
 _PINCH = 1e-6
 #: What `between()` takes: positions, box sides, faces, parts (their nearest
@@ -750,6 +753,9 @@ class Board:
     def _record(self, op: Op, name: str | None) -> None:
         if name and name in self._named_ops:
             raise LangError(f"operation name {name!r} used twice.", self.path)
+        if name and self._taken_by_board(name):
+            raise LangError(f"operation name {name!r} is taken by the board itself ({self.name}.{name}), so the "
+                            "operation could not be reached by it; give it another name.", self.path)
         inner = op.op if isinstance(op, EdgeOp) else op
         if isinstance(inner, (Cut, Pocket, Hole, Chamfer)):
             self._check_chamfer(inner.size if isinstance(inner, Chamfer) else inner.chamfer, "chamfer")
@@ -764,7 +770,7 @@ class Board:
             footprint = self._footprint(op)
             for cutout, opening in self._cutouts:
                 if footprint.intersection(opening).area > 1e-6:
-                    what = f"the {op.kind} {name!r}" if name else f"a {op.kind}"
+                    what = self._label(op, name)
                     raise LangError(
                         f"{what} lies in the cutout {cutout!r}, which was made before it: make the cutout "
                         "after it, or keep material there with keep=.", self.path)
@@ -773,6 +779,12 @@ class Board:
         self.ops.append(op)
         if name:
             self._named_ops[name] = op
+
+    def _taken_by_board(self, name: str) -> bool:
+        """Whether `name` is one of the board's own attributes, such as
+        `slot` or `front`, which hides an operation of that name from
+        `side.<name>`: such names are refused [Florian, 2026-10-14]."""
+        return hasattr(type(self), name) or name in vars(self)
 
     def _check_chamfer(self, size: float, what: str) -> None:
         """An error for a chamfer that is negative, or more than none but
@@ -826,7 +838,8 @@ class Board:
     @staticmethod
     def _label(op: Op, name: str | None) -> str:
         inner = op.op if isinstance(op, EdgeOp) else op
-        return f"the {inner.kind} {name!r}" if name else f"a {inner.kind}"
+        kind = "slot" if isinstance(inner, Pocket) and inner.slot is not None else inner.kind
+        return f"the {kind} {name!r}" if name else f"a {kind}"
 
     def _check_on_material(self, op: Op, name: str | None) -> None:
         """An error for an operation that misses the board: a pocket, hole
@@ -1103,6 +1116,99 @@ class Board:
                                 point[0], point[1]), name)
         return self
 
+    @overload
+    def slot(self, width: float, start: Anchor | Edge, end: Anchor | Edge, /, *, depth: DepthSpec,
+             name: str | None = None, chamfer: float = 0.0) -> Self: ...
+
+    @overload
+    def slot(self, width: float, /, *, at: Anchor | Edge | None = None, centres: float,
+             along: ExtentName | Side | Direction | Face, depth: DepthSpec,
+             name: str | None = None, chamfer: float = 0.0) -> Self: ...
+
+    def slot(self, width: float, start: Anchor | Edge | None = None, end: Anchor | Edge | None = None, /, *,
+             at: Anchor | Edge | None = None, centres: float | None = None,
+             along: ExtentName | Side | Direction | Face | None = None, depth: DepthSpec,
+             name: str | None = None, chamfer: float = 0.0) -> Self:
+        """A slot `width` wide into a big face, with round ends: a pocket
+        `depth` deep, or through.
+
+        `side.slot(8, start, end, depth=...)` runs between two anchors on
+        one face, the centres of its round ends, at any angle.
+        `side.slot(8, at=..., centres=52, along="height", depth=...)` is
+        centred on `at=` (the centre of the show face by default), as a hole
+        is, its end centres `centres` apart along `along` (an extent name,
+        or a side, direction or face, as `grain()` takes), so 60 long
+        overall. Both forms measure between the end centres.
+
+        Both end centres must lie on the board's outline, as a hole's
+        centre must; the rest of the slot cuts what it reaches. A slot open
+        at the board's edge is a `cut()` of a rounded rectangle. A slot on a
+        narrow face is a `pocket()` of one."""
+        two = start is not None or end is not None
+        if two and (at is not None or centres is not None or along is not None):
+            raise LangError("slot(): give either two anchors, slot(w, start, end, ...), or at=, centres= and "
+                            "along=, not both.", self.path)
+        if two:
+            if start is None or end is None:
+                raise LangError("slot(): give both anchors, the centres of the two round ends.", self.path)
+            a, b = self._anchor(start), self._anchor(end)
+            if a.face.direction != b.face.direction:
+                raise LangError(f"slot(): the two anchors lie on different faces, {a.face.name} and "
+                                f"{b.face.name}.", self.path)
+            face = self._slot_face(a)
+            p, q = a.resolve()[0], b.resolve()[0]
+        else:
+            if centres is None or along is None:
+                raise LangError("slot(): give two anchors, slot(w, start, end, ...), or centres= and along=.",
+                                self.path)
+            anchor = self._anchor(at)
+            face = self._slot_face(anchor)
+            if isinstance(along, str):
+                axis = self.scope.frame.axis_of_extent(one_of(along, ExtentName, "slot(along=)", self.path))
+            else:
+                axis = along.axis
+            axes = self.face_axes(face)
+            if axis not in axes:
+                raise LangError(f"slot(): along={along!r} runs along {axis}, which does not lie in the {face.name} "
+                                "face.", self.path)
+            if centres < NARROWEST - 1e-9:
+                raise LangError(f"slot(): centres={centres:g}; the end centres are at least {NARROWEST:g} mm apart "
+                                "(a round hole is hole()).", self.path)
+            c = anchor.resolve()[0]
+            k = axes.index(axis)
+            p = (c[0] - centres / 2, c[1]) if k == 0 else (c[0], c[1] - centres / 2)
+            q = (c[0] + centres / 2, c[1]) if k == 0 else (c[0], c[1] + centres / 2)
+        for k, label in ((0, "start"), (1, "end")):
+            point = (p, q)[k]
+            if self.outline.geometry.distance(Point(point)) > ON_FACE_TOLERANCE + 1e-9:
+                raise LangError(f"slot(): its {label} centre is off the board; both end centres lie on it. A slot "
+                                "open at the edge is a cut() of a rounded rectangle.", self.path)
+        return self._add_slot(face, p, q, width, depth, name, chamfer)
+
+    def _slot_face(self, anchor: Anchor) -> Face:
+        if not anchor.face.is_big:
+            raise LangError(f"slot(): {anchor!r} is on a narrow face; a slot goes into a big face (a slot in a "
+                            "narrow face is a pocket() of a rounded rectangle).", self.path)
+        return anchor.face
+
+    def _add_slot(self, face: Face, start: Point2, end: Point2, width: float, depth: DepthSpec,
+                  name: str | None, chamfer: float) -> Self:
+        if width < NARROWEST - 1e-9:
+            raise LangError(f"slot(): {width:g} wide; a slot is at least {NARROWEST:g} mm wide.", self.path)
+        # (two anchors on one axis but for float noise make a slot along it)
+        if abs(start[0] - end[0]) <= _ON_AXIS:
+            end = (start[0], end[1])
+        if abs(start[1] - end[1]) <= _ON_AXIS:
+            end = (end[0], start[1])
+        if math.dist(start, end) < NARROWEST - 1e-9:
+            raise LangError(f"slot(): its end centres are {math.dist(start, end):g} apart, less than "
+                            f"{NARROWEST:g} mm (a round hole is hole()).", self.path)
+        d, spec, _ = self._depth(face, depth)
+        line = SlotLine((float(start[0]), float(start[1])), (float(end[0]), float(end[1])), float(width))
+        self._record(Pocket(slot_shape(line.start, line.end, line.width), face.world_name, d, spec, name,
+                            float(chamfer), line), name)
+        return self
+
     def chamfer(self, what: ChamferTarget | Sequence[ChamferTarget], size: float) -> Self:
         """A chamfer along an edge (`side.front.inner`), along a face's
         outline (`side.outer.outline`), or along a named operation of this
@@ -1340,7 +1446,7 @@ class Board:
         if chamfer > 0 and chamfer >= d - 1e-9:
             raise LangError(f"cutout(): the chamfer ({chamfer:g}) must be smaller than the depth ({d:g}).",
                             self.path)
-        name = name or self.unique_op_name("cutout")
+        name = name or self.unique_op_name("openings")
         if name in self._named_ops:
             raise LangError(f"operation name {name!r} used twice.", self.path)
 
@@ -1655,6 +1761,15 @@ class Board:
         self._record(Pocket(shape, face.world_name, d, spec, name), name)
         return self
 
+    def add_slot(self, face: Face, start: Point2, end: Point2, width: float, depth: DepthSpec,
+                 name: str | None = None) -> Self:
+        """A slot into a big face from `start` to `end`, the centres of its
+        round ends in the face's frame, `width` wide; see `add_pocket`.
+        Joints cut their Domino and Clamex slots so, and it is what
+        `slot()` makes."""
+        self._big_face_of_mine(face, "add_slot()")
+        return self._add_slot(face, start, end, width, depth, name, 0.0)
+
     def add_cut(self, shape: Shape, name: str | None = None) -> Self:
         """A through cut with `shape` already in the outline's frame (world
         coordinates on its two axes); see `add_pocket`."""
@@ -1713,9 +1828,9 @@ class Board:
 
     def unique_op_name(self, base: str) -> str:
         """`base`, or `base_2`, `base_3`... when this board already has an
-        operation of that name."""
+        operation of that name, or the name is one of its own attributes."""
         name, n = base, 2
-        while name in self._named_ops:
+        while name in self._named_ops or self._taken_by_board(name):
             name, n = f"{base}_{n}", n + 1
         return name
 
@@ -1915,8 +2030,11 @@ def _op_to_layout(op: Op) -> OpLayout:
 
 
 def _pocket_to_layout(op: Pocket) -> PocketLayout:
+    slot: SlotLayout | None = None
+    if op.slot is not None:
+        slot = {"start": list(op.slot.start), "end": list(op.slot.end), "width": op.slot.width}
     return {"kind": "pocket", "name": op.name, "face": op.face, "depth": op.depth, "depth_spec": op.depth_spec,
-            "chamfer": op.chamfer, "shape": _rings(op.shape)}
+            "chamfer": op.chamfer, "shape": _rings(op.shape), "slot": slot}
 
 
 def _hole_to_layout(op: Hole) -> HoleLayout:

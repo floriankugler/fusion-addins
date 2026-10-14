@@ -329,7 +329,7 @@ def reliefs(board: Board, request: Request) -> list[Relief]:
     for c in corners(board):
         if request.at is not None and not any(_names(c, target) for target in request.at):
             continue
-        base = f"{c.ops[-1]}_dogbones" if c.ops else "dogbones"
+        base = f"{c.ops[-1]}_dogbones" if c.ops else "outline_dogbones"
         face = None if c.bottom is None and c.outline_cut else c.face
         groups.setdefault((base, face, c.bottom), []).append(_relief_shape(c, request))
     # In the order of the operations they belong to, the outline's own corners

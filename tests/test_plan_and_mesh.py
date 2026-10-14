@@ -94,7 +94,7 @@ CASES = [
                                                      chamfer=1),
          PocketStep, 10, 20 * 6 * 10 + contour_chamfer(20, 6, 1), True),
     Case("pocket right named chamfer", lambda p: p.pocket(rect(depth=20, height=6), at=p.right.center, depth=10,
-                                                         name="slot").chamfer(p.slot, 1),
+                                                         name="mortise").chamfer(p.mortise, 1),
          PocketStep, 10, 20 * 6 * 10 + contour_chamfer(20, 6, 1), True),
     Case("hole top chamfered", lambda p: p.hole(8, at=p.top.center, depth=5, chamfer=1), HoleStep, 5,
          cylinder(8, 5) + countersink(8, 1), True, 0.3),

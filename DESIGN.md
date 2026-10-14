@@ -8,7 +8,7 @@ Fusion documents. This file is the overview; the details are in `design/`:
 | `design/api.md` | Language and API form, names and paths, frames |
 | `design/placement.md` | Boxes, `on`/`between`, the position algebra, contours as limits |
 | `design/master.md` | The master document and its snapshot |
-| `design/operations.md` | Boards, shapes, cuts, pockets, holes, depths, chamfers, fillets, cutouts, dog bones |
+| `design/operations.md` | Boards, shapes, cuts, pockets, holes, slots, depths, chamfers, fillets, cutouts, dog bones |
 | `design/joints.md` | Contacts, crossings, half laps, connectors, tenons, screws, box joints, grooves |
 | `design/hardware.md` | Drawer slides, hinges, hatch hinges, ball catches, latches, sliding brackets |
 | `design/checks.md` | `no_interference`, `inside_box`, `inside()`, `fits_sheet` |
@@ -196,7 +196,7 @@ tools/         van_master.py builds the sample master; perf/ the compile benchma
 
 Built, in Fusion and the preview, each verified against its add-in where
 there is one: placement and references, the master snapshot and contour
-limits, every operation (cuts, pockets, holes, chamfers, fillets, cutouts,
+limits, every operation (cuts, pockets, holes, slots, chamfers, fillets, cutouts,
 dog bones), half laps, Dominos, Clamex, Cabineos, tenons, screws, box joints,
 grooves, drawer slides, concealed hinges, hatch hinges, ball catches, door
 latches, sliding brackets, the checks, and the folder preview. Everything is
@@ -221,7 +221,6 @@ is implemented. [Florian]
 | `standard-library.md` | `lang/std`: building blocks on the public API only |
 | `nesting.md` | Nesting in the language with PackingSolver: sheets of several sizes sawn into blanks for the bed, offcuts, grain, parts in openings (tried in `experiments/nesting/`) |
 | `cam.md` | A CAM plan from the layout, built by an add-in |
-| `slots.md` | `slot()`, spelled like `hole()` |
 | `runs.md` | Tubes, ducts and keep-outs |
 | `detail-levels.md` | Rough and full previews |
 | `hand-made-geometry.md` | Escape hatches for what the language cannot say |

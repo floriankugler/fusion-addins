@@ -169,6 +169,9 @@ def test_dominos_are_slots_in_the_face_and_marks_on_the_edge_on_board():
     assert (round(x0, 3), round(x1, 3)) == (37 - 8.3, 37 + 8.3)   # 16.6 long, 37 from the front
     assert (round(z0, 3), round(z1, 3)) == (5.5, 9.5)            # 4 high, centred on the bottom
     assert [round((s.shape.bounds[0] + s.shape.bounds[2]) / 2, 6) for s in slots] == [37, 250, 463]
+    line = first.slot                                       # a slot, its centre line kept for the CAM plan
+    assert line is not None and line.width == 4
+    assert line.start == pytest.approx((37 - 6.3, 7.5)) and line.end == pytest.approx((37 + 6.3, 7.5))
     assert len(_ops(p["right"], "domino_bottom_")) == 3
     # nothing but marks on the bottom: its mortises are cut with the machine
     marks = [op for op in p["bottom"].ops if isinstance(op, VGroove)]
@@ -273,6 +276,7 @@ def test_cabineo_defaults_to_the_hidden_face_and_its_variants():
     assert {op.face for op in holes} == {"bottom"}          # the top shows its top face
     relief = next(op for op in holes if op.name == "cabineo_right_1_relief")
     assert isinstance(relief, Pocket) and relief.depth == 0.8
+    assert relief.slot is not None and relief.slot.width == connector_data.CABINEO_FLUSH_RELIEF_WIDTH
     assert all(op.depth == 11 for op in holes if isinstance(op, Hole))
     screw, collar = _ops(p["right"], "cabineo_top_1")
     assert isinstance(screw, Hole) and (screw.d, screw.depth) == (7.9, 13.5)
@@ -321,6 +325,8 @@ def test_clamex_p10_slot_and_guide_holes():
     x0, y0, x1, y1 = slot.shape.bounds
     assert (round(x0, 6), round(x1, 6)) == (247, 253)                   # 6 wide at the centre
     assert (round(y0, 6), round(y1, 6)) == (585 - 10.5, 585 - 2)        # from 2 to 10.5 in from the right
+    assert slot.slot is not None and slot.slot.width == 6
+    assert sorted([slot.slot.start[1], slot.slot.end[1]]) == pytest.approx([585 - 7.5, 585 - 5])
     a, b = _ops(p["right"], "clamex_bottom_1")
     assert isinstance(a, Hole) and isinstance(b, Hole)
     assert (a.u, b.u, a.v, a.d, a.depth) == (250 - 50.5, 250 + 50.5, 7.5, 7.7, 8)

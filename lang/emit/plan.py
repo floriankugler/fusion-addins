@@ -47,7 +47,7 @@ if TYPE_CHECKING:
                                      PartLayout, PocketLayout, Rings)
 
 #: The layout version this plan reads (`lang.core.layout_types.LAYOUT_VERSION`).
-LAYOUT_VERSION = 3
+LAYOUT_VERSION = 4
 
 Axis = Literal["x", "y", "z"]
 AXES: tuple[Axis, Axis, Axis] = ("x", "y", "z")

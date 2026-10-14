@@ -1,7 +1,7 @@
 """Random boards for the fuzz tests: a board lying or standing, its outline
 a rectangle, a rounded or tapered shape or a slot, with holes, pockets,
-through cuts, notches, V-grooves, holes into its narrow faces and rounded
-corners, in random order; then the operation under test (a cutout); then
+slots, through cuts, notches, V-grooves, holes into its narrow faces and
+rounded corners, in random order; then the operation under test (a cutout); then
 one more operation. A case is plain data (frozen dataclasses), so a
 failing example prints as something to build again by hand.
 
@@ -11,7 +11,9 @@ openings keep `border` from the outline and `around` from everything the
 board had and from `keep=`, a router of the corner radius reaches every
 part of them, the bands of a cross stay, no material falls out, a failed
 cutout changes nothing, an operation made later in an opening is refused
-and one beside it is not; and the layout plans, draws and meshes."""
+and one beside it is not; and the layout plans, draws and meshes. Before
+the cutout, what `slot()` promises: a slot is taken only with both end
+centres on the board, and it is the stadium its centres and width give."""
 from __future__ import annotations
 
 import math
@@ -32,20 +34,22 @@ from lang import Board, Box, LangError, Shape, board, cross, material, module, t
 from lang.core.geometry import polygons_of
 from lang.core.layout import build_layout
 from lang.core.ops import MIN_CHAMFER, Cut, Pocket
+from lang.core.part import ON_FACE_TOLERANCE
 from lang.core.shapes import slot_shape
 from lang.emit.plan import plan_layout
 from lang.preview.mesh import mesh_part
 
 Place = Literal["bottom", "left", "back"]
 OutlineKind = Literal["rect", "rounded", "taper", "slot"]
-FeatureKind = Literal["hole", "pocket", "cut", "notch", "vgroove", "edge_hole", "fillet"]
+FeatureKind = Literal["hole", "pocket", "slot", "cut", "notch", "vgroove", "edge_hole", "fillet"]
 
 
 @dataclass(frozen=True)
 class Feature:
     """An operation at (u, v) mm from the outline's low corner, on big face
     `face` (0 or 1, as `big_faces()` gives them): a hole `a` across, a
-    pocket `a` by `b` turned by `angle` (a circle when `b` is 0), a through
+    pocket `a` by `b` turned by `angle` (a circle when `b` is 0), a slot
+    `a` wide from (u, v) to the end centre `b` away at `angle`, a through
     cut of that shape, a notch (a cut over the outline's edge), a V-groove
     `a` long and `b` deep, a hole `a` across into narrow face `face` (0 to
     3) `b` deep, or every corner of the outline rounded with `a`. `depth`
@@ -101,8 +105,8 @@ def _offset(extent: float) -> st.SearchStrategy[float]:
 
 @st.composite
 def features(draw: st.DrawFn, size: tuple[float, float], t: float) -> Feature:
-    kind: FeatureKind = draw(st.sampled_from(["hole", "hole", "pocket", "pocket", "cut", "notch", "vgroove",
-                                              "edge_hole", "fillet"]))
+    kind: FeatureKind = draw(st.sampled_from(["hole", "hole", "pocket", "pocket", "slot", "slot", "cut", "notch",
+                                              "vgroove", "edge_hole", "fillet"]))
     u, v = draw(_offset(size[0])), draw(_offset(size[1]))
     depth = draw(st.one_of(st.none(), floats(0.05, 0.95), st.just(0.5)))
     angle = draw(st.one_of(st.just(0.0), st.just(45.0), floats(0, 180)))
@@ -111,6 +115,10 @@ def features(draw: st.DrawFn, size: tuple[float, float], t: float) -> Feature:
     if kind in ("pocket", "cut", "notch"):
         a, b = draw(sizes(2, 120)), draw(st.one_of(st.just(0.0), sizes(2, 120)))
         return Feature(kind, draw(st.integers(0, 1)), u, v, a, b, angle, depth)
+    if kind == "slot":
+        angle = draw(st.one_of(st.just(0.0), st.just(90.0), floats(0, 360)))
+        return Feature(kind, draw(st.integers(0, 1)), u, v, draw(sizes(0.5, 40)),
+                       draw(st.one_of(sizes(0.5, 200), st.just(0.005))), angle, depth)
     if kind == "vgroove":
         return Feature(kind, draw(st.integers(0, 1)), u, v, draw(sizes(1, 200)), draw(floats(0.2, 0.45)) * t,
                        angle)
@@ -197,6 +205,12 @@ def apply(b: Board, f: Feature, name: str) -> BaseGeometry | None:
         g = _shape_at(f, p)
         b.add_pocket(faces[f.face], Shape(g), _depth(b, f.depth), name)  # pyright: ignore[reportArgumentType]
         return g
+    if f.kind == "slot":
+        end = _slot_end(f, p)
+        face = faces[f.face]
+        b.slot(f.a, _anchor_at(b, face, p), _anchor_at(b, face, end), depth=_depth(b, f.depth),  # pyright: ignore[reportArgumentType]
+               name=name)
+        return _stadium(f, p)
     if f.kind in ("cut", "notch"):
         g = _shape_at(f, p)
         b.add_cut(Shape(g), name)
@@ -209,6 +223,44 @@ def apply(b: Board, f: Feature, name: str) -> BaseGeometry | None:
         return _edge_hole(b, f, name)
     b.fillet(faces[0].outline, f.a)
     return None
+
+
+def _slot_end(f: Feature, p: tuple[float, float]) -> tuple[float, float]:
+    return (p[0] + f.b * math.cos(math.radians(f.angle)), p[1] + f.b * math.sin(math.radians(f.angle)))
+
+
+def _stadium(f: Feature, p: tuple[float, float]) -> BaseGeometry:
+    """The slot a feature asks for, drawn finely."""
+    return LineString([p, _slot_end(f, p)]).buffer(f.a / 2, quad_segs=256)
+
+
+def _anchor_at(b: Board, face: Any, point: tuple[float, float]) -> Any:
+    """The anchor on a big face at `point` in the outline's frame,
+    measured from the board's low edges, as a build file names one."""
+    box, frame = b.box(), b.scope.frame
+    low_u, low_v = frame.direction_of(b.u_axis, -1).name, frame.direction_of(b.v_axis, -1).name
+    return getattr(getattr(face, low_u)(point[0] - box.lo[b.u_axis]), low_v)(point[1] - box.lo[b.v_axis])
+
+
+def _slot_problems(b: Board, f: Feature, p: tuple[float, float], outline: BaseGeometry, refused: str | None) -> list[str]:
+    """What `slot()` promises: refused for an end centre off the board
+    only when one is (the outline as it was before it), taken only with
+    both on it, and then the stadium its centres and width give."""
+    off = max(outline.distance(Point(q)) for q in (p, _slot_end(f, p)))
+    if refused is not None:
+        if "centre is off the board" in refused and off <= ON_FACE_TOLERANCE - 1e-6:
+            return [f"a slot with both end centres on the board was refused as off it ({off:.3g} off)"]
+        return []
+    if off > ON_FACE_TOLERANCE + 1e-6:
+        return [f"a slot with an end centre {off:.3g} off the board was taken"]
+    op = b.ops[-1]
+    if not isinstance(op, Pocket) or op.slot is None:
+        return ["a slot was taken as something else"]
+    r = f.a / 2
+    wrong = op.shape.geometry.symmetric_difference(_stadium(f, p)).area
+    if wrong > 5e-4 * r * r + 1e-6:
+        return [f"a slot differs from its stadium by {wrong:.3g} mm2"]
+    return []
 
 
 def _edge_hole(b: Board, f: Feature, name: str) -> BaseGeometry:
@@ -246,7 +298,7 @@ def slack_of(case: BoardCase) -> float:
     """`NEAR` and the sagitta of the case's coarsest arc: circles of 32
     segments a quarter (2.8 degrees a step) as large as its largest arc."""
     radii = [min(case.size) / 2 if case.outline == "slot" else case.outline_r]
-    radii += [f.a / 2 for f in case.features if f.kind in ("hole", "pocket", "cut", "notch")]
+    radii += [f.a / 2 for f in case.features if f.kind in ("hole", "pocket", "slot", "cut", "notch")]
     return NEAR + max(radii) * (1 - math.cos(math.pi / 128))
 
 
@@ -277,13 +329,19 @@ def _run_cutout(case: BoardCase, name: str = "m", pipeline: bool = True) -> list
         for i, f in enumerate(case.features):
             name = f"{f.kind}_{i}"
             before = _state(b)
+            outline = b.outline.geometry
+            u0, v0, _, _ = b.outline.bounds
             try:
                 g = apply(b, f, name)
-            except LangError:
+            except LangError as e:
                 if _state(b) != before:
                     problems.append(f"a refused {f.kind} changed the board")
+                if f.kind == "slot":
+                    problems += _slot_problems(b, f, (u0 + f.u, v0 + f.v), outline, str(e))
                 continue
-            if g is not None and f.kind in ("hole", "pocket", "vgroove") and g.intersection(b.outline.geometry).area <= 1e-6:
+            if f.kind == "slot":
+                problems += _slot_problems(b, f, (u0 + f.u, v0 + f.v), outline, None)
+            if g is not None and f.kind in ("hole", "pocket", "slot", "vgroove") and g.intersection(b.outline.geometry).area <= 1e-6:
                 problems.append(f"a {f.kind} wholly off the board was accepted")
             if g is not None and f.kind not in ("cut", "notch"):
                 footprints.append((name, g))
@@ -304,12 +362,12 @@ def _run_cutout(case: BoardCase, name: str = "m", pipeline: bool = True) -> list
         before = _state(b)
         try:
             b.cutout(face, pattern=pattern, border=c.border, around=c.around, radius=c.radius, depth=depth,
-                     chamfer=c.chamfer, keep=keep_boxes, name="cutout")
+                     chamfer=c.chamfer, keep=keep_boxes, name="openings")
         except LangError:
             if _state(b) != before:
                 problems.append("a refused cutout changed the board")
             return problems
-        made = b.op("cutout").op
+        made = b.op("openings").op
         assert isinstance(made, (Cut, Pocket))
         opening = made.shape.geometry
         problems += _cutout_problems(b, case, opening, exterior, footprints, keep_boxes, isinstance(made, Cut))
@@ -418,6 +476,8 @@ def _footprint_of(b: Board, f: Feature) -> BaseGeometry | None:
         return Point(p).buffer(f.a / 2, quad_segs=64)
     if f.kind in ("pocket", "cut", "notch"):
         return _shape_at(f, p)
+    if f.kind == "slot":
+        return _stadium(f, p)
     return None
 
 

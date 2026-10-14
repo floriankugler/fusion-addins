@@ -146,7 +146,9 @@ open there: an error [decided]).
 - Operations are named `cabineo_left_1a` (kind, other board, station,
   letter), the stations numbered across all contacts of a pair
   (`domino_divider_1` to `_4` along a notched end). Round access pockets are
-  hole features; the slots' round ends come out as true arcs.
+  hole features; the slots are made as slots (`Board.add_slot`, see
+  `design/operations.md`), so the layout carries their centre lines, and
+  their round ends come out as true arcs.
 - Verified in Fusion against connectors_native on the same board pair
   (Cabineo 8 x 3, Domino 4x20 x 3 with marks, Clamex P-10 x 2): zero boolean
   difference both ways and as many faces per body as the add-in's.

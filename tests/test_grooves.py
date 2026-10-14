@@ -291,7 +291,7 @@ def test_a_join_that_fails_on_a_board_changes_none():
         boards = [p[n] for n in ("floor", "l", "r", "f", "k")]
         before = state(*boards)
         with pytest.raises(LangError, match=r"^box\.floor: groove with box\.left: box\.left: the pocket 'groove_floor' "
-                                            r"lies in the cutout 'cutout'"):
+                                            r"lies in the cutout 'openings'"):
             p["floor"].join(p["l"], p["r"], p["f"], p["k"], using=groove(5, clearance=(0.5, 1)))
         assert state(*boards) == before
 

@@ -293,7 +293,7 @@ def test_a_joint_that_fails_on_the_notched_board_changes_neither():
     fingers and lost its gaps by then; both are restored."""
     m, a, b = _pair()
     with m:
-        a.cut(rect(depth=7.8, height=140), at=a.right.front(12.2), name="slot")
+        a.cut(rect(depth=7.8, height=140), at=a.right.front(12.2), name="notch")
         before = state(a, b)
         with pytest.raises(LangError, match=r"^pair\.b: box_joint with pair\.a: pair\.a: the cut notch_b_2 splits the "
                                             r"board in pieces"):

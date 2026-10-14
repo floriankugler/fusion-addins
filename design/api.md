@@ -36,7 +36,7 @@ so they chain or stand on their own lines. [decided]
   `on`, `between`, `center`, `inset`, `grain`, `show`, `manual`. Setting one
   twice is an error. The result never depends on the order they were
   written in.
-- **Operation modifiers are ordered.** `cut`, `pocket`, `hole`, `chamfer`,
+- **Operation modifiers are ordered.** `cut`, `pocket`, `hole`, `slot`, `chamfer`,
   `fillet`, `cutout`, `dogbones`, and the joins. A cut changes the outline
   for everything after it, and so does a fillet (or chamfer) on a corner of
   the outline; a chamfer on a pocket must follow the pocket. The order on
@@ -48,7 +48,10 @@ so they chain or stand on their own lines. [decided]
   made: a named operation's edges are positions by direction, a pocket or
   hole also has a `floor`, and `board("bottom").on(left.toekick.top,
   toward=cab.top)` puts the bottom on the toe kick without repeating its
-  height.
+  height. A name the board has itself (`slot`, `hole`, `front`, `outline`)
+  is refused, since `side.slot` would reach the method, never the
+  operation [decided]; the language's own default names keep clear of
+  them (`openings`, `outline_dogbones`).
 - **Operations keep a few keywords.** Position and depth interact and belong
   in one call: `pocket(shape, at=, depth=)`. Splitting them into separate
   modifiers would double the length and lose the grouping.

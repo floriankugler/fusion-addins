@@ -15,8 +15,8 @@ at random: on a side, on another board's face or a position, centred on a
 mix of positions, between sides, boards, faces, mixes and boxes, inset,
 some of them a rect. Then operations placed through anchors
 (`side.inner.front(37).bottom(z)`), `to()` depths and `spread()` rows:
-holes, pockets, notches, holes into narrow faces, a board cut by another,
-chamfers along an edge and on a corner, fillets.
+holes, pockets, slots, notches, holes into narrow faces, a board cut by
+another, chamfers along an edge and on a corner, fillets.
 
 `run_case` builds it three ways that must give the same result, measured
 in the module's own terms (inward from its front, left and bottom sides;
@@ -35,7 +35,8 @@ an outline in the two measures of its plane):
   or a box's middle spelt another way, a box for its four sides, an
   anchor measured from the opposite edge or given as a position, its
   edges in the other order, a depth `to()` the other face for its number,
-  a row spread from its other end, an edge named from its other face.
+  a row spread from its other end, an edge named from its other face, a
+  slot's `along=` as an extent, a side or a face.
 
 A refusal must be one all three ways (the same boards and operations
 refused), and the preview must mesh every board as large in the other
@@ -170,7 +171,8 @@ class Depth:
     value: float = 0.0
 
 
-OpKind = Literal["hole", "row", "pocket", "notch", "edge_hole", "cut_part", "chamfer_edge", "chamfer_corner", "fillet"]
+OpKind = Literal["hole", "row", "pocket", "slot", "notch", "edge_hole", "cut_part", "chamfer_edge", "chamfer_corner",
+                 "fillet"]
 
 
 @dataclass(frozen=True)
@@ -179,10 +181,12 @@ class OpSpec:
     them along the first edge of `at` (`row`: from, to, pitch, count), a
     pocket or a through notch (`notch`, named `name`) of extents `size`
     (the board's two in-plane measures, in order) with its matching side
-    or corner at `at`, a hole `d` across into a narrow face, a cut of
-    board `other` (`cut_part`), or a chamfer or fillet `size[0]` of the
-    edge where `at`'s face meets its edge's (a corner through the board:
-    two narrow faces)."""
+    or corner at `at`, a slot `d` wide centred on `at`, its end centres
+    `size[0]` apart along the board's first or second in-plane measure
+    (`along`), a hole `d` across into a narrow face, a cut of board
+    `other` (`cut_part`), or a chamfer or fillet `size[0]` of the edge
+    where `at`'s face meets its edge's (a corner through the board: two
+    narrow faces)."""
     kind: OpKind
     board: int
     at: At = At("outer")
@@ -194,6 +198,8 @@ class OpSpec:
     other: int = 0
     #: A pocket's or notch's rect with a corner cut off: `clip(**{a: k, b: m})`.
     clip: tuple[str, float, str, float] | None = None
+    #: Which of the board's two in-plane measures a slot runs along.
+    along: int = 0
 
 
 @dataclass(frozen=True)
@@ -603,7 +609,8 @@ def _op(draw: st.DrawFn, d: _Draft, k: int) -> OpSpec:
     i = draw(st.integers(0, len(d.specs) - 1))
     t = d.t[i]
     plane = [m for m in range(3) if m != t]
-    kind: Any = draw(st.sampled_from(["hole", "hole", "row", "pocket", "notch", "edge_hole", "cut_part", "corner"]))
+    kind: Any = draw(st.sampled_from(["hole", "hole", "row", "pocket", "slot", "notch", "edge_hole", "cut_part",
+                                      "corner"]))
     thick = d.specs[i].t
     if kind == "hole":
         return OpSpec(kind, i, draw(_at(d, i, draw(st.integers(0, 2)))), d=draw(sizes(2, 35)), depth=draw(_depths(thick)))
@@ -628,6 +635,9 @@ def _op(draw: st.DrawFn, d: _Draft, k: int) -> OpSpec:
             return OpSpec(kind, i, at, size=size, name=f"notch{k}", clip=clip)
         return OpSpec(kind, i, draw(_at(d, i, draw(st.integers(0, 2)))), size=size, depth=draw(_depths(thick)),
                       clip=clip)
+    if kind == "slot":
+        return OpSpec(kind, i, draw(_at(d, i, draw(st.integers(0, 2)))), d=draw(sizes(1, 30)),
+                      size=(draw(sizes(0.5, 200)), 0.0), depth=draw(_depths(thick)), along=draw(st.integers(0, 1)))
     if kind == "edge_hole":
         return OpSpec(kind, i, draw(_at(d, i, 1, big=False)), d=draw(sizes(2, max(2.0, thick - 1))),
                       depth=Depth("mm", draw(sizes(3, 60))))
@@ -1160,6 +1170,17 @@ def _do(b: Built, key: str, x: Board, op: OpSpec) -> None:
             x.hole(op.d, at=at, depth=depth)
             b.meant.append((key, len(x.ops) - 1, where, want))
         return
+    if op.kind == "slot":
+        t = MEASURE[x.scope.frame.direction_of(x.t_axis, 1).name]
+        m = [k for k in range(3) if k != t][op.along]
+        sc = _scope(x)
+        along: Any = [lambda: EXTENT[m], lambda: sc.side(LOW[m]), lambda: sc.side(HIGH[m]),
+                      lambda: x.face(LOW[m])][b.pick(4)]()
+        at, where = _anchor(b, x, f, op.at.edges, {}, hole=True)
+        depth, want = _depth(b, x, f, op.depth)
+        x.slot(op.d, at=at, centres=op.size[0], along=along, depth=depth)
+        b.meant.append((key, len(x.ops) - 1, where, want))
+        return
     sizes_: dict[Axis, float] = {}
     shape: Any = None
     if op.kind in ("pocket", "notch"):
@@ -1370,7 +1391,10 @@ def _op_summary(loc: _Local, x: Board, op: Op) -> tuple[Any, ...]:
     if isinstance(op, Hole):
         return ("hole", loc.name(op.face), loc.point({u: op.u, v: op.v}), op.d, op.depth, op.through, op.chamfer)
     if isinstance(op, Pocket):
-        return ("pocket", loc.name(op.face), loc.plane(op.shape.geometry, u, v), op.depth)
+        line = None if op.slot is None else (
+            tuple(sorted((loc.point({u: p[0], v: p[1]}) for p in (op.slot.start, op.slot.end)), key=_rounded)),
+            op.slot.width)
+        return ("pocket", loc.name(op.face), loc.plane(op.shape.geometry, u, v), op.depth, line)
     if isinstance(op, Cut):
         return ("cut", op.name, loc.plane(op.shape.geometry, u, v))
     if isinstance(op, EdgeOp):
@@ -1538,6 +1562,10 @@ def _op_promises(x: Board, key: str, op: Op, where: Where, depth: float, thru: b
     if isinstance(op, Hole):
         got = {x.u_axis: (op.u, op.u), x.v_axis: (op.v, op.v)}
         inner: Hole | Pocket = op
+    elif isinstance(op, Pocket) and op.slot is not None:      # centred on its anchor, as a hole
+        cu, cv = (op.slot.start[0] + op.slot.end[0]) / 2, (op.slot.start[1] + op.slot.end[1]) / 2
+        got = {x.u_axis: (cu, cu), x.v_axis: (cv, cv)}
+        inner = op
     elif isinstance(op, Pocket):
         u0, v0, u1, v1 = op.shape.bounds
         got = {x.u_axis: (u0, u1), x.v_axis: (v0, v1)}
