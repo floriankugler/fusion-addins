@@ -1001,10 +1001,12 @@ class Board:
             hi = {ru: rb.hi[ru], rv: rb.hi[rv]}
             lo[t], hi[t] = b.lo[t], b.hi[t]
             strip = box_shape(lo[ru], lo[rv], hi[ru], hi[rv])
-            section = region.outline.intersection(strip)
-            if section.is_empty():
+            # (as it is, not cleaned: a section 0.01 wide, as far as the region must reach in, is no
+            # sliver [found by fuzzing, 2026-10-14: the board was refused where its box made a pocket])
+            section = region.outline.geometry.intersection(strip.geometry)
+            if section.is_empty or section.area <= 1e-9:
                 raise LangError(f"cut(): {label} does not reach into this board.", self.path)
-            s0, s1, s2, s3 = section.bounds
+            s0, s1, s2, s3 = (float(c) for c in section.bounds)
             bounds = {ru: (s0, s2), rv: (s1, s3)}
             free = rv if ru == t else ru              # the in-plane axis shared with this board
             span = {free: bounds[free], region.t_axis: (rb.lo[region.t_axis], rb.hi[region.t_axis])}

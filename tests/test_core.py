@@ -601,6 +601,23 @@ def test_a_cut_by_a_board_or_its_box_reaching_under_a_hundredth_in_is_refused_al
     assert len(side.ops) == 1
 
 
+def test_a_cut_by_a_board_or_its_box_reaching_a_hundredth_in_makes_one_pocket():
+    """Found by fuzzing the placement: a floor reaching 0.01 mm into a
+    side, the least a cut by a board or a box must reach, made a pocket
+    that deep as `side.cut(floor.box())` and was refused as
+    `side.cut(floor)`: the floor's section across the side, as narrow, was
+    cleaned away. The section is taken as it is."""
+    with module("box", Box.from_size(width=400, depth=300, height=100)) as m:
+        sides = [board(f"side{k}", ply15).on(m.left) for k in range(2)]
+        floor = board("floor", ply9).on(m.bottom + 10).between(sides[0].into(0.01), m.right)
+        sides[0].cut(floor)
+        sides[1].cut(floor.box())
+    a, c = sides[0].ops[0], sides[1].ops[0]
+    assert isinstance(a, Pocket) and isinstance(c, Pocket)
+    assert a.depth == pytest.approx(0.01) and c.depth == pytest.approx(0.01) and a.face == c.face
+    assert a.shape.geometry.symmetric_difference(c.shape.geometry).area < 1e-9
+
+
 def test_module_frame_follows_placement():
     # a cabinet against the driver's wall (left, -y) that opens toward the aisle
     box = Box.from_size(width=500, depth=600, height=720)
