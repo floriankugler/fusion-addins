@@ -159,6 +159,25 @@ def test_inner_outer_ambiguous_for_a_shelf_at_mid_height():
         assert shelf.top.value == 367.5
 
 
+def test_a_board_across_its_scope_s_middle_shows_its_top_back_or_right_face():
+    """Decided by Florian, 2026-10-14: a board across its scope's middle
+    without show(), which has no outer face, shows the face toward the
+    scope's top, else its back, else its right, named in the scope's own
+    terms. (It showed the face toward the world axis' positive end, so a
+    divider showed its left in a cabinet facing the van's right and its
+    right in one facing its front.)"""
+    van = Box.from_size(width=600, depth=600, height=700)
+    for front in ("front", "right", "back", "left"):
+        with cabinet(f"cab_{front}", van, front=van.side(front)) as cab:
+            shelf = board("shelf", ply15).center(cab.center("height"))
+            divider = board("divider", ply15).center(cab.center("width"))
+            panel = board("panel", ply15).center(cab.center("depth"))
+            side = board("side", ply15).on(cab.left)
+        assert (shelf.show_face.name, divider.show_face.name, panel.show_face.name) == ("top", "right", "back")
+        assert side.show_face.name == "left"                           # its outer face, as before
+        assert divider.to_layout()["show"] == world_frame().name_of(cab.frame.direction("right"))
+
+
 def test_the_inner_face_of_a_board_with_a_face_on_the_middle_faces_the_middle():
     """Found by fuzzing the placement: a board whose top face lay on its
     module's middle had its bottom face for its inner one (the one toward

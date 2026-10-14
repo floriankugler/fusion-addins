@@ -555,13 +555,19 @@ class Board:
 
     @property
     def show_face(self) -> Face:
+        """The visible big face: as `show()` says; else the outer one; else,
+        for a board across its scope's middle, the face toward the scope's
+        top, else its back, else its right, named in the scope's own terms
+        [decided by Florian, 2026-10-14; it was the face toward the world
+        axis' positive end, so another frame or facing showed the other]."""
         self._show_used = True
         if self._show is not None:
             return self.face(self._show)
         try:
             return self.face("outer")
         except LangError:
-            return Face(self, self.scope.frame.direction_of(self.t_axis, 1))
+            frame = self.scope.frame
+            return Face(self, next(d for d in map(frame.direction, ("top", "back", "right")) if d.axis == self.t_axis))
 
     def big_faces(self) -> tuple[Face, Face]:
         return (Face(self, self.scope.frame.direction_of(self.t_axis, 1)),
