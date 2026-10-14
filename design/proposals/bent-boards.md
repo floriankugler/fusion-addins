@@ -67,7 +67,7 @@ the shape's frame:
   closing only part way where a turn bends toward their face [Florian]:
   slots that close fully at the radius are too few, since a slot is no
   narrower than its cutter, and the wide webs between them stay straight, so
-  the curve is not smooth. `kerfs=slots(width=3, skin=2, pitch=6)` spreads
+  the curve is not smooth. `kerfs=kerfs(width=3, skin=2, pitch=6)` spreads
   them at the pitch over the stretches that curve; on a turn toward their
   face each closes as far as the curve is tight there, on one away from it
   each opens. The one check is that none has to close more than its width at
