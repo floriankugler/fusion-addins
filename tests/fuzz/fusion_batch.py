@@ -11,6 +11,7 @@ comes out in two), and only this finds those.
     .venv/bin/python tests/fuzz/fusion_batch.py hardware out/fuzz/hardware --count 36 --seed 1
     .venv/bin/python tests/fuzz/fusion_batch.py corners out/fuzz/corners --count 40 --seed 1
     .venv/bin/python tests/fuzz/fusion_batch.py contours out/fuzz/contours --count 40 --seed 1
+    .venv/bin/python tests/fuzz/fusion_batch.py placement out/fuzz/placement --count 30 --seed 1
 
 `build` draws boards until `count` pass every check of
 `boards.run_cutout`, builds them into one layout (modules `m0`, `m1`...)
@@ -24,8 +25,10 @@ of `joints.check` (pairs, corners, crossings, frames) the same way,
 `hardware.run_case` (hinges, latches, sliding brackets, hatch hinges, ball
 catches, slides), `corners` boards with dog bones and chamfers that
 pass every check of `corners.run_case`, `contours` boards limited by the
-master's contours that pass every check of `contours.run_case`, and
-`rebuild` builds any kind of cases file again. Then, in Fusion, `fusion_check.check([...])`
+master's contours that pass every check of `contours.run_case`,
+`placement` designs placed at random that pass every check of
+`placement.run_case` with nothing refused, and `rebuild` builds any kind
+of cases file again. Then, in Fusion, `fusion_check.check([...])`
 with those paths (without `.json`), and back here
 
     .venv/bin/python tests/fuzz/fusion_batch.py explain out/fuzz/batch [more paths]
@@ -56,11 +59,13 @@ import contours  # noqa: E402
 import corners  # noqa: E402
 import hardware  # noqa: E402
 import joints  # noqa: E402
+import placement  # noqa: E402
 from boards import BoardCase, CutoutCall, Feature  # noqa: E402
 from contours import ContourCase, ContourSpec, LimitSpec, Variant  # noqa: E402
 from corners import CornerOpCase  # noqa: E402
 from hardware import CatchCase, DoorCase, DrawerCase, HatchCase, PanelCase  # noqa: E402
 from joints import CornerCase, CrossCase, FrameCase, JointCase, JointSpec, PairCase  # noqa: E402
+from placement import At, BaySpec, BoardSpec, Depth, OpSpec, PlacementCase, Ref, Value  # noqa: E402
 from fuzzing import fresh, sample  # noqa: E402
 from lang.core.errors import LangError  # noqa: E402
 from lang.build import run_build  # noqa: E402
@@ -203,7 +208,24 @@ def draw_contour_cases(count: int, at: int) -> list[ContourCase]:
     return found
 
 
-Case = BoardCase | JointCase | hardware.Case | CornerOpCase | ContourCase
+def draw_placement_cases(count: int, at: int) -> list[PlacementCase]:
+    """`count` designs placed at random that keep every promise and build
+    all their boards and operations, the same ones for the same `at`."""
+    found: list[PlacementCase] = []
+
+    @settings(max_examples=count * 60, database=None, deadline=None, phases=[Phase.generate],
+              suppress_health_check=[HealthCheck.too_slow, HealthCheck.filter_too_much])
+    @seed(at)
+    @given(placement.placement_cases())
+    def collect(case: PlacementCase) -> None:
+        if len(found) < count and case not in found and placement.accepted(case):
+            found.append(case)
+
+    collect()
+    return found
+
+
+Case = BoardCase | JointCase | hardware.Case | CornerOpCase | ContourCase | PlacementCase
 
 
 def build_cases(cases: Sequence[Case]) -> Layout:
@@ -220,6 +242,8 @@ def build_cases(cases: Sequence[Case]) -> Layout:
             corners.apply(case, f"m{i}")
         elif isinstance(case, ContourCase):
             contours.apply(case, f"m{i}")
+        elif isinstance(case, PlacementCase):
+            placement.apply(case, f"m{i}")
         else:
             joints.apply(case, f"m{i}")
     layout = build_layout()
@@ -245,7 +269,9 @@ def read_cases(path: Path) -> list[Case]:
              "JointSpec": JointSpec, "CornerCase": CornerCase, "CrossCase": CrossCase, "FrameCase": FrameCase,
              "DoorCase": DoorCase, "PanelCase": PanelCase, "HatchCase": HatchCase, "CatchCase": CatchCase,
              "DrawerCase": DrawerCase, "CornerOpCase": CornerOpCase, "ContourCase": ContourCase,
-             "ContourSpec": ContourSpec, "LimitSpec": LimitSpec, "Variant": Variant}
+             "ContourSpec": ContourSpec, "LimitSpec": LimitSpec, "Variant": Variant,
+             "PlacementCase": PlacementCase, "BoardSpec": BoardSpec, "BaySpec": BaySpec, "OpSpec": OpSpec,
+             "Ref": Ref, "Value": Value, "At": At, "Depth": Depth}
     return [eval(line.split(": ", 1)[1], names) for line in path.read_text().splitlines() if line.strip()]
 
 
@@ -360,6 +386,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     limited.add_argument("out", type=Path)
     limited.add_argument("--count", type=int, default=40)
     limited.add_argument("--seed", type=int, default=0)
+    placed = commands.add_parser("placement", help="draw designs placed at random into one layout")
+    placed.add_argument("out", type=Path)
+    placed.add_argument("--count", type=int, default=30)
+    placed.add_argument("--seed", type=int, default=0)
     examples = commands.add_parser("examples", help="build every example")
     examples.add_argument("out_dir", type=Path)
     explain_ = commands.add_parser("explain", help="list the bodies Fusion made differently")
@@ -390,6 +420,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             limited_ = draw_contour_cases(args.count, args.seed)
         write(args.out, build_cases(limited_), limited_)
         print(f"{len(limited_)} boards -> {args.out}.json")
+    elif args.command == "placement":
+        with fresh():
+            designs = draw_placement_cases(args.count, args.seed)
+        write(args.out, build_cases(designs), designs)
+        print(f"{len(designs)} designs -> {args.out}.json")
     elif args.command == "rebuild":
         cases = read_cases(args.cases)
         write(args.out, build_cases(cases), cases)

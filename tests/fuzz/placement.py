@@ -87,7 +87,8 @@ MEASURE: dict[str, int] = {"front": 0, "back": 0, "left": 1, "right": 1, "bottom
 LOW = ("front", "left", "bottom")
 HIGH = ("back", "right", "top")
 EXTENT: tuple[Literal["depth"], Literal["width"], Literal["height"]] = ("depth", "width", "height")
-OPPOSITE = {"front": "back", "back": "front", "left": "right", "right": "left", "top": "bottom", "bottom": "top"}
+OPPOSITE = {"front": "back", "back": "front", "left": "right", "right": "left", "top": "bottom", "bottom": "top",
+            "inner": "outer", "outer": "inner"}
 #: The side of its box a cabinet opens toward, by index, in world terms.
 FRONTS = ("front", "right", "back", "left")
 #: The world frame's aliases (a module's frame keeps them, a cabinet's has none).
@@ -185,6 +186,8 @@ class OpSpec:
     name: str | None = None
     row: tuple[Ref, Ref, float, int] | None = None
     other: int = 0
+    #: A pocket's or notch's rect with a corner cut off: `clip(**{a: k, b: m})`.
+    clip: tuple[str, float, str, float] | None = None
 
 
 @dataclass(frozen=True)
@@ -226,6 +229,7 @@ class BaySpec:
     sizes: tuple[float, ...] = ()
     module: bool = False
     mirrored: bool = False
+    gap: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -437,7 +441,8 @@ def _bay(draw: st.DrawFn, d: _Draft) -> BaySpec:
         d.add(BoardSpec("floor", 9.0, side("bottom", draw(sizes(0, 20)), of=2), limits=tuple(draw(st.permutations(limits))),
                         scope=1, ops=cuts), 2)
     index = draw(st.integers(0, (len(bays) if bays else split - 1)))
-    return BaySpec(split, index, front, left, shrink, extent, bays, kind == "module", mirrored)
+    return BaySpec(split, index, front, left, shrink, extent, bays, kind == "module", mirrored,
+                   draw(st.one_of(st.just(0.0), sizes(0, 30))))
 
 
 @st.composite
@@ -509,13 +514,23 @@ def _extra(draw: st.DrawFn, d: _Draft, name: str) -> tuple[BoardSpec, int]:
 
 
 def _value(d: _Draft, i: int, measure: int) -> st.SearchStrategy[Value | None]:
-    """A distance along board i's measure (in its scope's terms)."""
+    """A distance along board i's measure (in its scope's terms): a share
+    of its extent, millimetres, its own face moved into it, or another
+    board's face on that measure (lined up with it, as a shelf pin with
+    its shelf)."""
     names = [n for n in MEASURE if MEASURE[n] == measure]
     fraction = st.builds(Value, _fraction(), st.one_of(st.just(0.0), floats(-5, 5)))
     mm = st.builds(Value, st.just(0.0), st.one_of(sizes(0, 100), floats(0, 400)))
-    ref = st.builds(Value, st.just(0.0), st.just(0.0), st.builds(face, st.just(i), st.sampled_from(names),
-                                                                    floats(-200, 0)).map(lambda r: r))
-    return st.one_of(fraction, fraction, mm, ref, st.none())
+    own = st.builds(Value, st.just(0.0), st.just(0.0), st.builds(face, st.just(i), st.sampled_from(names),
+                                                                    floats(-200, 0)))
+    options = [fraction, fraction, mm, own, st.none()]
+    if d.specs[i].scope == 0:
+        others = [(j, n) for j in range(len(d.specs)) if j != i for n in MEASURE
+                  if MEASURE[d.module_name(j, n)] == measure]
+        if others:
+            options.append(st.builds(Value, st.just(0.0), st.just(0.0), st.sampled_from(others).flatmap(
+                lambda f: st.builds(face, st.just(f[0]), st.just(f[1]), st.one_of(st.just(0.0), floats(-20, 20))))))
+    return st.one_of(*options)
 
 
 @st.composite
@@ -532,6 +547,10 @@ def _at(draw: st.DrawFn, d: _Draft, i: int, edges: int, big: bool = True) -> At:
     found: list[tuple[str, Value | None]] = []
     for m in chosen:
         found.append((draw(st.sampled_from([LOW[m], HIGH[m]])), draw(_value(d, i, m))))
+    if not big and draw(st.booleans()):
+        # across the thickness of a narrow face, from a big face (`side.front.right(50).inner(5)`)
+        found.append((draw(st.sampled_from(["inner", "outer", LOW[t], HIGH[t]])),
+                      Value(draw(st.sampled_from([0.25, 0.5, 0.75])), 0.0)))
     return At(name, tuple(found))
 
 
@@ -561,12 +580,17 @@ def _op(draw: st.DrawFn, d: _Draft, k: int) -> OpSpec:
                       row=(start, end, pitch if draw(st.booleans()) else 0.0, draw(st.integers(1, 6))))
     if kind in ("pocket", "notch"):
         size = (draw(sizes(5, 200)), draw(sizes(5, 200)))
+        m1, m2 = plane
+        clip = None
+        if draw(st.integers(0, 2)) == 0:
+            clip = (draw(st.sampled_from([LOW[m1], HIGH[m1]])), draw(floats(0.1, 0.9)) * size[1],
+                    draw(st.sampled_from([LOW[m2], HIGH[m2]])), draw(floats(0.1, 0.9)) * size[0])
         if kind == "notch":
-            m1, m2 = plane
             corner = ((draw(st.sampled_from([LOW[m1], HIGH[m1]])), None), (draw(st.sampled_from([LOW[m2], HIGH[m2]])), None))
             at = At(draw(st.sampled_from(["inner", "outer", LOW[t], HIGH[t]])), tuple(draw(st.permutations(corner))))
-            return OpSpec(kind, i, at, size=size, name=f"notch{k}")
-        return OpSpec(kind, i, draw(_at(d, i, draw(st.integers(0, 2)))), size=size, depth=draw(_depths(thick)))
+            return OpSpec(kind, i, at, size=size, name=f"notch{k}", clip=clip)
+        return OpSpec(kind, i, draw(_at(d, i, draw(st.integers(0, 2)))), size=size, depth=draw(_depths(thick)),
+                      clip=clip)
     if kind == "edge_hole":
         return OpSpec(kind, i, draw(_at(d, i, 1, big=False)), d=draw(sizes(2, max(2.0, thick - 1))),
                       depth=Depth("mm", draw(sizes(3, 60))))
@@ -686,7 +710,8 @@ def build(case: PlacementCase, how: How, name: str = "m") -> Built:
     if case.kind == "module":
         m = module(name, box, mirrored=mirrored)
     else:
-        m = cabinet(name, box, front=box.side(FRONTS[how.front]), mirrored=mirrored)
+        facing = box.side(FRONTS[how.front])
+        m = cabinet(name, box, front=[facing, facing.outward][b.pick(2)], mirrored=mirrored)
     b.module = m
     b.boxes[0] = m.box
     with m:
@@ -786,7 +811,7 @@ def _make_bay(b: Built, bay: BaySpec) -> None:
         b.why.append(str(e))
         return
     try:
-        bays = space.split(bay.extent, list(bay.sizes) if bay.sizes else bay.split)
+        bays = space.split(bay.extent, list(bay.sizes) if bay.sizes else bay.split, gap=bay.gap)
         space = bays[bay.index]
     except (LangError, IndexError) as e:
         b.refused.append("the bay")
@@ -996,7 +1021,8 @@ def _on(b: Built, x: Board, spec: BoardSpec) -> None:
         if r.by == 0:
             [lambda: x.on(f), lambda: x.on(f.position, toward=f.direction)][b.pick(2)]()
         else:
-            x.on(f.gap(r.by), toward=f.direction)
+            [lambda: x.on(f.gap(r.by), toward=f.direction),
+             lambda: x.on(f + f.direction.sign * r.by, toward=f.direction)][b.pick(2)]()
         return
     raise AssertionError(r.kind)
 
@@ -1035,7 +1061,7 @@ def _make_op(b: Built, key: str, op: OpSpec) -> None:
     try:
         with _scope(x):
             _do(b, key, x, op)
-    except LangError as e:
+    except (LangError, _Missing) as e:
         if op.kind == "row":
             x._restore(saved)  # pyright: ignore[reportPrivateUsage]
         elif _state(x) != before:
@@ -1053,7 +1079,9 @@ def _state(x: Board) -> tuple[str, list[Op], list[str]]:
 
 def _do(b: Built, key: str, x: Board, op: OpSpec) -> None:
     if op.kind == "cut_part":
-        x.cut(_board(b, op.other))
+        other = _board(b, op.other)
+        rectangular = abs(other.outline.area - other.outline.width * other.outline.height) < 1e-6
+        x.cut(other.box() if rectangular and other.t_axis != x.t_axis and b.pick(2) else other)
         return
     f = _face(b, x, op.at.face)
     if op.kind in ("chamfer_edge", "chamfer_corner", "fillet"):
@@ -1086,6 +1114,9 @@ def _do(b: Built, key: str, x: Board, op: OpSpec) -> None:
         t = MEASURE[x.scope.frame.direction_of(x.t_axis, 1).name]
         m1, m2 = [k for k in range(3) if k != t]
         shape = rect(**{EXTENT[m1]: op.size[0], EXTENT[m2]: op.size[1]})
+        if op.clip is not None:
+            a, k, c, n = op.clip
+            shape = shape.clip(**{a: k, c: n})
         sizes_ = {_scope(x).side(LOW[m1]).axis: op.size[0], _scope(x).side(LOW[m2]).axis: op.size[1]}
     at, where = _anchor(b, x, f, op.at.edges, sizes_, hole=op.kind in ("hole", "edge_hole"))
     if op.kind == "notch":
@@ -1106,6 +1137,8 @@ def _face(b: Built, x: Board, name: str) -> Face:
         return [lambda: x.face(name), lambda: x.inner if name == "inner" else x.outer][b.pick(2)]()
     f = x.face(name)
     spellings: list[Callable[[], Face]] = [lambda: f, lambda: getattr(x, name)]
+    for alias in (a for a, n in ALIASES.items() if n == name and _scope(x).frame.is_direction(a)):
+        spellings.append(lambda alias=alias: x.face(alias))
     for which in ("inner", "outer"):
         try:
             if x.face(which).direction == f.direction:
@@ -1505,7 +1538,8 @@ SHAPED = (f"{KNOWN} a board with a shape that does not fill its limits less its 
           "sits at their lowest corner in world terms")
 MIDDLE = f"{KNOWN} a single limit at the middle of the box leaves the board either half, by the world axis"
 CENTRED = f"{KNOWN} a board as the only limit, centred in the box, gives its face toward the world axis' end"
-OVERLAPPING = f"{KNOWN} limits that overlap (two boards, a position inside a board) put the board inside them"
+OVERLAPPING = (f"{KNOWN} limits that overlap (two boards, a position or a board's face moved by gap() inside "
+               "a board) put the board inside them")
 
 
 def _known(x: Board) -> str | None:
@@ -1548,20 +1582,17 @@ def _known(x: Board) -> str | None:
 
 def _overlapping(x: Board, axis: Axis) -> bool:
     """Whether the board's limits on an axis overlap: two boards, or a
-    position inside a board."""
-    spans: list[tuple[float, float]] = []
-    points: list[float] = []
+    position or another board's face (moved by its `gap()`) inside a board
+    beyond its `into()`."""
+    spans: list[tuple[float, float, float]] = []
     for limit in x._limits:  # pyright: ignore[reportPrivateUsage]
         if isinstance(limit, (Board, PartLimit)):
-            p = limit if isinstance(limit, Board) else limit.part
+            p, k = (limit, 0.0) if isinstance(limit, Board) else (limit.part, limit.offset)
             if p.t_axis == axis:
-                spans.append((p.box().lo[axis], p.box().hi[axis]))
-        elif not isinstance(limit, Box):
-            pos = as_pos(limit)
-            if pos.axis == axis:
-                points.append(pos.value)
+                spans.append((p.box().lo[axis], p.box().hi[axis], max(k, 0.0)))
+    values = x._limit_values(axis, x.scope.box, set())  # pyright: ignore[reportPrivateUsage]
     return any(min(a[1], c[1]) - max(a[0], c[0]) > 1e-6 for k, a in enumerate(spans) for c in spans[k + 1:]) or \
-        any(lo + 1e-6 < v < hi - 1e-6 for lo, hi in spans for v in points)
+        any(lo + k + 1e-6 < v < hi - k - 1e-6 for lo, hi, k in spans for v in values)
 
 
 def _known_boards(b: Built) -> dict[str, str]:
