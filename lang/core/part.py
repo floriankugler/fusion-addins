@@ -826,7 +826,9 @@ class Board:
         if through and cut.geometry.difference(unary_union(through)).area <= 1e-6:
             raise LangError("the cut leaves nothing of the board but what pockets and holes through it take.",
                             self.path)
-        if len(cut.polygons()) > len(self.outline.polygons()):
+        # (a piece left joined at a point only is apart, as for holes and pockets through the board,
+        # `_pieces` [found by fuzzing the checks, 2026-10-14])
+        if _pieces(cut.geometry) > _pieces(self.outline.geometry):
             raise LangError(f"the cut{f' {name}' if name else ''} splits the board in pieces.", self.path)
         # [found by fuzzing, 2026-10-12: a cut took away all of a hole made before, which Fusion then
         # found nothing to cut for]

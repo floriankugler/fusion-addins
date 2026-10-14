@@ -809,6 +809,23 @@ def test_a_hole_through_the_board_that_leaves_a_corner_hanging_at_a_point_splits
     assert [op.kind for op in panel.ops] == ["hole", "pocket"]
 
 
+@pytest.mark.parametrize("origin", [0.0, 0.1, 260.0, 1234.56, -5255.0, 3000.3, 17.25, 99.9])
+def test_a_cut_that_leaves_a_corner_hanging_at_a_point_splits_the_board(origin: float):
+    """Found by fuzzing the checks: the 118 mm circle of the hole above,
+    cut through the board, was refused at most places and kept at 0.1, as
+    the hole was. It splits the board everywhere now; a circle cut that
+    touches the edge further in, and cuts nothing off, is kept, as Fusion
+    builds it [Florian, 2026-10-12]."""
+    with module("m", Box.from_size(width=746, depth=519, height=100, origin=(origin, origin, 0))) as m:
+        panel = board("panel", material("birch", t=31)).on(m.bottom)
+        with pytest.raises(LangError, match="the cut splits the board in pieces"):
+            panel.add_cut(Shape(circle_geometry((origin + 482, origin + 59), 59)))
+        with pytest.raises(LangError, match="the cut corner splits the board in pieces"):
+            panel.cut(circle(118), at=panel.top.front(423).left(0), name="corner")
+        panel.cut(circle(118), at=panel.top.front(141).left(0), name="touching")
+    assert [op.kind for op in panel.ops] == ["cut"] and len(panel.outline.polygons()) == 1
+
+
 def test_a_pocket_through_the_board_may_not_leave_nothing_of_it():
     """Found by fuzzing dog bones: a circle pocket through a 53 mm square
     board, wider than the board, took all of it, which a cut may not, and
