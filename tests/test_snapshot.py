@@ -74,6 +74,20 @@ def test_collector_skips_double_underscore_and_reports_duplicates():
     assert problems[("boxes", "Haut")].startswith("a surface body")
 
 
+def test_a_name_made_twice_gives_the_same_snapshot_whichever_comes_first():
+    """The places of a name made twice are listed in order, so the
+    snapshot and its hash do not depend on the order Fusion lists the
+    components in. Fuzzing found it."""
+    def snapshot(order: list[tuple[str, float]]):
+        c = Collector()
+        for where, z in order:
+            c.plane("", "Boden", where, (0, 0, z), (0, 0, 1))
+        return c.build("master")
+    first, second = snapshot([("root", 40), ("Bett:1", 50)]), snapshot([("Bett:1", 50), ("root", 40)])
+    assert first == second
+    assert first["problems"][0]["message"] == "named twice (Bett:1, root)"
+
+
 def test_items_in_components_are_named_by_their_path():
     c = Collector()
     c.plane("", "Boden", "root", (0, 0, 40), (0, 0, 1))

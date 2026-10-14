@@ -192,7 +192,9 @@ class Collector:
             for name in sorted(self._entries[kind]):
                 entries = self._entries[kind][name]
                 if len(entries) > 1:
-                    places = ", ".join(e.where for e in entries)
+                    # (in order, not as Fusion listed them: the same master gave another hash when
+                    # its components came in another order [found by fuzzing, 2026-10-14])
+                    places = ", ".join(sorted(e.where for e in entries))
                     problems.append({"kind": kind, "name": name, "message": f"named twice ({places})"})
                 elif entries[0].problem is not None:
                     problems.append({"kind": kind, "name": name,
