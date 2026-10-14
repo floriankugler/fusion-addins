@@ -75,6 +75,25 @@ def test_a_spike_out_and_back_to_the_same_point_goes_whatever_its_length():
         assert list(cleaned.exterior.coords) == [(0, 0), (10, 0), (10, 10), (5, 10), (0, 10), (0, 0)]
 
 
+def test_a_spike_beside_an_edge_in_line_with_it_goes_too():
+    """Found by fuzzing: a union and difference left a spike 200 mm out
+    whose way back ran along another edge in line with it; without the
+    spike the ring ran along itself there, invalid, and clean kept the
+    spike rather than make it worse. What is left is made valid now, as an
+    invalid input is: two pieces, all the area, no spike."""
+    ring = [(30.337985425689457, -74.0311194046845), (23.502206085828806, -57.92703247462465),
+            (9.42172606141327, -72.00751249904019), (9.767766952966362, -72.35355339059328),
+            (8.353553390593262, -73.76776695296637), (6.232233047033624, -71.64644660940672),
+            (7.064448147192326, -70.81423150924802), (8.83972759919888, -72.58951096125458),
+            (153.08951096125458, 71.66027240080109),                    # the spike's tip
+            (25.027484546414023, -56.40175401403944), (32.17899513259434, -73.24965714770595)]
+    spiked = Polygon(ring)
+    assert spiked.is_valid
+    cleaned = clean(spiked)
+    assert cleaned.is_valid and cleaned.area == pytest.approx(spiked.area)
+    assert len(polygons_of(cleaned)) == 2 and cleaned.bounds[2] < 33
+
+
 def test_a_band_cut_across_a_shape_exactly_as_tall_parts_it():
     """Found by fuzzing: both turned 1.16 degrees, the cut left the shape
     whole with the band as a hole whose edges lay on the outline's, 2e-15

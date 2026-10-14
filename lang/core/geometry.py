@@ -96,7 +96,7 @@ def clean(g: BaseGeometry) -> BaseGeometry:
     return out[0] if len(out) == 1 else MultiPolygon(out)
 
 
-def _clean_polygon(poly: Polygon, walls: bool = True) -> list[Polygon] | None:
+def _clean_polygon(poly: Polygon, walls: bool = True, remake: bool = True) -> list[Polygon] | None:
     """The polygon's clean pieces, or None when it has nothing to clean.
     A ring is judged narrow without its spikes [found by fuzzing the
     placement, 2026-10-14: a strip 0.2 by 7 mm with a hairline tail 175 mm
@@ -122,14 +122,27 @@ def _clean_polygon(poly: Polygon, walls: bool = True) -> list[Polygon] | None:
     if changed:
         made = Polygon(shell, holes)
         if not made.is_valid:
-            # (cleaning would make it worse; leave it as it was, unless it is narrow as it is)
-            return (_opened(poly) if walls else []) if _narrow(poly.exterior) else None
+            # (what is left touches or crosses itself where a spike's way back ran along another
+            # edge: made valid as an invalid input is, and its pieces cleaned [found by fuzzing,
+            # 2026-10-14: a spike 200 mm out, beside an edge in line with it, was kept])
+            return _valid_pieces(made, walls) if remake else None
         poly = made
     if walls and len(poly.interiors) > 0 and _has_walls(poly):
         return _opened(poly)
     if _narrow(poly.exterior):
         return []
     return [poly] if changed else None
+
+
+def _valid_pieces(poly: Polygon, walls: bool) -> list[Polygon]:
+    """An invalid polygon made valid (its shells united, as `clean` makes
+    an invalid input valid), each piece cleaned."""
+    pieces: list[Polygon] = []
+    for piece in polygons_of(shapely.make_valid(poly, method="structure", keep_collapsed=False)):
+        # (once: a piece that would come out invalid again stays as it is)
+        again = _clean_polygon(piece, walls, remake=False)
+        pieces.extend([piece] if again is None else again)
+    return pieces
 
 
 def _opened(poly: Polygon) -> list[Polygon]:
