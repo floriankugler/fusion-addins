@@ -306,6 +306,13 @@ def _origin() -> st.SearchStrategy[tuple[float, float, float]]:
     return st.one_of(st.just((0.0, 0.0, 0.0)), st.tuples(far, far, far))
 
 
+def _by(lo: float, hi: float) -> st.SearchStrategy[float]:
+    """How far a plane is moved (mm): none, or at least 0.01 mm, as nothing
+    narrower is meant (a limit 1e-6 out of the box is out of it or not by
+    the rounding of the place, within the checks' tolerance)."""
+    return floats(lo, hi).map(lambda v: 0.0 if abs(v) < 0.01 else v)
+
+
 def _fraction() -> st.SearchStrategy[float]:
     return st.one_of(st.just(0.5), st.sampled_from([0.25, 1 / 3, 0.75]), floats(0.05, 0.95))
 
@@ -454,11 +461,11 @@ def _ref_on(draw: st.DrawFn, d: _Draft, measure: int, scope: int) -> Ref:
         options: list[st.SearchStrategy[Ref]] = [
             st.builds(side, st.sampled_from(names) if scope == 0 else st.sampled_from(
                 [n for n, m in d.bay_names.items() if m in names]),
-                st.one_of(st.just(0.0), sizes(0, 200), floats(-20, 20)), st.just(scope))]
+                st.one_of(st.just(0.0), sizes(0, 200), _by(-20, 20)), st.just(scope))]
         faces = [(i, n) for i in range(len(d.specs)) for n in MEASURE if MEASURE[d.module_name(i, n)] == measure]
         if faces:
             options.append(st.sampled_from(faces).flatmap(
-                lambda f: st.builds(face, st.just(f[0]), st.just(f[1]), st.one_of(st.just(0.0), floats(-10, 10)))))
+                lambda f: st.builds(face, st.just(f[0]), st.just(f[1]), st.one_of(st.just(0.0), _by(-10, 10)))))
         return st.one_of(*options)
     if draw(st.integers(0, 3)) == 0:
         return mid(draw(plain()), draw(plain()), draw(_fraction()))
@@ -473,11 +480,11 @@ def _extra(draw: st.DrawFn, d: _Draft, name: str) -> tuple[BoardSpec, int]:
     center = False
     if kind == "side":
         n = draw(st.sampled_from(list(MEASURE)))
-        at, t = side(n, draw(st.one_of(st.just(0.0), sizes(0, 300), floats(-20, 20)))), MEASURE[n]
+        at, t = side(n, draw(st.one_of(st.just(0.0), sizes(0, 300), _by(-20, 20)))), MEASURE[n]
     elif kind == "face" and d.specs:
         i = draw(st.integers(0, len(d.specs) - 1))
         n = draw(st.sampled_from([n for n in MEASURE if MEASURE[n] == d.t[i]] * 3 + list(MEASURE)))
-        at = face(i, n, draw(st.one_of(st.just(0.0), floats(-5, 20))))
+        at = face(i, n, draw(st.one_of(st.just(0.0), _by(-5, 20))))
         t = MEASURE[d.module_name(i, n)]
     else:
         t = draw(st.integers(0, 2))
@@ -490,7 +497,7 @@ def _extra(draw: st.DrawFn, d: _Draft, name: str) -> tuple[BoardSpec, int]:
         pick = draw(st.integers(0, 9))
         others = [i for i in range(len(d.specs)) if d.t0[i] != t]
         if pick < 3 and others:
-            limits.append(part(draw(st.sampled_from(others)), draw(st.one_of(st.just(0.0), st.just(0.0), floats(-5, 10)))))
+            limits.append(part(draw(st.sampled_from(others)), draw(st.one_of(st.just(0.0), st.just(0.0), _by(-5, 10)))))
         elif pick == 3:
             limits.append(Ref("box", of=0))
         elif pick == 4 and d.specs:
@@ -519,17 +526,17 @@ def _value(d: _Draft, i: int, measure: int) -> st.SearchStrategy[Value | None]:
     board's face on that measure (lined up with it, as a shelf pin with
     its shelf)."""
     names = [n for n in MEASURE if MEASURE[n] == measure]
-    fraction = st.builds(Value, _fraction(), st.one_of(st.just(0.0), floats(-5, 5)))
+    fraction = st.builds(Value, _fraction(), st.one_of(st.just(0.0), _by(-5, 5)))
     mm = st.builds(Value, st.just(0.0), st.one_of(sizes(0, 100), floats(0, 400)))
     own = st.builds(Value, st.just(0.0), st.just(0.0), st.builds(face, st.just(i), st.sampled_from(names),
-                                                                    floats(-200, 0)))
+                                                                    _by(-200, 0)))
     options = [fraction, fraction, mm, own, st.none()]
     if d.specs[i].scope == 0:
         others = [(j, n) for j in range(len(d.specs)) if j != i for n in MEASURE
                   if MEASURE[d.module_name(j, n)] == measure]
         if others:
             options.append(st.builds(Value, st.just(0.0), st.just(0.0), st.sampled_from(others).flatmap(
-                lambda f: st.builds(face, st.just(f[0]), st.just(f[1]), st.one_of(st.just(0.0), floats(-20, 20))))))
+                lambda f: st.builds(face, st.just(f[0]), st.just(f[1]), st.one_of(st.just(0.0), _by(-20, 20))))))
     return st.one_of(*options)
 
 
@@ -1080,8 +1087,12 @@ def _state(x: Board) -> tuple[str, list[Op], list[str]]:
 def _do(b: Built, key: str, x: Board, op: OpSpec) -> None:
     if op.kind == "cut_part":
         other = _board(b, op.other)
-        rectangular = abs(other.outline.area - other.outline.width * other.outline.height) < 1e-6
-        x.cut(other.box() if rectangular and other.t_axis != x.t_axis and b.pick(2) else other)
+        # (its box for it where the outline fills the box: no cut has taken a side's end away)
+        ob, ub = other.outline.bounds, other.box()
+        fills = abs(other.outline.area - other.outline.width * other.outline.height) < 1e-6 and all(
+            abs(p - q) < 1e-9 for p, q in zip(ob, (ub.lo[other.u_axis], ub.lo[other.v_axis], ub.hi[other.u_axis],
+                                                   ub.hi[other.v_axis])))
+        x.cut(other.box() if fills and other.t_axis != x.t_axis and b.pick(2) else other)
         return
     f = _face(b, x, op.at.face)
     if op.kind in ("chamfer_edge", "chamfer_corner", "fillet"):
@@ -1622,8 +1633,14 @@ def _known_boards(b: Built) -> dict[str, str]:
         if x is not None:
             out[x.path] = why
     for op in [*b.case.ops, *(o for spec in b.case.boards for o in spec.ops)]:
-        if op.kind == "cut_part":
-            x, other = b.made_boards[op.board], b.made_boards[op.other]
+        # (a board cut by a known one, or an operation placed by one's face)
+        named = {op.other} if op.kind == "cut_part" else set()
+        for r in [*(v.ref for _, v in op.at.edges if v is not None and v.ref is not None), *(op.row or ())[:2]]:
+            if r.kind in ("part", "face", "op"):
+                named.add(r.of)
+        x = b.made_boards[op.board]
+        for j in named:
+            other = b.made_boards[j]
             if x is not None and other is not None and other.path in out:
                 out.setdefault(x.path, out[other.path])
     return out
