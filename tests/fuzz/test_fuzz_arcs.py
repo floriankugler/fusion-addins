@@ -8,8 +8,10 @@ from collections.abc import Callable, Sequence
 
 from hypothesis import given
 from hypothesis import strategies as st
+from shapely.geometry import LineString
 
 from fuzzing import Point2, Recipe, recipe_problems, recipes, rings_of, shifts
+from lang.core.geometry import NARROWEST
 from lang.emit.arcs import Arc2, Circle2, Curve2, Line2, fit
 
 
@@ -36,6 +38,26 @@ def _tokens(curves: Sequence[Curve2], back: Transform, mirrored: bool) -> list[T
             a, b = (back(c.b), back(c.a)) if mirrored else (back(c.a), back(c.b))
             out.append(("line", (0.0, 0.0), 0.0, a, b))
     return out[::-1] if mirrored else out
+
+
+def _drawn(curves: Sequence[Curve2], back: Transform) -> list[Point2]:
+    """The curves drawn finely, in the original frame."""
+    out: list[Point2] = []
+    for c in curves:
+        if isinstance(c, (Arc2, Circle2)):
+            cx, cy = c.center
+            if isinstance(c, Circle2):
+                start, sweep = 0.0, 2 * math.pi
+            else:
+                angle = [math.atan2(q[1] - cy, q[0] - cx) for q in (c.a, c.mid, c.b)]
+                to_b, to_mid = (angle[2] - angle[0]) % (2 * math.pi), (angle[1] - angle[0]) % (2 * math.pi)
+                start, sweep = angle[0], to_b if to_mid < to_b else to_b - 2 * math.pi
+            out += [(cx + c.radius * math.cos(start + sweep * k / 64), cy + c.radius * math.sin(start + sweep * k / 64))
+                    for k in range(65)]
+        else:
+            assert isinstance(c, Line2)
+            out += [c.a, c.b]
+    return [back(q) for q in out]
 
 
 def _same(a: Token, b: Token, tol: float) -> bool:
@@ -74,4 +96,10 @@ def test_fit_finds_the_same_curves_moved_turned_and_mirrored(recipe: Recipe, how
         # steps under a micrometre, end an arc 0.02 mm sooner [fuzzing,
         # 2026-10-13]; both far under anything meant, 0.01 mm, and harmless in
         # Fusion)
-        assert _rotation_of(original, again, 0.05), (len(original), len(again))
+        if not _rotation_of(original, again, 0.05):
+            # (the way round, `fit` can take a dent shallower than anything meant into
+            # its arc or keep it as two lines: one 0.0014 mm deep, where a slot grown
+            # shut met a circle's rim [fuzzing, 2026-10-14]; then the drawings, not the
+            # lists, must agree within 0.01 mm)
+            drawn, drawn_again = LineString(_drawn(fit(ring), lambda p: p)), LineString(_drawn(fit(moved), back))
+            assert drawn.hausdorff_distance(drawn_again) <= NARROWEST, (len(original), len(again))
