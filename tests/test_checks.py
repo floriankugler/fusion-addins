@@ -2,6 +2,8 @@
 boxes against the parts' material and against each other), `fits_sheet`
 and `inside(contour)`."""
 
+from shapely.geometry import box as shapely_box
+
 from lang import *
 from lang.core.contours import Contour
 from lang.core.layout_types import BoxDict, HardwareBodyLayout
@@ -190,3 +192,16 @@ def test_a_long_board_touching_a_contour_is_inside_it():
             with module("m", Box.from_size(width=1200, depth=2400, height=100)) as m:
                 board("b", ply18).on(m.bottom).between(Pos("x", 5), Pos("x", 2395), Pos("y", gap - past), Pos("y", 600))
             assert [p.split(" with")[0].split(" (")[0] for p in inside(floor, gap=gap)(m)] == expected
+
+
+def test_a_board_whose_outline_only_touches_where_another_crosses_it_meets_nothing_there():
+    """Found by fuzzing the placement: `no_interference` looks at boards
+    across each other cell by cell, and a cell lying in a notch of a
+    shelf's outline, touching it along the notch's edge only, met it in a
+    line: the check failed ("Shape is not an area") instead of finding no
+    material there."""
+    with module("m", Box.from_size(width=600, depth=400, height=720)) as m:
+        panel = board("panel", ply18).on(m.bottom)
+        panel.add_cut(Shape(shapely_box(15, -1, 401, 9)))           # the front 9 mm notched away from x = 15
+        board("side", material("birch", t=6)).on(m.left).between(m.front + 15)   # within the notch
+    assert no_interference(m) == []

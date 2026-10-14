@@ -4,7 +4,7 @@ from __future__ import annotations
 import math
 from typing import TYPE_CHECKING
 
-from shapely.geometry import Point
+from shapely.geometry import MultiPolygon, Point
 from shapely.geometry import box as shapely_box
 
 from . import directions
@@ -12,6 +12,7 @@ from .box import Box
 from .contours import Contour, footprint, round_offset
 from .directions import AXES, Axis
 from .errors import LangError
+from .geometry import polygons_of
 from .ops import Hole, Pocket
 from .scope import Check, Scope
 from .shapes import Shape
@@ -141,8 +142,10 @@ def _material(part: Board, region: Box) -> Shape:
     span the region's range along the thickness axis."""
     b = part.box()
     t, u, v = part.t_axis, part.u_axis, part.v_axis
-    window = Shape(shapely_box(region.lo[u], region.lo[v], region.hi[u], region.hi[v]))
-    material = part.outline.intersection(window)
+    window = shapely_box(region.lo[u], region.lo[v], region.hi[u], region.hi[v])
+    # (its areas only: a window in a notch of the outline, touching it along the notch's edge,
+    # meets it in a line [found by fuzzing the placement, 2026-10-14: "Shape is not an area"])
+    material = Shape(MultiPolygon(polygons_of(part.outline.geometry.intersection(window))))
     t0, t1 = max(region.lo[t], b.lo[t]), min(region.hi[t], b.hi[t])
     for lo, hi, op in _bands(part):
         if lo <= t0 + _TOLERANCE and t1 <= hi + _TOLERANCE:
