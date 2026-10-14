@@ -8,7 +8,7 @@ from lang import *
 from lang.core.cutouts import circle_geometry
 from lang.core.layout import build_layout
 from lang.core.ops import Chamfer, Cut, EdgeOp, Hole, Pocket
-from lang.core.refs import Affine
+from lang.core.refs import Affine, as_pos
 from lang.core.scope import registry
 from lang.emit.plan import plan_layout
 from helpers import ply15, ply9
@@ -33,6 +33,26 @@ def test_mix_of_positions_needs_weights_summing_to_one():
     with pytest.raises(LangError):
         # a bare sum of positions is not a position
         board("x", ply15).on(Pos("z", 1) + Pos("z", 2), toward=world_frame().direction("top"))
+
+
+def test_a_sum_of_positions_less_a_position_is_a_position():
+    """Decided by Florian, 2026-10-14: `a + b - c` of positions is a
+    position where the weights add up to one (it was a TypeError), also
+    as `a - (b + c) / 2 + ...` sums; a length taken from a sum of positions
+    is an error saying so."""
+    cab = carcass()
+    bottom = cab["bottom"]
+    # the box's top moved up by the bottom's thickness: 720 + 15 - 0
+    assert cab.top + bottom.top - bottom.bottom == Pos("z", 735)
+    assert cab.top + cab.bottom - cab.bottom == Pos("z", 720)
+    assert as_pos(bottom.top - (cab.top + cab.bottom) + cab.top + cab.bottom) == Pos("z", 15)
+    with module("m", Box.from_size(width=600, depth=400, height=700)) as m:
+        shelf = board("shelf", ply15).on(m.bottom + m.top - m.top, toward=m.top)
+    assert shelf.box().lo["z"] == 0
+    with pytest.raises(LangError, match="weights of a sum of positions must add up to 1"):
+        as_pos(Pos("z", 1) + Pos("z", 2) + Pos("z", 3) - Pos("z", 4))         # weights 2
+    with pytest.raises(LangError, match="a length goes with one position"):
+        _ = Pos("z", 1) + Pos("z", 2) - 20
 
 
 def test_box_sides_mix_like_other_positions():

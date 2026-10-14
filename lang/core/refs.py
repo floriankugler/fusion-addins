@@ -5,14 +5,17 @@ floats. The rules (DESIGN.md, Placement and references):
 
 - position +/- length gives a position;
 - position - position gives a length (same axis only);
-- a weighted mix of positions whose weights add up to 1 gives a position;
+- a weighted mix of positions whose weights add up to 1 gives a position,
+  also with positions taken away (`a + b - c`);
 - anything else is an error.
 
 `Pos + Pos` therefore yields an intermediate `Affine` sum that only becomes
-a position once it is scaled so that its weights add up to one, as in
-`(a + b) / 2`.
+a position once its weights add up to one, scaled as in `(a + b) / 2` or
+with a position taken from it as in `a + b - c`.
 
-`Side` is a position with an inward direction, the face of a box. Anything
+`Side` is a position with an inward direction, the face of a box; moved
+into or out of the box (`into`, `gap`) it is still one, and `+` and `-`
+move it along the world axis. Anything
 with a `position` attribute (a `Side`, a part's `Face`, a master's plane)
 is accepted where a position is expected; `as_pos` does the coercion, and
 `PositionArithmetic` gives such a class the algebra above.
@@ -45,7 +48,9 @@ class Pos:
     @overload
     def __add__(self, other: Number) -> Pos: ...
     @overload
-    def __add__(self, other: Pos | Affine | HasPosition) -> Pos | Affine: ...
+    def __add__(self, other: Pos | HasPosition) -> Affine: ...
+    @overload
+    def __add__(self, other: Affine) -> Pos | Affine: ...
 
     def __add__(self, other: Number | Pos | Affine | HasPosition) -> Pos | Affine:
         if isinstance(other, (int, float)):
@@ -63,10 +68,14 @@ class Pos:
     def __sub__(self, other: Number) -> Pos: ...
     @overload
     def __sub__(self, other: Pos | HasPosition) -> float: ...
+    @overload
+    def __sub__(self, other: Affine) -> Pos | Affine: ...
 
-    def __sub__(self, other: Number | Pos | HasPosition) -> Pos | float:
+    def __sub__(self, other: Number | Pos | Affine | HasPosition) -> Pos | Affine | float:
         if isinstance(other, (int, float)):
             return Pos(self.axis, self.value - other)
+        if isinstance(other, Affine):
+            return Affine(self.axis, [(1.0, self.value)]) - other
         other_pos = as_pos(other)
         _same_axis(self, other_pos)
         return self.value - other_pos.value
@@ -94,7 +103,9 @@ def _same_axis(a: Pos, b: Pos) -> None:
 @dataclass(frozen=True)
 class Affine:
     """A weighted sum of positions on one axis. It is a position only when
-    the weights add up to one; `as_pos` checks that."""
+    the weights add up to one; `as_pos` checks that. A position taken from
+    it makes another such sum, so `a + b - c` is a position [decided by
+    Florian, 2026-10-14]."""
 
     axis: Axis
     terms: list[tuple[float, float]]
@@ -119,6 +130,17 @@ class Affine:
         return Affine(self.axis, self.terms + [(1.0, other_pos.value)]).resolved()
 
     __radd__ = __add__
+
+    def __sub__(self, other: Number | Pos | Affine | HasPosition) -> Pos | Affine:
+        if isinstance(other, (int, float)):
+            raise LangError(f"a length goes with one position, not with a sum of positions whose weights add up to "
+                            f"{self.weight:g}: move a position, or the mix once its weights add up to 1.")
+        if not isinstance(other, Affine):
+            pos = as_pos(other)
+            other = Affine(pos.axis, [(1.0, pos.value)])
+        if other.axis != self.axis:
+            raise LangError(f"Cannot combine positions on different axes ({self.axis} and {other.axis}).")
+        return Affine(self.axis, self.terms + [(-w, v) for w, v in other.terms]).resolved()
 
     def __mul__(self, other: Number) -> Pos | Affine:
         return Affine(self.axis, [(w * other, v) for w, v in self.terms]).resolved()
@@ -146,7 +168,9 @@ class PositionArithmetic(ABC):
     @overload
     def __add__(self, other: Number) -> Pos: ...
     @overload
-    def __add__(self, other: Pos | Affine | HasPosition) -> Pos | Affine: ...
+    def __add__(self, other: Pos | HasPosition) -> Affine: ...
+    @overload
+    def __add__(self, other: Affine) -> Pos | Affine: ...
 
     def __add__(self, other: Number | Pos | Affine | HasPosition) -> Pos | Affine:
         return self.position + other
@@ -158,8 +182,10 @@ class PositionArithmetic(ABC):
     def __sub__(self, other: Number) -> Pos: ...
     @overload
     def __sub__(self, other: Pos | HasPosition) -> float: ...
+    @overload
+    def __sub__(self, other: Affine) -> Pos | Affine: ...
 
-    def __sub__(self, other: Number | Pos | HasPosition) -> Pos | float:
+    def __sub__(self, other: Number | Pos | Affine | HasPosition) -> Pos | Affine | float:
         return self.position - other
 
     def __mul__(self, other: Number) -> Affine:
@@ -228,7 +254,9 @@ class Side:
     @overload
     def __add__(self, other: Number) -> Side: ...
     @overload
-    def __add__(self, other: Pos | Affine | HasPosition) -> Pos | Affine: ...
+    def __add__(self, other: Pos | HasPosition) -> Affine: ...
+    @overload
+    def __add__(self, other: Affine) -> Pos | Affine: ...
 
     def __add__(self, other: Number | Pos | Affine | HasPosition) -> Side | Pos | Affine:
         if isinstance(other, (int, float)):
@@ -239,8 +267,10 @@ class Side:
     def __sub__(self, other: Number) -> Side: ...
     @overload
     def __sub__(self, other: Pos | HasPosition) -> float: ...
+    @overload
+    def __sub__(self, other: Affine) -> Pos | Affine: ...
 
-    def __sub__(self, other: Number | Pos | HasPosition) -> Side | float:
+    def __sub__(self, other: Number | Pos | Affine | HasPosition) -> Side | Pos | Affine | float:
         if isinstance(other, (int, float)):
             return Side(self.axis, self.value - other, self.inward)
         return self.position - other
