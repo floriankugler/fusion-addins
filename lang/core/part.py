@@ -1032,7 +1032,9 @@ class Board:
             self._check_chamfer_depth(size, self.thickness, f"the edge {what.name}")
             big = what.a if what.a.is_big else what.b
             self._check_chamfer_wall(size, self._edge_rim(what), big.world_name, f"the edge {what.name}")
-            self._record(Chamfer(what.world_name, size, what.a.world_name), None)
+            # (on the big face, whichever face names the edge first [found by fuzzing, 2026-10-14:
+            # `side.front.inner` put it on the front face, so it did not count for the inner one])
+            self._record(Chamfer(what.world_name, size, big.world_name), None)
         elif isinstance(what, Outline):
             if what.face.part is not self:
                 raise LangError(f"chamfer(): {what.face!r} is not a face of this board.", self.path)

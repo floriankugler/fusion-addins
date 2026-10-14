@@ -350,12 +350,27 @@ def test_chamfer_targets():
     chamfers = [op for op in left.ops if isinstance(op, Chamfer)]
     # front.top runs through the board: a corner of the outline, cut off in it
     assert [op.what for op in chamfers] == ["outline", "front.right", "toekick"]
-    assert [op.face for op in chamfers] == ["left", "front", "left"]
+    assert [op.face for op in chamfers] == ["left", "right", "left"]
     assert left.outline.area == pytest.approx(area - 0.5 * 0.5 ** 2)
     with pytest.raises(LangError):
         left.chamfer(left.ops[1], 1)          # the unnamed hole
     with pytest.raises(LangError):
         left.chamfer(right.front.inner, 1)    # another board's edge
+
+
+def test_an_edge_chamfer_is_on_its_big_face_whichever_face_names_it_first():
+    """Found by fuzzing the placement: `side.front.inner` put the chamfer on
+    the front face and `side.inner.front` on the inner one, so the face a
+    board is machined from (the one more chamfers are made from) differed
+    by how the edge was named."""
+    cab = carcass()
+    left, right = cab["left"], cab["right"]
+    left.chamfer(left.front.inner, 1)
+    right.chamfer(right.inner.front, 1)
+    for side in (left, right):
+        chamfer = side.ops[-1]
+        assert isinstance(chamfer, Chamfer) and chamfer.face == side.inner.world_name
+        assert side.machine_face.direction == side.inner.direction
 
 
 # -- layout --------------------------------------------------------------------
