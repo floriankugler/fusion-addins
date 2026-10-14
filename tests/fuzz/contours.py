@@ -34,9 +34,9 @@ in the world by a `Variant`: those axes on any of the world's, anywhere.
   segments, its plane moved along its normal, its normal turned round), it
   comes out the same in the board's frame, or is refused both times.
 
-Two things are known and open, and marked `KNOWN` (see `_offset_noise`):
-GEOS's simplification of what it offsets, and open contours that run back
-along themselves.
+Decided by Florian (2026-10-14): an open contour that runs back along
+itself (`overhangs`) is refused, and a clearance may come out up to about
+a hundredth more than asked, never less (`_tolerance`).
 """
 from __future__ import annotations
 
@@ -387,8 +387,9 @@ def _star_corners(draw: st.DrawFn) -> list[Point2]:
 
 def _profile_points(draw: st.DrawFn) -> list[Point2]:
     """An open profile as (b, a) in the unit square, b running from 0 to 1
-    (now and then back a little, an overhang): a straight edge, a random
-    walk, steps, or ribs and valleys as the van floor has them."""
+    (now and then back a little, an overhang, which is refused): a straight
+    edge, a random walk, steps, or ribs and valleys as the van floor has
+    them."""
     kind = draw(st.sampled_from(["line", "walk", "walk", "steps", "ribs", "overhang"]))
     if kind == "line":
         return [(0.0, draw(floats(0, 1))), (1.0, draw(floats(0, 1)))]
@@ -463,8 +464,13 @@ def _closed(draw: st.DrawFn, normal: int, p: Range, q: Range, plane: float) -> C
 
 def _open(draw: st.DrawFn, normal: int, along: int, b: Range, a: Range, plane: float) -> ContourSpec:
     """An open profile running along the plane coordinate `along` (0 or 1)
-    over `b`, its other coordinate within `a`."""
+    over `b`, its other coordinate within `a`; now and then with a corner
+    set back behind the one before it, by a rounding (one way still) or a
+    little more (an overhang)."""
     pts = [(b[0] + x * (b[1] - b[0]), a[0] + y * (a[1] - a[0])) for x, y in _profile_points(draw)]
+    if len(pts) > 2 and draw(st.integers(0, 3)) == 0:
+        k = draw(st.integers(1, len(pts) - 2))
+        pts[k] = (pts[k - 1][0] - draw(st.one_of(floats(1e-4, 0.009), floats(0.011, 0.05))), pts[k][1])
     corners = pts if along == 0 else [(y, x) for x, y in pts]
     if draw(st.booleans()):
         corners.reverse()
@@ -704,6 +710,8 @@ def expected(case: ContourCase, variant: Variant | None = None) -> Expected:
             du, dv = abs(points[-1][0] - points[0][0]), abs(points[-1][1] - points[0][1])
             if abs(du - dv) < 1e-6:
                 raise Refusal("the chord runs diagonally")
+            if runs_back([p[_along(spec, points)] for p in points]) > NARROWEST:
+                raise Refusal("an open contour runs back along itself")
             # the axis it limits is the one across its chord; it runs along the other
             axis, along = (1, 1) if du < dv else (2, 0)
             edges[axis].append((i, limit, points, along))
@@ -714,6 +722,8 @@ def expected(case: ContourCase, variant: Variant | None = None) -> Expected:
             regions[i] = Region(_round_offset(area, -g), area, area.boundary)
             sections[s].append(regions[i].allowed)
         else:
+            if runs_back([p[0] for p in points]) > NARROWEST:
+                raise Refusal("an open contour runs back along itself")
             crossings[s].append((i, limit, points))
 
     extents: dict[int, Range] = {}
@@ -937,50 +947,48 @@ def _same(a: Outcome | Expected, b: Outcome | Expected) -> tuple[str, float] | N
     return None
 
 
-#: Known and open (2026-10-14), so the checks mark them `KNOWN`:
-#:
-#: - GEOS simplifies what it offsets, by about a hundredth of the distance
-#:   (a pass; up to 1.4 % seen) and only toward more clearance, and how
-#:   depends on the form it is given. `contours.round_offset` gives it one
-#:   form, but a mirrored area (the board's axes the other way round, or
-#:   the reckoning's region against the language's) is another, so a
-#:   clearance can differ by that much. Whether to offset exactly is
-#:   Florian's to decide: an own offset of rectangles and discs was exact,
-#:   but GEOS unites such pieces wrongly where their edges nearly coincide.
-#: - An open contour that runs back along the direction it runs in (an
-#:   overhang): which side of it the board fills is open. The language
-#:   closes the region beyond it into a ring and makes that valid; the
-#:   reckoning splits a square with it.
-def _offset_noise(case: ContourCase) -> float:
-    """How much GEOS's simplification may move a board (mm)."""
+def _tolerance(case: ContourCase) -> float:
+    """How far apart (mm) two builds of the case, or a build and the
+    reckoning, may put a board's ends. A clearance may come out up to about
+    a hundredth more than asked, never less [decided by Florian,
+    2026-10-14]: GEOS simplifies what it offsets by about that much a pass
+    (1.4 % seen, so twice that here), as the form it is given goes, and a
+    mirrored area (the board's axes the other way round, or the reckoning's
+    region against the language's) is another form. Never less is checked
+    on its own (`_limit_problems`)."""
     return 0.02 * max((abs(_gap(limit)) for limit in case.limits if limit.kind == "contour"), default=0.0) + 1e-5
 
 
+def runs_back(values: list[float]) -> float:
+    """How far a run of coordinates lies behind the furthest it reached, run
+    from its first toward its last."""
+    sign = 1.0 if values[-1] >= values[0] else -1.0
+    furthest, back = -math.inf, 0.0
+    for v in values:
+        furthest = max(furthest, sign * v)
+        back = max(back, furthest - sign * v)
+    return back
+
+
+def _along(spec: ContourSpec, points: list[Point2]) -> int:
+    """The plane coordinate an open contour must run one way along: its
+    chord's longer one in the board's plane, t across it."""
+    if spec.normal != 0:
+        return 0
+    return 1 if abs(points[-1][0] - points[0][0]) < abs(points[-1][1] - points[0][1]) else 0
+
+
 def overhangs(case: ContourCase) -> bool:
-    """Whether an open contour the board takes runs back along the
-    direction it runs in: along its chord in the board's plane, along t
-    across it."""
+    """Whether an open contour the board takes runs back along the way it
+    runs by more than `NARROWEST`, an overhang, which `between()` refuses
+    [decided by Florian, 2026-10-14]."""
     for limit in case.limits:
-        if limit.kind != "contour" or case.contours[limit.index].closed:
-            continue
         spec = case.contours[limit.index]
-        pts = polyline(spec)
-        along = 0
-        if spec.normal == 0:
-            along = 1 if abs(pts[-1][0] - pts[0][0]) < abs(pts[-1][1] - pts[0][1]) else 0
-        steps = [q[along] - p[along] for p, q in zip(pts, pts[1:])]
-        if any(d > 1e-9 for d in steps) and any(d < -1e-9 for d in steps):
-            return True
+        if limit.kind == "contour" and not spec.closed:
+            pts = polyline(spec)
+            if runs_back([p[_along(spec, pts)] for p in pts]) > NARROWEST:
+                return True
     return False
-
-
-def _known(case: ContourCase, problem: str, off: float | None = None) -> str:
-    """The problem, marked known when it is one of the open items above."""
-    if overhangs(case):
-        return f"{KNOWN} an open contour runs back along itself; {problem}"
-    if off is not None and off <= _offset_noise(case):
-        return f"{KNOWN} offsets differ by GEOS's simplification; {problem}"
-    return problem
 
 
 def run_case(case: ContourCase) -> list[str]:
@@ -997,11 +1005,11 @@ def run_case(case: ContourCase) -> list[str]:
                       if "/lang/" in fr.filename), traceback.extract_tb(e.__traceback__)[-1])
         return [f"{type(e).__name__} at {Path(frame.filename).name}:{frame.lineno}: {e}"]
     if (first.refused is None) != (second.refused is None):
-        return problems + [_known(case, f"one variant refuses, the other not: {first.refused or second.refused}")]
+        return problems + [f"one variant refuses, the other not: {first.refused or second.refused}"]
     if first.refused is None:
         diff = _same(first, second)
-        if diff:
-            return problems + [_known(case, f"another variant comes out otherwise: {diff[0]}", diff[1])]
+        if diff and diff[1] > _tolerance(case):
+            return problems + [f"another variant comes out otherwise: {diff[0]}"]
     return problems
 
 
@@ -1025,15 +1033,15 @@ def _attempt(case: ContourCase, variant: Variant, check: bool) -> tuple[list[str
         want, reason = None, str(r)
     if got.refused is not None:
         if want is not None:
-            problems.append(_known(case, f"refused ({got.refused}), though it fits"))
+            problems.append(f"refused ({got.refused}), though it fits")
         return problems, got
     if want is None:
-        problems.append(_known(case, f"accepted, though {reason}"))
+        problems.append(f"accepted, though {reason}")
         return problems, got
-    problems += [_known(case, p) for p in _limit_problems(case, got, want.regions)]
+    problems += _limit_problems(case, got, want.regions)
     diff = _same(got, want)
-    if diff:
-        problems.append(_known(case, f"not the board worked out: {diff[0]}", diff[1]))
+    if diff and diff[1] > _tolerance(case):
+        problems.append(f"not the board worked out: {diff[0]}")
     problems += _inside_problems(case, built)
     problems += _pipeline_problems()
     return problems, got
@@ -1046,8 +1054,8 @@ def apply(case: ContourCase, name: str) -> None:
 
 
 def accepted(case: ContourCase) -> bool:
-    """Whether the case's board is accepted and keeps every promise, known
-    items included."""
+    """Whether the case's board is accepted and keeps every promise, the
+    pipeline's known problems included."""
     if run_case(case):
         return False
     with fresh():

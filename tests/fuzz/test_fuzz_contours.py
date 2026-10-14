@@ -65,7 +65,8 @@ def test_a_round_offset_is_the_same_however_its_rings_come(g: BaseGeometry, d: f
     it keeps at least the distance from the area's edges, less only by its
     arcs' chords, and more by no more than GEOS's simplification (a
     hundredth of the distance a pass), which is all that a mirrored or
-    moved area may change (`contours.KNOWN`'s first item)."""
+    moved area may change: a clearance up to about a hundredth more than
+    asked, never less, is accepted [decided by Florian, 2026-10-14]."""
     distance = d if grow else -d
     got = round_offset(g, distance)
     assert got.is_valid
