@@ -916,18 +916,51 @@ class Board:
         """An error for a pocket or hole through the board that, with those
         made before, splits the board in pieces or leaves nothing of it, as
         a through cut may not [found by fuzzing, 2026-10-12]. A piece joined
-        to the rest only at a point is apart (`_pieces`)."""
-        new = self._through_footprint(op)
-        if new is None:
+        to the rest only at a point is apart (`_pieces`). A pocket or hole
+        that goes through where it meets one from the other face, the two
+        as deep as the board together, counts there too [found by fuzzing,
+        2026-10-14: two circle pockets, from either face and half the
+        thickness each, covered all of a board and left nothing of it]."""
+        alone = self._through_footprint(op)
+        partners = [] if alone is not None else self._through_partners(op, self.ops)
+        if alone is None and not partners:
             return
-        taken = [g for g in (self._through_footprint(o) for o in self.ops) if g is not None] + [new]
+        taken = self._through_regions([*self.ops, op])
         rest = self.outline.geometry.difference(unary_union(taken))
+        how = "goes through the board" if alone is not None else \
+            f"goes through the board with {self._label(partners[0], partners[0].name)} from the other face"
         if rest.area <= 1e-6:
             # [found by fuzzing, 2026-10-13: a circle wider than the board, through it, left nothing,
             # which a cut may not either]
-            raise LangError(f"{self._label(op, name)} goes through the board and leaves nothing of it.", self.path)
+            raise LangError(f"{self._label(op, name)} {how} and leaves nothing of it.", self.path)
         if _pieces(rest) > _pieces(self.outline.geometry):
-            raise LangError(f"{self._label(op, name)} goes through the board and splits it in pieces.", self.path)
+            raise LangError(f"{self._label(op, name)} {how} and splits it in pieces.", self.path)
+
+    def _bore(self, op: Pocket | Hole) -> BaseGeometry:
+        """What a pocket or hole takes at its full depth: its shape, a hole's
+        bore (without its countersink)."""
+        return op.shape.geometry if isinstance(op, Pocket) else cutout_geometry.circle_geometry((op.u, op.v), op.d / 2)
+
+    def _through_partners(self, op: Op, ops: Sequence[Op]) -> list[Pocket | Hole]:
+        """The pockets and holes of `ops` from the big face opposite `op`'s
+        that meet it, the two as deep as the board together."""
+        if not isinstance(op, (Pocket, Hole)) or not self._on_big_face(op.face):
+            return []
+        bore = self._bore(op)
+        return [o for o in ops if isinstance(o, (Pocket, Hole)) and o is not op and self._on_big_face(o.face)
+                and o.face != op.face and o.depth + op.depth >= self.thickness - 1e-9
+                and self._bore(o).intersection(bore).area > 1e-6]
+
+    def _through_regions(self, ops: Sequence[Op]) -> list[BaseGeometry]:
+        """What `ops` take through the board: each pocket or hole through it
+        alone, and where two from opposite faces meet, as deep as the board
+        together."""
+        out = [g for g in (self._through_footprint(o) for o in ops) if g is not None]
+        for k, o in enumerate(ops):
+            if isinstance(o, (Pocket, Hole)) and self._through_footprint(o) is None:
+                out += [self._bore(o).intersection(self._bore(q)) for q in self._through_partners(o, ops[k + 1:])
+                        if self._through_footprint(q) is None]
+        return out
 
     def cut(self, shape: Shape | Board | Box, at: Anchor | Edge | None = None, name: str | None = None,
             chamfer: float = 0.0) -> Self:

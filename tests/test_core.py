@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 from shapely.geometry import Point
+from shapely.geometry import box as shapely_box
 
 from lang import *
 from lang.core.cutouts import circle_geometry
@@ -1226,6 +1227,29 @@ def test_a_pocket_or_groove_with_nothing_left_to_cut_is_refused():
         with pytest.raises(LangError, match="nothing to cut"):
             panel.add_pocket(bottom, Shape(Point(250, 300).buffer(10)), 2)  # in the hole through
     assert len(panel.ops) == 7
+
+
+def test_pockets_from_either_face_through_together_may_not_leave_nothing_or_split_the_board():
+    """Found by fuzzing dog bones: two circle pockets, from either face of a
+    6 mm board and 3 deep each, covered all of it, so together they left
+    nothing of the board, which the preview could not mesh. Where pockets
+    or holes from opposite faces meet as deep as the board together, they
+    go through there, and are held to what a pocket through it is."""
+    with module("m", Box.from_size(width=40, depth=40, height=100)) as m:
+        panel = board("panel", material("birch", t=6)).on(m.bottom)
+        panel.add_pocket(panel.top, Shape(Point(0, 0).buffer(80.5, quad_segs=64)), 3, name="top_dish")
+        with pytest.raises(LangError, match=r"^m\.panel: the pocket 'bottom_dish' goes through the board with the "
+                                            r"pocket 'top_dish' from the other face and leaves nothing of it\.$"):
+            panel.add_pocket(panel.bottom, Shape(Point(0, 0).buffer(81, quad_segs=64)), 3, name="bottom_dish")
+    with module("n", Box.from_size(width=40, depth=40, height=100)) as n:
+        strip = board("strip", material("birch", t=6)).on(n.bottom)
+        strip.add_pocket(strip.top, Shape(shapely_box(-1, 15, 41, 25)), 3, name="top_band")
+        with pytest.raises(LangError, match="goes through the board with the pocket 'top_band' from the other face "
+                                            "and splits it in pieces"):
+            strip.add_pocket(strip.bottom, Shape(shapely_box(-1, 10, 41, 30)), 4)          # along it, 7 deep in all
+        strip.add_pocket(strip.bottom, Shape(shapely_box(-1, 10, 41, 30)), 2)              # 5 deep in all: no way through
+        strip.add_pocket(strip.bottom, Shape(shapely_box(5, 18, 8, 22)), 4)                # through, but only a window
+    assert [len(panel.ops), len(strip.ops)] == [1, 3]
 
 
 def test_a_cut_may_not_leave_only_what_through_pockets_take():
