@@ -245,11 +245,15 @@ class Side:
 
 
 def spread(start: PosLike, end: PosLike, pitch: float | None = None, count: int | None = None) -> list[Pos]:
-    """Positions from `start` to `end` on one axis.
+    """Positions from `start` to `end` on one axis, in that order.
 
     With `count`, that many positions including both ends (one position is
     centred). With `pitch`, as many as fit at that spacing, centred within
-    the span so the leftover is shared at both ends."""
+    the span so the leftover is shared at both ends; a span within a
+    nanometre of a whole number of pitches fits that many [found by
+    fuzzing, 2026-10-14: rounding left one a hair short at some places,
+    and it fitted one position fewer there; and the positions ran from the
+    lower coordinate, whichever end came first]."""
     a, b = as_pos(start, "spread start"), as_pos(end, "spread end")
     _same_axis(a, b)
     if count is not None and pitch is not None:
@@ -261,12 +265,16 @@ def spread(start: PosLike, end: PosLike, pitch: float | None = None, count: int 
             raise LangError("spread: count must be at least 1.")
         if count == 1:
             return [Pos(a.axis, (lo + hi) / 2)]
-        return [Pos(a.axis, lo + span * i / (count - 1)) for i in range(count)]
-    if pitch is None or pitch <= 0:
-        raise LangError("spread: give a positive pitch or a count.")
-    n = int(span // pitch) + 1
-    rest = span - (n - 1) * pitch
-    return [Pos(a.axis, lo + rest / 2 + i * pitch) for i in range(n)]
+        values = [lo + span * i / (count - 1) for i in range(count)]
+    else:
+        if pitch is None or pitch <= 0:
+            raise LangError("spread: give a positive pitch or a count.")
+        n = int((span + EPS) // pitch) + 1
+        rest = span - (n - 1) * pitch
+        values = [lo + rest / 2 + i * pitch for i in range(n)]
+    if a.value > b.value:
+        values.reverse()
+    return [Pos(a.axis, v) for v in values]
 
 
 class HasName(Protocol):

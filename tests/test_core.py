@@ -748,6 +748,19 @@ def test_spread_takes_pitch_or_count():
         spread(Pos("z", 0), Pos("z", 100), pitch=32, count=3)
 
 
+def test_spread_runs_from_its_start_and_fits_alike_anywhere():
+    """Found by fuzzing the placement: spread() gave its positions from the
+    lower coordinate whichever end came first, so a row in a cabinet facing
+    another way ran the other way round; and a span of a whole number of
+    pitches fitted one position fewer where rounding left it a hair short
+    (from 0.1 to 64.1 is 63.99999999999999)."""
+    assert spread(Pos("z", 100), Pos("z", 0), count=3) == [Pos("z", 100), Pos("z", 50), Pos("z", 0)]
+    assert [p.value for p in spread(Pos("z", 100), Pos("z", 0), pitch=32)] == pytest.approx([98, 66, 34, 2])
+    for start in (0.0, 0.1, 1234.1):
+        assert len(spread(Pos("z", start), Pos("z", start + 64), pitch=32)) == 3
+        assert len(spread(Pos("z", start + 64), Pos("z", start), pitch=32)) == 3
+
+
 def test_positions_are_not_numbers():
     with pytest.raises(TypeError):
         float(Pos("z", 12.5))  # type: ignore[arg-type]
