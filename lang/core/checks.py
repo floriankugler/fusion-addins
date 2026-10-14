@@ -9,7 +9,7 @@ from shapely.geometry import box as shapely_box
 
 from . import directions
 from .box import Box
-from .contours import Contour, footprint
+from .contours import Contour, footprint, round_offset
 from .directions import AXES, Axis
 from .errors import LangError
 from .ops import Hole, Pocket
@@ -220,7 +220,8 @@ def inside(contour: Contour, gap: float = 0.0) -> Check:
         raise LangError(f"inside(): contour {contour.name!r} is open; the check needs a closed one.")
     n = contour.normal_axis
     others: list[Axis] = [a for a in AXES if a != n]
-    allowed = contour.polygon(others[0], others[1]).buffer(_TOLERANCE - gap)
+    # (offset as between() offsets a clearance, however the contour's points run)
+    allowed = round_offset(contour.polygon(others[0], others[1]), _TOLERANCE - gap)
 
     def check(scope: Scope) -> list[str]:
         problems: list[str] = []

@@ -4,9 +4,11 @@ import math
 from pathlib import Path
 
 import pytest
-from shapely.geometry import Point
+from shapely.geometry import MultiPolygon, Point, Polygon, box
 
 from lang import *
+from lang.core.contours import round_offset
+from lang.core.geometry import polygons_of
 from lang.core.layout import build_layout
 from lang.core.refs import as_pos
 from helpers import ply12, ply15
@@ -231,6 +233,40 @@ def test_an_open_contours_clearance_counts_at_a_face_whichever_way_it_runs():
         b = board(f"bent{i}", material("thick", t=40)).center(Pos("x", 134)).between(
             _contour("bent", points, False).into(17), Pos("y", 1000), Pos("z", 0), Pos("z", 50))
         assert b.box().lo["y"] == pytest.approx(6.2)
+
+
+def test_a_clearance_does_not_depend_on_how_the_contours_points_run():
+    """The same outline, run the other way with points added along two of
+    its edges, keeps the board where it was: GEOS's offset, which
+    simplifies what it offsets as the points come, moved the board's end
+    0.03 mm (the whole offset 0.14 mm) for a 26 mm gap. Fuzzing found it."""
+    points = [(3.9415, 125.9767), (4.4927, 126.3301), (56.21, 141.3801), (56.21, 0.0), (3.7272, 2.4822)]
+    back = points[::-1]
+    resampled: list[tuple[float, float]] = []
+    for j, (p, q) in enumerate(zip(back, back[1:] + back[:1])):
+        resampled.append(p)
+        if j % 3 == 0:
+            resampled += [(p[0] + f * (q[0] - p[0]), p[1] + f * (q[1] - p[1])) for f in (0.3, 0.5, 0.7)]
+    lows: list[float] = []
+    for i, ring in enumerate([points, resampled]):
+        b = board(f"panel{i}", ply15).center(Pos("z", 0)).between(_contour("outline", ring, True).gap(26))
+        lows.append(b.box().lo["x"])
+    assert lows[1] == pytest.approx(lows[0], abs=1e-9)
+
+
+def test_an_offset_is_the_same_with_points_along_its_edges():
+    """Points added along the edges of an area do not change its offset:
+    simplified away, the points Douglas-Peucker split at stayed, and the
+    square's four corners outside a rounded square grew otherwise.
+    Fuzzing found it."""
+    square = box(-1, -1, 1, 1)
+    corners = square.difference(Shape(square).rounded(0.5).geometry)
+
+    def along(ring: list[tuple[float, float]]) -> list[tuple[float, float]]:
+        return [x for p, q in zip(ring, ring[1:] + ring[:1])
+                for x in (p, (p[0] + 0.25 * (q[0] - p[0]), p[1] + 0.25 * (q[1] - p[1])))]
+    more = MultiPolygon([Polygon(along([(x, y) for x, y in p.exterior.coords][:-1])) for p in polygons_of(corners)])
+    assert round_offset(more, 1).symmetric_difference(round_offset(corners, 1)).area == 0
 
 
 def test_an_end_picks_one_piece_of_a_cut_up_board(van: Master):

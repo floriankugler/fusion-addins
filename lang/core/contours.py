@@ -22,10 +22,12 @@ with shapely; nothing is projected in Fusion.
 """
 from __future__ import annotations
 
-from collections.abc import Sequence
+import math
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import NamedTuple, cast
 
+import shapely
 from shapely import make_valid
 from shapely.geometry import LineString, MultiPolygon, Polygon
 from shapely.geometry import box as shapely_box
@@ -130,9 +132,56 @@ def _area(g: BaseGeometry) -> BaseGeometry:
     return unary_union(parts) if parts else Polygon()
 
 
-def _offset(area: BaseGeometry, distance: float) -> BaseGeometry:
-    """Grown (positive) or shrunk; round joins keep the clearance exact."""
-    return area.buffer(distance) if distance else area
+def round_offset(area: BaseGeometry, distance: float) -> BaseGeometry:
+    """The area grown by `distance` (shrunk when it is negative); round
+    joins keep a clearance exact at corners. GEOS simplifies what it
+    offsets, by about a hundredth of the distance and only ever toward more
+    clearance, and how depends on where a ring starts, which way it runs
+    and the points along its edges: so the area is given to it in one
+    form, those points dropped (the same outline run the other way with
+    points added along it kept 26.03 mm instead of a 26 mm gap [found by
+    fuzzing, 2026-10-14]). (An offset of its own, a rectangle along every
+    segment and a disc about every vertex, would be exact, but GEOS unites
+    such pieces wrongly, without an error, where their edges nearly
+    coincide, as along a strip twice the distance wide.)"""
+    if not distance:
+        return area
+    polygons = [Polygon(_ring_without_edge_points(p.exterior.coords),
+                        [_ring_without_edge_points(h.coords) for h in p.interiors]) for p in polygons_of(area)]
+    return shapely.normalize(polygons[0] if len(polygons) == 1 else MultiPolygon(polygons)).buffer(distance)
+
+
+def _ring_without_edge_points(coords: Iterable[Sequence[float]]) -> list[Point2]:
+    """A ring's vertices without those that lie on the edge between their
+    neighbours (within 1e-9 mm) or on the one before. (Simplifying it does
+    not drop them all: a point Douglas-Peucker splits at stays.)"""
+    out: list[Point2] = []
+    for c in list(coords)[:-1]:
+        p = (float(c[0]), float(c[1]))
+        while len(out) >= 2 and _on_edge(out[-2], out[-1], p):
+            out.pop()
+        if not out or p != out[-1]:
+            out.append(p)
+    changed = True
+    while changed and len(out) > 3:
+        changed = False
+        if _on_edge(out[-2], out[-1], out[0]) or out[-1] == out[0]:
+            out.pop()
+            changed = True
+        elif _on_edge(out[-1], out[0], out[1]):
+            out.pop(0)
+            changed = True
+    return out
+
+
+def _on_edge(a: Point2, b: Point2, c: Point2) -> bool:
+    """Whether b lies on the edge from a to c, within 1e-9 mm."""
+    dx, dy = c[0] - a[0], c[1] - a[1]
+    length2 = dx * dx + dy * dy
+    if length2 == 0:
+        return False
+    t = ((b[0] - a[0]) * dx + (b[1] - a[1]) * dy) / length2
+    return 0 < t < 1 and abs((b[0] - a[0]) * dy - (b[1] - a[1]) * dx) <= 1e-9 * math.sqrt(length2)
 
 
 class _OpenEdge:
@@ -193,7 +242,7 @@ def _beyond(points: list[Point2], side: int, gap: float) -> BaseGeometry:
     lo_b, hi_b = pts[0][0] - _FAR, pts[-1][0] + _FAR
     far_a = min(values) - _FAR if side > 0 else max(values) + _FAR
     ring = [(lo_b, pts[0][1])] + pts + [(hi_b, pts[-1][1]), (hi_b, far_a), (lo_b, far_a)]
-    return _offset(_area(make_valid(Polygon(ring))), gap)
+    return round_offset(_area(make_valid(Polygon(ring))), gap)
 
 
 def _swap(g: BaseGeometry) -> BaseGeometry:
@@ -236,7 +285,7 @@ class ContourLimits:
             raise LangError(error.message, self.path) from None
         if n == self.t:
             if c.closed:
-                self.areas.append((c.name, _offset(c.polygon(self.u, self.v), -limit.gap)))
+                self.areas.append((c.name, round_offset(c.polygon(self.u, self.v), -limit.gap)))
                 return
             (u0, v0), (u1, v1) = c.coords(self.u, self.v)[0], c.coords(self.u, self.v)[-1]
             du, dv = abs(u1 - u0), abs(v1 - v0)
@@ -248,7 +297,7 @@ class ContourLimits:
             return
         s: Axis = next(x for x in AXES if x not in (n, self.t))
         if c.closed:
-            self.sections[s].append((c.name, _offset(c.polygon(self.t, s), -limit.gap)))
+            self.sections[s].append((c.name, round_offset(c.polygon(self.t, s), -limit.gap)))
         else:
             self.crossings[s].append((limit, LineString(c.coords(self.t, s))))
 
