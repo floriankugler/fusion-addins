@@ -161,6 +161,32 @@ def test_contour_errors(van: Master):
                                                         Pos("x", 2600), Pos("y", -800), Pos("y", -700)).box()
 
 
+def _contour(name: str, points: list[tuple[float, float]], closed: bool, normal: str = "z") -> Contour:
+    """A contour in the plane through the origin perpendicular to `normal`,
+    its points in that plane's other two axes in x, y, z order."""
+    i = "xyz".index(normal)
+    axis = [0.0, 0.0, 0.0]
+    axis[i] = 1.0
+
+    def at(p: tuple[float, float]) -> tuple[float, float, float]:
+        c = list(p)
+        c.insert(i, 0.0)
+        return (c[0], c[1], c[2])
+    return Contour(name, tuple(at(p) for p in points), closed, (0.0, 0.0, 0.0), (axis[0], axis[1], axis[2]))
+
+
+def test_a_board_across_a_contour_fits_over_its_whole_thickness():
+    """A notch in the contour whose tip lies between the board's faces
+    stops the board at the tip; sectioned at the two faces alone, the
+    board ran 75 mm into it. Fuzzing found it."""
+    notched = _contour("notched", [(0, 0), (200, 0), (200, 500), (110, 500), (100, 400), (90, 500), (0, 500)], True)
+    b = board("b", ply15).center(Pos("x", 100)).between(notched, Pos("z", 0), Pos("z", 50))
+    assert (b.box().lo["y"], b.box().hi["y"]) == pytest.approx((0, 400))
+    # beside the notch, the board reaches the contour's edge
+    beside = board("beside", ply15).center(Pos("x", 50)).between(notched, Pos("z", 0), Pos("z", 50))
+    assert beside.box().hi["y"] == pytest.approx(500)
+
+
 def test_an_end_picks_one_piece_of_a_cut_up_board(van: Master):
     """A batten along the wall is cut in two by the wheel arch: with both
     ends it is an error that names the pieces, one end takes its piece."""

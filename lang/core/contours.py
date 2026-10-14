@@ -10,11 +10,11 @@ way the board's plane meets it:
   at: it limits the axis across its chord (the line from its first to its
   last point), the board keeps the side its other limit on that axis is
   on, and the edge follows the contour, `batten.between(top, profile)`.
-- In a perpendicular plane, it is sectioned at both big faces of the board
-  and the tighter result wins, so the board fits over its whole
-  thickness. A closed contour gives a stretch on the axis the two planes
-  share, `batten.between(top, profile, floor_outline)`; an open one a
-  position on it.
+- In a perpendicular plane, the board fits over its whole thickness: its
+  section across that plane, from one big face to the other, keeps clear
+  of the contour. A closed contour gives a stretch on the axis the two
+  planes share, `batten.between(top, profile, floor_outline)`; an open one
+  a position on it.
 
 `contour.gap(n)` keeps n mm of clearance, measured in the contour's
 plane; `contour.into(n)` reaches n mm past it. All of it is polyline math
@@ -28,6 +28,7 @@ from typing import cast
 
 from shapely import make_valid
 from shapely.geometry import LineString, MultiPolygon, Polygon
+from shapely.geometry import box as shapely_box
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
 
@@ -44,8 +45,8 @@ Point2 = tuple[float, float]
 _FAR = 1e5
 #: A contour is planar when its points lie this close to its plane (mm).
 _PLANAR = 0.01
-#: Faces are sectioned this far inside the board, so that a contour edge
-#: lying exactly in a face does not count as crossing it.
+#: A closed contour must hold the board this far inside its faces, so that
+#: a contour edge lying exactly in a face does not count as crossing it.
 _INSIDE = 1e-6
 
 
@@ -285,8 +286,8 @@ class ContourLimits:
 
     def stretch(self, axis: Axis, values: Sequence[float], centre: float | None) -> tuple[float, float] | None:
         """The stretch on `axis` that closed contours leave: the bounds of
-        those in the board's plane, and the sections of those in
-        perpendicular planes at both faces (tighter wins). Where a section
+        those in the board's plane, and where those in perpendicular planes
+        hold the board over its whole thickness (`_fits`). Where that
         falls into several stretches, the board's limits on the axis pick
         one: a single limit the stretch it lies in, two limits the one
         stretch between them (more is an error: the contour would cut the
@@ -301,13 +302,9 @@ class ContourLimits:
             lo, hi = max(lo, b[i]), min(hi, b[i + 2])
             found = True
         for name, area in self.sections[axis]:
-            pieces = None
-            for t in (self.t_lo + _INSIDE, self.t_hi - _INSIDE):
-                at_face = self._section(area, t)
-                pieces = at_face if pieces is None else _intersect(pieces, at_face)
-            pieces = [p for p in pieces or [] if p[1] - p[0] > 1e-9]
+            pieces = self._fits(area)
             if not pieces:
-                raise LangError(f"the board lies outside contour {name!r} (sectioned at {self.t}="
+                raise LangError(f"the board lies outside contour {name!r} (between {self.t}="
                                 f"{self.t_lo:g} and {self.t_hi:g}).", self.path)
             if len(pieces) > 1:
                 pieces = self._pick(name, axis, pieces, values, centre)
@@ -337,15 +334,18 @@ class ContourLimits:
                             f"{where} lies in none of them; give a limit inside the one meant.", self.path)
         return chosen
 
-    def _section(self, area: BaseGeometry, t: float) -> list[tuple[float, float]]:
+    def _fits(self, area: BaseGeometry) -> list[tuple[float, float]]:
+        """The stretches of the shared axis over which the board's section
+        across the contour's plane, from face to face, lies inside the
+        area (in (t, s)): what the pieces of that band outside the area,
+        projected onto the axis, leave. (Sections at the two faces alone
+        missed a notch of the contour between them, and the board ran into
+        it [found by fuzzing, 2026-10-14].)"""
+        if area.is_empty:
+            return []
         lo, hi = area.bounds[1] - 1.0, area.bounds[3] + 1.0
-        hit = area.intersection(LineString([(t, lo), (t, hi)]))
-        out: list[tuple[float, float]] = []
-        for g in parts_of(hit):
-            if isinstance(g, LineString):
-                ys = [float(y) for _, y in g.coords]
-                out.append((min(ys), max(ys)))
-        return sorted(out)
+        band = shapely_box(self.t_lo + _INSIDE, lo, self.t_hi - _INSIDE, hi)
+        return _free(band.difference(area), lo, hi)
 
     # -- the outline ------------------------------------------------------------------
 
@@ -382,14 +382,19 @@ def _crossings(line: LineString, t: float) -> list[float]:
     return sorted(values)
 
 
-def _intersect(a: list[tuple[float, float]], b: list[tuple[float, float]]) -> list[tuple[float, float]]:
+def _free(blocked: BaseGeometry, lo: float, hi: float) -> list[tuple[float, float]]:
+    """What is left of `lo` to `hi` on the second axis when each piece of
+    `blocked` (in (t, s)) is projected onto it."""
+    taken = sorted((float(p.bounds[1]), float(p.bounds[3])) for p in polygons_of(blocked))
     out: list[tuple[float, float]] = []
-    for a0, a1 in a:
-        for b0, b1 in b:
-            lo, hi = max(a0, b0), min(a1, b1)
-            if hi > lo:
-                out.append((lo, hi))
-    return out
+    here = lo
+    for b0, b1 in taken:
+        if b0 > here:
+            out.append((here, b0))
+        here = max(here, b1)
+    if hi > here:
+        out.append((here, hi))
+    return [p for p in out if p[1] - p[0] > 1e-9]
 
 
 def footprint(box: Box, outline: Shape | None, t: Axis, n: Axis) -> BaseGeometry:
@@ -400,5 +405,4 @@ def footprint(box: Box, outline: Shape | None, t: Axis, n: Axis) -> BaseGeometry
     a, b = others
     if outline is not None and t == n:
         return outline.geometry
-    from shapely.geometry import box as shapely_box
     return shapely_box(box.lo[a], box.lo[b], box.hi[a], box.hi[b])
