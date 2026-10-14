@@ -5,6 +5,7 @@ import pytest
 from shapely.geometry import Point
 
 from lang import *
+from lang.core.cutouts import circle_geometry
 from lang.core.layout import build_layout
 from lang.core.ops import Chamfer, Cut, EdgeOp, Hole, Pocket
 from lang.core.refs import Affine
@@ -785,6 +786,27 @@ def test_a_pocket_through_the_board_may_not_split_it():
         with pytest.raises(LangError, match="splits it in pieces"):
             panel.pocket(rect(depth=10, width=400), at=panel.top.front(250).left(0), depth=through)
     assert len(panel.ops) == 1
+
+
+@pytest.mark.parametrize("origin", [0.0, 0.1, 260.0, 1234.56, -5255.0, 3000.3, 17.25, 99.9])
+def test_a_hole_through_the_board_that_leaves_a_corner_hanging_at_a_point_splits_it(origin: float):
+    """Found by fuzzing the checks: a 118 mm hole through a 519 by 746
+    board, tangent to its edge and over the next one, cuts the corner off
+    but for the point where it touches the edge. It was refused at most
+    places and kept where the rounding put the circle 1e-15 short of the
+    edge (at 0.1). It is refused at every place now, as a through pocket
+    of that circle is; one touching the edge further in, which cuts
+    nothing off, is kept, as Fusion builds it."""
+    with module("m", Box.from_size(width=746, depth=519, height=100, origin=(origin, origin, 0))) as m:
+        panel = board("panel", material("birch", t=31)).on(m.bottom)
+    corner = (origin + 482, origin + 59)
+    with pytest.raises(LangError, match="the hole 'corner' goes through the board and splits it in pieces"):
+        panel.add_hole(panel.top, corner, 118, through, name="corner")
+    with pytest.raises(LangError, match="splits it in pieces"):
+        panel.add_pocket(panel.top, Shape(circle_geometry(corner, 59)), through)
+    panel.add_hole(panel.top, (origin + 200, origin + 59), 118, through)          # touches the edge only
+    panel.add_pocket(panel.top, Shape(circle_geometry((origin + 200, origin + 687), 59)), through)
+    assert [op.kind for op in panel.ops] == ["hole", "pocket"]
 
 
 def test_a_pocket_through_the_board_may_not_leave_nothing_of_it():

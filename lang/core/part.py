@@ -783,7 +783,8 @@ class Board:
     def _check_through(self, op: Op, name: str | None) -> None:
         """An error for a pocket or hole through the board that, with those
         made before, splits the board in pieces or leaves nothing of it, as
-        a through cut may not [found by fuzzing, 2026-10-12]."""
+        a through cut may not [found by fuzzing, 2026-10-12]. A piece joined
+        to the rest only at a point is apart (`_pieces`)."""
         new = self._through_footprint(op)
         if new is None:
             return
@@ -793,7 +794,7 @@ class Board:
             # [found by fuzzing, 2026-10-13: a circle wider than the board, through it, left nothing,
             # which a cut may not either]
             raise LangError(f"{self._label(op, name)} goes through the board and leaves nothing of it.", self.path)
-        if len([p for p in parts_of(rest) if p.area > 1e-6]) > len(self.outline.polygons()):
+        if _pieces(rest) > _pieces(self.outline.geometry):
             raise LangError(f"{self._label(op, name)} goes through the board and splits it in pieces.", self.path)
 
     def cut(self, shape: Shape | Board | Box, at: Anchor | Edge | None = None, name: str | None = None,
@@ -1684,6 +1685,23 @@ class PartLimit:
     from it (`part.gap(n)`)."""
     part: Board
     offset: float
+
+
+def _pieces(g: BaseGeometry) -> int:
+    """How many pieces of 1e-6 mm2 or more `g` is in, a piece joined to the
+    rest only at a point counted apart, as an opening touching the outline
+    at a point is refused [Florian, 2026-10-12]: the more of its own pieces
+    and of those it falls in opened by `_PINCH`, which parts it where it is
+    joined narrower than that (a copy, for counting; the geometry stays as
+    it is). A through hole tangent to the board's edge that cut a corner
+    off but for that point was refused or kept as the rounding put the
+    circle 1e-15 over the edge or short of it [found by fuzzing the
+    checks, 2026-10-14]; a circle touching the edge that cuts nothing off
+    leaves one piece either way, as Fusion builds it."""
+    def count(h: BaseGeometry) -> int:
+        return len([p for p in parts_of(h) if p.area > 1e-6])
+    # (round joins: mitred ones of no limit join the cusps either side of the point again)
+    return max(count(g), count(g.buffer(-_PINCH).buffer(_PINCH)))
 
 
 def _in_plane(t_axis: Axis) -> tuple[Axis, Axis]:
