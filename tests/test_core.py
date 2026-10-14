@@ -876,6 +876,19 @@ def test_parts_of_and_polygons_of():
     assert len(parts_of(mixed)) == 3 and parts_of(square) == [square] and parts_of(Polygon()) == []
 
 
+def test_a_hole_as_far_off_the_face_as_the_tolerance_is_on_it_wherever_the_board_lies():
+    """Found by fuzzing the placement: a hole lined up with another board's
+    face, 0.001 mm off this board's edge, as far as a point may lie off a
+    face and still be on it (`ON_FACE_TOLERANCE`), was refused as off the
+    face where the module lay at the origin (18.001 - 18 is a hair more
+    than 0.001) and made where it lay elsewhere."""
+    for k, x in enumerate((0.0, 817.7)):
+        with module(f"m{k}", Box.from_size(width=600, depth=400, height=700, origin=(x, 0, 0))) as m:
+            side = board("side", ply15).on(m.left).between(m.front.into(18.001))
+            side.hole(d=8, at=side.inner.front(m.front.into(18)).bottom(100), depth=5)
+        assert len(side.ops) == 1
+
+
 def test_an_operation_that_misses_the_board_is_an_error():
     """Found compiling fuzz boards in Fusion: holes, pockets and V-grooves
     wholly where a rounded corner took the board away, holes whose centre

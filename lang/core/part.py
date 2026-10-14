@@ -815,7 +815,9 @@ class Board:
             face = self.face(directions.frame.direction(op.face))
             taken = self._taken_from(face, before)
             region = outline.difference(unary_union(taken)) if taken else outline
-            if region.distance(Point(op.u, op.v)) > ON_FACE_TOLERANCE:
+            # (the tolerance itself, give or take rounding [found by fuzzing, 2026-10-14: a centre 0.001
+            # off the edge was off the face at some places, on it at others])
+            if region.distance(Point(op.u, op.v)) > ON_FACE_TOLERANCE + 1e-9:
                 return (f"has its centre off the {face.name} face (off the board, or in a pocket or hole made into "
                         "it before); a hole starts on the face. For one over the board's edge, cut a circle.")
         return None
