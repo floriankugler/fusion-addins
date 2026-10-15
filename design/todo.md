@@ -65,15 +65,10 @@ done.
 - **Latched drawer box detail**: a cut-out in the drawer box for the latch
   versus keeping the box clear by `latch.reach` (deferred by Florian,
   2026-10-12).
-- **Syntax review decisions** (`proposals/syntax.md`, 2026-10-15): the
-  items Florian decided for, to build: refuse `+`/`-` on sides and faces
-  (1), `no_interference` by default (4), `shrunk(n)`/`grown(n)` (5),
-  `anchor.center(pos)` for a shape centred on a position (6, was an item
-  here), `to(face, leave=)` (7), lowercase hardware factories (9),
-  `centers=` and `miter` (10), `material.thickness` (11), any sequence for
-  lists of parts (12), `-` and `+` on shapes (13); the carcass block (2) and
-  the drawer box (3) go into the standard library, exports as runs' ports
-  (14) and bare references in `path()` (15) into the runs proposal.
+- **`default_grain`** in `lang/core/scope.py` is set by nothing (placement.md
+  promises a scope-level grain default): drop it, or give `module()` and
+  `cabinet()` a `grain=`. The loose end of the syntax review's item 16
+  (`proposals/syntax.md`, 2026-10-15).
 - **Corners named by a point** (`panel.top.front(60).left(40)`) for
   `fillet()` and `chamfer()`, once a build needs it.
 - **Try the language on real modules**: write two modules from the van in
