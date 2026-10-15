@@ -19,7 +19,8 @@ from the side equals the join from the shelf; an accepted one plans,
 draws and meshes, leaves every board in one piece, lets no two boards
 share material, cuts no blind pocket or hole as deep as its board,
 sinks no countersink past a board's edge, and a connector's operations
-lie within its contact. A join across a
+lie within its contact; a Domino slot is the Domino's outline inset by
+half of `undersize`. A join across a
 pocket made before, in the side's face or the shelf's end where they meet,
 is refused, and only such a one [Florian, 2026-10-13].
 """
@@ -142,8 +143,7 @@ def joint_specs(draw: st.DrawFn) -> JointSpec:
                           ("fence", draw(st.one_of(st.none(), st.none(), sizes(0, 20)))),
                           ("remaining", draw(st.one_of(st.none(), st.none(), sizes(0, 15)))),
                           ("loose", draw(st.sampled_from([0.0, 6.0, 10.0]))),
-                          ("length_offset", draw(st.one_of(st.just(0.0), floats(-2, 2)))),
-                          ("height_offset", draw(st.one_of(st.just(0.0), floats(-1, 1)))),
+                          ("undersize", draw(st.one_of(st.just(0.2), st.just(0.0), floats(-1, 1)))),
                           ("marks", draw(st.sampled_from(["all", "middle", None]))),
                           ("mark_depth", draw(st.one_of(st.just(0.3), floats(0.1, 2)))))
         return JointSpec(kind, params, at)
@@ -452,6 +452,8 @@ def _run_pair(case: PairCase) -> list[str]:
     if case.joint.kind in ("domino", "clamex", "cabineo", "screws"):
         problems += _within_problems(b, contacts, before)
         problems += _station_problems(case.joint, b, contacts, before)
+    if case.joint.kind == "domino":
+        problems += _domino_problems(case.joint, contacts, before)
     if case.joint.kind == "tenons" and not problems:
         problems += _tenon_problems(case, b, contacts, meshes)
     return problems + _symmetry_problems(case, b)      # last: it builds the pair again
@@ -603,6 +605,40 @@ def _within_problems(b: Built, contacts: list[Contact], before: list[tuple[str, 
                     fits = True
             if not fits:
                 problems.append(f"{x.path}: the {op.kind} {getattr(op, 'name', None)!r} lies outside every contact")
+    return problems
+
+
+def _domino_problems(spec: JointSpec, contacts: list[Contact], before: list[tuple[str, str, list[Op]]]) -> list[str]:
+    """Every Domino slot is the Domino's outline inset by half of
+    `undersize` (0.2 by default) on every side: its thickness less the
+    undersize across the contact, its width less the undersize along it,
+    and with `loose=` all but one per contact that much longer."""
+    params = dict(spec.params)
+    size = data.domino_size(params["size"])
+    undersize = params.get("undersize", data.DOMINO_SLOT_UNDERSIZE)
+    loose = params.get("loose", 0.0)
+    height, length = size.thickness - undersize, size.width - undersize
+    problems: list[str] = []
+    for c in contacts:
+        x = c.face_on
+        lengths: list[float] = []
+        for op in _new_ops(x, before):
+            if not isinstance(op, Pocket):
+                continue
+            region = x._footprint(op)  # pyright: ignore[reportPrivateUsage]
+            lo, hi = _extent(x, region, c.axis)
+            if not c.lo - 1e-6 <= (lo + hi) / 2 <= c.hi + 1e-6:
+                continue
+            alo, ahi = _extent(x, region, c.across)
+            if abs(ahi - alo - height) > 1e-6:
+                problems.append(f"{x.path}: the slot {op.name!r} is {ahi - alo:.6g} high, not {height:.6g}")
+            lengths.append(hi - lo)
+        exact = [n for n in lengths if abs(n - length) <= 1e-6]
+        others = [n for n in lengths if abs(n - length - loose) <= 1e-6]
+        if lengths and not (len(exact) == len(lengths) if loose == 0 else
+                            len(exact) == 1 and len(others) == len(lengths) - 1):
+            wanted = f"all {length:.6g}" if loose == 0 else f"one {length:.6g} and the others {loose:g} longer"
+            problems.append(f"{x.path}: the slots are {[round(n, 6) for n in lengths]} long, not {wanted}")
     return problems
 
 

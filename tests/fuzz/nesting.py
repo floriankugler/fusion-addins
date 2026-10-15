@@ -6,10 +6,11 @@ dataclasses), so a failing example prints as something to build again.
   the 48 world frames, far out or at the origin, with `boards.py`'s
   features (holes, pockets, slots, cuts, notches, V-grooves, rounded
   corners) and maybe a big opening, a grain or none, an extra pocket on one
-  big face. The nest must see it from its machining face: its frame maps
-  the board's outline at that face onto the item's outline, at the board's
-  thickness above the blank, by a proper rotation that turns the
-  machining face's normal up; a placed part's transform maps it onto the
+  big face, now and then `machine()` naming either big face. The nest must
+  see it from its machining face, the one `machine()` names where given:
+  its frame maps the board's outline at that face onto the item's outline,
+  at the board's thickness above the blank, by a proper rotation that
+  turns the machining face's normal up; a placed part's transform maps it onto the
   part turned and moved as the nest says; the solver's polygon contains
   the outline and lies at most `items.OUTSIDE` outside it; an opening stays open
   exactly when the smallest part could go in; the turns follow the grain.
@@ -97,6 +98,9 @@ class PartCase:
     #: The big face (0 or 1) given one more pocket, so that it is machined.
     machined: int = 0
     nested: bool = True
+    #: The big face (0 or 1) `machine()` names, whatever the operations
+    #: say; -1: not given.
+    machine: int = -1
 
 
 @st.composite
@@ -112,7 +116,7 @@ def part_cases(draw: st.DrawFn, longest: float = 1800.0, widest: float = 1100.0)
                     draw(st.one_of(st.just(0), st.integers(0, len(WORLD_FRAMES) - 1))),
                     tuple(draw(st.lists(features(size, t), max_size=4))), opening,
                     draw(st.sampled_from(["", "first", "second"])), draw(st.integers(0, 1)),
-                    draw(st.booleans()) or draw(st.booleans()))
+                    draw(st.booleans()) or draw(st.booleans()), draw(st.sampled_from([-1, -1, 0, 1])))
 
 
 def build_part(case: PartCase, name: str) -> Board:
@@ -147,6 +151,8 @@ def build_part(case: PartCase, name: str) -> Board:
             b.add_pocket(face, Shape(shapely_box(u0 + 2, v0 + 2, u0 + 8, v0 + 8)), 1.0, "mark")
         except LangError:
             pass
+        if case.machine >= 0:
+            b.machine(b.big_faces()[case.machine])
     return b
 
 
@@ -161,17 +167,22 @@ def run_parts(cases: tuple[PartCase, ...]) -> list[str]:
     with fresh():
         try:
             _in_frame(cases[0].frame)
-            for k, case in enumerate(cases):
-                build_part(case, f"p{k}")
+            boards = [build_part(case, f"p{k}") for k, case in enumerate(cases)]
             layout = build_layout()
         except LangError:
             return []
+        problems: list[str] = []
+        machined = {p["path"]: p["machine"] for m in layout["modules"] for p in m["parts"]}
+        for case, b in zip(cases, boards):
+            if case.machine >= 0 and machined[b.path] != b.big_faces()[case.machine].world_name:
+                problems.append(f"{b.path}: machined from {machined[b.path]}, machine() names "
+                                f"{b.big_faces()[case.machine].world_name}")
         spacing = 10.0
         try:
             got = parts_of_layout(layout, spacing)
         except LangError as error:
-            return _refused_in_pieces(layout, str(error))
-        return _item_problems(layout, got.by_material, spacing)
+            return problems + _refused_in_pieces(layout, str(error))
+        return problems + _item_problems(layout, got.by_material, spacing)
 
 
 def _refused_in_pieces(layout: Layout, text: str) -> list[str]:
@@ -536,7 +547,7 @@ def nest_cases(draw: st.DrawFn) -> NestCase:
     parts = draw(st.lists(st.one_of(small, small, large), min_size=6 if short else 1, max_size=12 if short else 8))
     one = draw(st.one_of(st.none(), st.integers(0, len(MATERIALS) - 1)))
     return NestCase(tuple(PartCase(p.material if one is None else one, p.side, p.size, p.origin, frame, p.features,
-                                   p.opening, p.grain, p.machined, p.nested) for p in parts),
+                                   p.opening, p.grain, p.machined, p.nested, p.machine) for p in parts),
                     stock, draw(st.sampled_from([0.2, 0.4])))
 
 

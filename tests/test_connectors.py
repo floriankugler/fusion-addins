@@ -166,11 +166,12 @@ def test_dominos_are_slots_in_the_face_and_marks_on_the_edge_on_board():
     first = slots[0]
     assert first.face == "right" and first.depth == 10.5
     x0, z0, x1, z1 = first.shape.bounds                     # the side's frame is (x, z)
-    assert (round(x0, 3), round(x1, 3)) == (37 - 8.3, 37 + 8.3)   # 16.6 long, 37 from the front
-    assert (round(z0, 3), round(z1, 3)) == (5.5, 9.5)            # 4 high, centred on the bottom
+    # 0.2 under the Domino's 16.6 x 4: 16.4 long, 37 from the front, 3.8 high, centred on the bottom
+    assert (round(x0, 3), round(x1, 3)) == (37 - 8.2, 37 + 8.2)
+    assert (round(z0, 3), round(z1, 3)) == (5.6, 9.4)
     assert [round((s.shape.bounds[0] + s.shape.bounds[2]) / 2, 6) for s in slots] == [37, 250, 463]
     line = first.slot                                       # a slot, its centre line kept for the CAM plan
-    assert line is not None and line.width == 4
+    assert line is not None and line.width == pytest.approx(3.8)
     assert line.start == pytest.approx((37 - 6.3, 7.5)) and line.end == pytest.approx((37 + 6.3, 7.5))
     assert len(_ops(p["right"], "domino_bottom_")) == 3
     # nothing but marks on the bottom: its mortises are cut with the machine
@@ -205,10 +206,34 @@ def test_domino_depth_fence_and_loose_slots():
                                                 face=cab.bottom, loose=6))
     a, b = _pockets(p["left"], "domino_bottom_")
     assert a.depth == 12 and a.depth_spec == "to(left, leave=3)"
-    assert (round(a.shape.bounds[1], 6), round(a.shape.bounds[3], 6)) == (2.5, 7.5)   # 5 above the underside
-    assert round(a.shape.width, 6) == 18.8 and round(b.shape.width, 6) == 24.8         # the first one is exact
-    assert round(a.shape.bounds[0], 6) == 20 - 9.4
+    assert (round(a.shape.bounds[1], 6), round(a.shape.bounds[3], 6)) == (2.6, 7.4)   # 5 above the underside
+    assert round(a.shape.width, 6) == 18.6 and round(b.shape.width, 6) == 24.6         # the first one is exact
+    assert round(a.shape.bounds[0], 6) == 20 - 9.3
     assert _ops(p["right"], "domino") == []
+
+
+def test_domino_slots_are_undersized_on_every_side():
+    """The slot is the Domino's outline inset by half of `undersize` on
+    every side, 0.2 by default: shorter and narrower, as deep as ever; 0
+    cuts the Domino's own size, a negative undersize a larger slot. The
+    loose slots are `loose` longer than the exact one."""
+    cab, p = carcass()
+    with cab:
+        p["bottom"].join(p["left"], using=domino("4x20", count=2, undersize=0))
+        p["bottom"].join(p["right"], using=domino("4x20", count=2, undersize=-0.4, loose=6))
+        p["top"].join(p["left"], using=domino("4x20", count=2, undersize=0.5))
+    sizes = {name: [(round(op.shape.width, 6), round(op.shape.height, 6), op.depth) for op in
+                    _pockets(p[side], f"domino_{other}_")]
+             for name, side, other in (("zero", "left", "bottom"), ("over", "right", "bottom"),
+                                       ("under", "left", "top"))}
+    assert sizes == {"zero": [(16.6, 4, 10.5)] * 2, "over": [(17, 4.4, 10.5), (23, 4.4, 10.5)],
+                     "under": [(16.1, 3.5, 10.5)] * 2}
+    for side, other in (("left", "bottom"), ("right", "bottom"), ("left", "top")):
+        slot = _pockets(p[side], f"domino_{other}_1")[0].slot
+        assert slot is not None and slot.end[0] - slot.start[0] == pytest.approx(16.6 - 4)   # the span stays
+    with pytest.raises(LangError, match=r"^domino: undersize=4 leaves no slot of a 4x20\.$"):
+        domino("4x20", count=2, undersize=4)
+    domino("5x30", count=2, undersize=4)                    # 1 high
 
 
 def test_dominos_around_a_back_panel():
@@ -302,7 +327,7 @@ def test_the_face_named_as_inner_outer_or_a_direction():
     (mark,) = [op for op in p["top"].ops if isinstance(op, VGroove)]
     assert mark.face == "bottom"                            # the top's inner face carries the mark
     (slot,) = _pockets(p["right"], "domino_top_")
-    assert (round(slot.shape.bounds[1], 6), round(slot.shape.bounds[3], 6)) == (708, 712)   # 5 above the inner face
+    assert (round(slot.shape.bounds[1], 6), round(slot.shape.bounds[3], 6)) == (708.1, 711.9)   # 5 above the inner face
     with pytest.raises(LangError, match="cabineo\\(face=\\): expected 'inner' or 'outer', not 'side'"):
         cabineo(count=1, face="side")  # type: ignore[arg-type]
 
@@ -436,7 +461,7 @@ def test_connectors_near_the_contacts_ends_that_fit():
     with cab:
         p["bottom"].join(p["left"], using=clamex(at=[Pos("x", 54.35)]))
         p["bottom"].join(p["right"], using=cabineo(at=[Pos("x", 8.1)], surface="anti-break"))
-        p["top"].join(p["left"], using=domino("4x20", count=2, end=10, loose=3.4))     # 20 long: to the end
+        p["top"].join(p["left"], using=domino("4x20", count=2, end=10, loose=3.6))     # 20 long: to the end
         p["top"].join(p["right"], using=screws(at=[Pos("x", 2)]))
     assert [h.u for h in _holes(p["left"], "clamex_bottom_1")] == pytest.approx([3.85, 104.85])   # 3.85 from the end
     slot = _pockets(p["left"], "domino_top_2")[0]
@@ -457,7 +482,7 @@ def test_a_connector_must_lie_where_the_face_on_board_covers_the_end():
         (c,) = contacts(back, bottom)
         assert (c.across_lo, c.across_hi, back.show_face.value) == (491, 495, 500)
         before = state(back, bottom)
-        with pytest.raises(LangError, match=r"^cab\.back: domino with cab\.bottom: the slot \(x 493\.5 to 497\.5\) "
+        with pytest.raises(LangError, match=r"^cab\.back: domino with cab\.bottom: the slot \(x 493\.6 to 497\.4\) "
                                             r"would reach past cab\.bottom, which covers the end of cab\.back only "
                                             r"from x=491 to 495\.$"):
             back.join(bottom, using=domino("4x20", count=2))
@@ -466,7 +491,7 @@ def test_a_connector_must_lie_where_the_face_on_board_covers_the_end():
         assert state(back, bottom) == before
         back.join(bottom, using=domino("4x20", count=2, fence=7))     # 7 in from the back's outer face
     (slot, _) = _pockets(bottom, "domino_back_")
-    assert (round(slot.shape.bounds[0], 6), round(slot.shape.bounds[2], 6)) == (491, 495)
+    assert (round(slot.shape.bounds[0], 6), round(slot.shape.bounds[2], 6)) == (491.1, 494.9)
 
 
 def test_the_preview_cuts_the_marks():

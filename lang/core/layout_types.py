@@ -132,7 +132,8 @@ class PartLayout(TypedDict):
     grain: str | None
     show: str
     #: The big face the part is machined from, which faces up on the
-    #: machine (world name).
+    #: machine (world name): what `machine()` names, else the face more
+    #: operations are made from, else the show face.
     machine: str
     #: Whether the material has a grain (`grain` may still be None, unset).
     grained: bool

@@ -35,6 +35,8 @@ def operations() -> None:
         side.slot(8, at=a, centers=52, along="heigth", depth=10)              # type: ignore  # a misspelt extent
         side.slot(width=8, at=a, centers=52, along="height", depth=10)        # type: ignore  # width by position
         side.slot(8, a, b)                                                    # type: ignore  # no depth
+        side.machine(side.inner)                                              # a face: fine
+        side.machine("inside")                                                # type: ignore  # inner or outer
 
 
 

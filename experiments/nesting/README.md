@@ -144,7 +144,7 @@ sheets, did not fit it and it went unused). With sheets of several sizes
 the sawing picks the cheapest (by area); refill empties only sheets bought,
 never an offcut. The blank grid includes the stock's and the bed's own
 sizes, so a sheet the bed takes whole can be one blank. Results for these
-are in `design/proposals/nesting.md`.
+are in `design/nesting.md`.
 
 ### Cuts per sheet and the leftover (`sawing.py`)
 

@@ -156,23 +156,28 @@ _NOTCH = {
 }
 
 
-def _orientation(on: str, machined: str) -> Board:
+def _orientation(on: str, machined: str, given: bool = False) -> Board:
     """A board on the module's `on` side with a notch at one corner (so
     its outline has a handedness) and a blind pocket on its `machined` big
-    face (so that face is the one machined)."""
+    face (so that face is the one machined); `given`: the pocket on the
+    other face, and `machine()` names the `machined` one."""
     with module("m", Box.from_size(depth=600, width=500, height=400)) as m:
         b = board("b", ply15).on(getattr(m, on))
         face = getattr(b, machined)
         shape, (edge, corner) = _NOTCH[on]
         b.cut(shape, at=getattr(getattr(face, edge), corner))
-        b.pocket(circle(20), at=face.center, depth=4)
+        b.pocket(circle(20), at=(getattr(b, "outer" if machined == "inner" else "inner") if given else face).center,
+                 depth=4)
+        if given:
+            b.machine(face)
     return b
 
 
 @pytest.mark.parametrize("on", ["bottom", "top", "left", "right", "front", "back"])
 @pytest.mark.parametrize("machined", ["inner", "outer"])
-def test_a_part_is_seen_from_its_machining_face_and_maps_onto_it(on: str, machined: str):
-    b = _orientation(on, machined)
+@pytest.mark.parametrize("given", [False, True])
+def test_a_part_is_seen_from_its_machining_face_and_maps_onto_it(on: str, machined: str, given: bool):
+    b = _orientation(on, machined, given)
     layout = build_layout()
     part = layout["modules"][0]["parts"][0]
     item = parts_of_layout(layout, 10).by_material["birch 15"][0]

@@ -78,11 +78,10 @@ class DominoInputs:
 
     domino_size: inputs.DropDownInput
     domino_end_stop: inputs.DropDownInput
-    domino_length_offset: inputs.FloatInput
+    domino_slot_undersize: inputs.FloatInput
     domino_loose_slots: inputs.DropDownInput
     domino_loose_slot_extra: inputs.FloatInput
     domino_exact_slot_last: inputs.CheckboxInput
-    domino_height_offset: inputs.FloatInput
     domino_fence_height: inputs.DropDownInput
     domino_fence_distance: inputs.FloatInput
     domino_depth_mode: inputs.DropDownInput
@@ -145,21 +144,20 @@ class DominoInputs:
         "adjacent board"."""
         Item = inputs.DropDownInput.Item
         self.domino_slot_board = slot_board
-        self.domino_length_offset = inputs.FloatInput(
-            id="dominoLengthOffset",
-            name="Slot Length Offset",
-            default_value=0,
+        self.domino_slot_undersize = inputs.FloatInput(
+            id="dominoSlotUndersize",
+            name="Slot Undersize",
+            default_value=connector_data.DOMINO_SLOT_UNDERSIZE / 10,
             tool_tip=(
-                "Added to the Domino's width to get the slot length along "
-                "the edge. Negative values make the slot tighter."
+                "How much shorter and narrower than the Domino the slots "
+                "are: their outline is inset by half of it on every side, "
+                "so the Domino fits tight. Loose slots get their extra "
+                "length on top. Negative values make the slots larger "
+                "than the Domino."
             ),
             units=units,
             update_visibility=is_domino,
         )
-        # A value input created from the number 0 cannot report its
-        # expression until the dialog is on screen; the slot dimensions are
-        # built from these expressions, so give both an explicit one.
-        self.domino_length_offset.default_expression = "0 mm"
         self.domino_loose_slots = inputs.DropDownInput(
             id="dominoLooseSlots",
             name="Loose Slots",
@@ -205,18 +203,6 @@ class DominoInputs:
             ),
             update_visibility=has_loose_slots,
         )
-        self.domino_height_offset = inputs.FloatInput(
-            id="dominoHeightOffset",
-            name="Slot Height Offset",
-            default_value=0,
-            tool_tip=(
-                "Added to the Domino's thickness to get the slot height. "
-                "Negative values make the slot tighter."
-            ),
-            units=units,
-            update_visibility=is_domino,
-        )
-        self.domino_height_offset.default_expression = "0 mm"
         self.domino_fence_height = inputs.DropDownInput(
             id="dominoFenceHeight",
             name="Fence Height",
@@ -347,14 +333,23 @@ class DominoInputs:
         return size
 
     def domino_slot_height(self, size: Size) -> float:
-        return size.thickness / 10 + self.domino_height_offset.value
+        return size.thickness / 10 - self.domino_slot_undersize.value
+
+    def domino_slot_height_expression(self, size: Size) -> str:
+        return (
+            f"{size.thickness:g} mm - "
+            f"({self.domino_slot_undersize.expression})"
+        )
 
     def domino_slot_length(self, size: Size) -> float:
         """Length of an exact slot along the edge."""
-        return size.width / 10 + self.domino_length_offset.value
+        return size.width / 10 - self.domino_slot_undersize.value
 
     def domino_slot_length_expression(self, size: Size) -> str:
-        return f"{size.width:g} mm + ({self.domino_length_offset.expression})"
+        return (
+            f"{size.width:g} mm - "
+            f"({self.domino_slot_undersize.expression})"
+        )
 
     def domino_loose_extra(self) -> tuple[float, str] | None:
         """Extra length of the loose slots as value and expression, or None
@@ -423,13 +418,10 @@ class DominoInputs:
         except Exception as exc:
             return str(exc)
         height = self.domino_slot_height(size)
+        # The slot stays longer than it is high: it is as much shorter than
+        # the Domino is wide as it is narrower than the Domino is thick.
         if height <= tolerance:
-            return "Slot Height Offset must leave a positive slot height."
-        if self.domino_slot_length(size) - height <= tolerance:
-            return (
-                "Slot Length Offset must leave the slot longer than it is "
-                "high."
-            )
+            return "Slot Undersize must be less than the Domino's thickness."
         if height >= board_thickness - tolerance:
             return "The Domino slot is higher than the selected board is thick."
         try:
@@ -829,10 +821,7 @@ class DominoBuilder:
             if settings.domino_exact_slot_last.value
             else 0
         )
-        height_expression = (
-            f"{size.thickness:g} mm + "
-            f"({settings.domino_height_offset.expression})"
-        )
+        height_expression = settings.domino_slot_height_expression(size)
         first_width_parameter: adsk.fusion.ModelParameter | None = None
         exact_reference: adsk.fusion.SketchLine | None = None
         exact_span_parameter: adsk.fusion.ModelParameter | None = None
@@ -883,16 +872,15 @@ class DominoBuilder:
             if first_width_parameter is None:
                 first_width_parameter = width_dimension.parameter
             if not is_loose and exact_reference is None:
-                # The slot's overall length is the Domino's width: the
-                # center-to-center span is that minus the slot's own height.
+                # The slot is the Domino's outline inset by half the
+                # undersize, which leaves the center-to-center span the
+                # Domino's width minus its thickness: the undersize is in
+                # the height alone.
                 exact_span_parameter = self.sketcher.add_distance_dimension(
                     sketch,
                     centerline.startSketchPoint,
                     centerline.endSketchPoint,
-                    (
-                        f"{settings.domino_slot_length_expression(size)}"
-                        f" - {first_width_parameter.name}"
-                    ),
+                    f"{size.width:g} mm - {size.thickness:g} mm",
                     "dominoSlotSpan",
                 ).parameter
                 exact_reference = centerline

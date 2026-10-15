@@ -172,6 +172,14 @@ materials (`sheet_material()`), joints (`cabineo()`) and hardware
   else its back, else its right, named in the scope's own terms [decided].
   `show()` is frozen once the show face is used, not when the placement is,
   so `side.show(side.inner)` works.
+- The machining face, the big face that faces up on the machine (the
+  layout's `machine`, which the nest lays up): what `machine()` names, taking
+  what `show()` takes (`side.machine(side.inner)`, `machine(cab.left)`,
+  `machine("outer")`); else the big face more pockets, holes and chamfers
+  are made from (a cut's chamfer counts for the show face), else the show
+  face. `machine()` changes no shape and only the layout reads it, so it
+  comes at any time, once, like `nest()`; a narrow face is refused, and a
+  slat is not machined [decided 2026-10-15].
 - Geometry made by an operation takes the operation's name
   (`left.toekick.top`).
 - The language's naming is structural, by construction. Finding named faces

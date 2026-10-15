@@ -45,7 +45,7 @@ Committed next to the source:
 - the cut list, with slats and runs by length;
 - a lock file recording the snapshot hash and the tooling commit a compile
   used;
-- later the nest file (see `nesting.md`).
+- later the nest file (see `design/nesting.md`).
 
 ## Fusion documents, not in git
 

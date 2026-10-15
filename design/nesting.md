@@ -5,9 +5,10 @@ Python after the layout step, like the preview, and drawn into Fusion by
 the emitter. Part of the modeling language's design; the overview is
 `DESIGN.md`. Code: `lang/nest/` (`workshop`, `items`, `packing`, `sawing`,
 `refill`, `nest`, `verify`, `draw`, `nest_types`), `lang/emit/nested.py`
-and `NestEmitter` in `lang/emit/fusion.py`. Built 2026-10-14 from
-`design/proposals/nesting.md`, which keeps what is still open; the
-experiments behind it are at the end and in `experiments/nesting/`.
+and `NestEmitter` in `lang/emit/fusion.py`. Florian added it as a proposal
+on 2026-10-14 and it was built the same evening; what is still open is under
+"Still open", the experiments behind it are at the end and in
+`experiments/nesting/`.
 
 ## Running it
 
@@ -18,14 +19,15 @@ python -m lang.nest out/van/layout.json --bed 2000x1000 --sheet 2470x1240 \
     --sheet "birch 15:1525x1525*2" --offcut "birch 15:1250x600"
 ```
 
-- The machine and the stock come from a workshop file (TOML,
+- The machine and the stock come from a workshop file (TOML [proposed],
   `examples/workshop.toml`, read by `workshop.py`): the bed, the spacing
   between parts, the margin to a blank's edge, the saw's kerf, the most
   cuts per sheet, the keep threshold, the nest's time, and the stock on
   hand: `[[sheet]]` sizes (along the grain first; a count, or as many as
   needed; for one material or every one) and `[[offcut]]`s (a material
   and a size). The command line gives any of it instead: `--sheet` replaces
-  all the file's sheets, `--offcut` all its offcuts, the numbers theirs.
+  all the file's sheets, `--offcut` all its offcuts, the numbers theirs; an
+  offcut there names its material, `"birch 15:1250x600"` [proposed].
   The bed and the sheets are given when nesting is run [decided]; there is
   no default for either, and a nest without them is refused.
 - Defaults: spacing and margin 10, kerf 4, at most 5 cuts a sheet
@@ -58,8 +60,10 @@ python -m lang.nest out/van/layout.json --bed 2000x1000 --sheet 2470x1240 \
   refused; machining in two setups is open].
 - Per material, as the layout labels it (`birch 15`).
 - A part lies on its blank with its machining face up (`machine` in the
-  layout), so the nest sees its outline from that face: as it is where
-  u × v points out of that face, else mirrored. Never flipped [decided].
+  layout: what `machine()` names, else the face with more operations, see
+  `design/api.md`), so the nest sees its outline from that face: as it is
+  where u × v points out of that face, else mirrored. Never flipped
+  [decided].
 - Its machine outline is the outline less its through pockets and through
   holes. An opening stays open for other parts where the smallest part of
   the material could go in (its inside, the spacing in from its edge, has
@@ -99,7 +103,7 @@ Per material (`nest.py`):
 3. The blanks are sawn out of the sheets and the offcuts larger than the
    bed (`sawing.py`): PackingSolver's guillotine solver, straight cuts right
    through, the kerf between, each blank in the sheet's grain, in tenths of
-   a millimetre (the kerf rounded up to one). Ten settings side by side (two
+   a millimetre (the kerf rounded up to one) [proposed]. Ten settings side by side (two
    or three stages, rips or cross cuts first, limits on the cuts per stage),
    a second each; the plan is made as simple as it allows, then kept by,
    in this order: every blank sawn, no sheet over `max_cuts`, the cheapest
@@ -108,10 +112,10 @@ Per material (`nest.py`):
    one; pieces holding blanks and rests too small to keep, side by side,
    are one piece when the bed takes them together [decided], two holding
    blanks only where two margins and the kerf make up the spacing (their
-   parts are that far apart); a rest too small to keep goes along with the
+   parts are that far apart) [proposed]; a rest too small to keep goes along with the
    pieces beside it; a piece the solver left larger than the bed is cut
    down to its blank, also where what comes off is narrower than the kerf
-   (the blade takes it whole: a trim).
+   (the blade takes it whole: a trim) [proposed].
 4. Where the stock on hand runs short (sheets with a count), the parts of
    the blanks it could not take are nested again on what is left, twice
    more at most; what still finds no stock is reported as left over.
@@ -124,7 +128,7 @@ Per material (`nest.py`):
 A rest of a sheet is stock, kept, from `keep_across` and `keep_area`
 (300 mm, 0.25 m²); smaller ones are waste. A sheet over the cut limit is
 reported, not refused: a sheet larger than the bed both ways needs two cuts
-whatever the limit.
+whatever the limit [proposed].
 
 ## The nest file
 
@@ -144,7 +148,7 @@ nested (`lang.core.layout.layout_hash`), which tells whether a nest is the
 layout's at hand.
 
 Writing the leftovers back into the workshop file as offcuts waits for
-cut sheets being pinned (`design/proposals/nesting.md`).
+cut sheets being pinned (Still open, below).
 
 ## Checked
 
@@ -165,7 +169,8 @@ its piece.
 - The preview shows a design's nest (`nest.svg` in its out directory) in
   its nest view (`design/preview.md`), and nests it again on request.
 - The compiler's Compile Layout takes a `nest.json` too and draws a
-  document per material (`lang/emit/nested.py` plans it, Fusion-free): per
+  document per material (no button of its own [proposed];
+  `lang/emit/nested.py` plans it, Fusion-free): per
   piece of stock a component, the pieces one above the other along y, per
   blank a component at its place holding the blank as a see-through stock
   body and its parts' bodies, flat, machining face up, named by path, their
@@ -175,6 +180,39 @@ its piece.
   Fusion read the profiles in the other space ("the path is tangent to the
   profile") [found 2026-10-14]. Verified on the van's nest: 36 parts, each
   one solid within 0.01 mm of its place, machining face up.
+
+## Still open
+
+- **Cut sheets are pinned.** A van is built over weeks, so a sheet marked as
+  cut keeps its nest; later nests take only the parts not cut yet and report
+  parts that changed after they were cut [open]. With it, the leftovers of
+  the sheets cut go back into the workshop file as offcuts.
+- **Parts larger than the bed**: today `nest(False)` (sawn by hand), as the
+  nest refuses them by name; machined in two setups, moved between them,
+  is open.
+- **Manufacturing groups** nested rigid (`design/todo.md`) [open: not
+  tried].
+- **A rule** that sets `nest(False)` for a whole kind of part [proposed],
+  once the language has rules.
+- **The cut list**: slats by length, `nest(False)` boards by size
+  (`design/proposals/build-repo.md`).
+- **The saw plan**: reordering its cuts (the simplifying keeps the solver's
+  order, a rip first where it cut across first, so a plan may take a cut
+  more than it could); trimming factory edges (the guillotine solver takes
+  trims); refill on a sheet whose cut budget is spent.
+- **Offcuts with an outline** (an L-shaped piece) **and defects**:
+  PackingSolver takes both (the experiments), the workshop file has
+  rectangles only.
+- **Irregular parts**: whether a time budget for knapsack on one sheet
+  fewer is worth it, or the first nest is enough.
+- **Reproducible nests**: the nest runs for its time and keeps the best it
+  found, so a slower or busier machine may find another (a changed nest
+  shows in a diff), and too short a time costs sheets (7 instead of 5 for
+  the examples' 62 parts in 20 s). `--mode deterministic` runs one fixed
+  search instead, which split 124 parts into many small blanks (Measured,
+  below); the saw step is time-bound either way.
+- **Any angle** for parts whose grain does not matter: not offered, so
+  every face stays along an axis in Fusion.
 
 ## Measured
 

@@ -120,8 +120,11 @@ open there: an error [decided]).
 - `domino(size, ...)`: a slot in the face-on board, centred on the edge-on
   board's thickness or `fence=` from its reference face (the show face
   unless `face=`), half the Domino's length plus 0.5 deep or `remaining=`
-  short of the far face; `loose=` lengthens all slots but the first (front,
-  left or bottom) per contact. The edge-on board's mortise is cut with the
+  short of the far face. The slot is the Domino's outline inset by half of
+  `undersize=` on every side (0.2 by default, so 0.1 each side; the depth
+  stays), as the add-ins' Slot Undersize does, so the Domino fits tight;
+  `loose=` lengthens all slots but the first (front, left or bottom) per
+  contact by that much more. The edge-on board's mortise is cut with the
   Domino machine, which is lined up by a mark: a 90 degree V-groove in the
   edge-on board's reference face, 0.3 deep, running 4 in from its end (it
   starts 1 mm outside the board so it runs out cleanly), one per Domino by

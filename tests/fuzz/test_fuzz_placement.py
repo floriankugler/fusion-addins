@@ -1,6 +1,6 @@
 """Fuzzing the placement algebra (modules, scopes, boxes, positions,
 directions and frames, faces and anchors, `on`, `between`, `center`,
-`inset`, `show`) on random designs (`placement.placement_cases`): each
+`inset`, `show`, `machine`) on random designs (`placement.placement_cases`): each
 must come out the same moved, in another world frame and written another
 way, and keep what placement promises, the rules Florian decided on
 2026-10-14 among them (`placement.run_case`)."""
