@@ -1068,7 +1068,7 @@ def test_machine_names_the_face_the_board_is_machined_from_however_it_is_named()
     """The holes would make the inner face the machined one; `machine()`
     wins, named as a face, inner or outer, a box side or a direction."""
     with module("cab", Box.from_size(width=1200, depth=500, height=720)) as cab:
-        sides = [board(f"s{k}", ply15).on(cab.left + 100 * k, toward=cab.right) for k in range(5)]   # left of the middle
+        sides = [board(f"s{k}", ply15).on(cab.left.into(100 * k)) for k in range(5)]   # left of the middle, thickness inward
     namings: list[Face | Side | Direction | InnerOuter] = [sides[0].outer, "outer", cab.left, cab.left.outward,
                                                            sides[4].left]
     for side, name in zip(sides, namings):
@@ -1098,7 +1098,7 @@ def test_machine_takes_a_big_face_of_this_board_only():
         side = board("side", ply15).on(cab.left)
         other = board("other", ply15).on(cab.right)
         unplaced = board("unplaced", ply15).machine(cab.front).on(cab.bottom)
-        straddling = board("straddling", ply15).center(cab.left + 300).machine("inner")
+        straddling = board("straddling", ply15).center(cab.left.into(300)).machine("inner")
         rail = slat("rail", slat_material("oak"), section=(20, 40)).on(cab.bottom).edge_on(cab.front) \
             .between(cab.left, cab.right)
     side.box()

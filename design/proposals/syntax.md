@@ -49,7 +49,7 @@ Decision: [decided] No. `(a + b) / 2` is plain Python and one name fewer to lear
 Three proposals lean on "a project rule" that does not exist: the bent
 board's `ease=`, "1 mm on the outline of every show face"
 (`design/operations.md`, Chamfers), `nest(False)` for a whole kind of part
-(`proposals/nesting.md`). Joinery rules were dropped [decided]. Proposed
+(`design/nesting.md`, Still open). Joinery rules were dropped [decided]. Proposed
 first: a scope-level defaults object, `cabinet(name, box, front=...,
 defaults=Defaults(chamfer=1, tool=6, ease=0.5))`.
 
