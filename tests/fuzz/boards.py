@@ -13,7 +13,12 @@ part of them, the bands of a cross stay, no material falls out, a failed
 cutout changes nothing, an operation made later in an opening is refused
 and one beside it is not; and the layout plans, draws and meshes. Before
 the cutout, what `slot()` promises: a slot is taken only with both end
-centres on the board, and it is the stadium its centres and width give."""
+centres on the board, and it is the stadium its centres and width give.
+
+`run_center` places a cut, pocket or hole by `anchor.center(pos)` on a
+face of such a board, big or narrow, and checks that the shape's bounds
+have their middle on `pos` and their side on the edge the anchor names
+(a hole its centre), within 1e-9 [syntax.md item 6]."""
 from __future__ import annotations
 
 import math
@@ -30,13 +35,16 @@ from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
 
 from fuzzing import floats, fresh, fit_problems, rings_of, sizes
-from lang import Board, Box, LangError, Shape, board, cross, sheet_material, module, through, to, triangles
+from lang import Board, Box, LangError, Pos, Shape, board, circle, cross, sheet_material, module, through, to, triangles
+from lang.core.directions import AXES
+from lang.core.refs import as_pos
 from lang.core.geometry import polygons_of
 from lang.core.layout import build_layout
 from lang.core.ops import MIN_CHAMFER, Cut, Pocket
 from lang.core.part import ON_FACE_TOLERANCE
 from lang.core.shapes import slot_shape
 from lang.emit.plan import plan_layout
+from lang.master import Plane
 from lang.preview.mesh import mesh_part
 
 Place = Literal["bottom", "left", "back"]
@@ -525,3 +533,128 @@ def _touching(rings: list[list[list[float]]]) -> bool:
 
 
 __all__ = ["BoardCase", "CutoutCall", "Feature", "board_cases", "run_cutout", "rings_of"]
+
+
+# -- a shape centred on a position ---------------------------------------------------------------
+
+CenterKind = Literal["cut", "pocket", "hole"]
+Given = Literal["pos", "side", "face", "plane"]
+
+
+@dataclass(frozen=True)
+class CenterCase:
+    """A board filling its module (`BoardCase`'s thickness, place, origin
+    and size) and an operation placed by `anchor.center(pos)` on face
+    `face` (0 and 1 its big faces, 2 to 5 its narrow ones): the face's axis
+    `axis` (of `face_axes()`'s two) centred on the position `at` of the
+    way along the board (below 0 or past 1 off it), given as a `Pos`, the
+    module's side moved into its box, the board's face moved into it or a
+    master's plane; the other axis named by its low edge (`edge` 0), its
+    high edge (1) or nothing (2: the face's middle), `inset` mm inside the
+    edge (None: on it, through `Edge.center`). A cut (big faces only),
+    pocket or hole of a rectangle `a` by `b` turned by `angle`, or a
+    circle `a` across when `b` is 0 (a hole `a` across)."""
+    t: float
+    place: Place
+    origin: tuple[float, float, float]
+    size: tuple[float, float]
+    kind: CenterKind
+    face: int
+    axis: int
+    at: float
+    given: Given
+    edge: int
+    inset: float | None
+    a: float
+    b: float = 0.0
+    angle: float = 0.0
+
+
+@st.composite
+def center_cases(draw: st.DrawFn) -> CenterCase:
+    t = draw(st.sampled_from([6.0, 9.0, 12.0, 15.0, 18.0, 24.0]))
+    size = (draw(sizes(40, 2400)), draw(sizes(40, 1200)))
+    far = sizes(-6000, 6000)
+    origin = draw(st.one_of(st.just((0.0, 0.0, 0.0)), st.tuples(far, far, far)))
+    kind: CenterKind = draw(st.sampled_from(["cut", "pocket", "pocket", "hole"]))
+    face = draw(st.integers(0, 1 if kind == "cut" else 5))
+    at = draw(st.one_of(st.just(0.5), floats(0, 1), floats(-0.2, 1.2)))
+    edge = draw(st.integers(0, 2))
+    inset = None if edge == 2 else draw(st.one_of(st.none(), sizes(0, 30)))
+    reach = 2 * t if face >= 2 else 120.0
+    a, b = draw(sizes(1, reach)), draw(st.one_of(st.just(0.0), sizes(1, reach)))
+    angle = draw(st.one_of(st.just(0.0), st.just(45.0), floats(0, 180)))
+    return CenterCase(t, draw(st.sampled_from(["bottom", "left", "back"])), origin, size, kind, face,
+                      draw(st.integers(0, 1)), at, draw(st.sampled_from(["pos", "side", "face", "plane"])), edge,
+                      inset, a, b, angle)
+
+
+def run_center(case: CenterCase) -> list[str]:
+    """What is wrong with the operation centred on its position; [] when
+    it was refused with a LangError that changed nothing."""
+    with fresh():
+        try:
+            return _run_center(case)
+        except Exception as e:
+            frame = next((fr for fr in reversed(traceback.extract_tb(e.__traceback__))
+                          if "/lang/" in fr.filename), traceback.extract_tb(e.__traceback__)[-1])
+            return [f"{type(e).__name__} at {Path(frame.filename).name}:{frame.lineno}: {e}"]
+
+
+def _run_center(case: CenterCase) -> list[str]:
+    with module("m", _module_box(BoardCase(case.t, case.place, case.origin, case.size))) as m:
+        x = board("panel", sheet_material("birch", t=case.t)).on(getattr(m, case.place))
+        narrow = [n for n in ("front", "back", "left", "right", "top", "bottom")
+                  if m.frame.direction(n).axis != x.t_axis]
+        f = [*x.big_faces(), *(x.face(n) for n in narrow)][case.face]
+        axes = x.face_axes(f)
+        centred, other = axes[case.axis], axes[1 - case.axis]
+        bx = x.box()
+        lo, hi = bx.lo[centred], bx.hi[centred]
+        coord = lo + case.at * (hi - lo)
+        low = m.frame.direction_of(centred, -1).name
+        pos: Any
+        if case.given == "pos":
+            pos = Pos(centred, coord)
+        elif case.given == "side":
+            pos = m.side(low).into(coord - lo)
+        elif case.given == "face":
+            pos = x.face(low).into(coord - lo)
+        else:
+            k = AXES.index(centred)
+            pos = Plane("p", [coord if i == k else 0.0 for i in range(3)], [1.0 if i == k else 0.0 for i in range(3)])
+        edge = getattr(f, m.frame.direction_of(other, 1 if case.edge == 1 else -1).name)
+        anchor = (f.center.center(pos) if case.edge == 2 else edge.center(pos) if case.inset is None
+                  else edge(case.inset).center(pos))
+        shape = circle(case.a) if case.b <= 0 else Shape(affinity.rotate(
+            shapely_box(-case.a / 2, -case.b / 2, case.a / 2, case.b / 2), case.angle, origin=(0, 0)))
+        depth = min(20.0, (bx.hi[f.axis] - bx.lo[f.axis]) / 2)
+        before = _state(x)
+        try:
+            if case.kind == "cut":
+                x.cut(shape, at=anchor, name="centred")
+            elif case.kind == "pocket":
+                x.pocket(shape, at=anchor, depth=depth, name="centred")
+            else:
+                x.hole(case.a, at=anchor, depth=depth, name="centred")
+        except LangError:
+            return [] if _state(x) == before else [f"a refused {case.kind} changed the board"]
+    problems: list[str] = []
+    extents = x.op("centred").extents()
+    want = as_pos(pos).value
+    c0, c1 = extents[centred]
+    if abs((c0 + c1) / 2 - want) > 1e-9:
+        problems.append(f"the {case.kind} lies {c0!r} to {c1!r} on {centred}, its middle off the position "
+                        f"{want!r} center() names by {(c0 + c1) / 2 - want:.3g}")
+    o0, o1 = extents[other]
+    e0, e1 = bx.lo[other], bx.hi[other]
+    inset = case.inset or 0.0
+    if case.edge == 2:
+        got, target, what = (o0 + o1) / 2, (e0 + e1) / 2, "its middle"
+    elif case.kind == "hole":
+        got, target, what = (o0 + o1) / 2, e0 + inset if case.edge == 0 else e1 - inset, "its centre"
+    else:
+        got, target, what = (o0, e0 + inset, "its low side") if case.edge == 0 else (o1, e1 - inset, "its high side")
+    if abs(got - target) > 1e-9:
+        problems.append(f"the {case.kind} has {what} at {got!r} on {other}, the anchor names {target!r}")
+    return problems

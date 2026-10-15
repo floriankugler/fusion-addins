@@ -757,7 +757,9 @@ class Board:
 
     def _place_shape(self, shape: Shape, anchor: Anchor) -> Shape:
         """The shape in the frame of the anchor's face, with its matching
-        side or corner on the anchor's point."""
+        side or corner on the anchor's point, and the middle of its bounds
+        on it along an axis the anchor leaves unnamed (the face's middle,
+        or the position `Anchor.center()` gives)."""
         ua, va = self.face_axes(anchor.face)
         placed = shape.in_plane(ua, va, self.path)
         point, shape_anchor = anchor.resolve()

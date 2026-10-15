@@ -79,7 +79,16 @@ shape = rect(depth=500, height=720).clip(top=380, back=120)   # the top back cor
   kick notch. Distances follow the edge they are measured from,
   `side.inner.front(37).bottom(z)`, and a position from the reference
   algebra may stand in for a distance, which is how a hole lines up with
-  another part. Patterns come from `spread()` along one axis of the face.
+  another part. An axis the anchor leaves unnamed is centred on the face,
+  or on a position with `center(pos)`: `b.front.top.center(line)` puts a
+  notch's top on the top edge and its middle on `line` [decided by
+  Florian, 2026-10-15, syntax.md item 6]. `pos` is a position whose axis
+  lies in the face's plane and is the one the anchor leaves unnamed (a
+  `Pos`, a face, a master's plane, a box side, an operation's edge), never
+  a number, which measures from an edge; it applies wherever a shape is
+  placed by `at=` (`cut`, `pocket`, a cutout's region), and gives a hole's
+  and a slot's centre. Patterns come from `spread()` along one axis of the
+  face.
 - **Depths** [decided]: `depth=` is a number, `through` or `to(face)`,
   which reaches the face, or `to(face, leave=3)`, which stops 3 mm short of
   it [decided by Florian, 2026-10-15, syntax.md item 7: it was a signed

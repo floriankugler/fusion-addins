@@ -202,6 +202,17 @@ def test_a_region_limits_the_cutout():
         side.cutout(side.front)
 
 
+def test_a_region_centred_on_a_position_limits_the_cutout():
+    """syntax.md item 6: a region placed by `anchor.center(pos)` has its
+    middle on `pos` along the axis the anchor leaves unnamed."""
+    cab, side = _side()
+    with cab:
+        side.cutout(rect(depth=200, height=100), at=side.inner.bottom(100).center(Pos("x", 180)))
+    cut = side.ops[0]
+    assert isinstance(cut, Cut)
+    assert cut.shape.bounds == pytest.approx((80, 100, 280, 200))
+
+
 def test_shared_pattern_math():
     w, h = data.triangle_dimensions(560, 360, 8, 6, 20)
     assert (w, h) == pytest.approx((84.2232, 43.3333), abs=1e-4)

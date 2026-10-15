@@ -569,6 +569,65 @@ def test_anchor_errors_name_the_problem():
         left.hole(d=5, depth=5, at=right.inner.center)   # another board's face
 
 
+def test_an_anchor_centres_a_shape_on_a_position():
+    """Decided by Florian, 2026-10-15 (syntax.md item 6): `anchor.center(pos)`
+    puts a shape's middle on `pos` along the axis the anchor has not named:
+    `b.outer.top.center(line)` puts a notch's top on the top edge and its
+    middle on `line`, where `left(line - 7)` was written for a notch 14
+    wide. It works wherever a shape is placed by at= (a cut, a pocket on a
+    big face and on a narrow one; a cutout's region in test_cutouts) and
+    gives a hole's and a slot's centre. The position may be a `Pos`, a box
+    side, a part's face, a master's plane or an operation's edge."""
+    with module("m", Box.from_size(width=600, depth=400, height=700)) as m:
+        left = board("left", ply15).on(m.left)               # x 0..400, y 0..15, z 0..700
+        shelf = board("shelf", ply15).on(Pos("z", 300), toward=m.top).between(left, m.right)
+        line, cable = Pos("x", 120), Plane("cable", [250, 0, 0], [1, 0, 0])
+        left.cut(rect(depth=14, height=12), at=left.outer.top.center(line), name="notch")
+        left.pocket(rect(depth=30, height=10), at=left.inner.front(50).center(shelf.bottom), depth=5, name="dado")
+        left.pocket(rect(width=6, height=20), at=left.front.inner(3).center(m.bottom.into(400)), depth=10,
+                    name="edge")
+        left.hole(d=8, at=left.inner.bottom(100).center(cable), depth=5, name="cable")
+        left.hole(d=8, at=left.inner.bottom(140).center(left.notch.front), depth=5, name="under_notch")
+        start, end = left.inner.top(50).center(m.front.into(150)), left.inner.top(50).center(Pos("x", 250))
+        left.slot(6, start, end, depth=5, name="mount")
+    def edges(name: str) -> tuple[float, ...]:
+        return tuple(left.op(name).side(d).value for d in ("front", "back", "bottom", "top"))
+
+    assert edges("notch") == (113, 127, 688, 700)
+    assert edges("dado") == (50, 80, 295, 305)
+    assert edges("edge") == (0, 10, 390, 410) and (left.edge.left.value, left.edge.right.value) == (6, 12)
+    assert edges("cable") == (246, 254, 96, 104) and edges("under_notch") == (109, 117, 136, 144)
+    assert edges("mount") == (147, 253, 647, 653)
+    assert left.outer.top.center(line).resolve()[0] == (120, 700)
+    assert left.inner.center.center(line).resolve()[0] == (120, 350)    # the other axis centred on the face
+
+
+def test_anchor_center_takes_a_position_on_the_axis_left_unnamed():
+    """syntax.md item 6: `center()` takes a position, never a number (that
+    measures from an edge); its axis lies in the face's plane and is the
+    one the anchor has not named; once it is given, that axis is no edge
+    to name."""
+    with module("m", Box.from_size(width=600, depth=400, height=700)) as m:
+        left = board("left", ply15).on(m.left)
+    anchor = left.inner.top
+    refused = [
+        (lambda: anchor.center(5), re.escape("center() takes a position; a number measures from an edge, "  # type: ignore[arg-type]
+                                             "name one: face.front(37).")),
+        (lambda: anchor.center(m.right), r"center\(y=600\) is not in the plane of the right face"),
+        (lambda: anchor.center(m.top), r"center\(z=700\) lies on the axis of top, which the anchor names"),
+        (lambda: anchor.front.center(Pos("x", 5)), "both axes of the face are given already"),
+        (lambda: anchor(30).back(20).center(Pos("x", 5)), "both axes of the face are given already"),
+        (lambda: anchor.center(Pos("x", 5)).center(Pos("x", 6)), "both axes of the face are given already"),
+        (lambda: left.inner.center.center(Pos("x", 5)).center(Pos("x", 6)), r"center\(x=6\) is given on x already"),
+        (lambda: anchor.center(Pos("x", 5)).front, "front lies on the axis it is centred on"),
+        (lambda: left.inner.center.center(Pos("z", 5)).top, "top lies on the axis it is centred on"),
+    ]
+    for make, message in refused:
+        with pytest.raises(LangError, match=message):
+            make()
+    assert repr(anchor.center(Pos("x", 5))) == "Anchor(m.left.right.top.center(x=5))"
+
+
 def test_pocket_depth_to_face():
     cab = carcass()
     left = cab["left"]
