@@ -9,6 +9,7 @@ far down they reach inside, so the shelf below them stays clear. Bottom,
 top and shelf are joined to the sides with Cabineos, the back to all four
 with Dominos."""
 from lang import *
+from lang.std import carcass
 
 from stock import ply9, ply18
 
@@ -22,19 +23,12 @@ def wall_cabinet(name: str, box: Box, hinge: HatchHinge, *, front: Side) -> Scop
         hatch = (board("hatch", ply18).on(cab.front)
                  .between(cab.left.into(GAP), cab.right.into(GAP), cab.bottom, cab.top))
         # The carcass behind the closed hatch; its front is the hatch's inner face.
-        left = board("left", ply18).on(cab.left).between(hatch, cab.back)
-        right = board("right", ply18).on(cab.right).between(hatch, cab.back)
-        top = board("top", ply18).on(cab.top).between(left, right, hatch, cab.back)
-        bottom = board("bottom", ply18).on(cab.bottom).between(left, right, hatch, cab.back)
-        back = board("back", ply9).on(cab.back).between(left, right, bottom, top)
+        left, right, _bottom, top, back = carcass(cab, ply18, back=ply9, front=hatch)
         # The shelf's upper face where the closed hinges end, set back 20 mm.
         shelf = (board("shelf", ply18).on(hinge.lowest(top), toward=cab.bottom)
                  .between(left, right, left.front.into(20), back))
 
-        bottom.join(left, right, using=cabineo(count=2))
-        top.join(left, right, using=cabineo(count=2))
         shelf.join(left, right, using=cabineo(count=2))
-        back.join(left, right, bottom, top, using=domino("4x20", count=2))
 
         # Drills the side panels' inner faces and the hatch's inner face,
         # which faces the carcass, and places the two hinges.

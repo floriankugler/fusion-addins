@@ -14,7 +14,7 @@ from .core.directions import Direction, Frame, set_frame, world_frame
 from .core.errors import LangError
 from .core.material import SheetMaterial, SlatMaterial, sheet_material, slat_material
 from .core.faces import Anchor, Edge, Face, Operation, Outline
-from .core.part import Board, Slat, board, slat
+from .core.part import Board, Joint, Slat, board, slat
 from .core.refs import Pos, Side, spread, through, to
 from .core.scope import Scope, cabinet, check, module, scope, uncheck
 from .core.shapes import Shape, circle, polygon, rect
@@ -29,7 +29,7 @@ __all__ = [
     "Pos", "Side", "spread", "to", "through",
     "Box", "Shape", "rect", "circle", "polygon", "cross", "triangles",
     "SheetMaterial", "SlatMaterial", "sheet_material", "slat_material",
-    "Board", "Slat", "Face", "Edge", "Anchor", "Outline", "Operation", "board", "slat",
+    "Board", "Slat", "Face", "Edge", "Anchor", "Outline", "Operation", "Joint", "board", "slat",
     "Scope", "module", "cabinet", "scope", "check", "uncheck",
     "no_interference", "fits_sheet", "inside", "inside_box", "LangError",
     "master", "Master", "Plane", "Contour", "half_lap", "domino", "clamex", "cabineo", "tenons", "screws",

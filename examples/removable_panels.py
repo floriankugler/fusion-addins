@@ -13,6 +13,7 @@ off square to itself. Top and bottom are joined to the sides with
 Cabineos. Built on its own, the base stands across the vehicle behind
 the cab and opens toward the rear."""
 from lang import *
+from lang.std import carcass
 
 from stock import ply12, ply18
 
@@ -24,13 +25,9 @@ def seat_base(name: str, box: Box, *, front: Side) -> Scope:
     removable cover over the front and a removable panel set in at the
     back."""
     with cabinet(name, box, front=front) as cab:
-        behind = cab.front.into(ply12.thickness)          # the sides' front edges, against the cover
-        left = board("left", ply18).on(cab.left).between(behind)
-        right = board("right", ply18).on(cab.right).between(behind)
-        top = board("top", ply18).on(cab.top).between(left, right, behind)
-        bottom = board("bottom", ply18).on(cab.bottom).between(left, right, behind)
-        top.join(left, right, using=cabineo(count=2))
-        bottom.join(left, right, using=cabineo(count=2))
+        # the sides' front edges stand back by the cover; no back, the rear
+        # panel is set in instead
+        left, right, bottom, top = carcass(cab, ply18, front=cab.front.into(ply12.thickness))
 
         cover = board("cover", ply12).on(cab.front)
         rear = (board("rear", ply12).on(cab.back)

@@ -12,6 +12,7 @@ Fusion documents. This file is the overview; the details are in `design/`:
 | `design/slats.md` | Sheet and slat materials, slats, lips and edge banding |
 | `design/joints.md` | Contacts, crossings, half laps, connectors, tenons, screws, box joints, grooves |
 | `design/hardware.md` | Drawer slides, hinges, hatch hinges, ball catches, latches, sliding brackets |
+| `design/std.md` | The standard library: `carcass()` and `drawer_box()`, on the public API only |
 | `design/checks.md` | `no_interference`, `inside_box`, `inside()`, `fits_sheet` |
 | `design/geometry.md` | Polygons and arcs, cleaning, tolerances, offsets |
 | `design/emitter.md` | The Fusion backend, compile speed, Fusion findings |
@@ -138,7 +139,10 @@ The rules behind every topic file; details in `design/api.md`.
 
 ## Example
 
-The carcass of `examples/drawer_cabinet.py`:
+The carcass of `examples/drawer_cabinet.py`, written out by hand. The example
+itself writes it as `carcass(cab, ply15, back=ply9, toekick=(60, 100),
+joins=cabineo(count=3))` from the standard library (`design/std.md`), which
+writes these lines for it:
 
 ```python
 from lang import *
@@ -190,6 +194,7 @@ lang/
                contours, checks, material, layout and layout_types, errors
   joints/      half laps, connectors, tenons, screws, box joints, grooves
   hardware/    slides, hinges, hatch hinges, ball catches, latches, sliding brackets
+  std/         the standard library: carcass, drawer box, written on the public API only
   emit/        plan, loops, arcs, nested (Fusion-free); fusion (draws); the snapshot writer
   nest/        nesting: workshop file, parts, PackingSolver, saw plans, refill, verify, drawing
   preview/     mesher, server, three.js viewer
@@ -210,8 +215,9 @@ limits, every operation (cuts, pockets, holes, slots, chamfers, fillets, cutouts
 dog bones), half laps, Dominos, Clamex, Cabineos, tenons, screws, box joints,
 grooves, drawer slides, concealed hinges, hatch hinges, ball catches, door
 latches, sliding brackets, slats and lips (cosmetic slats for now), the checks,
-the folder preview, and nesting (sheets and offcuts sawn into blanks for the
-bed, the preview's nest view, nested documents in Fusion). Everything is
+the folder preview, nesting (sheets and offcuts sawn into blanks for the
+bed, the preview's nest view, nested documents in Fusion), and the standard
+library's carcass and drawer box, which give the examples' layouts unchanged. Everything is
 fuzzed (AGENTS.md, "Fuzz Tests").
 
 Proposed, in `design/proposals/`. Where they depend on each other Florian
@@ -228,7 +234,7 @@ is implemented. [Florian]
 | `bevels.md` | Narrow faces cut at an angle, as hand work |
 | `tilted-boards.md` | Boards turned about one axis of their scope |
 | `miters.md` | Mitered corners as a joint |
-| `standard-library.md` | `lang/std`: building blocks on the public API only |
+| `standard-library.md` | What is left of the standard library (built: `design/std.md`): cabinet types per build repo, further blocks |
 | `nesting.md` | What is left of nesting (built: `design/nesting.md`): pinning cut sheets, parts larger than the bed, groups, the cut list |
 | `cam.md` | A CAM plan from the layout, built by an add-in |
 | `runs.md` | Hoses, cables, ducts and keep-outs: one run primitive that plans and is checked, routed through the boards' own openings, at the van level or in a module |

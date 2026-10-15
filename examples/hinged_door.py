@@ -10,6 +10,7 @@ inner face as the Concealed Hinge add-in does and places the hinges as
 boxes. `carcass=right` hangs it on the other side. Built on its own, it
 hangs on the driver's wall and opens toward the aisle."""
 from lang import *
+from lang.std import carcass
 
 from stock import ply9, ply12, ply15
 
@@ -20,15 +21,8 @@ def hinged_cabinet(name: str, box: Box, hinge: ConcealedHinge, *, front: Side) -
     """A cabinet in its own frame with one overlay door hinged on its left
     side, the hinges `hinge`. `front=` places it (see `cabinet`)."""
     with cabinet(name, box, front=front) as cab:
-        behind = cab.front.into(ply12.thickness)          # the carcass stands behind the door
-        left = board("left", ply15).on(cab.left).between(behind)
-        right = board("right", ply15).on(cab.right).between(behind)
-        bottom = board("bottom", ply15).on(cab.bottom).between(left, right, behind)
-        top = board("top", ply15).on(cab.top).between(left, right, behind)
-        back = board("back", ply9).on(cab.back).between(left, right, bottom, top)
-        bottom.join(left, right, using=cabineo(count=2))
-        top.join(left, right, using=cabineo(count=2))
-        back.join(left, right, bottom, top, using=domino("4x20", count=2))
+        # the carcass stands behind the door
+        left, right, bottom, top, back = carcass(cab, ply15, back=ply9, front=cab.front.into(ply12.thickness))
 
         # a shelf halfway up, 1 mm clear of the sides and 20 mm back from
         # the door, on a pin 37 mm in from each end of both sides

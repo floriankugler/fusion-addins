@@ -7,6 +7,7 @@ unnecessary, and the check fails.
 """
 # pyright: reportUnnecessaryTypeIgnoreComment=true
 from lang import *
+from lang.std import carcass, drawer_box
 
 ply15 = sheet_material("birch", t=15)
 
@@ -179,3 +180,27 @@ def modules() -> None:
     module("floor", van)
     module("kitchen", van, front=van.right)                                  # type: ignore  # a cabinet
     cabinet("kitchen", van)                                                  # type: ignore  # no front
+
+
+def std() -> None:
+    """The standard library's blocks are typed like the core."""
+    oak = slat_material("oak")
+    ply9 = sheet_material("birch", t=9)
+    box = Box.from_size(width=600, depth=400, height=700)
+    with cabinet("c", box, front=box.right) as cab:
+        left, right, bottom, top, back = carcass(cab, ply15, back=ply9, toekick=(60, 100))   # fine
+        back.join(left, right, using=domino("4x20", count=2))                               # the back is a Board
+        _ = carcass(cab, ply15).back                                                        # type: ignore  # no back without back=
+        carcass(cab, ply15, ply9)                                                           # type: ignore  # back= by keyword
+        carcass(cab, ply15, back_joins=domino("4x20", count=2))                             # type: ignore  # nothing to join
+        carcass(cab, oak)                                                                   # type: ignore  # a slat material
+        carcass(cab, ply15, front="front")                                                  # type: ignore  # a limit, not a string
+        slide = drawer_slide("Dynapro 40", nl=450)
+        with scope("d", cab.interior) as d:
+            face = board("face", ply15).on(cab.interior.front)
+            drawer_box(d, cab.interior, slide, front=face.back, height=100, material=ply15, floor=ply9,
+                       corners=None, floor_joint=groove(5), carcass=[left, right])          # fine
+            drawer_box(d, cab.interior, slide, front=face.back, height=100, material=ply15, floor=ply9,
+                       carcass=[left, right])                                               # type: ignore  # corners= and floor_joint= are said
+            drawer_box(d, cab.interior, slide, face.back, 100, ply15, ply9, None, None, [left, right])  # type: ignore  # keywords
+    _ = bottom, top

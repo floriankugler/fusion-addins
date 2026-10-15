@@ -10,6 +10,7 @@ boxes. Behind a drawer face it takes room, so the drawer box stays
 here. Built on its own, the cabinet stands against the driver's wall and
 opens toward the aisle, like the drawer cabinet."""
 from lang import *
+from lang.std import carcass, drawer_box
 
 from stock import ply9, ply12, ply15
 
@@ -22,14 +23,7 @@ def latched_cabinet(name: str, box: Box, slide: DrawerSlide, model: LatchModel =
     `drawer_height` high, a rail, a second bay, a shelf and the door's
     compartment above it. A `model` latch holds every front."""
     with cabinet(name, box, front=front) as cab:
-        left = board("left", ply15).on(cab.left)
-        right = board("right", ply15).on(cab.right)
-        bottom = board("bottom", ply15).on(cab.bottom).between(left, right)
-        top = board("top", ply15).on(cab.top).between(left, right)
-        back = board("back", ply9).on(cab.back).between(left, right, bottom, top)
-        bottom.join(left, right, using=cabineo(count=3))
-        top.join(left, right, using=cabineo(count=3))
-        back.join(left, right, bottom, top, using=domino("4x20", count=2))
+        left, right, _bottom, top, back = carcass(cab, ply15, back=ply9, joins=cabineo(count=3))
 
         # the rest, above the shelf, is the door's compartment
         lower_bay, rail_space, upper_bay, shelf_space, _ = cab.interior.split(
@@ -45,30 +39,28 @@ def latched_cabinet(name: str, box: Box, slide: DrawerSlide, model: LatchModel =
 
         drawer_latch = latch(model)
         for i, (bay, catch) in enumerate(((lower_bay, rail), (upper_bay, shelf)), 1):
-            d = drawer(f"drawer{i}", bay, slide, drawer_latch, catch)
-            d.mount(slide, sides=(left, right), front=d.face.back)     # pre-drills the carcass
+            d = drawer(f"drawer{i}", bay, slide, drawer_latch, catch, sides=(left, right))   # pre-drills the carcass
             d.mount(drawer_latch, door=d.face, carcass=catch)          # the lock in the face, the strike under `catch`
 
         check(fits_sheet)
     return cab
 
 
-def drawer(name: str, bay: Box, slide: DrawerSlide, latch: DoorLatch, catch: Board) -> Scope:
+def drawer(name: str, bay: Box, slide: DrawerSlide, latch: DoorLatch, catch: Board, *,
+           sides: tuple[Board, Board]) -> Scope:
     """A drawer in its `bay` with an inset face. The slide sizes the box
     behind the face; its top stays clear of the latch that holds the face
-    to `catch`, the board above the bay."""
+    to `catch`, the board above the bay; its runners go on the carcass
+    `sides`."""
     with scope(name, bay) as d:
         face = board("face", ply15).on(bay.front).inset(REVEAL)
         box_top = catch.bottom.gap(latch.reach)
-        box = slide.drawer_box(bay, front=face.back, side_thickness=ply12.thickness,
-                               height=(box_top - bay.bottom) - slide.side_lift)
-        l = board("left", ply12).on(box.left).between(box)
-        r = board("right", ply12).on(box.right).between(box)
-        f = board("front", ply12).on(box.front).between(l, r, box.bottom, box.top)
-        k = board("back", ply12).on(box.back).between(l, r, box.bottom, box.top)
-        floor = board("floor", ply9).on(box.bottom.into(slide.recess)).between(l, r, f, k)
-        floor.join(l, r, f, k, using=groove(5, clearance=(0.5, 0.5)))
-        slide.machine_box(sides=(l, r), front=f, back=k, floor=floor)
+        # the box behind the face, from the standard library: its corners
+        # left plain here, its floor grooved into all four boards, the
+        # slide's cut-outs and hook holes, and its runners on the carcass
+        drawer_box(d, bay, slide, front=face.back, height=(box_top - bay.bottom) - slide.side_lift,
+                   material=ply12, floor=ply9, corners=None, floor_joint=groove(5, clearance=(0.5, 0.5)),
+                   carcass=sides)
     return d
 
 
