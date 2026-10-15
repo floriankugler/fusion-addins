@@ -3,7 +3,7 @@
 Status: added by Florian 2026-10-14, worked out by Claude the same day;
 nothing built. Only the points marked [Florian] are his. The spellings are
 working titles, to be settled in a detailed plan before implementing
-[Florian]. Comes before mitres (`mitres.md`) and before fitted ends on tilted
+[Florian]. Comes before miters (`miters.md`) and before fitted ends on tilted
 boards (`tilted-boards.md`).
 
 A narrow face cut at an angle through the whole thickness, which a sloped

@@ -189,7 +189,7 @@ def test_a_slat_takes_no_operations():
             lambda: s.cut(rect(depth=10, height=10), at=s.left.center),
             lambda: s.hole(5, s.left.center, depth=5),
             lambda: s.pocket(rect(depth=10, height=10), at=s.left.center, depth=5),
-            lambda: s.slot(5, at=s.left.center, centres=20, along="depth", depth=5),
+            lambda: s.slot(5, at=s.left.center, centers=20, along="depth", depth=5),
             lambda: s.chamfer(s.left.top, 1),
             lambda: s.fillet(s.front.top, 2),
             lambda: s.dogbones(),

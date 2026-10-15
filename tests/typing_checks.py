@@ -22,14 +22,14 @@ def operations() -> None:
         side.fillet(side.front.bottom, r=5)                                   # type: ignore  # radius=, not r=
         a, b = side.inner.front(40).bottom(100), side.inner.front(40).bottom(300)
         side.slot(8, a, b, depth=10)                                          # two end centres: fine
-        side.slot(8, at=a, centres=52, along="height", depth=10)              # a centre: fine
-        side.slot(8, at=a, centres=52, along=m.top, depth=10)                 # along a side: fine
+        side.slot(8, at=a, centers=52, along="height", depth=10)              # a centre: fine
+        side.slot(8, at=a, centers=52, along=m.top, depth=10)                 # along a side: fine
         side.slot(8, a, depth=10)                                             # type: ignore  # one anchor
         side.slot(8, a, b, at=a, depth=10)                                    # type: ignore  # both forms
-        side.slot(8, at=a, centres=52, depth=10)                              # type: ignore  # no along=
-        side.slot(8, at=a, length=60, along="height", depth=10)               # type: ignore  # centres=, not length=
-        side.slot(8, at=a, centres=52, along="heigth", depth=10)              # type: ignore  # a misspelt extent
-        side.slot(width=8, at=a, centres=52, along="height", depth=10)        # type: ignore  # width by position
+        side.slot(8, at=a, centers=52, depth=10)                              # type: ignore  # no along=
+        side.slot(8, at=a, length=60, along="height", depth=10)               # type: ignore  # centers=, not length=
+        side.slot(8, at=a, centers=52, along="heigth", depth=10)              # type: ignore  # a misspelt extent
+        side.slot(width=8, at=a, centers=52, along="height", depth=10)        # type: ignore  # width by position
         side.slot(8, a, b)                                                    # type: ignore  # no depth
 
 

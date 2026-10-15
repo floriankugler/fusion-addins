@@ -33,7 +33,7 @@ with module("panels", Box.from_size(width=600, depth=400, height=200)) as m:
         panel.pocket(rect(depth=100, width=100), at=top.front(140).left(40), depth=4, name="recess")
         panel.pocket(rect(depth=40, width=40), at=top.front(170).left(70), depth=10, name="well")
         panel.pocket(rect(depth=60, width=40), at=panel.bottom.back(40).right(40), depth=6, name="below")
-        panel.slot(12, at=top.front(100).right(206), centres=68, along="depth", depth=through, name="oblong")
+        panel.slot(12, at=top.front(100).right(206), centers=68, along="depth", depth=through, name="oblong")
         panel.cut(rect(depth=60, width=60).rounded(10), at=top.back(60).left(250), name="rounded")
         panel.dogbones()                    # every inside corner made above
 

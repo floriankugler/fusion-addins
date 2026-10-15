@@ -1185,7 +1185,7 @@ def _do(b: Built, key: str, x: Board, op: OpSpec) -> None:
                       lambda: x.face(LOW[m])][b.pick(4)]()
         at, where = _anchor(b, x, f, op.at.edges, {}, hole=True)
         depth, want = _depth(b, x, f, op.depth)
-        x.slot(op.d, at=at, centres=op.size[0], along=along, depth=depth)
+        x.slot(op.d, at=at, centers=op.size[0], along=along, depth=depth)
         b.meant.append((key, len(x.ops) - 1, where, want))
         return
     sizes_: dict[Axis, float] = {}

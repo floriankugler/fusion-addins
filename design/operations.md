@@ -107,16 +107,18 @@ screw holes for adjustable mounting, pass-throughs for straps and cables
   face, the centres of its round ends, at any angle. One between two edges
   needs no arithmetic: `side.slot(8, side.inner.bottom(z).front(40),
   side.inner.bottom(z).back(40), depth=through)`.
-- `side.slot(8, at=..., centres=52, along="height", depth=...)` is centred
+- `side.slot(8, at=..., centers=52, along="height", depth=...)` is centred
   on `at=`, as a hole is (the show face's centre by default), its end
   centres 52 apart, so 60 long overall [decided]: catalogues give overall
-  lengths, so the keyword says centre to centre. `along=` takes what
-  `grain()` takes, an extent name or a side, direction or face
-  (`along=cab.top`), and must lie in the face's plane.
+  lengths, so the keyword says centre to centre (`centers=`, spelt
+  American as the whole API is [decided by Florian, 2026-10-15, syntax.md
+  item 10]). `along=` takes what `grain()` takes, an extent name or a
+  side, direction or face (`along=cab.top`), and must lie in the face's
+  plane.
 
 ```python
 for z in spread(back.bottom + 60, back.top - 60, pitch=20):     # vents, centred across the back
-    back.slot(6, at=back.inner.bottom(z), centres=120, along="width", depth=through)
+    back.slot(6, at=back.inner.bottom(z), centers=120, along="width", depth=through)
 
 a, b = side.inner.front(40).bottom(100), side.inner.front(40).bottom(140)
 side.slot(12, a, b, depth=4, name="mount_head")                 # a stepped mounting slot:
