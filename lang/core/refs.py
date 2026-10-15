@@ -14,19 +14,24 @@ a position once its weights add up to one, scaled as in `(a + b) / 2` or
 with a position taken from it as in `a + b - c`.
 
 `Side` is a position with an inward direction, the face of a box; moved
-into or out of the box (`into`, `gap`) it is still one, and `+` and `-`
-move it along the world axis. A part's face moved by `gap()` or `into()`
-is one too, its inward direction the face's, away from the part; moved
-again it keeps the face's in and out (`from_face`). Anything
-with a `position` attribute (a `Side`, a part's `Face`, a master's plane)
-is accepted where a position is expected; `as_pos` does the coercion, and
-`PositionArithmetic` gives such a class the algebra above.
+into or out of the box (`into`, `gap`) it is still one. A part's face moved
+by `gap()` or `into()` is one too, its inward direction the face's, away
+from the part; moved again it keeps the face's in and out (`from_face`).
+Anything with a `position` attribute (a `Side`, a part's `Face`, a master's
+plane) is accepted where a position is expected; `as_pos` does the
+coercion, and `PositionArithmetic` gives such a class the algebra above.
+
+A position with a direction (a `Side`, a part's `Face`, through
+`DirectedArithmetic`) has the algebra too, but for a length added or taken
+away: along the world axis that moves inward in one frame and outward in
+another, so it is an error naming `into()` and `gap()`, which say which
+way [decided by Florian, 2026-10-15, syntax.md item 1].
 """
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field, replace
-from typing import Protocol, overload, runtime_checkable
+from typing import Never, NoReturn, Protocol, cast, overload, runtime_checkable
 
 from . import directions
 from .directions import Axis, Direction, InnerOuter
@@ -200,6 +205,68 @@ class PositionArithmetic(ABC):
         return self.position / other
 
 
+class DirectedArithmetic(ABC):
+    """The position algebra for a position with a direction: a box side, a
+    side moved by `into()` or `gap()`, a part's face. A position added or
+    taken away, `*` and `/` work as for a bare position, so `(bottom.top +
+    top.bottom) / 2` is the middle and `top.bottom - bottom.top` a length;
+    a length added or taken away is an error, for the type checker and when
+    the build runs, since along the world axis it moves inward in one frame
+    and outward in another: `into()` and `gap()` say which way [decided by
+    Florian, 2026-10-15, syntax.md item 1]."""
+
+    @property
+    @abstractmethod
+    def position(self) -> Pos: ...
+
+    @abstractmethod
+    def _directed(self) -> tuple[str, str, str | None]:
+        """What it is (`"a side"`), how the error writes it
+        (`"kitchen.front"`) and the error's path."""
+
+    def _length_refused(self, op: str, n: object, first: bool = False) -> LangError:
+        """The error for `self op n`, or `n op self` when the number is
+        `first`."""
+        noun, label, path = self._directed()
+        number, amount = (f"{n:g}", f"{abs(n):g}") if isinstance(n, (int, float)) else (repr(n), "n")
+        written = f"{number} {op} {label}" if first else f"{label} {op} {number}"
+        return LangError(f"{written}: {noun} has a direction; write {label}.into({amount}) or "
+                         f"{label}.gap({amount}).", path)
+
+    @overload
+    def __add__(self, other: Pos | HasPosition) -> Affine: ...
+    @overload
+    def __add__(self, other: Affine) -> Pos | Affine: ...
+
+    def __add__(self, other: Number | Pos | Affine | HasPosition) -> Pos | Affine:
+        if isinstance(other, (int, float)):
+            raise self._length_refused("+", other)
+        return self.position + other
+
+    def __radd__(self, other: Never) -> NoReturn:
+        """Only a number reaches here (a position adds itself first)."""
+        raise self._length_refused("+", other, first=True)
+
+    @overload
+    def __sub__(self, other: Pos | HasPosition) -> float: ...
+    @overload
+    def __sub__(self, other: Affine) -> Pos | Affine: ...
+
+    def __sub__(self, other: Number | Pos | Affine | HasPosition) -> Pos | Affine | float:
+        if isinstance(other, (int, float)):
+            raise self._length_refused("-", other)
+        return self.position - other
+
+    def __mul__(self, other: Number) -> Affine:
+        return self.position * other
+
+    def __rmul__(self, other: Number) -> Affine:
+        return self.position * other
+
+    def __truediv__(self, other: Number) -> Affine:
+        return self.position / other
+
+
 def as_pos(value: object, what: str = "position") -> Pos:
     """Coerces a Pos, an Affine whose weights add up to one, or anything with
     a `position` (Side, Face) to a Pos."""
@@ -219,14 +286,15 @@ def as_pos(value: object, what: str = "position") -> Pos:
 
 
 @dataclass(frozen=True)
-class Side:
+class Side(DirectedArithmetic):
     """A position with a direction pointing inward, into the box it bounds;
     for a part's face moved by `gap()` or `into()`, the face's direction,
     away from the part (`lang.core.faces.Face.gap`). `on()` uses the
-    direction to decide where a board's thickness goes.
-    Moving a side by a length keeps its direction; scaled, it is a
-    position in a mix like any other (`0.5 * cab.bottom + 0.5 * cab.top`)
-    [found by fuzzing, 2026-10-14: it had no `*` or `/`]."""
+    direction to decide where a board's thickness goes. `into()` and
+    `gap()` move it and keep its direction; a length added with `+` or
+    `-` is an error (`DirectedArithmetic`). Scaled, it is a position in a
+    mix like any other (`0.5 * cab.bottom + 0.5 * cab.top`) [found by
+    fuzzing, 2026-10-14: it had no `*` or `/`]."""
 
     axis: Axis
     value: float
@@ -236,6 +304,8 @@ class Side:
     #: `inward`, and `gap()` away from it, so `back.inner.gap(15).gap(5)` is
     #: 20 in front of the back [decided by Florian, 2026-10-15].
     from_face: bool = False
+    #: How an error writes it (`kitchen.front`, `back.inner.gap(15)`).
+    label: str | None = field(default=None, compare=False, repr=False)
 
     def __post_init__(self) -> None:
         if self.inward.axis != self.axis:
@@ -258,54 +328,25 @@ class Side:
         """This side moved `n` into the box, its inward direction kept, so a
         board lies on it with its thickness inward, `on(cab.bottom.into(60))`
         [decided by Florian, 2026-10-14: it was a bare position, which
-        needed toward=]; one made from a face moves into the face's part.
-        `+` and `-` move it along the world axis instead."""
-        return replace(self, value=self.value + self._into_sign * n)
+        needed toward=]; one made from a face moves into the face's part."""
+        return replace(self, value=self.value + self._into_sign * n, label=_moved_label(self.label, "into", n))
 
     def gap(self, n: float) -> Side:
         """This side moved `n` out of the box, its inward direction kept;
         one made from a face moves away from the face's part."""
-        return replace(self, value=self.value - self._into_sign * n)
+        return replace(self, value=self.value - self._into_sign * n, label=_moved_label(self.label, "gap", n))
 
-    @overload
-    def __add__(self, other: Number) -> Side: ...
-    @overload
-    def __add__(self, other: Pos | HasPosition) -> Affine: ...
-    @overload
-    def __add__(self, other: Affine) -> Pos | Affine: ...
-
-    def __add__(self, other: Number | Pos | Affine | HasPosition) -> Side | Pos | Affine:
-        if isinstance(other, (int, float)):
-            return replace(self, value=self.value + other)
-        return self.position + other
-
-    @overload
-    def __sub__(self, other: Number) -> Side: ...
-    @overload
-    def __sub__(self, other: Pos | HasPosition) -> float: ...
-    @overload
-    def __sub__(self, other: Affine) -> Pos | Affine: ...
-
-    def __sub__(self, other: Number | Pos | Affine | HasPosition) -> Side | Pos | Affine | float:
-        if isinstance(other, (int, float)):
-            return replace(self, value=self.value - other)
-        return self.position - other
-
-    def __radd__(self, other: Number) -> Side:
-        return replace(self, value=self.value + other)
-
-    def __mul__(self, other: Number) -> Affine:
-        return self.position * other
-
-    def __rmul__(self, other: Number) -> Affine:
-        return self.position * other
-
-    def __truediv__(self, other: Number) -> Affine:
-        return self.position / other
+    def _directed(self) -> tuple[str, str, str | None]:
+        return "a side", self.label or "side", None
 
     def __repr__(self) -> str:
         made = ", from a face" if self.from_face else ""
         return f"Side({self.axis}, {self.value:g}, inward={self.inward.name}{made})"
+
+
+def _moved_label(label: str | None, how: str, n: float) -> str | None:
+    """The label of a side `label` moved by `into(n)` or `gap(n)`."""
+    return f"{label}.{how}({n:g})" if label else None
 
 
 def spread(start: PosLike, end: PosLike, pitch: float | None = None, count: int | None = None) -> list[Pos]:
@@ -356,23 +397,38 @@ class FaceOfPart(Protocol):
 
 @dataclass(frozen=True)
 class ToFace:
-    """Depth of a cut or hole: to the named face of the same part, plus an
-    offset (negative stops short of it). `part` is the part whose face was
-    named, None for `"inner"` and `"outer"`; the operation checks that it
-    is its own."""
+    """Depth of a cut or hole: to the named face of the same part, leaving
+    `leave` of material at it. `part` is the part whose face was named,
+    None for `"inner"` and `"outer"`; the operation checks that it is its
+    own."""
     face: str
-    offset: float = 0.0
+    leave: float = 0.0
     part: object = field(default=None, compare=False)
 
 
-def to(face: FaceOfPart | InnerOuter, offset: float = 0.0) -> ToFace:
-    """A depth reaching a face of the same part, `to(side.outer, -3)`
-    stopping 3 mm short of it. `"inner"` and `"outer"` name the face
-    without naming the part, for the chained form. A positive offset would
-    reach past the face, out of the part, and is an error where it is used."""
+def to(face: FaceOfPart | InnerOuter, *args: Never, leave: float = 0.0) -> ToFace:
+    """A depth reaching a face of the same part, `to(side.outer)`, or
+    stopping short of it: `to(side.outer, leave=3)` leaves 3 mm at it
+    [decided by Florian, 2026-10-15, syntax.md item 7: it was a signed
+    offset, `to(side.outer, -3)`, of which only zero or a negative was
+    legal]. `"inner"` and `"outer"` name the face without naming the part,
+    for the chained form. The amount given by position, or a negative
+    `leave`, is an error; one that leaves the whole board or more reaches
+    nothing, an error where it is used."""
+    named = face if isinstance(face, str) else f"{getattr(face.part, 'name', '?')}.{face.name}"
+    path = None if isinstance(face, str) else getattr(face.part, "path", None)
+    given = cast(tuple[object, ...], args)    # (pyright lets nothing through; a build may run unchecked)
+    if given:
+        n = given[0]
+        amount = f"{abs(n):g}" if isinstance(n, (int, float)) else "n"
+        raise LangError(f"to({named}, {n!r}): give what is left at the face as leave=, "
+                        f"to({named}, leave={amount}).", path)
+    if leave < 0:
+        raise LangError(f"to({named}, leave={leave:g}): a negative leave= reaches past the face, out of the "
+                        "board; leave= is what is left at it, 0 or more.", path)
     if isinstance(face, str):
-        return ToFace(one_of(face, InnerOuter, "to()"), offset)
-    return ToFace(face.name, offset, face.part)
+        return ToFace(one_of(face, InnerOuter, "to()"), float(leave))
+    return ToFace(face.name, float(leave), face.part)
 
 
 class Through:
@@ -385,7 +441,8 @@ through = Through()
 DepthSpec = Number | ToFace | Through
 
 __all__ = [
-    "Pos", "Affine", "Side", "HasPosition", "HasName", "FaceOfPart", "PositionArithmetic", "PosLike", "Number",
+    "Pos", "Affine", "Side", "HasPosition", "HasName", "FaceOfPart", "PositionArithmetic", "DirectedArithmetic",
+    "PosLike", "Number",
     "DepthSpec", "ToFace", "Through", "to", "through", "spread", "as_pos",
 ]
 

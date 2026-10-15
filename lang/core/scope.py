@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from collections.abc import Generator
 from contextlib import contextmanager
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, ParamSpec, Protocol, cast
 
@@ -172,7 +173,7 @@ class Scope:
     # -- the box's sides and extents -------------------------------------------------
 
     def side(self, direction: str) -> Side:
-        return self.require_box(direction).side(direction)
+        return replace(self.require_box(direction).side(direction), label=f"{self.path}.{direction}")
 
     @property
     def front(self) -> Side:

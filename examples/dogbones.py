@@ -43,8 +43,8 @@ with module("panels", Box.from_size(width=600, depth=400, height=200)) as m:
         shelf.dogbones(at=shelf.cable)
 
 with module("frame", Box.from_size(width=400, depth=300, height=40, origin=(0, 700, 0))) as f:
-    crosses = [board(f"cross{i}", ply15).center(f.front + x) for i, x in enumerate((60, 150, 240))]
-    left_rail = board("left_rail", ply15).center(f.left + 100)
-    right_rail = board("right_rail", ply15).center(f.left + 300)
+    crosses = [board(f"cross{i}", ply15).center(f.front.into(x)) for i, x in enumerate((60, 150, 240))]
+    left_rail = board("left_rail", ply15).center(f.left.into(100))
+    right_rail = board("right_rail", ply15).center(f.left.into(300))
     left_rail.join(crosses, using=half_lap(toward=f.top))
     right_rail.join(crosses, using=half_lap(toward=f.top, dogbones="hidden"))

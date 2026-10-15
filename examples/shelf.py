@@ -13,7 +13,7 @@ box = Box.from_size(width=600, depth=250, height=900)
 with cabinet("shelf", box, front=box.front) as unit:
     left = board("left", ply18).on(unit.left)
     right = board("right", ply18).on(unit.right)
-    bottom = board("bottom", ply18).on(unit.bottom + 60).between(left, right)
+    bottom = board("bottom", ply18).on(unit.bottom.into(60)).between(left, right)
     middle = board("middle", ply18).center(unit.center("height")).between(left, right)
     top = board("top", ply18).on(unit.top).between(left, right)
 

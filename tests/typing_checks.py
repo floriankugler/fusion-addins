@@ -18,6 +18,9 @@ def operations() -> None:
         side.pocket(rect(depth=50, height=50), at=side.inner.center)          # type: ignore  # no depth
         side.hole(5, side.inner.center)                                       # type: ignore  # no depth
         side.pocket(rect(depth=50, height=50), side.inner.center, 5)          # type: ignore  # depth by position
+        side.pocket(rect(depth=50, height=50), depth=to(side.outer, leave=3))  # fine
+        side.pocket(rect(depth=50, height=50), depth=to(side.outer, -3))      # type: ignore  # leave= by keyword
+        side.hole(5, depth=to("outer", 3))                                    # type: ignore  # leave= by keyword
         side.hoel(d=5, at=side.inner.center, depth=10)                        # type: ignore  # a misspelt method
         side.fillet(side.front.bottom, r=5)                                   # type: ignore  # radius=, not r=
         a, b = side.inner.front(40).bottom(100), side.inner.front(40).bottom(300)
@@ -52,12 +55,27 @@ def slats() -> None:
         shelf.edge_on(m.left)                                                 # type: ignore  # a board has no edge_on
 
 
+def references() -> None:
+    """A side or a face plus or minus a number is refused: `into()` and
+    `gap()` say which way (syntax.md item 1)."""
+    with module("r", Box.from_size(width=600, depth=400, height=700)) as m:
+        shelf = board("shelf", ply15).on(m.bottom)
+        _ = m.bottom.into(60), shelf.top.gap(5), m.bottom.position + 60, shelf.top.position - 5     # fine
+        _ = (m.bottom + shelf.top) / 2, m.top - m.bottom, 0.5 * m.bottom + 0.5 * shelf.top        # fine
+        _ = m.bottom + 60                                                     # type: ignore  # a side has a direction
+        _ = m.top - 60                                                        # type: ignore  # into() or gap()
+        _ = 60 + m.bottom                                                     # type: ignore  # the number first
+        _ = m.bottom.into(60) + 5                                             # type: ignore  # a moved side
+        _ = shelf.top + 5                                                     # type: ignore  # a face
+        _ = shelf.top.gap(5) - 5                                              # type: ignore  # a moved face
+
+
 def joints() -> None:
     top = world_frame().direction("top")
     with module("j", Box.from_size(width=600, depth=400, height=40)) as m:
-        half_lap(m.top, split=m.bottom + 10, clearance=0.2)
-        half_lap(m.top, at=m.bottom + 10)                                     # type: ignore  # split=, not at=
-        half_lap(m.top, m.bottom + 10)                                        # type: ignore  # settings by keyword
+        half_lap(m.top, split=m.bottom.into(10), clearance=0.2)
+        half_lap(m.top, at=m.bottom.into(10))                                 # type: ignore  # split=, not at=
+        half_lap(m.top, m.bottom.into(10))                                    # type: ignore  # settings by keyword
     half_lap(top, clearance=0.2, dogbones=None)
     tenons(2, width=50, dogbones=None)
     tenons(2, 50)                                                             # type: ignore  # width= by keyword

@@ -66,7 +66,7 @@ class Box:
     def side(self, direction: str | Direction) -> Side:
         d = self.frame.direction(direction)
         value = self.hi[d.axis] if d.sign > 0 else self.lo[d.axis]
-        return Side(d.axis, value, inward=-d)
+        return Side(d.axis, value, inward=-d, label=f"box.{self.frame.name_of(d)}")
 
     @property
     def front(self) -> Side:

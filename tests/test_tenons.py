@@ -64,7 +64,7 @@ def test_blind_mortises_are_pockets_half_a_millimetre_deeper():
         shelf.join(left, using=tenons(count=1, width=60, remaining=6))
     assert has_material(shelf, (150, 6.5), (150, 5.5)) == [True, False]       # 15 - 6 = 9 long, from y = 15 to 6
     (pocket,) = [op for op in left.ops if isinstance(op, Pocket)]
-    assert pocket.face == "right" and pocket.depth == pytest.approx(9.5) and pocket.depth_spec == "to(left, -5.5)"
+    assert pocket.face == "right" and pocket.depth == pytest.approx(9.5) and pocket.depth_spec == "to(left, leave=5.5)"
     assert left.outline.geometry.area == 300 * 800                     # nothing through
 
 

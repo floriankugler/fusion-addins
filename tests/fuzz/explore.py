@@ -86,6 +86,7 @@ CHECKS: dict[str, Check] = {
     "chamfers": (st.tuples(fuzzing.line_polygons(), _radii), _chamfers),
     "offsets": (fuzzing.recipes(), fuzzing.offset_problems),
     "cutouts": (boards.board_cases(), boards.run_cutout),
+    "centers": (boards.center_cases(), boards.run_center),
     "joints": (joints.pair_cases(), joints.run_pair),
     "box_joints": (joints.corner_cases(), joints.run_corner),
     "half_laps": (joints.cross_cases(), joints.run_cross),

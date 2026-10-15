@@ -40,7 +40,7 @@ def drawer_cabinet(name: str, box: Box, n: int, slide: DrawerSlide, *, front: Si
 
         # shelf-pin holes on the inner faces, lined up on both sides
         for side in (left, right):
-            for z in spread(bottom.top + 100, top.bottom - 100, pitch=32):
+            for z in spread(bottom.top.gap(100), top.bottom.gap(100), pitch=32):
                 side.hole(d=5, depth=10, at=side.inner.front(37).bottom(z))
 
         # The opening above the bottom is what the drawers occupy; the area
@@ -92,7 +92,7 @@ def drawer(name: str, bay: Box, panel: Box, slide: DrawerSlide) -> Scope:
         # lies in the sides' lowest finger, so their grooves stop inside
         # them and those in the front and back run out into the joints'
         # gaps.
-        floor = board("floor", ply9).on(box.bottom + slide.recess).between(l, r, f, k)
+        floor = board("floor", ply9).on(box.bottom.into(slide.recess)).between(l, r, f, k)
         floor.join(l, r, f, k, using=groove(5, clearance=(0.5, 0.5)))
         slide.machine_box(sides=(l, r), front=f, back=k, floor=floor)   # cut-outs and hook holes
     return d

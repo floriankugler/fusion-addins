@@ -80,7 +80,10 @@ materials (`sheet_material()`), joints (`cabineo()`) and hardware
 - **Strict typing.** The package is checked with pyright in strict mode and
   ships a `py.typed` marker, so build files get completion and errors in the
   editor. Positions, sides, faces, anchor and depth specs and the layout
-  file are all typed; the layout file's shape lives in `layout_types.py` and
+  file are all typed, a side or a face plus a number among the type errors
+  (a position with a direction moves by `into()` and `gap()`,
+  `design/placement.md`) [decided by Florian, 2026-10-15, syntax.md item
+  1]; the layout file's shape lives in `layout_types.py` and
   is the contract the emitter is checked against. A hardware object's
   `mount` names its parts as typed keywords, which `cab.mount(hardware,
   ...)` passes on through a ParamSpec, so `cab.mount(hinge, dor=door)` is a
@@ -108,10 +111,13 @@ materials (`sheet_material()`), joints (`cabineo()`) and hardware
   `side.front.right(50)` is a point on a narrow face, centred in the
   thickness because the thickness axis is not named. A number measures from
   the edge it follows, a position is taken as it is, an unnamed axis stays
-  centred. The anchor also says which face the operation is on, so there is
-  no `face=`. Strings and bare direction names were rejected: no
-  autocomplete, and carcass parts are named after directions, so
-  `bottom.front` would read as a face of the bottom board. [decided]
+  centred, on the face or, with `center(pos)`, on a position:
+  `b.front.top.center(line)` centres a notch on `line` along the top edge
+  [decided by Florian, 2026-10-15, syntax.md item 6]. The anchor also says
+  which face the operation is on, so there is no `face=`. Strings and bare
+  direction names were rejected: no autocomplete, and carcass parts are
+  named after directions, so `bottom.front` would read as a face of the
+  bottom board. [decided]
 - **Strings are names or lookups.** Strings in the API are either names
   checked as literals by the type checker (`width`/`depth`/`height`,
   `"inner"`/`"outer"` in `show()` and `to()`, catalogue names such as

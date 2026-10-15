@@ -99,7 +99,7 @@ def test_an_inset_door():
     with module("cab", BOX) as cab:
         left = board("left", ply15).on(cab.left)
         right = board("right", ply15).on(cab.right)
-        door = board("door", ply12).on(cab.front).between(left.gap(2), right.gap(2), cab.bottom + 2, cab.top - 2)
+        door = board("door", ply12).on(cab.front).between(left.gap(2), right.gap(2), cab.bottom.into(2), cab.top.into(2))
         cab.mount(ConcealedHinge(), door=door, carcass=left)
     assert {(u, face) for _, face, u, *_ in _holes(door)} == {(42.0, "back")}
     assert {(u, face) for _, face, u, *_ in _holes(left)} == {(50.5, "right")}
@@ -338,13 +338,13 @@ def test_mounting_refuses_what_the_add_in_refuses(case: str, message: str):
         left = board("left", ply15).on(cab.left).between(behind)
         carcass = left
         if case == "short door":
-            door = board("door", ply12).on(cab.front).between(cab.bottom, cab.bottom + 120)
+            door = board("door", ply12).on(cab.front).between(cab.bottom, cab.bottom.into(120))
         elif case == "door for one hinge":
-            door = board("door", ply12).on(cab.front).between(cab.bottom, cab.bottom + 162)
+            door = board("door", ply12).on(cab.front).between(cab.bottom, cab.bottom.into(162))
         elif case == "narrow door":
-            door = board("door", ply12).on(cab.front).between(cab.left, cab.left + 40)
+            door = board("door", ply12).on(cab.front).between(cab.left, cab.left.into(40))
         elif case == "cup rim off the door":
-            door = board("door", ply12).on(cab.front).between(cab.left, cab.left + 46)
+            door = board("door", ply12).on(cab.front).between(cab.left, cab.left.into(46))
         elif case == "cup over a hole":
             door = board("door", ply12).on(cab.front)
             # the lowest cup at y 42, z 44 (60 - 16): a 6 mm hole 6 below its
@@ -355,7 +355,7 @@ def test_mounting_refuses_what_the_add_in_refuses(case: str, message: str):
             hinge = ConcealedHinge(pilot=(3, 15))
         elif case == "shallow carcass":
             door = board("door", ply12).on(cab.front)
-            carcass = board("strip", ply15).on(cab.right).between(behind, behind + 30)
+            carcass = board("strip", ply15).on(cab.right).between(behind, behind.into(30))
         elif case == "one board":
             door = left
         else:
@@ -446,7 +446,7 @@ def test_hinges_closer_than_their_plates_are_long_are_refused():
         registry.reset()
         with module("cab", BOX) as cab:
             side = board("side", ply15).on(cab.left).between(cab.front.into(12))
-            door = board("door", ply12).on(cab.front).between(cab.bottom, cab.bottom + height)
+            door = board("door", ply12).on(cab.front).between(cab.bottom, cab.bottom.into(height))
             if fits:
                 cab.mount(ConcealedHinge(), door=door, carcass=side)
                 assert build_layout()["problems"] == []

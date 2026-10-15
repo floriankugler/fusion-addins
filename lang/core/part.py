@@ -757,7 +757,9 @@ class Board:
 
     def _place_shape(self, shape: Shape, anchor: Anchor) -> Shape:
         """The shape in the frame of the anchor's face, with its matching
-        side or corner on the anchor's point."""
+        side or corner on the anchor's point, and the middle of its bounds
+        on it along an axis the anchor leaves unnamed (the face's middle,
+        or the position `Anchor.center()` gives)."""
         ua, va = self.face_axes(anchor.face)
         placed = shape.in_plane(ua, va, self.path)
         point, shape_anchor = anchor.resolve()
@@ -771,7 +773,7 @@ class Board:
         from a narrow one. A depth reaching past the opposite face is an
         error, and so is one under 0.01 mm, which reaches nothing, as a
         number or as `to()` [found by fuzzing, 2026-10-14: `to(side.outer,
-        -20)` on a 15 mm board made a hole -5 deep]."""
+        leave=20)` on a 15 mm board made a hole -5 deep]."""
         b = self.box()
         extent = b.hi[face.axis] - b.lo[face.axis]
         if isinstance(depth, Through):
@@ -786,13 +788,11 @@ class Board:
                 raise LangError(f"depth to({depth.face!r}) is not opposite the face the operation is on.", self.path)
             if target.direction == face.direction:
                 raise LangError(f"depth to({depth.face!r}) names the face itself.", self.path)
-            if depth.offset > 1e-9:
-                raise LangError(f"depth to({depth.face!r}, {depth.offset:g}) reaches past that face, out of the "
-                                "board; use through, or a negative offset to stop short of it.", self.path)
-            if extent + depth.offset < NARROWEST - 1e-9:
-                raise LangError(f"depth to({depth.face!r}, {depth.offset:g}) does not reach into the board: that face "
-                                f"is {extent:g} from the {face.name} face.", self.path)
-            return extent + depth.offset, f"to({depth.face}, {depth.offset:g})", abs(depth.offset) < 1e-9
+            spec = f"to({depth.face}, leave={depth.leave:g})" if depth.leave else f"to({depth.face})"
+            if extent - depth.leave < NARROWEST - 1e-9:
+                raise LangError(f"depth {spec} does not reach into the board: that face is {extent:g} from the "
+                                f"{face.name} face.", self.path)
+            return extent - depth.leave, spec, depth.leave < 1e-9
         if depth < NARROWEST - 1e-9:
             raise LangError(f"depth {depth:g} does not reach into the board: a depth is at least {NARROWEST:g} mm.",
                             self.path)
@@ -1499,7 +1499,7 @@ class Board:
         `at=` on a big face: then only that region is cut out, still inside
         the border. `pattern=` leaves more material: `cross(width)` or
         `triangles(columns, rows, spacing)`. `depth=` makes it a pocket
-        (`to(side.outer, -3)` leaves 3 mm); `radius=` rounds every corner
+        (`to(side.outer, leave=3)` leaves 3 mm); `radius=` rounds every corner
         of the openings (0 leaves them sharp), and pieces too small for it
         are left out; `chamfer=` puts a 45 degree chamfer on their rims at
         the face cut from only.

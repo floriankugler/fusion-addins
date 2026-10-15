@@ -288,7 +288,7 @@ class DoorLatch:
         for hole in holes:
             if hole.kind == "counterbore":
                 outer = Face(hole.board, -hole.face.direction)
-                hole.board.add_pocket(hole.face, circle(hole.d, center=hole.point), to(outer, -hole.depth),
+                hole.board.add_pocket(hole.face, circle(hole.d, center=hole.point), to(outer, leave=hole.depth),
                                       hole.board.unique_op_name(hole.name))
             else:
                 depth = through if hole.kind == "through" else hole.depth

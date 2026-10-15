@@ -116,12 +116,12 @@ def test_a_part_as_large_as_its_sheet_fits_it_far_from_the_origin():
     2026-10-14]."""
     with module("m", Box.from_size(width=300, depth=300, height=500, origin=(0, 0, -1220))) as m:
         b = board("b", sheet_material("birch", t=9, size=(57, 243))).on(m.left).between(
-            m.bottom + 0.1, m.bottom + 243.1, m.front, m.front + 57)
+            m.bottom.into(0.1), m.bottom.into(243.1), m.front, m.front.into(57))
     assert b.outline.height > 243
     assert fits_sheet(m) == []
     with module("n", Box.from_size(width=300, depth=300, height=500)) as n:
-        board("b", sheet_material("birch", t=9, size=(57, 243))).on(n.left).between(n.bottom, n.bottom + 243.01,
-                                                                               n.front, n.front + 57)
+        board("b", sheet_material("birch", t=9, size=(57, 243))).on(n.left).between(n.bottom, n.bottom.into(243.01),
+                                                                               n.front, n.front.into(57))
     assert fits_sheet(n) == ["n.b (57 x 243.01) does not fit a 57 x 243 sheet"]
 
 
@@ -147,8 +147,8 @@ def test_parallel_boards_with_room_made_in_each_do_not_overlap():
     for depth, expected in ((4, []), (3, ["m.a overlaps m.b"])):
         registry.reset()
         with module("m", Box.from_size(width=100, depth=300, height=100)) as m:
-            a = board("a", ply18).on(m.bottom).between(m.front, m.front + 200)                 # z 0 to 18
-            b = board("b", ply18).on(m.bottom + 10).between(m.front + 100, m.back)             # z 10 to 28
+            a = board("a", ply18).on(m.bottom).between(m.front, m.front.into(200))                 # z 0 to 18
+            b = board("b", ply18).on(m.bottom.into(10)).between(m.front.into(100), m.back)             # z 10 to 28
             a.pocket(rect(depth=100, width=100), at=a.top.back, depth=depth)
             b.pocket(rect(depth=100, width=100), at=b.bottom.front, depth=depth)
         assert no_interference(m) == expected
@@ -166,7 +166,7 @@ def test_a_divider_notched_clear_of_the_material_beside_its_groove_does_not_over
             shelf = board("shelf", ply18).on(m.bottom)
             shelf.pocket(rect(depth=40, width=50), at=shelf.top.front(40).left, depth=5)      # x 40 to 80, y 0 to 50
             divider = board("divider", ply18).on(Pos("x", 50), toward=m.back).between(
-                m.left, m.left + 100, m.bottom + 13, m.bottom + 60)
+                m.left, m.left.into(100), m.bottom.into(13), m.bottom.into(60))
             if notched:
                 divider.cut(rect(width=50, height=6), at=divider.outer.right.bottom)           # y 50 to 100, z 13 to 19
         assert no_interference(m) == expected
@@ -235,7 +235,7 @@ def test_a_board_whose_outline_only_touches_where_another_crosses_it_meets_nothi
     with module("m", Box.from_size(width=600, depth=400, height=720)) as m:
         panel = board("panel", ply18).on(m.bottom)
         panel.add_cut(Shape(shapely_box(15, -1, 401, 9)))           # the front 9 mm notched away from x = 15
-        board("side", sheet_material("birch", t=6)).on(m.left).between(m.front + 15)   # within the notch
+        board("side", sheet_material("birch", t=6)).on(m.left).between(m.front.into(15))   # within the notch
     assert no_interference(m) == []
 
 
@@ -249,9 +249,9 @@ def test_an_overlap_deeper_than_a_micrometre_counts_in_the_plane_as_across_the_t
     for into, expected in ((0.005, ["m.a overlaps m.side_by_side", "m.a overlaps m.stacked"]), (5e-7, [])):
         registry.reset()
         with module("m", Box.from_size(width=300, depth=600, height=100)) as m:
-            board("a", ply18).on(m.bottom).between(m.front, m.front + 200)                         # z 0 to 18
-            board("side_by_side", ply18).on(m.bottom).between(m.front + 200 - into, m.front + 400)
-            board("stacked", ply18).on(m.bottom + 18 - into).between(m.front, m.front + 100)
+            board("a", ply18).on(m.bottom).between(m.front, m.front.into(200))                         # z 0 to 18
+            board("side_by_side", ply18).on(m.bottom).between(m.front.into(200 - into), m.front.into(400))
+            board("stacked", ply18).on(m.bottom.into(18 - into)).between(m.front, m.front.into(100))
         assert no_interference(m) == expected
 
 
@@ -263,8 +263,8 @@ def test_a_divider_or_a_box_a_little_into_a_board_overlaps_it():
     for into, expected in ((0.005, ["m.shelf overlaps m.divider", "m.pin.pin overlaps m.shelf"]), (5e-7, [])):
         registry.reset()
         with module("m", Box.from_size(width=300, depth=300, height=100)) as m:
-            board("shelf", ply18).on(m.bottom).between(m.front, m.front + 200)                     # z 0 to 18
-            board("divider", ply18).on(Pos("x", 50), toward=m.back).between(m.bottom + 18 - into, m.top)
+            board("shelf", ply18).on(m.bottom).between(m.front, m.front.into(200))                     # z 0 to 18
+            board("divider", ply18).on(Pos("x", 50), toward=m.back).between(m.bottom.into(18 - into), m.top)
         m.place_hardware("pin", [_body("pin", _box((200 - into, 100, 5), (220, 120, 10)))])
         assert no_interference(m) == expected
 
@@ -276,7 +276,7 @@ def test_a_part_reaches_out_of_its_box_where_its_material_does():
     (it was inside); a board placed 10 past the back, its last 10 cut off,
     does not (it reached out by 10)."""
     with module("m", Box.from_size(width=300, depth=300, height=200)) as m:
-        shelf = board("shelf", ply18).on(m.bottom).between(m.left + 20, m.right)
+        shelf = board("shelf", ply18).on(m.bottom).between(m.left.into(20), m.right)
         shelf.add_to_outline(Shape(shapely_box(100, 290, 150, 312)))       # a tenon out of the right end (y)
         cut = board("cut", ply18).on(m.top).between(Pos("x", 0), Pos("x", 310))
         cut.add_cut(Shape(shapely_box(300, -1, 311, 301)))                  # its last 10 on x cut off

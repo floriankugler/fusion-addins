@@ -79,7 +79,7 @@ def test_rings_around_round_features_are_exact_circles():
 def test_a_pocket_cutout_has_several_pieces_in_the_layout():
     cab, side = _side()
     with cab:
-        side.cutout(pattern=cross(40), depth=to(side.outer, -3), chamfer=1)
+        side.cutout(pattern=cross(40), depth=to(side.outer, leave=3), chamfer=1)
     pocket = side.ops[0]
     assert isinstance(pocket, Pocket) and pocket.depth == 12 and pocket.face == "right"
     part = build_layout()["modules"][0]["parts"][0]
@@ -202,6 +202,17 @@ def test_a_region_limits_the_cutout():
         side.cutout(side.front)
 
 
+def test_a_region_centred_on_a_position_limits_the_cutout():
+    """syntax.md item 6: a region placed by `anchor.center(pos)` has its
+    middle on `pos` along the axis the anchor leaves unnamed."""
+    cab, side = _side()
+    with cab:
+        side.cutout(rect(depth=200, height=100), at=side.inner.bottom(100).center(Pos("x", 180)))
+    cut = side.ops[0]
+    assert isinstance(cut, Cut)
+    assert cut.shape.bounds == pytest.approx((80, 100, 280, 200))
+
+
 def test_shared_pattern_math():
     w, h = data.triangle_dimensions(560, 360, 8, 6, 20)
     assert (w, h) == pytest.approx((84.2232, 43.3333), abs=1e-4)
@@ -280,7 +291,7 @@ def test_pieces_rounded_as_a_router_would_keep_their_new_arcs_off_a_large_arc():
         back = board("back", sheet_material("birch", t=9), Shape(box(0, 0, 631, 1124)).rounded(197.5322915245099)).on(m.back)
         inner, outer = back.big_faces()[1], back.big_faces()[0]
         back.cutout(inner, pattern=triangles(9, 5, 27.5), border=7.809625022994677, around=27.5, radius=11,
-                    depth=to(outer, -1), name="openings")
+                    depth=to(outer, leave=1), name="openings")
     op = back.op("openings").op
     assert isinstance(op, Pocket)
     for piece in polygons_of(op.shape.geometry):
@@ -317,7 +328,7 @@ def test_material_kept_around_a_box_keeps_its_width_where_a_piece_is_rounded_as_
         boxes = [(1861.1499947555708, 0.0, 2078.649994755571, 107.0), (1.0, 2.0, 167.0, 64.0)]
         keep = [Box({"x": u0, "y": 0, "z": v0}, {"x": u1, "y": 12, "z": v1}) for u0, v0, u1, v1 in boxes]
         outer = next(f for f in side.big_faces() if f.direction == side.show_face.direction)
-        side.cutout(pattern=triangles(3, 3, 25.0, aligned=True), around=around, depth=to(outer, -2), keep=keep)
+        side.cutout(pattern=triangles(3, 3, 25.0, aligned=True), around=around, depth=to(outer, leave=2), keep=keep)
     op = side.op("openings").op
     assert isinstance(op, Pocket)
     for u0, v0, u1, v1 in boxes:

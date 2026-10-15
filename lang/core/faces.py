@@ -2,25 +2,27 @@
 
 `Face` is one of a board's six faces, named by direction in the frame of
 the board's scope; it is also a position (its plane), so it works in
-`on()`, `between()` and the position algebra, and moved by `gap()` or
-`into()` it is a `Side` that keeps the face's side. `Edge` is where two
-faces meet: a chamfer's target, a corner of the outline when both faces
-are narrow, and an `at=` point in the middle of the first face's edge.
+`on()`, `between()` and the position algebra but for a length added, and
+moved by `gap()` or `into()` it is a `Side` that keeps the face's side.
+`Edge` is where two faces meet: a chamfer's target, a corner of the
+outline when both faces are narrow, and an `at=` point in the middle of
+the first face's edge.
 `Anchor` is a point on a face for `at=`, named by the edges it is measured
-from (`side.inner.front(37).bottom(z)`). `Outline` is a big face's
+from (`side.inner.front(37).bottom(z)`), and centred on a position along an
+axis it leaves unnamed (`b.front.top.center(line)`). `Outline` is a big face's
 outer contour, and `Operation` a named operation of a board, whose edges
 are positions (`left.toekick.top`).
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from . import directions
 from .directions import Axis, Direction
 from .errors import LangError
 from .ops import Chamfer, Cut, EdgeOp, Hole, Op, VGroove
-from .refs import HasPosition, Number, Pos, PositionArithmetic, Side, as_pos
+from .refs import DirectedArithmetic, HasPosition, Number, Pos, PosLike, Side, as_pos
 from .shapes import Anchor as ShapeAnchor
 
 if TYPE_CHECKING:
@@ -29,10 +31,12 @@ if TYPE_CHECKING:
 Point2 = tuple[float, float]
 
 
-class Face(PositionArithmetic):
+class Face(DirectedArithmetic):
     """One of the six faces of a board. Its direction is named in the frame
     of the board's scope, whatever frame named it when it was asked for,
-    so `name` reads as the build file writes it."""
+    so `name` reads as the build file writes it. A position plus or minus
+    a length is an error on it, as on a box side: `gap()` and `into()` move
+    it (`DirectedArithmetic`)."""
 
     def __init__(self, part: Board, direction: Direction):
         self.part = part
@@ -61,12 +65,21 @@ class Face(PositionArithmetic):
         needed toward=]. Moved again it keeps the face's in and out:
         `back.inner.gap(15).gap(5)` is 20 in front of the back,
         `back.inner.gap(15).into(5)` 10 [decided by Florian, 2026-10-15]."""
-        return Side(self.axis, self.value + self.direction.sign * n, inward=self.direction, from_face=True)
+        return Side(self.axis, self.value + self.direction.sign * n, inward=self.direction, from_face=True,
+                    label=f"{self._label}.gap({n:g})")
 
     def into(self, n: float) -> Side:
         """The face's plane moved `n` into the part, behind the face; it
         keeps the face's side and its in and out, as `gap()` does."""
-        return Side(self.axis, self.value - self.direction.sign * n, inward=self.direction, from_face=True)
+        return Side(self.axis, self.value - self.direction.sign * n, inward=self.direction, from_face=True,
+                    label=f"{self._label}.into({n:g})")
+
+    @property
+    def _label(self) -> str:
+        return f"{self.part.name}.{self.name}"
+
+    def _directed(self) -> tuple[str, str, str | None]:
+        return "a face", self._label, self.part.path
 
     @property
     def is_big(self) -> bool:
@@ -141,8 +154,9 @@ class Edge:
     """The edge where face `a` meets face `b`. For `chamfer()` it is that
     edge, and where two narrow faces meet, a corner of the outline, which
     `fillet()` rounds; for `at=` it is the middle of that edge of face `a`,
-    from which an offset, `side.inner.front(37)`, or a corner,
-    `side.outer.bottom.front`, continues as an `Anchor`."""
+    from which an offset, `side.inner.front(37)`, a corner,
+    `side.outer.bottom.front`, or a position to centre on,
+    `side.outer.top.center(line)`, continues as an `Anchor`."""
 
     def __init__(self, part: Board, a: Face, b: Face):
         if a.axis == b.axis:
@@ -177,6 +191,11 @@ class Edge:
         """A point `value` inside this edge: a number is a distance from the
         edge, a position is taken as it is."""
         return self.anchor(value)
+
+    def center(self, pos: PosLike) -> Anchor:
+        """A point on this edge of face `a` with a shape's middle on `pos`
+        along the edge (`Anchor.center`)."""
+        return self.anchor.center(pos)
 
     def _corner(self, name: str) -> Anchor:
         return self.anchor.toward(name)
@@ -222,15 +241,19 @@ class Anchor:
     `face.front(37).bottom(z)` 37 mm behind the front edge at the position
     `z`. A number measures from the edge it follows, a position is taken as
     it is and must lie on that edge's axis. An axis that is not named stays
-    centred. When a shape is placed, the shape's own side or corner of the
-    same name goes onto the point, so the shape extends into the face.
+    centred on the face, or on a position: `face.top.center(line)` (see
+    `center()`). When a shape is placed, the shape's own side or corner of
+    the same name goes onto the point, so the shape extends into the face,
+    and its middle onto the centre of an axis not named.
     """
 
     def __init__(self, face: Face, named: dict[Axis, tuple[Direction, float | Pos | None]] | None = None,
-                 last: Axis | None = None):
+                 last: Axis | None = None, centred: dict[Axis, Pos] | None = None):
         self.face = face
         self._named: dict[Axis, tuple[Direction, float | Pos | None]] = dict(named or {})
         self._last: Axis | None = last
+        #: The axes centred on a position, by `center()`.
+        self._centred: dict[Axis, Pos] = dict(centred or {})
 
     @property
     def part(self) -> Board:
@@ -238,6 +261,7 @@ class Anchor:
 
     def __repr__(self) -> str:
         parts = [f"{d.name}({v})" if v is not None else d.name for d, v in self._named.values()]
+        parts += [f"center({p})" for p in self._centred.values()]
         return f"Anchor({self.part.path}.{self.face.name}" + "".join("." + p for p in parts) + ")"
 
     def toward(self, name: str | Direction) -> Anchor:
@@ -249,9 +273,11 @@ class Anchor:
         if d.axis in self._named:
             raise LangError(f"{self!r}: {d.name} and {self._named[d.axis][0].name} lie on the same axis.",
                             self.part.path)
+        if d.axis in self._centred:
+            raise LangError(f"{self!r}: {d.name} lies on the axis it is centred on.", self.part.path)
         named = dict(self._named)
         named[d.axis] = (d, None)
-        return Anchor(self.face, named, d.axis)
+        return Anchor(self.face, named, d.axis, self._centred)
 
     def __call__(self, value: Number | Pos | HasPosition) -> Anchor:
         last = self._last
@@ -269,7 +295,39 @@ class Anchor:
             resolved = pos
         named = dict(self._named)
         named[last] = (d, resolved)
-        return Anchor(self.face, named, last)
+        return Anchor(self.face, named, last, self._centred)
+
+    def center(self, pos: PosLike) -> Anchor:
+        """This anchor with a shape's middle on `pos` along the axis it has
+        not named: `b.front.top.center(line)` puts a notch's top on the top
+        edge and its middle on `line` [decided by Florian, 2026-10-15,
+        syntax.md item 6: it was `left(line - 7)` for a notch 14 wide].
+        `pos` is a position whose axis lies in the face's plane (a `Pos`, a
+        face, a master's plane, a box side, an operation's edge), never a
+        number: a number measures from an edge, `face.front(37)`. It names
+        the axis the anchor leaves unnamed, so an axis named before, or
+        both, is an error. A shape placed there has the middle of its
+        bounds on `pos`; a hole or a slot's centre is on it."""
+        value = cast(object, pos)
+        if isinstance(value, (int, float)):
+            raise LangError(f"{self!r}: center() takes a position; a number measures from an edge, name one: "
+                            "face.front(37).", self.part.path)
+        p = as_pos(pos, "center()")
+        axes = self.part.face_axes(self.face)
+        if p.axis not in axes:
+            raise LangError(f"{self!r}: center({p}) is not in the plane of the {self.face.name} face.",
+                            self.part.path)
+        if all(a in self._named or a in self._centred for a in axes):
+            raise LangError(f"{self!r}: both axes of the face are given already; center() places a shape on the "
+                            "axis the anchor leaves unnamed.", self.part.path)
+        if p.axis in self._named:
+            raise LangError(f"{self!r}: center({p}) lies on the axis of {self._named[p.axis][0].name}, which the "
+                            "anchor names; center() places a shape on the axis it leaves unnamed.", self.part.path)
+        if p.axis in self._centred:
+            raise LangError(f"{self!r}: center({p}) is given on {p.axis} already.", self.part.path)
+        centred = dict(self._centred)
+        centred[p.axis] = p
+        return Anchor(self.face, self._named, None, centred)
 
     @property
     def front(self) -> Anchor:
@@ -324,6 +382,10 @@ class Anchor:
                 coords.append(coord)
                 fractions.append(1.0 if d.sign > 0 else 0.0)
                 flags.append(True)
+            elif axis in self._centred:
+                coords.append(self._centred[axis].value)
+                fractions.append(0.5)
+                flags.append(False)
             else:
                 coords.append((b.lo[axis] + b.hi[axis]) / 2)
                 fractions.append(0.5)

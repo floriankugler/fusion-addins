@@ -1,5 +1,7 @@
 import math
+import re
 from pathlib import Path
+from typing import Any
 
 import pytest
 from shapely.geometry import Point
@@ -8,11 +10,13 @@ from shapely.geometry import box as shapely_box
 from lang import *
 from lang.core.cutouts import circle_geometry
 from lang.core.directions import Axis
+from lang.core.faces import Face
 from lang.core.layout import build_layout
 from lang.core.ops import Chamfer, Cut, EdgeOp, Hole, Pocket
 from lang.core.refs import Affine, as_pos
 from lang.core.scope import registry
 from lang.emit.plan import plan_layout
+from lang.master import Plane
 from helpers import ply15, ply9
 
 
@@ -60,15 +64,77 @@ def test_a_sum_of_positions_less_a_position_is_a_position():
 def test_box_sides_mix_like_other_positions():
     """Found by fuzzing the placement: `0.5 * m.bottom + 0.5 * m.top` was a
     TypeError where the same mix of faces or positions is a position: a box
-    side had no scaling (`*`, `/`) and no number added from the left."""
+    side had no scaling (`*`, `/`). A number added from the left is refused
+    as one added from the right is (syntax.md item 1)."""
     with module("m", Box.from_size(width=600, depth=400, height=700, origin=(0, 0, 100))) as m:
         assert 0.5 * m.bottom + 0.5 * m.top == Pos("z", 450)
         assert (m.bottom * 3 + m.top) / 4 == Pos("z", 275)
         assert m.bottom / 2 + m.top / 2 == Pos("z", 450)
-        moved = 60 + m.bottom
-        assert isinstance(moved, Side) and moved == m.bottom + 60
+        with pytest.raises(LangError, match=r"^60 \+ m.bottom: a side has a direction; write m.bottom.into\(60\) "):
+            _ = 60 + m.bottom  # type: ignore[operator]
         shelf = board("shelf", ply15).center(0.25 * m.bottom + 0.75 * m.top)
     assert shelf.box().lo["z"] == 625 - 7.5
+
+
+def test_a_side_or_a_face_plus_a_length_is_refused():
+    """Decided by Florian, 2026-10-15 (syntax.md item 1): a side or a face
+    plus or minus a number moved along the world axis, so in a cabinet it
+    moved inward or outward depending on `front=`. It is an error naming
+    the receiver and the fix, `into()` or `gap()`: for a box side, a side
+    moved by `into()` or `gap()`, a face and a face moved by `gap()` or
+    `into()`, the number on either side of the operator, in cabinets facing
+    two ways."""
+    van = Box.from_size(width=600, depth=500, height=700)
+    for facing in ("front", "right"):
+        with cabinet(f"cab_{facing}", van, front=van.side(facing)) as cab:
+            left = board("left", ply15).on(cab.left)
+            refused: dict[str, Any] = {
+                f"cab_{facing}.front": cab.front,
+                f"cab_{facing}.bottom.into(60)": cab.bottom.into(60),
+                f"cab_{facing}.top.gap(5)": cab.top.gap(5),
+                "left.right": left.inner,
+                "left.right.gap(15)": left.inner.gap(15),
+                "left.front.into(3)": left.front.into(3),
+            }
+        for label, ref in refused.items():
+            noun = "a face" if isinstance(ref, Face) else "a side"
+            for written, move in ((f"{label} + 40", lambda: ref + 40), (f"{label} - 40", lambda: ref - 40),
+                                  (f"40 + {label}", lambda: 40 + ref)):
+                fix = f"{written}: {noun} has a direction; write {label}.into(40) or {label}.gap(40)."
+                with pytest.raises(LangError, match=re.escape(fix)):
+                    move()
+        with pytest.raises(LangError, match=re.escape(f"cab_{facing}.front - -2.5: a side has a direction; write "
+                                                      f"cab_{facing}.front.into(2.5) or cab_{facing}.front.gap(2.5).")):
+            _ = cab.front - -2.5  # type: ignore[operator]
+    with pytest.raises(LangError, match=re.escape("box.top + 1: a side has a direction; write box.top.into(1)")):
+        _ = van.top + 1  # type: ignore[operator]
+
+
+def test_positions_keep_their_arithmetic_and_sides_and_faces_mix():
+    """What stays (syntax.md item 1): a bare position takes a length (a
+    `Pos`, a master's plane, an operation's side, `spread()`'s positions,
+    `box.center()`, a side's or a face's `.position`); a side or a face
+    plus a position is the weighted mix, minus one a length, and `*` and
+    `/` scale it."""
+    with module("m", Box.from_size(width=600, depth=400, height=700)) as m:
+        left = board("left", ply15).on(m.left)
+        left.cut(rect(depth=60, height=100), at=left.outer.bottom.front, name="toekick")
+        bottom = board("bottom", ply15).on(left.toekick.top + 5, toward=m.top).between(left, m.right)
+        top = board("top", ply15).on(m.top).between(left, m.right)
+        rows = spread(bottom.top, top.bottom, count=3)
+    assert left.toekick.top + 5 == Pos("z", 105) and bottom.bottom.value == 105
+    assert Pos("z", 10) + 5 == Pos("z", 15) and 5 + Pos("z", 10) == Pos("z", 15) and Pos("z", 10) - 5 == Pos("z", 5)
+    floor = Plane("floor", [0, 0, 100], [0, 0, 1])
+    assert floor + 5 == Pos("z", 105) and floor - 5 == Pos("z", 95) and 5 + floor == Pos("z", 105)
+    assert rows[1] + 10 == Pos("z", (120 + 685) / 2 + 10)
+    assert m.center("height") - 50 == Pos("z", 300)
+    assert m.bottom.position + 60 == Pos("z", 60) and bottom.top.position - 5 == Pos("z", 115)
+    # sides and faces with positions
+    assert (bottom.top + top.bottom) / 2 == Pos("z", 402.5) and top.bottom - bottom.top == 565
+    assert m.top - m.bottom == 700 and m.top - floor == 600 and floor - m.bottom == 100
+    assert 0.5 * m.bottom + 0.5 * top.bottom == Pos("z", 342.5) and m.top / 2 + bottom.top / 2 == Pos("z", 410)
+    assert bottom.top + top.bottom - m.top == Pos("z", 120 + 685 - 700)
+    assert as_pos(m.bottom.into(60) + m.top.gap(40) - left.toekick.top) == Pos("z", 700)
 
 
 def test_mixing_axes_is_an_error():
@@ -102,7 +168,7 @@ def test_box_sides_and_extents():
     assert len(b.split("height", [360, 360])) == 2    # an exact fit has no remainder
     with pytest.raises(LangError):
         b.split("height", [500, 300])          # more than the box has
-    moved = b.with_sides(front=Pos("x", 100), top=b.bottom + 50)
+    moved = b.with_sides(front=Pos("x", 100), top=b.bottom.into(50))
     assert moved.front.value == 100 and moved.top.value == 50
     with pytest.raises(TypeError):
         b.shrunk(lefft=5)  # type: ignore[call-arg]  -- a misspelt side is a type error
@@ -141,21 +207,17 @@ def test_a_side_moved_into_or_out_of_its_box_is_a_side():
     """Decided by Florian, 2026-10-14: `side.into(n)` and `side.gap(n)` are
     the side moved, its inward direction kept, so a board lies on them with
     its thickness inward without toward= (`on(cab.bottom.into(60))`); they
-    were bare positions. `+` and `-` stay world arithmetic: `cab.left + 100`
-    moves toward the world axis' positive end, which in a cabinet facing
-    the van's right is out of the box."""
+    were bare positions."""
     van = Box.from_size(width=600, depth=500, height=700)
     with cabinet("cab", van, front=van.right) as cab:
         raised = board("raised", ply15).on(cab.bottom.into(60))
         partition = board("partition", ply15).on(cab.left.into(100))
         lid = board("lid", ply15).on(cab.top.gap(5))
-        moved = cab.left + 100
     assert isinstance(cab.left.into(100), Side) and isinstance(cab.top.gap(5), Side)
     assert (raised.box().lo["z"], raised.box().hi["z"]) == (60, 75)
     assert cab.left.axis == "x" and cab.left.value == 500                       # the cabinet's left is +x
     assert (partition.box().lo["x"], partition.box().hi["x"]) == (385, 400)    # 100 in, thickness inward
     assert (lid.box().lo["z"], lid.box().hi["z"]) == (690, 705)                # 5 above, thickness down
-    assert moved.value == 600 and moved.inward == cab.left.inward              # out of the box, world +x
     assert cab.left.into(100).position == Pos("x", 400) and cab.left.gap(5) - cab.left == 5
 
 
@@ -236,10 +298,6 @@ def test_a_face_moved_again_keeps_the_face_s_in_and_out():
         assert back.inner.into(3).into(2).value == inner - 5 * f
         assert back.inner.into(3).gap(5).value == inner + 2 * f
         assert left.inner.gap(100).into(30).value == left.right.value + 70 * r
-        # moved along the world axis in between, it still moves as the face does
-        assert (back.inner.gap(15) + 7 * f).gap(5).value == inner + 27 * f
-        assert (7 * f + back.inner.gap(15)).into(5).value == inner + 17 * f
-        assert (back.inner.gap(15) - 7 * f).gap(5).value == inner + 13 * f
         # narrow faces
         assert bottom.front.gap(10).gap(5).value == bottom.front.value + 15 * f
         assert bottom.front.gap(10).into(4).value == bottom.front.value + 6 * f
@@ -268,7 +326,6 @@ def test_box_sides_moved_again_move_as_before():
         assert cab.bottom.into(60).gap(10) == cab.bottom.into(50)
         assert cab.top.gap(5).gap(5).value == 710 and cab.top.gap(5).into(15).value == 690
         assert cab.left.into(100).into(20).value == cab.left.value + 120 * r
-        assert (cab.left.into(100) + 1).gap(20).value == cab.left.value + 80 * r + 1
         assert (raised.box().lo["z"], raised.box().hi["z"]) == (70, 85)
         assert (lid.box().lo["z"], lid.box().hi["z"]) == (695, 710)
 
@@ -300,10 +357,10 @@ def test_a_moved_face_is_a_position_as_before_everywhere_else():
         back = board("back", ply9).on(m.back).between(left, right, bottom, m.top)
         a, b, c = left.inner.gap(2), right.inner.into(5), back.inner.gap(4)
         pa, pb, pc = a.position, b.position, c.position
-        shelf = board("shelf", ply15).on(m.bottom + 300, toward=m.top).between(a, b, c)
-        shelf_p = board("shelf_p", ply15).on(m.bottom + 300, toward=m.top).between(pa, pb, pc)
-        lone = board("lone", ply15).on(m.bottom + 400, toward=m.top).between(c)
-        lone_p = board("lone_p", ply15).on(m.bottom + 400, toward=m.top).between(pc)
+        shelf = board("shelf", ply15).on(m.bottom.into(300), toward=m.top).between(a, b, c)
+        shelf_p = board("shelf_p", ply15).on(m.bottom.into(300), toward=m.top).between(pa, pb, pc)
+        lone = board("lone", ply15).on(m.bottom.into(400), toward=m.top).between(c)
+        lone_p = board("lone_p", ply15).on(m.bottom.into(400), toward=m.top).between(pc)
         divider = board("divider", ply15).center(left.inner.gap(100)).between(bottom, m.top)
         divider_p = board("divider_p", ply15).center(left.inner.gap(100).position).between(bottom, m.top)
         at = back.inner.left(left.inner.gap(30)).bottom(bottom.top.gap(40))
@@ -322,11 +379,13 @@ def test_a_moved_face_is_a_position_as_before_everywhere_else():
     narrowed, narrowed_p = box.with_sides(left=a, back=c), box.with_sides(left=pa, back=pc)
     assert (narrowed.lo, narrowed.hi) == (narrowed_p.lo, narrowed_p.hi) == ({"x": 0, "y": 17, "z": 0},
                                                                             {"x": 487, "y": 600, "z": 700})
-    # the algebra: lengths, mixes and moves come out as they did
+    # the algebra: lengths and mixes come out as they did; a length added is refused (syntax.md item 1)
     assert a - left.inner == 2 and b - a == pb - pa == 573 and a - pa == 0
     assert (a + b) / 2 == (pa + pb) / 2 == Pos("y", 303.5)
     assert 0.5 * a + 0.5 * b == Pos("y", 303.5) and a + b - a == pb
-    assert (a + 5).position == pa + 5 and (a - 5).position == pa - 5 and (5 + a).position == pa + 5
+    assert a.position + 5 == pa + 5
+    with pytest.raises(LangError, match=r"left.right.gap\(2\) \+ 5: a side has a direction"):
+        _ = a + 5  # type: ignore[operator]
 
 
 def test_between_parts_uses_nearest_faces_and_box_defaults():
@@ -403,7 +462,7 @@ def test_the_inner_face_of_a_board_with_a_face_on_the_middle_faces_the_middle():
         with module(name, Box.from_size(width=600, depth=400, height=30, origin=(0, 0, origin))) as m:
             low = board("low", ply15).on(m.bottom)
             high = board("high", ply15).on(m.top)
-            mid = board("mid", ply15).on(m.bottom + 7.5)             # 7.5 to 22.5, across the middle at 15
+            mid = board("mid", ply15).on(m.bottom.into(7.5))             # 7.5 to 22.5, across the middle at 15
         assert low.inner.name == "top" and low.outer.name == "bottom"
         assert high.inner.name == "bottom" and high.outer.name == "top"
         with pytest.raises(LangError, match="ambiguous"):
@@ -510,10 +569,69 @@ def test_anchor_errors_name_the_problem():
         left.hole(d=5, depth=5, at=right.inner.center)   # another board's face
 
 
+def test_an_anchor_centres_a_shape_on_a_position():
+    """Decided by Florian, 2026-10-15 (syntax.md item 6): `anchor.center(pos)`
+    puts a shape's middle on `pos` along the axis the anchor has not named:
+    `b.outer.top.center(line)` puts a notch's top on the top edge and its
+    middle on `line`, where `left(line - 7)` was written for a notch 14
+    wide. It works wherever a shape is placed by at= (a cut, a pocket on a
+    big face and on a narrow one; a cutout's region in test_cutouts) and
+    gives a hole's and a slot's centre. The position may be a `Pos`, a box
+    side, a part's face, a master's plane or an operation's edge."""
+    with module("m", Box.from_size(width=600, depth=400, height=700)) as m:
+        left = board("left", ply15).on(m.left)               # x 0..400, y 0..15, z 0..700
+        shelf = board("shelf", ply15).on(Pos("z", 300), toward=m.top).between(left, m.right)
+        line, cable = Pos("x", 120), Plane("cable", [250, 0, 0], [1, 0, 0])
+        left.cut(rect(depth=14, height=12), at=left.outer.top.center(line), name="notch")
+        left.pocket(rect(depth=30, height=10), at=left.inner.front(50).center(shelf.bottom), depth=5, name="dado")
+        left.pocket(rect(width=6, height=20), at=left.front.inner(3).center(m.bottom.into(400)), depth=10,
+                    name="edge")
+        left.hole(d=8, at=left.inner.bottom(100).center(cable), depth=5, name="cable")
+        left.hole(d=8, at=left.inner.bottom(140).center(left.notch.front), depth=5, name="under_notch")
+        start, end = left.inner.top(50).center(m.front.into(150)), left.inner.top(50).center(Pos("x", 250))
+        left.slot(6, start, end, depth=5, name="mount")
+    def edges(name: str) -> tuple[float, ...]:
+        return tuple(left.op(name).side(d).value for d in ("front", "back", "bottom", "top"))
+
+    assert edges("notch") == (113, 127, 688, 700)
+    assert edges("dado") == (50, 80, 295, 305)
+    assert edges("edge") == (0, 10, 390, 410) and (left.edge.left.value, left.edge.right.value) == (6, 12)
+    assert edges("cable") == (246, 254, 96, 104) and edges("under_notch") == (109, 117, 136, 144)
+    assert edges("mount") == (147, 253, 647, 653)
+    assert left.outer.top.center(line).resolve()[0] == (120, 700)
+    assert left.inner.center.center(line).resolve()[0] == (120, 350)    # the other axis centred on the face
+
+
+def test_anchor_center_takes_a_position_on_the_axis_left_unnamed():
+    """syntax.md item 6: `center()` takes a position, never a number (that
+    measures from an edge); its axis lies in the face's plane and is the
+    one the anchor has not named; once it is given, that axis is no edge
+    to name."""
+    with module("m", Box.from_size(width=600, depth=400, height=700)) as m:
+        left = board("left", ply15).on(m.left)
+    anchor = left.inner.top
+    refused = [
+        (lambda: anchor.center(5), re.escape("center() takes a position; a number measures from an edge, "  # type: ignore[arg-type]
+                                             "name one: face.front(37).")),
+        (lambda: anchor.center(m.right), r"center\(y=600\) is not in the plane of the right face"),
+        (lambda: anchor.center(m.top), r"center\(z=700\) lies on the axis of top, which the anchor names"),
+        (lambda: anchor.front.center(Pos("x", 5)), "both axes of the face are given already"),
+        (lambda: anchor(30).back(20).center(Pos("x", 5)), "both axes of the face are given already"),
+        (lambda: anchor.center(Pos("x", 5)).center(Pos("x", 6)), "both axes of the face are given already"),
+        (lambda: left.inner.center.center(Pos("x", 5)).center(Pos("x", 6)), r"center\(x=6\) is given on x already"),
+        (lambda: anchor.center(Pos("x", 5)).front, "front lies on the axis it is centred on"),
+        (lambda: left.inner.center.center(Pos("z", 5)).top, "top lies on the axis it is centred on"),
+    ]
+    for make, message in refused:
+        with pytest.raises(LangError, match=message):
+            make()
+    assert repr(anchor.center(Pos("x", 5))) == "Anchor(m.left.right.top.center(x=5))"
+
+
 def test_pocket_depth_to_face():
     cab = carcass()
     left = cab["left"]
-    left.pocket(rect(depth=200, height=12), at=left.inner.center, depth=to(left.outer, -3))
+    left.pocket(rect(depth=200, height=12), at=left.inner.center, depth=to(left.outer, leave=3))
     pocket = left.ops[-1]
     assert isinstance(pocket, Pocket)
     assert pocket.depth == pytest.approx(12)
@@ -572,7 +690,7 @@ def test_a_hole_into_a_narrow_face_stays_there_when_a_cut_leaves_the_face_a_hair
         panel = board("panel", ply15).on(m.bottom)
         panel.hole(d=8, at=panel.back.left(50), depth=20)
         panel.cut(rect(depth=77.69648890942747, width=100), at=panel.top.back.right, name="notch")
-        other = board("other", ply15).on(m.bottom + 20)
+        other = board("other", ply15).on(m.bottom.into(20))
         other.hole(d=8, at=other.back.right(30), depth=20)
         with pytest.raises(LangError, match="does not reach the back side there"):
             other.cut(rect(depth=77.69648890942747, width=100), at=other.top.back.right, name="notch")
@@ -619,13 +737,13 @@ def test_a_shaped_board_fills_its_limits_or_sits_against_one_or_in_the_corner(fa
         shape = rect(width=100, depth=50)
         filled = board("filled", ply15, shape).on(cab.bottom).between(
             cab.left.into(10), cab.left.into(110), cab.front, cab.front.into(50))
-        inset = board("inset", ply15, shape).on(cab.bottom + 20).between(
+        inset = board("inset", ply15, shape).on(cab.bottom.into(20)).between(
             cab.left.into(10), cab.left.into(120), cab.front, cab.front.into(60)).inset(5)
-        against = board("against", ply15, shape).on(cab.bottom + 40).between(cab.right.into(20))
+        against = board("against", ply15, shape).on(cab.bottom.into(40)).between(cab.right.into(20))
         side = board("side", ply15).on(cab.right)
-        on_side = board("on_side", ply15, shape).on(cab.bottom + 60).between(side, cab.back.into(30))
-        corner = board("corner", ply15, shape).on(cab.bottom + 80).inset(2)
-        wrong = board("wrong", ply15, shape).on(cab.bottom + 100).between(cab.left.into(10), cab.left.into(120))
+        on_side = board("on_side", ply15, shape).on(cab.bottom.into(60)).between(side, cab.back.into(30))
+        corner = board("corner", ply15, shape).on(cab.bottom.into(80)).inset(2)
+        wrong = board("wrong", ply15, shape).on(cab.bottom.into(100)).between(cab.left.into(10), cab.left.into(120))
     assert _measured(cab, filled)[:2] == [(0, 50), (10, 110)]
     assert _measured(cab, inset)[:2] == [(5, 55), (15, 115)]
     width = cab.width
@@ -759,7 +877,7 @@ def test_part_limits_into_and_gap():
 def test_cut_with_a_perpendicular_part_is_a_pocket_from_the_entered_face():
     with module("box", Box.from_size(width=400, depth=300, height=100)) as m:
         side = board("side", ply15).on(m.left)
-        floor = board("floor", ply9).on(m.bottom + 10).between(side.into(5), m.right, m.front + 12, m.back)
+        floor = board("floor", ply9).on(m.bottom.into(10)).between(side.into(5), m.right, m.front.into(12), m.back)
         side.cut(floor, name="groove")
         side.cut(floor.box().grown(top=0.5, left=0.5), name="roomy")
     groove, roomy = side.ops
@@ -784,7 +902,7 @@ def test_cut_with_a_parallel_part_through_the_thickness_changes_the_outline():
 def test_cut_with_a_part_that_misses_or_floats_is_an_error():
     with module("box", Box.from_size(width=400, depth=300, height=100)) as m:
         side = board("side", ply15).on(m.left)
-        away = board("away", ply9).on(m.bottom).between(m.right, m.right + 100)
+        away = board("away", ply9).on(m.bottom).between(m.right, m.right.gap(100))
         with pytest.raises(LangError):
             side.cut(away)
         with pytest.raises(LangError):
@@ -800,11 +918,11 @@ def test_a_cut_by_a_board_or_its_box_reaching_under_a_hundredth_in_is_refused_al
     pocket 0.0036 deep as `side.cut(floor.box())`."""
     with module("box", Box.from_size(width=400, depth=300, height=100)) as m:
         side = board("side", ply15).on(m.left)
-        floor = board("floor", ply9).on(m.bottom + 10).between(side.into(0.0036), m.right)
+        floor = board("floor", ply9).on(m.bottom.into(10)).between(side.into(0.0036), m.right)
         for region in (floor, floor.box()):
             with pytest.raises(LangError, match="does not reach into this board"):
                 side.cut(region)
-        deeper = board("deeper", ply9).on(m.bottom + 30).between(side.into(0.01), m.right)
+        deeper = board("deeper", ply9).on(m.bottom.into(30)).between(side.into(0.01), m.right)
         side.cut(deeper.box())
     assert len(side.ops) == 1
 
@@ -817,7 +935,7 @@ def test_a_cut_by_a_board_or_its_box_reaching_a_hundredth_in_makes_one_pocket():
     cleaned away. The section is taken as it is."""
     with module("box", Box.from_size(width=400, depth=300, height=100)) as m:
         sides = [board(f"side{k}", ply15).on(m.left) for k in range(2)]
-        floor = board("floor", ply9).on(m.bottom + 10).between(sides[0].into(0.01), m.right)
+        floor = board("floor", ply9).on(m.bottom.into(10)).between(sides[0].into(0.01), m.right)
         sides[0].cut(floor)
         sides[1].cut(floor.box())
     a, c = sides[0].ops[0], sides[1].ops[0]
@@ -857,7 +975,7 @@ def test_module_frame_follows_placement():
 
 def test_face_names_leave_out_inner_and_outer_when_ambiguous():
     with module("cab", Box.from_size(width=500, depth=600, height=720)) as cab:
-        shelf = board("shelf", ply15).on(cab.bottom + 355)    # straddles the middle at 360
+        shelf = board("shelf", ply15).on(cab.bottom.into(355))    # straddles the middle at 360
     assert shelf.to_layout()["faces"]["top"] == ["top"]
     assert all(len(names) == 1 for names in shelf.to_layout()["faces"].values())
 
@@ -892,14 +1010,14 @@ def test_a_module_that_opens_toward_a_side_is_a_cabinet():
 def test_interference_ignores_overlap_inside_a_pocket():
     with module("box", Box.from_size(width=400, depth=300, height=100)) as m:
         side = board("side", ply15).on(m.left)
-        floor = board("floor", ply9).on(m.bottom + 10).between(side.inner.into(5), m.right)
+        floor = board("floor", ply9).on(m.bottom.into(10)).between(side.inner.into(5), m.right)
         side.pocket(rect(depth=300, height=9.5), at=side.inner.bottom(floor.bottom).front,
                     depth=5, name="groove")
     assert no_interference(m) == []
     # a floor reaching deeper than the groove hits material
     with module("box2", Box.from_size(width=400, depth=300, height=100)) as m2:
         side = board("side", ply15).on(m2.left)
-        floor = board("floor", ply9).on(m2.bottom + 10).between(side.inner.into(6), m2.right)
+        floor = board("floor", ply9).on(m2.bottom.into(10)).between(side.inner.into(6), m2.right)
         side.pocket(rect(depth=300, height=9.5), at=side.inner.bottom(floor.bottom).front,
                     depth=5, name="groove")
     assert no_interference(m2) == ["box2.side overlaps box2.floor"]
@@ -952,8 +1070,8 @@ def _partitions() -> tuple[Scope, Board, Board]:
     """Two partitions, both left of the middle of a 1000 wide box: y
     100..115 and 300..315."""
     with module("m", Box.from_size(width=1000, depth=400, height=700)) as m:
-        p1 = board("p1", ply15).on(m.left + 100, toward=m.right)
-        p2 = board("p2", ply15).on(m.left + 300, toward=m.right)
+        p1 = board("p1", ply15).on(m.left.into(100), toward=m.right)
+        p2 = board("p2", ply15).on(m.left.into(300), toward=m.right)
     return m, p1, p2
 
 
@@ -963,7 +1081,7 @@ def test_between_two_parts_takes_the_faces_that_face_each_other():
     face, not through the second one."""
     m, p1, p2 = _partitions()
     with m:
-        shelf = board("shelf", ply15).on(m.bottom + 300, toward=m.top).between(p1, p2)
+        shelf = board("shelf", ply15).on(m.bottom.into(300), toward=m.top).between(p1, p2)
         check(no_interference)
     assert (shelf.box().lo["y"], shelf.box().hi["y"]) == (115, 300)
     assert build_layout()["problems"] == []
@@ -972,8 +1090,8 @@ def test_between_two_parts_takes_the_faces_that_face_each_other():
 def test_between_a_part_and_a_position_takes_the_face_toward_the_position():
     m, p1, p2 = _partitions()
     with m:
-        shelf = board("shelf", ply15).on(m.bottom + 300, toward=m.top).between(m.left, p2.gap(1))
-        reach = board("reach", ply15).on(m.bottom + 400, toward=m.top).between(p1.into(5), m.right)
+        shelf = board("shelf", ply15).on(m.bottom.into(300), toward=m.top).between(m.left, p2.gap(1))
+        reach = board("reach", ply15).on(m.bottom.into(400), toward=m.top).between(p1.into(5), m.right)
     assert (shelf.box().lo["y"], shelf.box().hi["y"]) == (0, 299)      # p2's left face, 1 away from it
     assert (reach.box().lo["y"], reach.box().hi["y"]) == (110, 1000)   # p1's right face, 5 into it
 
@@ -986,7 +1104,7 @@ def test_a_board_between_one_board_keeps_to_its_side_of_it():
     box's bottom. It goes from the face away from the board."""
     for z, want in ((40, (55, 100)), (46, (0, 46))):
         with module(f"m{z}", Box.from_size(width=600, depth=400, height=100)) as m:
-            bottom = board("bottom", ply15).on(m.bottom + z)
+            bottom = board("bottom", ply15).on(m.bottom.into(z))
             back = board("back", ply9).on(m.back).between(bottom)
             check(no_interference)
         assert (back.box().lo["z"], back.box().hi["z"]) == want
@@ -1014,14 +1132,14 @@ def test_ambiguous_limits_are_refused(case: str, error: str):
         right = board("right", ply15).on(m.right)
         door = board("door", ply15).on(m.front)                            # x 0 to 15
         panel = board("panel", ply15).on(door.back)                        # x 15 to 30, touching it
-        low = board("low", ply15).on(m.bottom + 100)                       # z 100 to 115
-        high = board("high", ply15).on(m.bottom + 110)                     # z 110 to 125
+        low = board("low", ply15).on(m.bottom.into(100))                       # z 100 to 115
+        high = board("high", ply15).on(m.bottom.into(110))                     # z 110 to 125
         divider = board("divider", ply15).center(m.center("width"))
         limits = {"twice": [left, left.into(5)], "overlapping": [low, high],
                   "position inside": [right, m.left.into(590)], "gap inside": [door, panel.gap(1.5)],
                   "middle": [m.left.into(300)], "centred board": [divider]}[case]
         # (standing across the width for the limits on x, against the back for the others)
-        x = board("x", ply9).on(m.left + 200) if case == "gap inside" else board("x", ply9).on(m.back)
+        x = board("x", ply9).on(m.left.into(200)) if case == "gap inside" else board("x", ply9).on(m.back)
         x.between(*limits)
     with pytest.raises(LangError, match=error):
         x.box()
@@ -1033,8 +1151,8 @@ def test_limits_near_the_ambiguous_ones_are_kept():
     with module("m", Box.from_size(width=600, depth=400, height=700)) as m:
         left = board("left", ply15).on(m.left)
         a = board("a", ply9).on(m.back).between(left.into(5), m.right)
-        b = board("b", ply9).on(m.back + -20).between(m.left.into(299))
-        c = board("c", ply9).on(m.back + -40).between(board("off", ply15).center(m.center("width") + 1))
+        b = board("b", ply9).on(m.back.into(20)).between(m.left.into(299))
+        c = board("c", ply9).on(m.back.into(40)).between(board("off", ply15).center(m.center("width") + 1))
     assert (a.box().lo["y"], a.box().hi["y"]) == (10, 600)
     assert (b.box().lo["y"], b.box().hi["y"]) == (299, 600)
     assert (c.box().lo["y"], c.box().hi["y"]) == (0, 293.5)
@@ -1052,8 +1170,8 @@ def test_a_box_as_a_limit_gives_both_ends_on_each_in_plane_axis():
 def test_a_limit_that_limits_neither_in_plane_axis_is_an_error():
     with module("m", Box.from_size(width=600, depth=400, height=700)) as m:
         left = board("left", ply15).on(m.left)
-        parallel = board("parallel", ply15).on(m.left + 100, toward=m.right).between(left)
-        thick = board("thick", ply15).on(m.bottom + 100, toward=m.top).between(left, Pos("z", 50))
+        parallel = board("parallel", ply15).on(m.left.into(100), toward=m.right).between(left)
+        thick = board("thick", ply15).on(m.bottom.into(100), toward=m.top).between(left, Pos("z", 50))
     with pytest.raises(LangError, match="m.left is parallel to this board"):
         parallel.box()
     with pytest.raises(LangError, match=r"lies on the board's thickness axis \(z\)"):
@@ -1108,28 +1226,59 @@ def test_a_depth_past_the_opposite_face_is_an_error():
             left.hole(d=5, at=left.inner.center, depth=40)
         with pytest.raises(LangError, match="reaches past the opposite face, 400 from the front face"):
             left.hole(d=5, at=left.front.center, depth=401)
-        with pytest.raises(LangError, match="reaches past that face"):
-            left.pocket(rect(depth=50, height=50), at=left.inner.center, depth=to(left.outer, 1))
+        with pytest.raises(LangError, match=r"to\(left.left, leave=-1\): a negative leave= reaches past the face"):
+            left.pocket(rect(depth=50, height=50), at=left.inner.center, depth=to(left.outer, leave=-1))
         left.hole(d=5, at=left.inner.center, depth=15)            # as deep as the board: fine
         left.hole(d=5, at=left.front.bottom(50), depth=400)
     assert len(left.ops) == 2
 
 
 def test_a_depth_that_does_not_reach_into_the_board_is_an_error():
-    """Found by fuzzing the placement: `to(left.outer, -20)` on a 15 mm
+    """Found by fuzzing the placement: `to(left.outer, leave=20)` on a 15 mm
     board made a hole -5 deep, accepted where the number -5 is refused;
-    and `to(left.outer, -15)` was 0 deep at some places and 2e-15 at
+    and `to(left.outer, leave=15)` was 0 deep at some places and 2e-15 at
     others, refused or not. A depth under 0.01 mm reaches nothing either
     way."""
     for name, y in (("at0", 0.0), ("far", 0.1)):
         with module(name, Box.from_size(width=600, depth=400, height=700, origin=(0, y, 0))) as m:
             left = board("left", ply15).on(m.left)
-            for depth in (to(left.outer, -20), to(left.outer, -15), to(left.outer, -14.995), -5, 0.005):
+            for depth in (to(left.outer, leave=20), to(left.outer, leave=15), to(left.outer, leave=14.995), -5, 0.005):
                 with pytest.raises(LangError, match="does not reach into the board"):
                     left.hole(d=5, at=left.inner.center, depth=depth)
-            left.hole(d=5, at=left.inner.center, depth=to(left.outer, -14.99))
+            left.hole(d=5, at=left.inner.center, depth=to(left.outer, leave=14.99))
         hole = left.ops[0]
         assert isinstance(hole, Hole) and hole.depth == pytest.approx(0.01)
+
+
+def test_to_leaves_what_leave_says():
+    """Decided by Florian, 2026-10-15 (syntax.md item 7): `to(face,
+    leave=3)` leaves 3 mm at the face, `to(face)` reaches it; the signed
+    offset, `to(face, -3)`, of which only zero or a negative was legal,
+    goes. A number given by position is an error saying to write leave=,
+    and so is a negative leave=. The layout records the depth as written."""
+    with module("m", Box.from_size(width=600, depth=400, height=700)) as m:
+        left = board("left", ply15).on(m.left)
+        left.pocket(rect(depth=50, height=50), at=left.inner.front(40), depth=to(left.outer, leave=3))
+        left.pocket(rect(depth=50, height=50), at=left.inner.back(40), depth=to("outer", leave=0.5))
+        left.hole(d=5, at=left.inner.center, depth=to(left.outer))
+        left.hole(d=5, at=left.front.center, depth=to(left.back, leave=100))
+        for n in (-3, 3):
+            with pytest.raises(LangError, match=re.escape(f"to(left.left, {n}): give what is left at the face as "
+                                                          "leave=, to(left.left, leave=3).")):
+                to(left.outer, n)  # type: ignore[arg-type]
+        with pytest.raises(LangError, match=re.escape("to(outer, -2): give what is left at the face as leave=, "
+                                                      "to(outer, leave=2).")):
+            to("outer", -2)  # type: ignore[arg-type]
+        with pytest.raises(LangError, match=re.escape("to(outer, leave=-0.5): a negative leave= reaches past")):
+            to("outer", leave=-0.5)
+        with pytest.raises(LangError, match=re.escape("depth to(left, leave=15) does not reach into the board: "
+                                                      "that face is 15 from the right face.")):
+            left.hole(d=5, at=left.inner.center, depth=to(left.outer, leave=15))
+    pockets = [op for op in left.ops if isinstance(op, Pocket)]
+    holes = [op.op if isinstance(op, EdgeOp) else op for op in left.ops if isinstance(op, (Hole, EdgeOp))]
+    assert [(p.depth, p.depth_spec) for p in pockets] == [(12, "to(left, leave=3)"), (14.5, "to(outer, leave=0.5)")]
+    assert [(h.depth, h.depth_spec, isinstance(h, Hole) and h.through) for h in holes] == [
+        (15, "to(left)", True), (300, "to(back, leave=100)", False)]
 
 
 def test_to_names_a_face_of_the_board_itself():
@@ -1137,8 +1286,8 @@ def test_to_names_a_face_of_the_board_itself():
         left = board("left", ply15).on(m.left)
         bottom = board("bottom", ply15).on(m.bottom).between(left, m.right)
         with pytest.raises(LangError, match=r"to\(m.left.right\) names a face of another part"):
-            bottom.pocket(rect(depth=50, width=50), at=bottom.top.center, depth=to(left.inner, -3))
-        bottom.pocket(rect(depth=50, width=50), at=bottom.top.center, depth=to(bottom.bottom, -3))
+            bottom.pocket(rect(depth=50, width=50), at=bottom.top.center, depth=to(left.inner, leave=3))
+        bottom.pocket(rect(depth=50, width=50), at=bottom.top.center, depth=to(bottom.bottom, leave=3))
     assert isinstance(bottom.ops[0], Pocket) and bottom.ops[0].depth == 12
 
 
@@ -1188,9 +1337,9 @@ def test_the_interior_counts_parts_that_cover_a_side_s_middle():
     """A foot in a corner of the bottom does not raise the interior; the
     bottom board does."""
     with module("cab", Box.from_size(width=600, depth=500, height=720)) as cab:
-        board("foot", ply15).on(cab.bottom).between(cab.left, cab.left + 50, cab.front, cab.front + 50)
+        board("foot", ply15).on(cab.bottom).between(cab.left, cab.left.into(50), cab.front, cab.front.into(50))
         assert cab.interior.lo["z"] == 0
-        board("bottom", ply15).on(cab.bottom).between(cab.left + 100, cab.right)
+        board("bottom", ply15).on(cab.bottom).between(cab.left.into(100), cab.right)
         assert cab.interior.lo["z"] == 15
 
 
@@ -1199,7 +1348,7 @@ def test_problems_are_listed_once():
     the emitter's plan reports each once."""
     with module("m", Box.from_size(width=600, depth=400, height=700)) as m:
         board("a", ply15).on(m.left)
-        board("b", ply15).on(m.left + 5, toward=m.right)
+        board("b", ply15).on(m.left.into(5), toward=m.right)
         check(no_interference)
     layout = build_layout()
     assert layout["problems"] == ["m.a overlaps m.b"] == layout["modules"][0]["problems"]

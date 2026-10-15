@@ -64,12 +64,12 @@ with board("left", ply15, rect(depth=500, height=720)) as side:
     side.show("outer").grain("height")
     side.cut(rect(depth=60, height=100), at=side.outer.bottom.front, name="toekick")
     side.pocket(rect(depth=200, height=12), at=side.inner.front.bottom(shelf.bottom),
-                depth=to(side.outer, -3), chamfer=0.5)    # dado whose bottom is the shelf's
+                depth=to(side.outer, leave=3), chamfer=0.5)   # dado whose bottom is the shelf's
     side.chamfer(side.outer.outline, 1)                   # the show face's outer contour
     side.chamfer(side.front.inner, 1)                     # one edge
     side.chamfer(side.toekick, 1)                         # the contour a named cut made
     side.fillet(side.back.top, 20)                        # a corner of the outline, rounded through the board
-    for z in spread(side.bottom + 100, side.top - 100, pitch=32):
+    for z in spread(side.bottom.into(100), side.top.into(100), pitch=32):
         side.hole(d=5, depth=10, at=side.inner.front(37).bottom(z))   # a shelf-pin column
 
 shape = rect(depth=500, height=720).clip(top=380, back=120)   # the top back corner cut off, 380 x 120
@@ -87,14 +87,29 @@ shape = rect(depth=500, height=720).clip(top=380, back=120)   # the top back cor
   kick notch. Distances follow the edge they are measured from,
   `side.inner.front(37).bottom(z)`, and a position from the reference
   algebra may stand in for a distance, which is how a hole lines up with
-  another part. Patterns come from `spread()` along one axis of the face.
-- **Depths** [decided]: `depth=` is a number, `through` or `to(face,
-  offset)`. Through and `to()` measure the board from the face the operation
-  is on to the opposite face: its thickness from a big face, its length or
-  width from a narrow one, so a hole through a board's front edge runs out
-  at its back edge. A depth past the opposite face, under 0.01 mm, or `to()`
-  with a positive offset, is an error; `to()` names a face of the board the
-  operation is on, and a face of another part is an error.
+  another part. An axis the anchor leaves unnamed is centred on the face,
+  or on a position with `center(pos)`: `b.front.top.center(line)` puts a
+  notch's top on the top edge and its middle on `line` [decided by
+  Florian, 2026-10-15, syntax.md item 6]. `pos` is a position whose axis
+  lies in the face's plane and is the one the anchor leaves unnamed (a
+  `Pos`, a face, a master's plane, a box side, an operation's edge), never
+  a number, which measures from an edge; it applies wherever a shape is
+  placed by `at=` (`cut`, `pocket`, a cutout's region), and gives a hole's
+  and a slot's centre. Patterns come from `spread()` along one axis of the
+  face.
+- **Depths** [decided]: `depth=` is a number, `through` or `to(face)`,
+  which reaches the face, or `to(face, leave=3)`, which stops 3 mm short of
+  it [decided by Florian, 2026-10-15, syntax.md item 7: it was a signed
+  offset, `to(face, -3)`, of which only zero or a negative was legal].
+  Through and `to()` measure the board from the face the operation is on to
+  the opposite face: its thickness from a big face, its length or width
+  from a narrow one, so a hole through a board's front edge runs out at its
+  back edge. A depth past the opposite face or under 0.01 mm is an error,
+  and so is a `leave=` that leaves the whole board, a negative `leave=`, or
+  the amount given by position (`to(face, 3)`, which the error spells with
+  `leave=`); `to()` names a face of the board the operation is on, and a
+  face of another part is an error. The layout records the depth as
+  written, `to(outer, leave=3)`, for a reader only.
 - **Refusals** that keep the layout buildable: holes, pockets and V-grooves
   wholly off the board; a hole whose centre is off its face or in a hole or
   pocket made into that face before; a pocket or V-groove wholly in what was
@@ -125,7 +140,7 @@ screw holes for adjustable mounting, pass-throughs for straps and cables
   plane.
 
 ```python
-for z in spread(back.bottom + 60, back.top - 60, pitch=20):     # vents, centred across the back
+for z in spread(back.bottom.into(60), back.top.into(60), pitch=20):   # vents, centred across the back
     back.slot(6, at=back.inner.bottom(z), centers=120, along="width", depth=through)
 
 a, b = side.inner.front(40).bottom(100), side.inner.front(40).bottom(140)
@@ -256,7 +271,7 @@ its narrow faces, V-grooves.
 - It is named `openings` unless `name=` says otherwise.
 - `radius=` (8) rounds every corner of the openings, `chamfer=` puts a 45
   degree chamfer on their rims at the face cut from, `depth=` makes it a
-  pocket (`to(side.outer, -3)` leaves 3 mm), and a region shape with `at=`
+  pocket (`to(side.outer, leave=3)` leaves 3 mm), and a region shape with `at=`
   limits it to part of the face (the add-in's Bounding Box Points).
 - Defaults and the patterns' sizes are `lib/cutout_patterns.py`, which the
   add-in reads too.

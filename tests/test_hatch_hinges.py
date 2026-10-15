@@ -47,7 +47,7 @@ def _cabinet(hinge: HatchHinge | None = None, *, frame: str = "cabinet", hatch_t
         top = board("top", sheet_material("birch", t=top_t)).on(cab.top).between(left, right, carcass, cab.back)
         bottom = board("bottom", ply18).on(cab.bottom).between(left, right, carcass, cab.back)
         hatch = (board("hatch", sheet_material("birch", t=hatch_t)).on(cab.front)
-                 .between(cab.left, cab.right, cab.bottom, cab.top - hatch_drop))
+                 .between(cab.left, cab.right, cab.bottom, cab.top.into(hatch_drop)))
         parts = {"left": left, "right": right, "top": top, "bottom": bottom, "hatch": hatch}
         if shelf_at is not None:
             parts["shelf"] = (board("shelf", ply18).on(Pos("z", shelf_at), toward=cab.top)

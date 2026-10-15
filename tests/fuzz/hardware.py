@@ -441,7 +441,7 @@ def build_drawer(case: DrawerCase, front: int, origin: tuple[float, float, float
             r = board("right", t).on(dbox.right).between(dbox)
             f = board("front", t).on(dbox.front).between(l, r, dbox.bottom, dbox.top)
             k = board("back", t).on(dbox.back).between(l, r, dbox.bottom, dbox.top)
-            floor = board("floor", sheet_material("birch", t=9)).on(dbox.bottom + slide.recess).between(l, r, f, k)
+            floor = board("floor", sheet_material("birch", t=9)).on(dbox.bottom.into(slide.recess)).between(l, r, f, k)
             slide.machine_box(sides=(l, r), front=f, back=k, floor=floor)
         check(no_interference)
 
