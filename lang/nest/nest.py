@@ -171,8 +171,11 @@ def _blank_types(stock: _Stock, workshop: Workshop) -> tuple[list[Bin], list[str
     bed = workshop.bed
     available = [s for s in stock.sawn if s.copies != 0]
     sheets = [s for s in available if s.kind == "sheet"]
-    lengths = sorted(set(LENGTHS) | {s.length for s in sheets} | set(bed))
-    widths = sorted(set(WIDTHS) | {s.width for s in sheets} | set(bed))
+    # In the saw's tenths of a millimetre, rounded down, so that a blank as
+    # long as the bed is not sawn longer [found by fuzzing, 2026-10-15: a
+    # bed 846.352 wide took a blank sawn 846.4].
+    lengths = sorted(set(LENGTHS) | {_tenth(s.length) for s in sheets} | {_tenth(v) for v in bed})
+    widths = sorted(set(WIDTHS) | {_tenth(s.width) for s in sheets} | {_tenth(v) for v in bed})
     bins: list[Bin] = []
     kinds: list[str] = []
     for w in lengths:
@@ -185,7 +188,7 @@ def _blank_types(stock: _Stock, workshop: Workshop) -> tuple[list[Bin], list[str
         if s.kind == "offcut":
             for w, h in _split_to_bed(s.length, s.width, bed, workshop.saw_kerf):
                 if min(w, h) > 2 * workshop.margin:
-                    bins.append(Bin(w, h, 1, ON_HAND))
+                    bins.append(Bin(_tenth(w), _tenth(h), 1, ON_HAND))
                     kinds.append("piece")
     for k, (w, h) in enumerate(stock.direct):
         if stock.direct_left[k]:
@@ -260,6 +263,11 @@ def _nest_round(items: list[Item], indices: list[int], stock: _Stock, workshop: 
         for bi in plan.unsawn:
             left += [p.item for p in blank_parts[bi]]
     return states, sorted(left), notes
+
+
+def _tenth(v: float) -> float:
+    """`v` rounded down to a tenth of a millimetre, the saw's unit."""
+    return math.floor(v * sawing.UNIT + 1e-9) / sawing.UNIT
 
 
 def _price(w: float, h: float, sheets: list[Stock], kerf: float) -> float:

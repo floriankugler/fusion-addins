@@ -476,6 +476,20 @@ def test_an_offcut_larger_than_the_bed_is_sawn_like_a_sheet():
     assert offcut["cuts"] and all(_fits(b["rect"][2], b["rect"][3]) for b in offcut["blanks"])
 
 
+def test_a_blank_as_long_as_a_bed_of_fractions_is_sawn_within_it():
+    """A blank as wide as a bed 846.352 wide was sawn 846.4, the saw's
+    tenths rounded up, and did not fit the bed [found by fuzzing,
+    2026-10-15]."""
+    panel("a", 1100, 820)
+    workshop = Workshop(bed=(2250.12, 846.352), margin=12.3, kerf=6, sheets=(Sheet(2602.8, 996.98),))
+    _layout, nest, _parts = nested(workshop)
+    assert nest["problems"] == []
+    from lang.nest.nest import _blank_types, _stock_of  # pyright: ignore[reportPrivateUsage]
+    bins, _kinds = _blank_types(_stock_of("birch 15", workshop), workshop)
+    assert all(b.width * 10 == round(b.width * 10) and b.height * 10 == round(b.height * 10) for b in bins)
+    assert max(b.height for b in bins if b.width > 1000) == 846.3      # as wide as the bed, in tenths
+
+
 def test_short_stock_leaves_parts_over_and_says_so():
     for k in range(4):
         panel(f"p{k}", 1900, 900)
