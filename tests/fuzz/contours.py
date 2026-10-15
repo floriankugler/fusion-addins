@@ -58,7 +58,7 @@ from shapely.ops import split, unary_union
 
 from boards import KNOWN, _pipeline_problems  # pyright: ignore[reportPrivateUsage]
 from fuzzing import floats, fresh, sizes
-from lang import Board, Box, LangError, Pos, board, inside, sheet_material, module
+from lang import Board, Box, LangError, Pos, board, inside, sheet_material, module, no_interference, uncheck
 from lang.core.contours import Contour, round_offset
 from lang.core.directions import AXES, Axis, world_frame
 from lang.core.geometry import NARROWEST, clean, polygons_of
@@ -303,6 +303,7 @@ def build(case: ContourCase, variant: Variant, name: str = "m") -> Built:
     contours = [van.contour(f"c{i}") for i in range(len(case.contours))]
     ends: list[Board] = []
     with module(name, world.box(case.room)) as m:
+        uncheck(no_interference)         # (a board limited at random may reach into an end board)
         limits: list[Any] = []
         for i, limit in enumerate(case.limits):
             if limit.kind == "pos":

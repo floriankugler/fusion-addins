@@ -120,7 +120,10 @@ materials (`sheet_material()`), joints (`cabineo()`) and hardware
   (`show(cab.front)`, `on(pos, toward=cab.top)`, `grain(cab.top)`), faces,
   edges, anchors, operations. Side keywords (`shrunk(left=5)`,
   `with_sides(front=...)`, `Box.from_sides(...)`) are explicit parameters,
-  so a misspelt side is a type error. Enums instead of literals were
+  so a misspelt side is a type error. `shrunk()` and `grown()` also take a
+  leading amount for all six sides, which a side's keyword overrides:
+  `shrunk(GAP / 2)`, `grown(0.5, front=0)`; keywords alone move their
+  sides only [decided by Florian, 2026-10-15, syntax.md item 5]. Enums instead of literals were
   considered and dropped: Python has no `.height` shorthand, catalogue names
   such as "4x20" or "8 M6" cannot be identifiers, and pyright completes a
   `Literal`'s values once the quote is open (an enum parameter got the whole
@@ -132,7 +135,9 @@ materials (`sheet_material()`), joints (`cabineo()`) and hardware
 - What this is not: free functions for everything (no autocomplete entry
   point), operators such as `left @ cab.left` (cryptic), or dataclass specs
   (that is what the layout JSON is for, and the language should not look
-  like it).
+  like it). 2D booleans are the exception to the operators: `a - b` and
+  `a + b` on shapes, as shapely, CadQuery and build123d users expect
+  [decided by Florian, 2026-10-15, syntax.md item 13].
 
 ## Names and paths
 

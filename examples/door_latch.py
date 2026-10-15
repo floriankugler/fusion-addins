@@ -49,7 +49,7 @@ def latched_cabinet(name: str, box: Box, slide: DrawerSlide, model: LatchModel =
             d.mount(slide, sides=(left, right), front=d.face.back)     # pre-drills the carcass
             d.mount(drawer_latch, door=d.face, carcass=catch)          # the lock in the face, the strike under `catch`
 
-        check(no_interference, fits_sheet)
+        check(fits_sheet)
     return cab
 
 

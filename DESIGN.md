@@ -164,7 +164,7 @@ def carcass(name, box, *, front):
                 side.hole(d=5, depth=10, at=side.inner.front(37).bottom(z))
 
         cab.export("worktop", top.top)                     # for whatever stands on it
-        check(no_interference, fits_sheet)
+        check(fits_sheet)
     return cab
 
 

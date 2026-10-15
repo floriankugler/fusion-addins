@@ -39,7 +39,7 @@ def wall_cabinet(name: str, box: Box, hinge: HatchHinge, *, front: Side) -> Scop
         # Drills the side panels' inner faces and the hatch's inner face,
         # which faces the carcass, and places the two hinges.
         cab.mount(hinge, hatch=hatch, sides=(left, right), top=top)
-        check(no_interference, fits_sheet)
+        check(fits_sheet)
     return cab
 
 

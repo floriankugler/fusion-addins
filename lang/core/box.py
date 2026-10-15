@@ -164,12 +164,29 @@ class Box:
             position += step * (size + gap)
         return boxes
 
-    def shrunk(self, *, front: float = 0.0, back: float = 0.0, left: float = 0.0, right: float = 0.0,
-               top: float = 0.0, bottom: float = 0.0) -> Box:
-        """A copy with sides moved inward by the given amounts."""
+    def shrunk(self, n: float = 0.0, /, *, front: float | None = None, back: float | None = None,
+               left: float | None = None, right: float | None = None, top: float | None = None,
+               bottom: float | None = None) -> Box:
+        """A copy with sides moved inward: by `n` all round, a side's
+        keyword overriding it for that side. `shrunk(GAP / 2)` moves all
+        six, `shrunk(3, front=0)` all but the front, and `shrunk(front=20)`
+        the front only [decided by Florian, 2026-10-15, syntax.md item 5]."""
+        return self._moved_in(n, (front, back, left, right, top, bottom))
+
+    def grown(self, n: float = 0.0, /, *, front: float | None = None, back: float | None = None,
+              left: float | None = None, right: float | None = None, top: float | None = None,
+              bottom: float | None = None) -> Box:
+        """A copy with sides moved outward, as `shrunk` moves them inward:
+        `grown(0.5, front=0)`. This is how a part gets room around it:
+        `floor.box().grown(top=0.5)`."""
+        return self._moved_in(-n, tuple(None if a is None else -a for a in (front, back, left, right, top, bottom)))
+
+    def _moved_in(self, n: float, amounts: tuple[float | None, ...]) -> Box:
+        """A copy with each side moved inward by its amount, in
+        `DIRECTION_NAMES` order, or by `n` where it has none."""
         lo, hi = dict(self.lo), dict(self.hi)
-        amounts = (front, back, left, right, top, bottom)
         for name, amount in zip(DIRECTION_NAMES, amounts):
+            amount = n if amount is None else amount
             if amount == 0.0:
                 continue
             d = self.frame.direction(name)
@@ -178,13 +195,6 @@ class Box:
             else:
                 lo[d.axis] += amount
         return Box(lo, hi, self.frame)
-
-    def grown(self, *, front: float = 0.0, back: float = 0.0, left: float = 0.0, right: float = 0.0,
-              top: float = 0.0, bottom: float = 0.0) -> Box:
-        """A copy with sides moved outward by the given amounts; the mirror
-        image of `shrunk`. This is how a part gets room around it:
-        `floor.box().grown(top=0.5)`."""
-        return self.shrunk(front=-front, back=-back, left=-left, right=-right, top=-top, bottom=-bottom)
 
     def with_sides(self, *, front: PosLike | None = None, back: PosLike | None = None,
                    left: PosLike | None = None, right: PosLike | None = None,

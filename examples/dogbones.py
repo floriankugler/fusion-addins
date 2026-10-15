@@ -48,4 +48,3 @@ with module("frame", Box.from_size(width=400, depth=300, height=40, origin=(0, 7
     right_rail = board("right_rail", ply15).center(f.left + 300)
     left_rail.join(crosses, using=half_lap(toward=f.top))
     right_rail.join(crosses, using=half_lap(toward=f.top, dogbones="hidden"))
-    check(no_interference)

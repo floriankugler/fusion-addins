@@ -1,4 +1,5 @@
-"""`Shape.rounded()`, `Shape.clip()`, and operations given a shape without area."""
+"""`Shape.rounded()`, `Shape.clip()`, `-` and `+` on shapes, and operations
+given a shape without area."""
 import math
 import re
 from collections.abc import Callable
@@ -187,3 +188,38 @@ def test_clip_errors():
         polygon([(0, 0), (40, 0), (40, 20)]).clip(front=5, top=5)
     with pytest.raises(LangError, match="the leg must be positive"):
         rect(depth=50, height=50).clip(top=10, back=0)
+
+
+# -- - and + ------------------------------------------------------------------------------------------
+
+def test_minus_and_plus_are_difference_and_union():
+    """Decided by Florian, 2026-10-15 (syntax.md item 13): `a - b` takes
+    material away and `a + b` adds it, as build123d spells them; the
+    methods stay, and the operators are them exactly."""
+    plate = rect(depth=100, height=60)
+    hole = circle(20, (50, 30))
+    tab = rect(depth=20, height=80)
+    assert (plate - hole).geometry.equals_exact(plate.difference(hole).geometry, 0)
+    assert (plate + tab).geometry.equals_exact(plate.union(tab).geometry, 0)
+    assert (plate - hole).area == pytest.approx(6000 - math.pi * 100, abs=0.1)
+    assert (plate + tab).bounds == (0, 0, 100, 80)
+    assert (plate - hole + tab).axes == (plate - hole).axes == plate.axes == ("x", "z")
+
+
+def test_minus_and_plus_keep_the_plane_and_clean_as_the_methods_do():
+    """A raw shape takes the plane of the one it is combined with; two
+    planes are an error; what is narrower than 0.01 mm goes, as from every
+    shape."""
+    assert (circle(10) + rect(depth=20, height=20)).axes == ("x", "z") == (circle(10) - rect(depth=20, height=20)).axes
+    assert (circle(10, (10, 10)) - rect(depth=20, height=20)).is_empty()
+    with pytest.raises(LangError, match="Shapes lie in different planes: depth x height and width x height"):
+        _ = rect(depth=20, height=20) - rect(width=20, height=20)
+    sliver = rect(depth=100, height=60) - rect(depth=100, height=59.995)
+    assert sliver.is_empty()
+
+
+def test_minus_or_plus_a_number_is_an_error():
+    with pytest.raises(LangError, match=r"shape \+ 5: \+ takes another shape; a shape moves with moved\(\)"):
+        _ = rect(depth=20, height=20) + 5  # type: ignore[operator]  -- a number is a type error too
+    with pytest.raises(LangError, match=r"shape - 0.5: - takes another shape; .* grows with offset\(\)"):
+        _ = rect(depth=20, height=20) - 0.5  # type: ignore[operator]

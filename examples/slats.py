@@ -41,7 +41,7 @@ with cabinet("unit", box, front=box.front) as unit:
             .between(back, side.front.into(20))
     shelf = board("shelf", ply18).on(height, toward=unit.top).between(left, right, back, left.front.into(20))
     shelf.lip(shelf.front, 0.5, oak)                            # banding
-    check(no_interference, fits_sheet)
+    check(fits_sheet)
 
 
 bed = Box.from_size(width=1400, depth=2000, height=100, origin=(0, 800, 0))     # beside the unit
@@ -53,4 +53,3 @@ with module("bed", bed) as base:
     ]
     for i, x in enumerate(spread(base.front.into(50), base.back.into(50), count=15)):
         slat(f"slat{i + 1}", pine, section=(20, 70)).on(rails[0].top).center(x).between(base.left, base.right)
-    check(no_interference)

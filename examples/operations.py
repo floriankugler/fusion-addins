@@ -37,7 +37,7 @@ with module("ops", Box.from_size(width=400, depth=300, height=100)) as m:
             panel.hole(d=5, depth=8, at=top.right(25).front(x))     # a column 25 mm from the right edge
 
     # a standing board, to check that a vertical show face and its edges resolve
-    with board("side", ply15).on(m.left).between(m.front, m.back, m.bottom, m.top).show("inner") as side:
+    with board("side", ply15).on(m.left).between(m.front, m.back, panel, m.top).show("inner") as side:
         side.fillet(side.back.top, 30)                              # a corner of a standing board
         side.chamfer(side.inner.outline, 1)
         side.chamfer(side.front.outer, 1)

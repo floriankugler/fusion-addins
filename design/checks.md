@@ -4,10 +4,20 @@ Design checks that run on the layout, before any geometry exists in Fusion.
 Part of the modeling language's design; the overview is `DESIGN.md`. Code:
 `lang/core/checks.py`.
 
-- A module asks for checks with `check(...)` inside it or `module.check(...)`
-  after: `check(no_interference, fits_sheet)`,
-  `kitchen.check(inside_box, inside(floor_outline))`. Results go into the
-  layout's problems and the build's output.
+- Every module, `module()` and `cabinet()` alike, runs `no_interference`
+  without asking; `uncheck(no_interference)` inside it or
+  `module.uncheck(no_interference)` after turns it off, for parts that
+  overlap on purpose [decided by Florian, 2026-10-15, syntax.md item 4].
+  The other checks are asked for with `check(...)` inside a module or
+  `module.check(...)` after: `check(fits_sheet)`,
+  `kitchen.check(inside_box, inside(floor_outline))`. `fits_sheet` stays
+  asked for, since the nest refuses a part its bed cannot take and some
+  parts are sawn from bigger stock by hand. A check asked for twice, or
+  `no_interference` asked for again, runs once; unchecking a check the
+  scope does not run is an error. A scope inside a module runs only what
+  it asks for, and the module's checks take in its parts; a module inside
+  a module runs its own, and each problem is listed once. Results go into
+  the layout's problems and the build's output.
 - Every check allows 1e-6 mm, as a distance: a part may reach that far out of
   a box or contour, and an overlap counts only where it is deeper than that
   in every direction. Touching never counts. [decided]

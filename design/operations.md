@@ -7,9 +7,10 @@ design; the overview is `DESIGN.md`. Code: `lang/core/part.py`,
 ## Boards
 
 - A **board** is sheet material. Thickness comes from the material. The
-  outline is a 2D shape, mostly a rectangle; other shapes are made by union
-  and difference of 2D shapes. The composition happens in 2D before
-  thickness is applied, so a board is flat by construction. [decided]
+  outline is a 2D shape, mostly a rectangle; other shapes are made by
+  adding and taking away 2D shapes (`a + b`, `a - b`). The composition
+  happens in 2D before thickness is applied, so a board is flat by
+  construction. [decided]
 - Board versus slat is a matter of stock form, not species: a glued-up solid
   wood panel is a board. A board's material is a `sheet_material()`; solid
   wood by section and length is a slat, and `lip()` glues it along a
@@ -44,6 +45,13 @@ design; the overview is `DESIGN.md`. Code: `lang/core/part.py`,
   open at the board's edge is a `cut()` of one; others are `slot()`, see
   below); a larger r, or one too large for an edge between two corners, is
   an error, and so is any operation given a shape without area.
+- **Adding and taking away**: `a + b` is `a.union(b)` and `a - b` is
+  `a.difference(b)`, as build123d spells them; the methods stay, and
+  `intersection()` is a method only [decided by Florian, 2026-10-15,
+  syntax.md item 13]. The result is cleaned as every shape is and lies in
+  the plane of whichever shape has one; shapes in two planes are an error,
+  and so is a number (`shape + 5`: a shape moves with `moved()` and grows
+  with `offset()`).
 - **Clipping a corner**: `shape.clip(top=380, back=120)` cuts off the corner
   where the two named edges meet, each value the length of the cut along
   that edge; a rectangle's edges are named as the frame names its plane, a

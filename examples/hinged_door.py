@@ -41,7 +41,7 @@ def hinged_cabinet(name: str, box: Box, hinge: ConcealedHinge, *, front: Side) -
 
         door = board("door", ply12).on(cab.front).inset(GAP / 2)
         cab.mount(hinge, door=door, carcass=left)
-        check(no_interference, fits_sheet)
+        check(fits_sheet)
     return cab
 
 
