@@ -93,6 +93,10 @@ DOMINO_STOP_LATCH = 37.0
 DOMINO_ADDITIONAL_STOP = 20.0
 #: Added to half the Domino's length to get the slot depth, mm.
 DOMINO_DEPTH_OFFSET = 0.5
+#: The slots are this much shorter and narrower than the Domino, their
+#: outline inset by half of it on every side, so the Domino fits tight;
+#: the slot's depth is not changed, mm.
+DOMINO_SLOT_UNDERSIZE = 0.2
 #: The two wider mortise settings of the Domino DF 500 (13, 19 or 23 mm
 #: plus the cutter diameter), as extra slot length, mm.
 DOMINO_LOOSE_STEPS = (6.0, 10.0)
@@ -232,6 +236,8 @@ def _self_check() -> None:
     assert [size.key for size in DOMINO_SIZES][:3] == ["4x20", "5x30", "6x40"]
     assert len({size.value for size in DOMINO_SIZES}) == len(DOMINO_SIZES)
     assert domino_size("8x50").width == 21.9
+    # Undersized, the thinnest Domino still leaves a slot.
+    assert 0 < DOMINO_SLOT_UNDERSIZE < min(size.thickness for size in DOMINO_SIZES)
     assert len({stop.value for stop in FENCE_STOPS}) == len(FENCE_STOPS)
     # The access pocket's first circle breaks through the board's end.
     assert CABINEO_ACCESS_CENTERS[0] < CABINEO_ACCESS_DIAMETER / 2

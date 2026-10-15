@@ -76,8 +76,7 @@ class Domino(SpacedJoint):
     face: FaceChoice = None
     remaining: float | None = None
     loose: float = 0.0
-    length_offset: float = 0.0
-    height_offset: float = 0.0
+    undersize: float = data.DOMINO_SLOT_UNDERSIZE
     marks: DominoMarks | None = "all"
     mark_depth: float = data.DOMINO_MARK_DEPTH
     mark_length: float = data.DOMINO_MARK_LENGTH
@@ -85,14 +84,14 @@ class Domino(SpacedJoint):
 
     @property
     def slot_height(self) -> float:
-        """Across the contact: the Domino's thickness plus the offset."""
-        return self.size.thickness + self.height_offset
+        """Across the contact: the Domino's thickness less the undersize."""
+        return self.size.thickness - self.undersize
 
     @property
     def slot_length(self) -> float:
-        """Along the contact: the Domino's width plus the offset; the loose
-        slots are `loose` longer."""
-        return self.size.width + self.length_offset
+        """Along the contact: the Domino's width less the undersize; the
+        loose slots are `loose` longer."""
+        return self.size.width - self.undersize
 
     def _reference(self, e: Board) -> Face:
         """The face the machine's fence rests on, which carries the marks."""
@@ -155,8 +154,8 @@ class Domino(SpacedJoint):
 
 def domino(size: DominoSize, *, count: int | None = None, at: Sequence[PosLike] | None = None,
            end: float | None = None, fence: float | None = None, face: FaceChoice = None,
-           remaining: float | None = None, loose: float = 0.0, length_offset: float = 0.0,
-           height_offset: float = 0.0, marks: DominoMarks | None = "all",
+           remaining: float | None = None, loose: float = 0.0,
+           undersize: float = data.DOMINO_SLOT_UNDERSIZE, marks: DominoMarks | None = "all",
            mark_depth: float = data.DOMINO_MARK_DEPTH, mark_length: float = data.DOMINO_MARK_LENGTH) -> Domino:
     """Dominos of `size` ("5x30": thickness x length): per station a slot
     in the face of the board that is met, half the Domino's length plus 0.5
@@ -173,18 +172,20 @@ def domino(size: DominoSize, *, count: int | None = None, at: Sequence[PosLike] 
     per Domino (`marks="all"`), all but the first and last, which the
     machine's stops locate (`"middle"`), or none (`None`).
 
-    `loose` makes every slot but the first (from the front, left or bottom)
-    that much longer, as the machine's wider settings do (6 or 10);
-    `length_offset` and `height_offset` change every slot's size."""
+    `undersize` (0.2) makes every slot that much shorter and narrower
+    than the Domino, its outline inset by half of it on every side, so the
+    Domino fits tight (negative: larger); the depth stays. `loose` makes
+    every slot but the first (from the front, left or bottom) that much
+    longer still, as the machine's wider settings do (6 or 10)."""
     spec = data.domino_size(one_of(size, DominoSize, "domino()"))
     face = face_choice("domino", face)
     if marks is not None:
         one_of(marks, DominoMarks, "domino(marks=)")
     spacing = make_spacing("domino", count, at, end=end, default_end=data.DOMINO_STOP_LATCH)
-    if spec.thickness + height_offset <= 0:
-        raise LangError("domino: height_offset leaves no slot.")
-    if spec.width + length_offset - (spec.thickness + height_offset) < NARROWEST - EPS:
-        raise LangError(f"domino: length_offset leaves the slot less than {NARROWEST:g} mm longer than it is high.")
+    # The slot stays longer than it is high: it is as much shorter than
+    # the Domino is wide as it is narrower than the Domino is thick.
+    if spec.thickness - undersize < NARROWEST - EPS:
+        raise LangError(f"domino: undersize={undersize:g} leaves no slot of a {spec.key}.")
     if fence is not None and fence <= 0:
         raise LangError("domino: fence must be positive.")
     if remaining is not None and remaining < 0:
@@ -194,8 +195,8 @@ def domino(size: DominoSize, *, count: int | None = None, at: Sequence[PosLike] 
     if marks is not None and (mark_depth <= 0 or mark_length <= 0):
         raise LangError("domino: mark_depth and mark_length must be positive.")
     return Domino(spec, spacing, None if fence is None else float(fence), face,
-                  None if remaining is None else float(remaining), float(loose), float(length_offset),
-                  float(height_offset), marks, float(mark_depth), float(mark_length))
+                  None if remaining is None else float(remaining), float(loose), float(undersize), marks,
+                  float(mark_depth), float(mark_length))
 
 
 # -- Clamex P ------------------------------------------------------------------------------------------
