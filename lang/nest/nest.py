@@ -64,10 +64,11 @@ RETRIES = 4
 
 @dataclass
 class Options:
-    """How hard the solvers try: the nest's time per material (the
-    workshop's `seconds` unless given), the mode (`anytime`: the best
-    within the time; `deterministic`: one fixed search), the saw's time per
-    setting, refill's per try (0: no refill)."""
+    """How hard the solvers try: the nest's time per material (unless
+    given, `Workshop.nest_seconds`: 0.6 s a part, 5 s to the workshop's
+    `seconds`), the mode (`anytime`: the best within the time;
+    `deterministic`: one fixed search, as long as it takes), the saw's time
+    per setting, refill's per try (0: no refill)."""
     seconds: float | None = None
     mode: str = "anytime"
     saw_seconds: float = SAW_SECONDS
@@ -130,7 +131,7 @@ class _Stock:
 
 def nest_material(items: list[Item], material: str, workshop: Workshop, options: Options, log: Log) -> MaterialOut:
     assert workshop.bed is not None
-    seconds = options.seconds if options.seconds is not None else workshop.seconds
+    seconds = options.seconds if options.seconds is not None else workshop.nest_seconds(len(items))
     stock = _stock_of(material, workshop)
     remaining = list(range(len(items)))
     states: list[SheetState] = []

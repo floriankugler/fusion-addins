@@ -86,7 +86,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-cuts", type=int)
     parser.add_argument("--keep-across", type=float, help="mm a rest needs across to be kept")
     parser.add_argument("--keep-area", type=float, help="m2 a rest needs to be kept")
-    parser.add_argument("--seconds", type=float, help="the nest's time per material")
+    parser.add_argument("--seconds", type=float, help="the nest's time per material at most (0.6 s a part)")
     parser.add_argument("--mode", choices=["anytime", "deterministic"], default="anytime")
     parser.add_argument("--no-refill", action="store_true", help="leave out refill (emptying a sheet into the others)")
     parser.add_argument("--material", help="nest this material only (as the layout names it, 'birch 15')")

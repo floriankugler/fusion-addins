@@ -14,7 +14,7 @@ are square metres.
     max_cuts = 5                # saw cuts per sheet at most
     keep_across = 300           # a rest is kept as stock from 300 mm across
     keep_area = 0.25            # ... and 0.25 m2
-    seconds = 20                # the nest's time per material
+    seconds = 40                # the nest's time per material at most
 
     [[sheet]]                   # for every material, as many as needed
     size = [2470, 1240]
@@ -43,8 +43,13 @@ from typing import Any
 
 from ..core.errors import LangError
 
-#: Seconds the nest of one material may take, unless the workshop says.
-SECONDS = 20.0
+#: Seconds the nest of one material may take at most, unless the
+#: workshop says; it takes `SECONDS_PER_PART` a part, at least
+#: `MIN_SECONDS` [measured 2026-10-15: the examples' 62 parts of birch 15
+#: came out on 7 sheets in 20 s and on 5 in 40 s, 124 parts on 9 in 40 s].
+SECONDS = 40.0
+SECONDS_PER_PART = 0.6
+MIN_SECONDS = 5.0
 
 
 @dataclass(frozen=True)
@@ -89,7 +94,8 @@ class Workshop:
     keep_across: float = 300.0
     #: ... and this area (m2) [Florian, 2026-10-14]; anything smaller is waste.
     keep_area: float = 0.25
-    #: The nest's time per material (s).
+    #: The nest's time per material at most (s); it takes 0.6 s a part, at
+    #: least 5 s (`nest_seconds`).
     seconds: float = SECONDS
     sheets: tuple[Sheet, ...] = field(default=())
     offcuts: tuple[Offcut, ...] = field(default=())
@@ -99,6 +105,10 @@ class Workshop:
 
     def offcuts_for(self, material: str) -> list[Offcut]:
         return [o for o in self.offcuts if o.material == material]
+
+    def nest_seconds(self, parts: int) -> float:
+        """The nest's time for a material of `parts` parts."""
+        return min(self.seconds, max(MIN_SECONDS, SECONDS_PER_PART * parts))
 
     def keeps(self, w: float, h: float) -> bool:
         """Whether a rest of w x h is worth keeping as stock."""

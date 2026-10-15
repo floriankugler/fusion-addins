@@ -114,6 +114,12 @@ def test_the_command_line_spells_stock_and_replaces_the_files():
     assert with_overrides(w, offcuts=[]).offcuts == ()
 
 
+def test_the_nest_takes_its_time_by_the_parts_up_to_the_workshop_s():
+    w = Workshop()
+    assert [w.nest_seconds(n) for n in (4, 20, 62, 500)] == pytest.approx([5, 12, 37.2, 40])
+    assert Workshop(seconds=3).nest_seconds(4) == 3
+
+
 def test_a_nest_without_a_bed_or_stock_is_refused():
     panel("a", 500, 300)
     with pytest.raises(LangError, match="No bed"):

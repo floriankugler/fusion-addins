@@ -9,7 +9,7 @@ kerf = 4                # the saw's cut
 max_cuts = 5            # saw cuts per sheet at most
 keep_across = 300       # a rest is kept as stock from 300 mm across
 keep_area = 0.25        # and 0.25 m2; smaller ones are waste
-seconds = 20            # the nest's time per material
+seconds = 40            # the nest's time per material at most (0.6 s a part)
 
 [[sheet]]               # every material, as many as needed
 size = [2470, 1240]
