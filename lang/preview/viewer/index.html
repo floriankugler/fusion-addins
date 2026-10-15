@@ -47,8 +47,9 @@
     padding: 0 3px; border-radius: 2px; white-space: nowrap; }
   .flabel .alias { color: #a08463; }
   .plabel.selected, .flabel.selected { color: var(--accent); }
+  /* above the scene and its labels */
   #nestView { position: absolute; inset: 0 var(--side) 0 0; background: #fff; overflow: auto; padding: 12px;
-    box-sizing: border-box; }
+    box-sizing: border-box; z-index: 10; }
   #nestView svg { width: 100%; height: auto; }
   #nestView g.part { cursor: pointer; }
   #nestView g.part.selected path { fill: #f0a830; }
