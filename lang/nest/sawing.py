@@ -16,7 +16,10 @@ between pieces side by side, from the leaves up:
 - pieces that hold blanks, and rests too small to keep, when the bed takes
   them together: one piece, machined at once, each blank's parts staying
   where they are [Florian, 2026-10-14: two blanks side by side that the bed
-  takes together are not cut apart];
+  takes together are not cut apart]; two pieces holding blanks only where
+  two margins and the kerf make up the spacing (`join`), since the parts
+  across the cut left out are that far apart [found by fuzzing,
+  2026-10-14: with margin and kerf 0 they came 1.4 mm apart];
 - a rest too small to keep beside a piece that is cut further: the pieces
   along it take it along (each grows across it), when every piece holding
   blanks still fits the bed.
@@ -174,11 +177,12 @@ def _grown(node: Node, axis: int, at_start: bool, amount: float, fits_bed: FitsB
     return Node(r, children=kids)
 
 
-def simplify(node: Node, fits_bed: FitsBed, keeps: Keeps) -> Node:
-    """Leaves out the cuts that are not needed (see the module's doc)."""
+def simplify(node: Node, fits_bed: FitsBed, keeps: Keeps, join: bool = True) -> Node:
+    """Leaves out the cuts that are not needed (see the module's doc);
+    `join`: whether two pieces holding blanks may be one."""
     if node.leaf:
         return node
-    kids = [simplify(c, fits_bed, keeps) for c in node.children]
+    kids = [simplify(c, fits_bed, keeps, join) for c in node.children]
     changed = True
     while changed:
         changed = False
@@ -188,7 +192,8 @@ def simplify(node: Node, fits_bed: FitsBed, keeps: Keeps) -> Node:
             if a.leaf and b.leaf:
                 if a.rest and b.rest:
                     kids[i:i + 2] = [Node(r)]
-                elif not kept(a, keeps) and not kept(b, keeps) and fits_bed(r[2], r[3]):
+                elif (not kept(a, keeps) and not kept(b, keeps) and fits_bed(r[2], r[3])
+                      and (join or not (a.used and b.used))):
                     kids[i:i + 2] = [Node(r, a.blanks + b.blanks, a.parts + b.parts)]
                 else:
                     continue
@@ -197,14 +202,14 @@ def simplify(node: Node, fits_bed: FitsBed, keeps: Keeps) -> Node:
                 g = _grown(b, axis, True, b.rect[axis] - a.rect[axis], fits_bed)
                 if g is None:
                     continue
-                kids[i:i + 2] = [simplify(g, fits_bed, keeps)]
+                kids[i:i + 2] = [simplify(g, fits_bed, keeps, join)]
             elif b.rest and not kept(b, keeps) and not a.leaf:
                 axis = axis_of(kids)
                 g = _grown(a, axis, False, (b.rect[axis] + b.rect[axis + 2]) - (a.rect[axis] + a.rect[axis + 2]),
                            fits_bed)
                 if g is None:
                     continue
-                kids[i:i + 2] = [simplify(g, fits_bed, keeps)]
+                kids[i:i + 2] = [simplify(g, fits_bed, keeps, join)]
             else:
                 continue
             changed = True
@@ -408,7 +413,7 @@ SETTINGS: list[dict[str, Any]] = [dict(stages=s, first=f, max1=m1, max2=m2)
 
 def best_plan(blanks: Sequence[tuple[float, float]], stock: list[Stock], kerf: float, max_cuts: int,
               fits_bed: FitsBed, keeps: Keeps, seconds: float = 1.0,
-              settings: Sequence[dict[str, Any]] = SETTINGS) -> Plan:
+              settings: Sequence[dict[str, Any]] = SETTINGS, join: bool = True) -> Plan:
     """Saws `blanks` (w along the grain, h) out of `stock` with each setting
     and keeps the best (see the module's doc); `kerf` in tenths of a
     millimetre (`Workshop.saw_kerf`)."""
@@ -420,7 +425,7 @@ def best_plan(blanks: Sequence[tuple[float, float]], stock: list[Stock], kerf: f
         # The solver lets go of the GIL: the settings run side by side.
         with ThreadPoolExecutor(max_workers=len(settings)) as pool:
             solved = list(pool.map(solve, [knapsack] * len(settings), settings))
-        return [_judge(trees, origins, len(blanks), stock, max_cuts, fits_bed, keeps, blanks, kerf, s)
+        return [_judge(trees, origins, len(blanks), stock, max_cuts, fits_bed, keeps, blanks, kerf, s, join)
                 for (trees, origins), s in zip(solved, settings)]
 
     tried = run(knapsack=False)
@@ -436,8 +441,9 @@ def best_plan(blanks: Sequence[tuple[float, float]], stock: list[Stock], kerf: f
 
 def _judge(trees: list[tuple[Node, int]], origins: dict[int, tuple[float, float]], n_blanks: int,
            stock: list[Stock], max_cuts: int, fits_bed: FitsBed, keeps: Keeps, sizes: Sequence[tuple[float, float]],
-           kerf: float, setting: dict[str, Any]) -> Plan:
-    sheets = [Sawn(trim_to_bed(simplify(t, fits_bed, keeps), sizes, origins, kerf, fits_bed), k) for t, k in trees]
+           kerf: float, setting: dict[str, Any], join: bool) -> Plan:
+    sheets = [Sawn(trim_to_bed(simplify(t, fits_bed, keeps, join), sizes, origins, kerf, fits_bed), k)
+              for t, k in trees]
     for (raw, _k), sawn in zip(trees, sheets):
         for leaf in leaves(sawn.tree):
             for bi in leaf.blanks:

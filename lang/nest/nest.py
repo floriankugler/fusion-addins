@@ -237,8 +237,11 @@ def _nest_round(items: list[Item], indices: list[int], stock: _Stock, workshop: 
         blank_parts.append(parts)
     if blank_sizes:
         t1 = time.perf_counter()
+        # Blanks side by side are one piece only where the parts across the
+        # cut left out keep the spacing.
+        join = 2 * workshop.margin + workshop.saw_kerf >= workshop.spacing - 1e-9
         plan = sawing.best_plan(blank_sizes, stock.sawn, workshop.saw_kerf, workshop.max_cuts, workshop.fits_bed,
-                                workshop.keeps, options.saw_seconds)
+                                workshop.keeps, options.saw_seconds, join=join)
         notes.append(f"saw: {plan.setting}, cuts {plan.cuts}, {time.perf_counter() - t1:.1f} s")
         used: dict[int, int] = {}
         for sawn in plan.sheets:

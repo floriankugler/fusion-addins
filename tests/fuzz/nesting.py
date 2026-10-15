@@ -225,16 +225,20 @@ def _one_item(part: PartLayout, item: Item, layout: Layout, spacing: float, smal
     want = Polygon(item.placed(turn, at).exterior)
     if placed is None or placed.symmetric_difference(want).area > 1e-4 * max(1.0, want.length):
         problems.append("its transform does not put it where the nest says")
-    solid = Polygon(item.shape.exterior, [r for r in item.shape.interiors
-                                          if Polygon(r).buffer(-spacing, join_style="mitre").area >= smallest - 1e-6])
+    def takes(ring: object, inward: float) -> bool:
+        return Polygon(ring).buffer(-inward, join_style="mitre").area >= smallest - 1e-6  # pyright: ignore[reportArgumentType]
+    solid = Polygon(item.shape.exterior, [r for r in item.shape.interiors if takes(r, spacing)])
     if not item.solver.buffer(1e-6).contains(solid):
         problems.append("the solver's outline cuts into it")
+    if not all(takes(r, spacing) for r in item.solver.interiors):
+        problems.append("the solver has an opening no part could go in")
+    for r in item.shape.interiors:          # one that surely takes a part is open
+        if takes(r, spacing + OUTSIDE) and not any(Polygon(h).intersects(Polygon(r)) for h in item.solver.interiors):
+            problems.append("an opening that takes a part is filled")
     shape = Polygon(item.shape.exterior)
     outside = max(shape.distance(Point(p)) for p in item.solver.exterior.coords)
     if outside > OUTSIDE + 1e-6:
         problems.append(f"the solver's outline lies {outside:.3g} mm outside, more than {OUTSIDE:g}")
-    if len(item.solver.interiors) != len(solid.interiors):
-        problems.append(f"{len(item.solver.interiors)} openings open, {len(solid.interiors)} could take a part")
     grain = part["grain"] if part["grained"] else None
     want_turns = ((0.0, 180.0) if grain == item.frame.u else (90.0, 270.0) if grain == item.frame.v
                   else (0.0, 90.0, 180.0, 270.0))
@@ -412,8 +416,10 @@ class SawCase:
 @st.composite
 def saw_cases(draw: st.DrawFn) -> SawCase:
     bed = (draw(sizes(600, 2500)), draw(sizes(400, 1300)))
+    # Blanks fit the bed (the nest's do), mostly whole millimetres as cut down.
     blank = st.tuples(sizes(30, bed[0]), sizes(30, bed[1])).map(
-        lambda b: (math.ceil(b[0]), math.ceil(b[1])) if b[0] <= bed[0] and b[1] <= bed[1] else b)
+        lambda b: (math.ceil(b[0]), math.ceil(b[1])) if math.ceil(b[0]) <= bed[0] and math.ceil(b[1]) <= bed[1]
+        else b)
     blanks = tuple(draw(st.lists(blank.map(lambda b: (float(b[0]), float(b[1]))), min_size=1, max_size=8)))
     stock = tuple(draw(st.lists(st.tuples(sizes(300, 3000), sizes(200, 1600),
                                           st.one_of(st.just(-1), st.integers(1, 3)),

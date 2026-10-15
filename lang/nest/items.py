@@ -237,14 +237,15 @@ def _machine_outline(part: PartLayout, frame: dict[str, tuple[str, int]]) -> tup
 
 def _item(part: PartLayout, shape: Polygon, pf: PartFrame, spacing: float, smallest: float) -> Item:
     # Openings that cannot take the smallest part are filled.
-    kept = [ring for ring in shape.interiors
-            if Polygon(ring).buffer(-spacing, join_style="mitre").area >= smallest - 1e-6]
+    kept = [ring for ring in shape.interiors if _takes_a_part(ring, spacing, smallest)]
     solid = Polygon(shape.exterior, kept)
     grown = solid.buffer(1.5 * TOLERANCE, join_style="mitre", mitre_limit=MITRE)
     simple = grown.simplify(TOLERANCE, preserve_topology=True)
     if not isinstance(simple, Polygon) or simple.is_empty:
         raise LangError(f"{part['path']}: its outline could not be simplified for the nest.")
-    simple = orient(simple)
+    # Growing can close a notch's narrow mouth into a hole: the same rule
+    # for the solver's holes [found by fuzzing, 2026-10-14].
+    simple = orient(Polygon(simple.exterior, [r for r in simple.interiors if _takes_a_part(r, spacing, smallest)]))
     if not simple.buffer(1e-6).contains(solid):
         raise LangError(f"{part['path']}: the nest's outline would cut into the part.")
     x0, y0, _x1, _y1 = simple.bounds
@@ -262,6 +263,12 @@ def _item(part: PartLayout, shape: Polygon, pf: PartFrame, spacing: float, small
         raise LangError(f"{part['path']}: its grain {part['grain']} is not in its plane.")
     return Item(part["path"], part["material"], part["thickness"], shape, simple, turns, grained, pf,
                 part["machine"])
+
+
+def _takes_a_part(ring: object, spacing: float, smallest: float) -> bool:
+    """Whether an opening could take the smallest part: its inside, the
+    spacing in from its edge, has at least that part's area."""
+    return Polygon(ring).buffer(-spacing, join_style="mitre").area >= smallest - 1e-6  # pyright: ignore[reportArgumentType]
 
 
 def _polygons(rings: Rings) -> list[Polygon]:

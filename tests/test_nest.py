@@ -15,7 +15,7 @@ import numpy as np
 import pytest
 from shapely import Point, Polygon
 
-from lang import (Board, Box, LangError, SheetMaterial, board, circle, module, rect, sheet_material, slat,
+from lang import (Board, Box, LangError, Shape, SheetMaterial, board, circle, module, rect, sheet_material, slat,
                   slat_material, through)
 from lang.core.layout import build_layout, layout_hash
 from lang.core.layout_types import Layout
@@ -236,6 +236,16 @@ def test_a_needle_of_material_does_not_grow_a_spike_on_the_solver_outline():
     assert item.solver.buffer(1e-6).contains(item.shape)
 
 
+def test_a_notch_whose_mouth_the_growth_closes_is_no_opening():
+    """Grown, a notch with a narrow mouth became a hole in the solver's
+    outline that no part could go in [found by fuzzing, 2026-10-14]."""
+    b = panel("a", 200, 200)
+    b.add_cut(Shape(Polygon([(0, 99.7), (60, 99.7), (60, 60), (100, 60), (100, 140), (60, 140), (60, 100.3),
+                             (0, 100.3)])), "keyhole")            # a room 40 x 80 behind a slit 0.6 wide
+    (item,) = parts_of_layout(build_layout(), 10).by_material["birch 15"]
+    assert len(item.shape.interiors) == 0 and len(item.solver.interiors) == 0
+
+
 def test_a_part_too_large_for_the_bed_or_the_stock_is_refused_by_name():
     panel("long", 2400, 100)
     panel("ok", 500, 300)
@@ -312,6 +322,18 @@ def test_simplify_joins_blanks_the_bed_takes_together():
     # Joined: 1304 x 900 fits the bed; the 336 strip above is worth keeping.
     assert len(used) == 1 and used[0].blanks == [0, 1] and used[0].rect == [0, 0, 1304, 900]
     assert cuts(plan) == 2
+
+
+def test_blanks_are_joined_only_where_their_margins_and_the_kerf_make_the_spacing():
+    """Two blanks joined are machined as one piece: their parts are only
+    two margins and the kerf apart [found by fuzzing, 2026-10-14: with
+    margin and kerf 0, 1.4 mm for a spacing of 10]."""
+    sheet = Node([0, 0, 2470, 1240], children=[Node([0, 0, 600, 900], [0]), Node([600, 0, 700, 900], [1]),
+                                               Node([1300, 0, 1170, 1240])])
+    joined = simplify(sheet, _fits, _keeps, join=True)
+    apart = simplify(sheet, _fits, _keeps, join=False)
+    assert [leaf.blanks for leaf in leaves(joined) if leaf.used] == [[0, 1]]
+    assert [leaf.blanks for leaf in leaves(apart) if leaf.used] == [[0], [1]]
 
 
 def test_two_rests_side_by_side_are_one():
