@@ -115,7 +115,10 @@ so they chain or stand on their own lines. [decided]
   (`show(cab.front)`, `on(pos, toward=cab.top)`, `grain(cab.top)`), faces,
   edges, anchors, operations. Side keywords (`shrunk(left=5)`,
   `with_sides(front=...)`, `Box.from_sides(...)`) are explicit parameters,
-  so a misspelt side is a type error. Enums instead of literals were
+  so a misspelt side is a type error. `shrunk()` and `grown()` also take a
+  leading amount for all six sides, which a side's keyword overrides:
+  `shrunk(GAP / 2)`, `grown(0.5, front=0)`; keywords alone move their
+  sides only [decided by Florian, 2026-10-15, syntax.md item 5]. Enums instead of literals were
   considered and dropped: Python has no `.height` shorthand, catalogue names
   such as "4x20" or "8 M6" cannot be identifiers, and pyright completes a
   `Literal`'s values once the quote is open (an enum parameter got the whole

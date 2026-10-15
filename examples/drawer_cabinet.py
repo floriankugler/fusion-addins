@@ -48,7 +48,7 @@ def drawer_cabinet(name: str, box: Box, n: int, slide: DrawerSlide, *, front: Si
         # the outer faces keep a full gap to the carcass. Both are divided
         # the same way.
         opening = cab.interior.with_sides(bottom=bottom.top)
-        fronts = opening.shrunk(left=GAP / 2, right=GAP / 2, top=GAP / 2, bottom=GAP / 2)
+        fronts = opening.shrunk(GAP / 2)
         bays = divide(opening, n, bottom_drawer)
         panels = divide(fronts, n, bottom_drawer)
         for i, (bay, panel) in enumerate(zip(bays, panels), 1):

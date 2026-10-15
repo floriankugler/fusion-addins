@@ -729,6 +729,24 @@ def test_box_grown_mirrors_shrunk():
     assert g.hi["z"] == 100.5 and g.lo["y"] == -1 and g.hi["y"] == 100
 
 
+def test_shrunk_and_grown_take_one_amount_for_every_side():
+    """Decided by Florian, 2026-10-15 (syntax.md item 5): a leading amount
+    moves all six sides, a side's keyword overrides it for that side, and
+    keywords alone move their sides only, as before."""
+    b = Box.from_size(width=100, depth=200, height=300)       # x 0 to 200 (front low), y 0 to 100, z 0 to 300
+
+    def spans(box: Box) -> list[tuple[float, float]]:
+        return [(box.lo[a], box.hi[a]) for a in ("x", "y", "z")]
+
+    assert spans(b.shrunk(5)) == [(5, 195), (5, 95), (5, 295)]
+    assert spans(b.shrunk(5, front=0, top=-1)) == [(0, 195), (5, 95), (5, 301)]
+    assert spans(b.shrunk(front=20)) == [(20, 200), (0, 100), (0, 300)]
+    assert spans(b.grown(0.5)) == [(-0.5, 200.5), (-0.5, 100.5), (-0.5, 300.5)]
+    assert spans(b.grown(0.5, front=0)) == [(0, 200.5), (-0.5, 100.5), (-0.5, 300.5)]
+    assert spans(b.grown(top=0.5)) == [(0, 200), (0, 100), (0, 300.5)]
+    assert spans(b.grown(2, left=1)) == spans(b.shrunk(-2, left=-1))
+
+
 def test_part_limits_into_and_gap():
     with module("box", Box.from_size(width=400, depth=300, height=100)) as m:
         left = board("left", ply15).on(m.left)
