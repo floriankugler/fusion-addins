@@ -67,8 +67,9 @@ done.
   versus keeping the box clear by `latch.reach` (deferred by Florian,
   2026-10-12).
 - **`default_grain`** in `lang/core/scope.py` is set by nothing (placement.md
-  promises a scope-level grain default): drop it, or give `module()` and
-  `cabinet()` a `grain=`. The loose end of the syntax review's item 16
+  promises a scope-level grain default): drop it, give `module()` and
+  `cabinet()` a `grain=`, or make it an environment key
+  (`proposals/environment.md`). The loose end of the syntax review's item 16
   (`proposals/syntax.md`, 2026-10-15).
 - **Corners named by a point** (`panel.top.front(60).left(40)`) for
   `fillet()` and `chamfer()`, once a build needs it.

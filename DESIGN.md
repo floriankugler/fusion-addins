@@ -236,6 +236,7 @@ is implemented. [Florian]
 | `miters.md` | Mitered corners as a joint |
 | `standard-library.md` | What is left of the standard library (built: `design/std.md`): cabinet types per build repo, further blocks |
 | `cam.md` | A CAM plan from the layout, built by an add-in |
+| `environment.md` | Values that flow down the tree and are overridden at any level: CAM and nest preferences, appearance (Florian's idea, 2026-10-15) |
 | `runs.md` | Hoses, cables, ducts and keep-outs: one run primitive that plans and is checked, routed through the boards' own openings, at the van level or in a module |
 | `detail-levels.md` | Rough and full previews |
 | `hand-made-geometry.md` | Escape hatches for what the language cannot say |

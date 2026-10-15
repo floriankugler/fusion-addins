@@ -192,8 +192,19 @@ its piece.
   is open.
 - **Manufacturing groups** nested rigid (`design/todo.md`) [open: not
   tried].
-- **A rule** that sets `nest(False)` for a whole kind of part [proposed],
-  once the language has rules.
+- **Nesting a selection.** A nest takes a build's parts, all materials or
+  one (`--material`). Florian wants any nestable material on its own, and
+  any part or group of parts, since parts have to be made again now and
+  then; a `nest(False)` board that still has operations goes through the
+  same path to get its blank and setup (`proposals/cam.md`) [Florian,
+  2026-10-15; decided as a need].
+- **A name and a time.** A nest has neither. The CAM plan names its setups
+  and NC programs after the nest's blanks (`1.2`), so the nest itself needs
+  a name, from its sources and the time it was written, and the nest file a
+  timestamp [decided 2026-10-15].
+- **`nest(False)` for a whole module or scope** at once, through the
+  environment (`proposals/environment.md`) [proposed]; a rule by kind of
+  part was decided against (`proposals/syntax.md`, item 16).
 - **The cut list**: slats by length, `nest(False)` boards by size
   (`design/proposals/build-repo.md`).
 - **The saw plan**: reordering its cuts (the simplifying keeps the solver's
