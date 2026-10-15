@@ -16,7 +16,7 @@ from .core.material import SheetMaterial, SlatMaterial, sheet_material, slat_mat
 from .core.faces import Anchor, Edge, Face, Operation, Outline
 from .core.part import Board, Slat, board, slat
 from .core.refs import Pos, Side, spread, through, to
-from .core.scope import Scope, cabinet, check, module, scope
+from .core.scope import Scope, cabinet, check, module, scope, uncheck
 from .core.shapes import Shape, circle, polygon, rect
 from .hardware import (BallCatch, BracketModel, CatchModel, ConcealedHinge, DoorLatch, DrawerSlide, HatchHinge,
                        HatchHingeModel, HingeModel, LatchModel, SlideModel, SlidingBracket)
@@ -29,7 +29,7 @@ __all__ = [
     "Box", "Shape", "rect", "circle", "polygon", "cross", "triangles",
     "SheetMaterial", "SlatMaterial", "sheet_material", "slat_material",
     "Board", "Slat", "Face", "Edge", "Anchor", "Outline", "Operation", "board", "slat",
-    "Scope", "module", "cabinet", "scope", "check",
+    "Scope", "module", "cabinet", "scope", "check", "uncheck",
     "no_interference", "fits_sheet", "inside", "inside_box", "LangError",
     "master", "Master", "Plane", "Contour", "half_lap", "domino", "clamex", "cabineo", "tenons", "screws",
     "box_joint", "groove",

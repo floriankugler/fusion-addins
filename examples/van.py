@@ -70,7 +70,6 @@ def floor(name: str, box: Box) -> Scope:
         # Larger than the bed (and a sheet): cut by hand from a bigger panel.
         board("panel_front", ply12).on(f.top).between(floor_outline, f.front, joint).nest(False)
         board("panel_back", ply12).on(f.top).between(floor_outline, joint, f.back).nest(False)
-        check(no_interference)
     return f
 
 

@@ -27,4 +27,3 @@ with cabinet("cutouts", box, front=box.front) as unit:
     right.cutout(pattern=triangles(4, 3, spacing=25, aligned=True), keep=[shelf], chamfer=1)
     back.cutout(pattern=cross(60), chamfer=1)
     bottom.cutout(pattern=cross(40), depth=to(bottom.outer, -5), chamfer=1)
-    check(no_interference)

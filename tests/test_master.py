@@ -385,7 +385,7 @@ def test_inside_box_and_inside_contour(van: Master):
     problems = build_layout()["problems"]
     assert any(p.startswith("cab.top reaches out of cab's box") and "by 90" in p for p in problems)
     assert any(p.startswith("over_arch.bottom is not inside Bodenumriss with 5 mm") for p in problems)
-    assert not any(p.startswith("cab.left") for p in problems)
+    assert [p for p in problems if p.startswith("cab.left")] == ["cab.left overlaps cab.top"]  # (every module's check)
 
 
 def test_inside_does_not_count_a_rounding_past_the_contour():

@@ -40,7 +40,7 @@ def seat_base(name: str, box: Box, *, front: Side) -> Scope:
         # panel's System 32 line
         cab.mount(SlidingBracket(), panel=cover, frame=[left, right])
         cab.mount(SlidingBracket("Pacofix PF-L", frame_hole="euro"), panel=rear, frame=[left, right])
-        check(no_interference, fits_sheet)
+        check(fits_sheet)
     return cab
 
 

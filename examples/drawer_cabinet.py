@@ -56,7 +56,7 @@ def drawer_cabinet(name: str, box: Box, n: int, slide: DrawerSlide, *, front: Si
             d.mount(slide, sides=(left, right), front=d.face.back)   # pre-drills the carcass
 
         cab.export("worktop", top.top)   # for whatever stands on the cabinet
-        check(no_interference, fits_sheet)
+        check(fits_sheet)
     return cab
 
 

@@ -25,4 +25,4 @@ with cabinet("shelf", box, front=box.front) as unit:
     top.join(left, right, using=high)
     top.join(left, right, using=screws(tenons=high, countersink=True))
     top.join(left, right, using=screws(gaps=high, countersink=True))
-    check(no_interference, fits_sheet)
+    check(fits_sheet)

@@ -27,6 +27,7 @@ if TYPE_CHECKING:
 def no_interference(scope: Scope) -> list[str]:
     """Parts and hardware in the scope (and below) whose material overlaps:
     pairs of parts, a hardware body and a part, and two hardware bodies.
+    Every module runs it unless `uncheck()` turns it off (`Scope.checks`).
 
     An overlap counts where it is deeper than 1e-6 mm in every direction,
     in a board's plane as across its thickness; touching, within 1e-6 mm,

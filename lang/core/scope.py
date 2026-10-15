@@ -136,7 +136,10 @@ class Scope:
         self.children: dict[str, Scope] = {}
         self.hardware: list[HardwareLayout] = []
         self.exports: dict[str, Any] = {}
-        self.checks: list[Check] = []
+        #: The checks run on this scope: a module's start with
+        #: `no_interference`, which `uncheck()` turns off [decided by
+        #: Florian, 2026-10-15, syntax.md item 4].
+        self.checks: list[Check] = [_no_interference()] if is_module else []
         self.problems: list[str] = []
         self.default_grain: Axis | None = None
         if self.parent is not None:
@@ -337,7 +340,22 @@ class Scope:
         return self
 
     def check(self, *checks: Check) -> Scope:
-        self.checks.extend(checks)
+        """Adds checks to run on this scope, each once: a module runs
+        `no_interference` already, and asking for it again changes
+        nothing."""
+        for fn in checks:
+            if fn not in self.checks:
+                self.checks.append(fn)
+        return self
+
+    def uncheck(self, *checks: Check) -> Scope:
+        """Turns checks off on this scope: `cab.uncheck(no_interference)`
+        for a module whose parts overlap on purpose. A check the scope
+        does not run is an error."""
+        for fn in checks:
+            if fn not in self.checks:
+                raise LangError(f"uncheck({getattr(fn, '__name__', fn)}): this scope does not run it.", self.path)
+            self.checks.remove(fn)
         return self
 
     def mount(self, hardware: Mountable[P], /, *args: P.args, **kwargs: P.kwargs) -> Scope:
@@ -356,11 +374,15 @@ class Scope:
         return self
 
     def run_checks(self) -> list[str]:
-        self.problems = []
+        """The problems of this scope's checks and its children's, once
+        each: a module in a module finds its own overlaps again in the
+        outer one's."""
+        problems: list[str] = []
         for fn in self.checks:
-            self.problems.extend(fn(self))
+            problems.extend(fn(self))
         for child in self.children.values():
-            self.problems.extend(child.run_checks())
+            problems.extend(child.run_checks())
+        self.problems = list(dict.fromkeys(problems))
         return self.problems
 
     # -- context manager --------------------------------------------------------------------------
@@ -410,8 +432,25 @@ def scope(name: str, box: Box | None = None) -> Scope:
 
 
 def check(*checks: Check) -> None:
-    """Registers checks on the current scope."""
+    """Registers checks on the current scope. A module runs
+    `no_interference` without asking."""
     cur = current()
     if isinstance(cur, _Root):
         raise LangError("check() outside any module.")
     cur.check(*checks)
+
+
+def uncheck(*checks: Check) -> None:
+    """Turns checks off on the current scope: `uncheck(no_interference)`
+    inside a module whose parts overlap on purpose."""
+    cur = current()
+    if isinstance(cur, _Root):
+        raise LangError("uncheck() outside any module.")
+    cur.uncheck(*checks)
+
+
+def _no_interference() -> Check:
+    """The check every module runs unless it is turned off, imported here
+    since the checks import scopes."""
+    from .checks import no_interference
+    return no_interference

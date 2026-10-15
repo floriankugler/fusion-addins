@@ -2,13 +2,18 @@
 boxes against the parts' material and against each other), `fits_sheet`
 and `inside(contour)`."""
 
+from pathlib import Path
+
+import pytest
 from shapely.geometry import box as shapely_box
 
 from lang import *
+from lang.build import run_build
 from lang.core.contours import Contour
+from lang.core.layout import build_layout
 from lang.core.layout_types import BoxDict, HardwareBodyLayout
 from lang.core.scope import registry
-from helpers import ply18
+from helpers import EXAMPLES, ply18
 
 
 ply10 = sheet_material("birch", t=10)
@@ -290,3 +295,91 @@ def test_a_part_across_a_contour_is_inside_it_where_its_material_is():
         cut = board("cut", ply18).on(m.right).between(Pos("x", 0), Pos("x", 310))
         cut.add_cut(Shape(shapely_box(300, -1, 311, 201)))                  # its last 10 on x cut off
     assert [p.split(" (")[0] for p in inside(floor)(m)] == ["m.tenoned is not inside floor"]
+
+
+# -- which checks a module runs ------------------------------------------------------------------
+
+def _overlapping(m: Scope) -> None:
+    """Two boards on the module's left, the second 5 mm in from it, through
+    the first: y 0 to 18 and 5 to 23."""
+    board("a", ply18).on(m.left)
+    board("b", ply18).on(Pos("y", 5), toward=m.right)
+
+
+def test_every_module_runs_no_interference_without_asking():
+    """Decided by Florian, 2026-10-15 (syntax.md item 4): `module()` and
+    `cabinet()` run `no_interference` unless it is turned off."""
+    with module("m", Box.from_size(width=300, depth=300, height=100)) as m:
+        _overlapping(m)
+    box = Box.from_size(width=300, depth=300, height=100, origin=(0, 500, 0))
+    with cabinet("cab", box, front=box.front) as cab:
+        board("a", ply18).on(cab.bottom)
+        board("b", ply18).on(Pos("z", 5), toward=cab.top)
+    layout = build_layout()
+    assert layout["problems"] == ["m.a overlaps m.b", "cab.a overlaps cab.b"]
+    assert m.checks == [no_interference] == cab.checks
+
+
+def test_a_scope_in_a_module_is_checked_by_the_module():
+    """A sub-scope runs nothing of its own; the module's check takes in its
+    parts."""
+    with module("m", Box.from_size(width=300, depth=300, height=100)) as m:
+        with scope("bay") as bay:
+            _overlapping(m)
+    assert bay.checks == []
+    assert build_layout()["problems"] == ["m.bay.a overlaps m.bay.b"]
+
+
+def test_uncheck_turns_no_interference_off_inside_the_module_or_after_it():
+    with module("m", Box.from_size(width=300, depth=300, height=100)) as m:
+        _overlapping(m)
+        uncheck(no_interference)
+    with module("n", Box.from_size(width=300, depth=300, height=100, origin=(0, 500, 0))) as n:
+        board("a", ply18).on(n.left)
+        board("b", ply18).on(Pos("y", 505), toward=n.right)
+    n.uncheck(no_interference)
+    assert m.checks == [] == n.checks
+    assert build_layout()["problems"] == []
+
+
+def test_checking_no_interference_explicitly_runs_it_once():
+    """`check(no_interference)` written out stays allowed and changes
+    nothing; after `uncheck()` it turns the check on again."""
+    with module("m", Box.from_size(width=300, depth=300, height=100)) as m:
+        _overlapping(m)
+        check(no_interference, fits_sheet)
+        check(no_interference)
+    assert m.checks == [no_interference, fits_sheet]
+    m.uncheck(no_interference).check(no_interference)
+    assert m.checks == [fits_sheet, no_interference]
+    layout = build_layout()
+    assert layout["problems"] == ["m.a overlaps m.b"] == layout["modules"][0]["problems"]
+
+
+def test_a_module_in_a_module_lists_its_overlaps_once():
+    """Both modules run the check, the outer one over the inner one's
+    parts too; each overlap is listed once."""
+    with module("outer", Box.from_size(width=300, depth=300, height=100)) as outer:
+        with module("inner", Box.from_size(width=300, depth=300, height=100)) as inner:
+            _overlapping(inner)
+    assert outer.run_checks() == ["outer.inner.a overlaps outer.inner.b"]
+    assert inner.problems == ["outer.inner.a overlaps outer.inner.b"]
+
+
+def test_unchecking_what_a_scope_does_not_run_is_an_error():
+    with module("m", Box.from_size(width=300, depth=300, height=100)) as m:
+        with pytest.raises(LangError, match=r"uncheck\(fits_sheet\): this scope does not run it"):
+            uncheck(fits_sheet)
+        with scope("bay"):
+            with pytest.raises(LangError, match=r"uncheck\(no_interference\): this scope does not run it"):
+                uncheck(no_interference)
+    assert m.checks == [no_interference]
+    with pytest.raises(LangError, match=r"uncheck\(\) outside any module"):
+        uncheck(no_interference)
+
+
+@pytest.mark.parametrize("name", sorted(p.stem for p in EXAMPLES.glob("*.py") if p.stem != "stock"))
+def test_every_example_builds_without_problems(name: str, tmp_path: Path):
+    """Each module of an example runs `no_interference` though no example
+    asks for it any more."""
+    assert run_build(EXAMPLES / f"{name}.py", tmp_path, scene=False)["problems"] == []
