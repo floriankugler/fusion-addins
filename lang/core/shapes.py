@@ -111,6 +111,16 @@ class Shape:
     def intersection(self, other: Shape) -> Shape:
         return self._derived(self.geometry.intersection(other.geometry), other)
 
+    def __add__(self, other: Shape) -> Shape:
+        """`a + b`, material added: `a.union(b)`, as build123d spells it
+        [decided by Florian, 2026-10-15, syntax.md item 13]."""
+        return self.union(_operand(other, "+"))
+
+    def __sub__(self, other: Shape) -> Shape:
+        """`a - b`, material taken away: `a.difference(b)`, as build123d
+        spells it [decided by Florian, 2026-10-15, syntax.md item 13]."""
+        return self.difference(_operand(other, "-"))
+
     def offset(self, distance: float) -> Shape:
         """Outward offset (negative inward), with sharp corners kept."""
         return self._derived(self.geometry.buffer(distance, join_style="mitre"))
@@ -221,6 +231,15 @@ class Shape:
         x0, y0, x1, y1 = self.bounds
         plane = f" in {_plane(self.axes)}" if self.axes else ""
         return f"Shape({x1 - x0:g} x {y1 - y0:g}{plane})"
+
+
+def _operand(other: Shape, op: str) -> Shape:
+    """The other side of `+` or `-`, a shape also when the build runs
+    without the type checker."""
+    if not isinstance(cast(object, other), Shape):
+        raise LangError(f"shape {op} {other!r}: {op} takes another shape; a shape moves with moved() and grows "
+                        "with offset().")
+    return other
 
 
 def _extent_name(axis: Axis) -> str:

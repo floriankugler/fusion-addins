@@ -130,7 +130,9 @@ so they chain or stand on their own lines. [decided]
 - What this is not: free functions for everything (no autocomplete entry
   point), operators such as `left @ cab.left` (cryptic), or dataclass specs
   (that is what the layout JSON is for, and the language should not look
-  like it).
+  like it). 2D booleans are the exception to the operators: `a - b` and
+  `a + b` on shapes, as shapely, CadQuery and build123d users expect
+  [decided by Florian, 2026-10-15, syntax.md item 13].
 
 ## Names and paths
 
