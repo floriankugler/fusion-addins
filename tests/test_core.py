@@ -517,6 +517,24 @@ def test_an_edge_chamfer_is_on_its_big_face_whichever_face_names_it_first():
 
 # -- layout --------------------------------------------------------------------
 
+def test_nest_is_given_once_takes_a_bool_and_reaches_the_layout() -> None:
+    with module("m", Box.from_size(depth=500, width=300, height=15)) as m:
+        a = board("a", ply15).on(m.bottom)
+        b = board("b", ply15).on(m.bottom)
+        c = board("c", ply15).on(m.bottom).manual()
+        slat("d", slat_material("oak"), section=(20, 40)).on(m.bottom).edge_on(m.left).between(m.front, m.back)
+    a.hole(d=8, at=a.top.center, depth=5)
+    a.nest(False)                            # after the placement is used: it changes no shape
+    with pytest.raises(LangError, match="nest\\(\\) given twice"):
+        a.nest(True)
+    with pytest.raises(LangError, match="True or False"):
+        b.nest("no")  # pyright: ignore[reportArgumentType]
+    parts = {p["path"]: p for p in build_layout()["modules"][0]["parts"]}
+    assert (parts["m.a"]["nest"], parts["m.b"]["nest"], parts["m.c"]["nest"]) == (False, True, False)
+    assert parts["m.d"]["kind"] == "slat" and parts["m.d"]["nest"] is False     # slats go on the cut list
+    assert not a.nested and b.nested and c.nested       # a manual part is left out by the layout
+
+
 def test_layout_json_roundtrip(tmp_path: Path) -> None:
     from lang.core.layout import write_layout
     cab = carcass()
@@ -524,7 +542,7 @@ def test_layout_json_roundtrip(tmp_path: Path) -> None:
     cab.export("worktop", cab.top)
     cab.check(no_interference)
     layout = write_layout(tmp_path / "layout.json")
-    assert layout["version"] == 5
+    assert layout["version"] == 6
     module_layout = layout["modules"][0]
     assert module_layout["exports"] == {"worktop": {"axis": "z", "value": 720.0}}
     assert [p["path"] for p in module_layout["parts"]] == ["cab.left", "cab.right", "cab.bottom", "cab.back"]

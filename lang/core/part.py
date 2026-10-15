@@ -2,7 +2,7 @@
 
 A board is created with its identity (`board(name, material)`), placed with
 order-free modifiers (`on`, `between`, `center`, `inset`, `grain`, `show`,
-`manual`) and machined with ordered operations (`cut`, `pocket`, `hole`,
+`manual`, `nest`) and machined with ordered operations (`cut`, `pocket`, `hole`,
 `slot`, `chamfer`, `fillet`). Every modifier returns the board. Placement is
 resolved lazily the first time a face, the box or the layout is asked for;
 from then on the placement modifiers are frozen.
@@ -131,6 +131,8 @@ class Board:
         #: Whether the show face was read; from then on `show()` is frozen.
         self._show_used = False
         self.manual_part: bool = False
+        #: Whether the board goes into the nest (`nest()`).
+        self.nested: bool = True
         self._set: set[str] = set()
         # resolved
         self._box: Box | None = None
@@ -291,6 +293,21 @@ class Board:
     def manual(self) -> Self:
         self._placement("manual")
         self.manual_part = True
+        return self
+
+    def nest(self, nested: bool) -> Self:
+        """Whether the board goes into the nest (`lang.nest`): `nest(False)`
+        for one sawn or cut by hand (a strip ripped on the saw, a panel
+        larger than the machine's bed), which goes on the cut list by size
+        instead. Boards are nested unless they say otherwise; a manual part
+        never is, nor a slat (slats go on the cut list by length). It changes nothing about the board's shape, so it may come
+        at any time, once."""
+        if "nest" in self._set:
+            raise LangError("nest() given twice.", self.path)
+        if not isinstance(nested, bool):    # pyright: ignore[reportUnnecessaryIsInstance] - build files are not checked
+            raise LangError(f"nest() takes True or False, not {nested!r}.", self.path)
+        self._set.add("nest")
+        self.nested = nested
         return self
 
     # -- resolution ------------------------------------------------------------------------
@@ -2196,6 +2213,7 @@ class Board:
             "machine": self.machine_face.world_name,
             "grained": self.material.grain,
             "manual": self.manual_part,
+            "nest": self.nested and not self.manual_part and self.kind == "board",
             "ops": [_op_to_layout(op) for op in self.ops],
             "faces": self._face_names(),
         }

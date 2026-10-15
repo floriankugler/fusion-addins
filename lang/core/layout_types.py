@@ -1,11 +1,12 @@
-"""The layout file's shape, version 5.
+"""The layout file's shape, version 6.
 
 This is the contract between the language and its consumers (the preview
-mesher, the Fusion emitter, the viewer page). Bump LAYOUT_VERSION on
-incompatible changes; `lang.emit.plan` and the viewer repeat it and refuse
-other versions.
+mesher, the Fusion emitter, the viewer page, the nest). Bump LAYOUT_VERSION
+on incompatible changes; `lang.emit.plan` and the viewer repeat it and
+refuse other versions.
 
-Version 5 (2026-10-14): parts are boards or slats (`kind`), and a slat
+Version 6 (2026-10-15): a part carries `nest`, whether it goes into the
+nest. Version 5 (2026-10-14): parts are boards or slats (`kind`), and a slat
 carries its `section`. Version 4 (2026-10-14): a pocket carries `slot`, its centre line when it
 is a slot. Version 3 (2026-10-12): every key below is written; the top-level
 `problems` list every problem once, the modules' repeat their own; a
@@ -17,7 +18,7 @@ from __future__ import annotations
 
 from typing import Literal, NotRequired, TypedDict
 
-LAYOUT_VERSION = 5
+LAYOUT_VERSION = 6
 
 #: One or more polygons as rings of [u, v] points, one polygon after the
 #: other: its exterior ring, counter-clockwise, then its holes, clockwise.
@@ -136,6 +137,9 @@ class PartLayout(TypedDict):
     #: Whether the material has a grain (`grain` may still be None, unset).
     grained: bool
     manual: bool
+    #: Whether the part goes into the nest: False for `nest(False)`, a
+    #: manual part and a slat (slats go on the cut list by length).
+    nest: bool
     ops: list[OpLayout]
     #: What the build file calls each face, by world name: the direction in
     #: the frame of the part's scope (a cabinet's own front and left), then

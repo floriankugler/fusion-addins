@@ -62,12 +62,14 @@ def floor(name: str, box: Box) -> Scope:
                     # the battens on its side of the wheel arch
                     piece.join([b for b in battens if b.box().overlaps(piece.box())], using=lap)
             else:
+                # Longer than the machine's bed: sawn and notched by hand.
                 long = board(f"long{i}", ply15).center(y).between(top, above_floor, inside, floor_front, floor_back)
-                long.join(battens, using=lap)
+                long.nest(False).join(battens, using=lap)
         middle = battens[len(battens) // 2]
         joint = (middle.front + middle.back) / 2
-        board("panel_front", ply12).on(f.top).between(floor_outline, f.front, joint)
-        board("panel_back", ply12).on(f.top).between(floor_outline, joint, f.back)
+        # Larger than the bed (and a sheet): cut by hand from a bigger panel.
+        board("panel_front", ply12).on(f.top).between(floor_outline, f.front, joint).nest(False)
+        board("panel_back", ply12).on(f.top).between(floor_outline, joint, f.back).nest(False)
         check(no_interference)
     return f
 
