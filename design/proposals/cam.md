@@ -1,8 +1,8 @@
 # CAM from the language
 
 Status: added by Florian 2026-10-14, worked out by Claude the same day;
-nothing built. Only the points marked [Florian] are his. Builds on the
-nest (`design/nesting.md`).
+nothing built. Points marked [Florian] are his, [decided] his decisions,
+[proposed] Claude's. Builds on the nest (`design/nesting.md`).
 
 Florian's points: since the Fusion geometry is generated again on every
 compile, the CAM setups have to be made again too; Auto Setup helps, but it
@@ -22,8 +22,9 @@ Auto Setup runs on compiled documents has not been tried.
 
 Proposed:
 
-- A CAM plan per nested sheet, written from the layout and the nest: setups
-  (the stock, the work coordinates at its corner, top or flipped side) and
+- A CAM plan written from the layout and the nest: a setup per blank (the
+  nest saws sheets into blanks the bed takes, so a blank is one load on the
+  machine; the blank as stock, the work coordinates at its corner) and
   operations in order, each with its template kind and label, its tool and
   the features it machines, named by part path and operation (contours,
   pockets with depths, holes, dog bones, chamfers, V-grooves), plus tab
@@ -41,10 +42,21 @@ Proposed:
   made (bodies by path, edges and faces by position, as chamfers are found
   now). Fusion generates the toolpaths and posts them as before. Auto Setup
   stays for hand-modeled parts.
-- The preview can show the plan: which tool cuts what, the tabs, the flips.
-- Parts machined from both faces need a flipped setup of their sheet and a
-  way to register it. Florian has no standard procedure for this yet, so it
-  is worked out with nesting and CAM [Florian].
+- The preview can show the plan: which tool cuts what, the tabs.
+- One side only, for now [decided 2026-10-15]: no flipped setups and
+  nothing automatic for machining a part from both faces. Each blank is
+  machined from its top, where the nest lays every part with its machining
+  face (`machine` in the layout) up, so the side is fixed per part before
+  the plan is made. Operations on a part's other big face are left out of
+  the plan, reported, and go on the hand-work list. In the examples 14 of
+  137 boards have some: the drawer backs (hook holes outside, the floor's
+  groove and the finger reliefs inside) and boards machined from their
+  inner face with chamfers on the show face.
+- The machining face is chosen in the layout step (`Board.machine_face`):
+  the big face more pockets, holes and chamfers are made from, else the
+  show face. A build file steers it only through `show()`; naming it
+  outright, e.g. `side.machine(side.inner)`, a property modifier like
+  `nest()` [proposed].
 - The hand-work list per part comes from the same step: bevels and mitres,
   lipping and banding, roundovers (notes on edges), hardware to fit, and,
   once slats take operations, those (slats are made by hand, `design/slats.md`).
