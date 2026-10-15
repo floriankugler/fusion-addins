@@ -204,7 +204,7 @@ def test_domino_depth_fence_and_loose_slots():
         p["bottom"].join(p["left"], using=domino("5x30", count=2, end=20, remaining=3, fence=5,
                                                 face=cab.bottom, loose=6))
     a, b = _pockets(p["left"], "domino_bottom_")
-    assert a.depth == 12 and a.depth_spec == "to(left, -3)"
+    assert a.depth == 12 and a.depth_spec == "to(left, leave=3)"
     assert (round(a.shape.bounds[1], 6), round(a.shape.bounds[3], 6)) == (2.5, 7.5)   # 5 above the underside
     assert round(a.shape.width, 6) == 18.8 and round(b.shape.width, 6) == 24.8         # the first one is exact
     assert round(a.shape.bounds[0], 6) == 20 - 9.4

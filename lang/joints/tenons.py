@@ -165,7 +165,7 @@ class Tenons(ContactJoint):
         length = f.thickness - self.remaining
         depth = length + self.extra_depth
         mortise_depth: DepthSpec | None = (
-            None if depth >= f.thickness - EPS else to(opposite_face(c.face), self.extra_depth - self.remaining))
+            None if depth >= f.thickness - EPS else to(opposite_face(c.face), leave=self.remaining - self.extra_depth))
         # The reliefs and the material probes use the outlines as they were
         # before this joint.
         e_outline, f_outline = e.outline, f.outline

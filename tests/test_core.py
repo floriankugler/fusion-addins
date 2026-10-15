@@ -572,7 +572,7 @@ def test_anchor_errors_name_the_problem():
 def test_pocket_depth_to_face():
     cab = carcass()
     left = cab["left"]
-    left.pocket(rect(depth=200, height=12), at=left.inner.center, depth=to(left.outer, -3))
+    left.pocket(rect(depth=200, height=12), at=left.inner.center, depth=to(left.outer, leave=3))
     pocket = left.ops[-1]
     assert isinstance(pocket, Pocket)
     assert pocket.depth == pytest.approx(12)
@@ -1149,28 +1149,59 @@ def test_a_depth_past_the_opposite_face_is_an_error():
             left.hole(d=5, at=left.inner.center, depth=40)
         with pytest.raises(LangError, match="reaches past the opposite face, 400 from the front face"):
             left.hole(d=5, at=left.front.center, depth=401)
-        with pytest.raises(LangError, match="reaches past that face"):
-            left.pocket(rect(depth=50, height=50), at=left.inner.center, depth=to(left.outer, 1))
+        with pytest.raises(LangError, match=r"to\(left.left, leave=-1\): a negative leave= reaches past the face"):
+            left.pocket(rect(depth=50, height=50), at=left.inner.center, depth=to(left.outer, leave=-1))
         left.hole(d=5, at=left.inner.center, depth=15)            # as deep as the board: fine
         left.hole(d=5, at=left.front.bottom(50), depth=400)
     assert len(left.ops) == 2
 
 
 def test_a_depth_that_does_not_reach_into_the_board_is_an_error():
-    """Found by fuzzing the placement: `to(left.outer, -20)` on a 15 mm
+    """Found by fuzzing the placement: `to(left.outer, leave=20)` on a 15 mm
     board made a hole -5 deep, accepted where the number -5 is refused;
-    and `to(left.outer, -15)` was 0 deep at some places and 2e-15 at
+    and `to(left.outer, leave=15)` was 0 deep at some places and 2e-15 at
     others, refused or not. A depth under 0.01 mm reaches nothing either
     way."""
     for name, y in (("at0", 0.0), ("far", 0.1)):
         with module(name, Box.from_size(width=600, depth=400, height=700, origin=(0, y, 0))) as m:
             left = board("left", ply15).on(m.left)
-            for depth in (to(left.outer, -20), to(left.outer, -15), to(left.outer, -14.995), -5, 0.005):
+            for depth in (to(left.outer, leave=20), to(left.outer, leave=15), to(left.outer, leave=14.995), -5, 0.005):
                 with pytest.raises(LangError, match="does not reach into the board"):
                     left.hole(d=5, at=left.inner.center, depth=depth)
-            left.hole(d=5, at=left.inner.center, depth=to(left.outer, -14.99))
+            left.hole(d=5, at=left.inner.center, depth=to(left.outer, leave=14.99))
         hole = left.ops[0]
         assert isinstance(hole, Hole) and hole.depth == pytest.approx(0.01)
+
+
+def test_to_leaves_what_leave_says():
+    """Decided by Florian, 2026-10-15 (syntax.md item 7): `to(face,
+    leave=3)` leaves 3 mm at the face, `to(face)` reaches it; the signed
+    offset, `to(face, -3)`, of which only zero or a negative was legal,
+    goes. A number given by position is an error saying to write leave=,
+    and so is a negative leave=. The layout records the depth as written."""
+    with module("m", Box.from_size(width=600, depth=400, height=700)) as m:
+        left = board("left", ply15).on(m.left)
+        left.pocket(rect(depth=50, height=50), at=left.inner.front(40), depth=to(left.outer, leave=3))
+        left.pocket(rect(depth=50, height=50), at=left.inner.back(40), depth=to("outer", leave=0.5))
+        left.hole(d=5, at=left.inner.center, depth=to(left.outer))
+        left.hole(d=5, at=left.front.center, depth=to(left.back, leave=100))
+        for n in (-3, 3):
+            with pytest.raises(LangError, match=re.escape(f"to(left.left, {n}): give what is left at the face as "
+                                                          "leave=, to(left.left, leave=3).")):
+                to(left.outer, n)  # type: ignore[arg-type]
+        with pytest.raises(LangError, match=re.escape("to(outer, -2): give what is left at the face as leave=, "
+                                                      "to(outer, leave=2).")):
+            to("outer", -2)  # type: ignore[arg-type]
+        with pytest.raises(LangError, match=re.escape("to(outer, leave=-0.5): a negative leave= reaches past")):
+            to("outer", leave=-0.5)
+        with pytest.raises(LangError, match=re.escape("depth to(left, leave=15) does not reach into the board: "
+                                                      "that face is 15 from the right face.")):
+            left.hole(d=5, at=left.inner.center, depth=to(left.outer, leave=15))
+    pockets = [op for op in left.ops if isinstance(op, Pocket)]
+    holes = [op.op if isinstance(op, EdgeOp) else op for op in left.ops if isinstance(op, (Hole, EdgeOp))]
+    assert [(p.depth, p.depth_spec) for p in pockets] == [(12, "to(left, leave=3)"), (14.5, "to(outer, leave=0.5)")]
+    assert [(h.depth, h.depth_spec, isinstance(h, Hole) and h.through) for h in holes] == [
+        (15, "to(left)", True), (300, "to(back, leave=100)", False)]
 
 
 def test_to_names_a_face_of_the_board_itself():
@@ -1178,8 +1209,8 @@ def test_to_names_a_face_of_the_board_itself():
         left = board("left", ply15).on(m.left)
         bottom = board("bottom", ply15).on(m.bottom).between(left, m.right)
         with pytest.raises(LangError, match=r"to\(m.left.right\) names a face of another part"):
-            bottom.pocket(rect(depth=50, width=50), at=bottom.top.center, depth=to(left.inner, -3))
-        bottom.pocket(rect(depth=50, width=50), at=bottom.top.center, depth=to(bottom.bottom, -3))
+            bottom.pocket(rect(depth=50, width=50), at=bottom.top.center, depth=to(left.inner, leave=3))
+        bottom.pocket(rect(depth=50, width=50), at=bottom.top.center, depth=to(bottom.bottom, leave=3))
     assert isinstance(bottom.ops[0], Pocket) and bottom.ops[0].depth == 12
 
 

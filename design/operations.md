@@ -56,7 +56,7 @@ with board("left", ply15, rect(depth=500, height=720)) as side:
     side.show("outer").grain("height")
     side.cut(rect(depth=60, height=100), at=side.outer.bottom.front, name="toekick")
     side.pocket(rect(depth=200, height=12), at=side.inner.front.bottom(shelf.bottom),
-                depth=to(side.outer, -3), chamfer=0.5)    # dado whose bottom is the shelf's
+                depth=to(side.outer, leave=3), chamfer=0.5)   # dado whose bottom is the shelf's
     side.chamfer(side.outer.outline, 1)                   # the show face's outer contour
     side.chamfer(side.front.inner, 1)                     # one edge
     side.chamfer(side.toekick, 1)                         # the contour a named cut made
@@ -80,13 +80,19 @@ shape = rect(depth=500, height=720).clip(top=380, back=120)   # the top back cor
   `side.inner.front(37).bottom(z)`, and a position from the reference
   algebra may stand in for a distance, which is how a hole lines up with
   another part. Patterns come from `spread()` along one axis of the face.
-- **Depths** [decided]: `depth=` is a number, `through` or `to(face,
-  offset)`. Through and `to()` measure the board from the face the operation
-  is on to the opposite face: its thickness from a big face, its length or
-  width from a narrow one, so a hole through a board's front edge runs out
-  at its back edge. A depth past the opposite face, under 0.01 mm, or `to()`
-  with a positive offset, is an error; `to()` names a face of the board the
-  operation is on, and a face of another part is an error.
+- **Depths** [decided]: `depth=` is a number, `through` or `to(face)`,
+  which reaches the face, or `to(face, leave=3)`, which stops 3 mm short of
+  it [decided by Florian, 2026-10-15, syntax.md item 7: it was a signed
+  offset, `to(face, -3)`, of which only zero or a negative was legal].
+  Through and `to()` measure the board from the face the operation is on to
+  the opposite face: its thickness from a big face, its length or width
+  from a narrow one, so a hole through a board's front edge runs out at its
+  back edge. A depth past the opposite face or under 0.01 mm is an error,
+  and so is a `leave=` that leaves the whole board, a negative `leave=`, or
+  the amount given by position (`to(face, 3)`, which the error spells with
+  `leave=`); `to()` names a face of the board the operation is on, and a
+  face of another part is an error. The layout records the depth as
+  written, `to(outer, leave=3)`, for a reader only.
 - **Refusals** that keep the layout buildable: holes, pockets and V-grooves
   wholly off the board; a hole whose centre is off its face or in a hole or
   pocket made into that face before; a pocket or V-groove wholly in what was
@@ -246,7 +252,7 @@ its narrow faces, V-grooves.
 - It is named `openings` unless `name=` says otherwise.
 - `radius=` (8) rounds every corner of the openings, `chamfer=` puts a 45
   degree chamfer on their rims at the face cut from, `depth=` makes it a
-  pocket (`to(side.outer, -3)` leaves 3 mm), and a region shape with `at=`
+  pocket (`to(side.outer, leave=3)` leaves 3 mm), and a region shape with `at=`
   limits it to part of the face (the add-in's Bounding Box Points).
 - Defaults and the patterns' sizes are `lib/cutout_patterns.py`, which the
   add-in reads too.

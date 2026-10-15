@@ -358,7 +358,7 @@ def _run_cutout(case: BoardCase, name: str = "m", pipeline: bool = True) -> list
         face = None if c.face is None else faces[c.face]
         cut_face = face or next(f for f in faces if f.direction != b.show_face.direction)
         other = next(f for f in faces if f.direction != cut_face.direction)
-        depth = through if c.depth is None else to(other, c.depth) if c.depth < 0 else c.depth * case.t
+        depth = through if c.depth is None else to(other, leave=-c.depth) if c.depth < 0 else c.depth * case.t
         before = _state(b)
         try:
             b.cutout(face, pattern=pattern, border=c.border, around=c.around, radius=c.radius, depth=depth,

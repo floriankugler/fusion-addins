@@ -18,6 +18,9 @@ def operations() -> None:
         side.pocket(rect(depth=50, height=50), at=side.inner.center)          # type: ignore  # no depth
         side.hole(5, side.inner.center)                                       # type: ignore  # no depth
         side.pocket(rect(depth=50, height=50), side.inner.center, 5)          # type: ignore  # depth by position
+        side.pocket(rect(depth=50, height=50), depth=to(side.outer, leave=3))  # fine
+        side.pocket(rect(depth=50, height=50), depth=to(side.outer, -3))      # type: ignore  # leave= by keyword
+        side.hole(5, depth=to("outer", 3))                                    # type: ignore  # leave= by keyword
         side.hoel(d=5, at=side.inner.center, depth=10)                        # type: ignore  # a misspelt method
         side.fillet(side.front.bottom, r=5)                                   # type: ignore  # radius=, not r=
         a, b = side.inner.front(40).bottom(100), side.inner.front(40).bottom(300)

@@ -31,7 +31,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field, replace
-from typing import Never, NoReturn, Protocol, overload, runtime_checkable
+from typing import Never, NoReturn, Protocol, cast, overload, runtime_checkable
 
 from . import directions
 from .directions import Axis, Direction, InnerOuter
@@ -397,23 +397,38 @@ class FaceOfPart(Protocol):
 
 @dataclass(frozen=True)
 class ToFace:
-    """Depth of a cut or hole: to the named face of the same part, plus an
-    offset (negative stops short of it). `part` is the part whose face was
-    named, None for `"inner"` and `"outer"`; the operation checks that it
-    is its own."""
+    """Depth of a cut or hole: to the named face of the same part, leaving
+    `leave` of material at it. `part` is the part whose face was named,
+    None for `"inner"` and `"outer"`; the operation checks that it is its
+    own."""
     face: str
-    offset: float = 0.0
+    leave: float = 0.0
     part: object = field(default=None, compare=False)
 
 
-def to(face: FaceOfPart | InnerOuter, offset: float = 0.0) -> ToFace:
-    """A depth reaching a face of the same part, `to(side.outer, -3)`
-    stopping 3 mm short of it. `"inner"` and `"outer"` name the face
-    without naming the part, for the chained form. A positive offset would
-    reach past the face, out of the part, and is an error where it is used."""
+def to(face: FaceOfPart | InnerOuter, *args: Never, leave: float = 0.0) -> ToFace:
+    """A depth reaching a face of the same part, `to(side.outer)`, or
+    stopping short of it: `to(side.outer, leave=3)` leaves 3 mm at it
+    [decided by Florian, 2026-10-15, syntax.md item 7: it was a signed
+    offset, `to(side.outer, -3)`, of which only zero or a negative was
+    legal]. `"inner"` and `"outer"` name the face without naming the part,
+    for the chained form. The amount given by position, or a negative
+    `leave`, is an error; one that leaves the whole board or more reaches
+    nothing, an error where it is used."""
+    named = face if isinstance(face, str) else f"{getattr(face.part, 'name', '?')}.{face.name}"
+    path = None if isinstance(face, str) else getattr(face.part, "path", None)
+    given = cast(tuple[object, ...], args)    # (pyright lets nothing through; a build may run unchecked)
+    if given:
+        n = given[0]
+        amount = f"{abs(n):g}" if isinstance(n, (int, float)) else "n"
+        raise LangError(f"to({named}, {n!r}): give what is left at the face as leave=, "
+                        f"to({named}, leave={amount}).", path)
+    if leave < 0:
+        raise LangError(f"to({named}, leave={leave:g}): a negative leave= reaches past the face, out of the "
+                        "board; leave= is what is left at it, 0 or more.", path)
     if isinstance(face, str):
-        return ToFace(one_of(face, InnerOuter, "to()"), offset)
-    return ToFace(face.name, offset, face.part)
+        return ToFace(one_of(face, InnerOuter, "to()"), float(leave))
+    return ToFace(face.name, float(leave), face.part)
 
 
 class Through:

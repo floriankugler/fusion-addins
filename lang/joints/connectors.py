@@ -136,7 +136,7 @@ class Domino(SpacedJoint):
         e, f = c.edge_on, c.face_on
         centre, h = self._centre(g), self.slot_height
         depth: DepthSpec = (self.size.length / 2 + data.DOMINO_DEPTH_OFFSET if self.remaining is None
-                            else to(opposite_face(c.face), -self.remaining))
+                            else to(opposite_face(c.face), leave=self.remaining))
         for i, (s, length) in enumerate(zip(stations, self._lengths(c, stations))):
             half_span = (length - h) / 2
             f.add_slot(c.face, g.on_face(s - half_span, centre), g.on_face(s + half_span, centre), h, depth,

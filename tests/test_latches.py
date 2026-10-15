@@ -77,7 +77,7 @@ def test_pull_lock_on_an_inset_door():
     # the door's inner face is its back (+x); u, v are y, z
     assert _holes(door) == {"pull_lock_top_1": (300, 671, 38.1, "back", 15, True)}
     counterbore = _pockets(door)["pull_lock_top_1_counterbore"]
-    assert (counterbore.face, counterbore.depth, counterbore.depth_spec) == ("back", 5, "to(front, -10)")
+    assert (counterbore.face, counterbore.depth, counterbore.depth_spec) == ("back", 5, "to(front, leave=10)")
     assert counterbore.shape.bounds == pytest.approx((276, 647, 324, 695))
     assert [type(op) for op in door.ops] == [Hole, Pocket]          # the hole first, as in the add-in
     # the strike's pair in the top's underside, the door's own left (+y) first; u, v are x, y

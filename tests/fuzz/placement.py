@@ -1299,10 +1299,10 @@ def _depth(b: Built, x: Board, f: Face, depth: Depth) -> tuple[Any, tuple[float,
     toward = names[b.pick(len(names))]
     if depth.kind in ("mm", "frac"):
         v = depth.value if depth.kind == "mm" else depth.value * extent
-        options: list[Any] = [v] + ([to(toward, v - extent)] if v < extent - 1e-6 else [])
+        options: list[Any] = [v] + ([to(toward, leave=extent - v)] if v < extent - 1e-6 else [])
         return options[b.pick(len(options))], (v, False)
     if depth.kind == "to":
-        return [to(toward, -depth.value), extent - depth.value][b.pick(2)], (extent - depth.value, False)
+        return [to(toward, leave=depth.value), extent - depth.value][b.pick(2)], (extent - depth.value, False)
     return [through, to(toward)][b.pick(2)], (extent, True)
 
 
