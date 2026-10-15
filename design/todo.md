@@ -65,6 +65,10 @@ done.
 - **Latched drawer box detail**: a cut-out in the drawer box for the latch
   versus keeping the box clear by `latch.reach` (deferred by Florian,
   2026-10-12).
+- **A shape centred on a position**: `at=` puts a shape's matching side on
+  a position (`b.front.top.left(line)` puts a notch's left side there), so
+  a notch centred on a line is written `left(line - 7)`. Seen while writing
+  the runs proposal's examples (`proposals/runs.md`).
 - **Corners named by a point** (`panel.top.front(60).left(40)`) for
   `fillet()` and `chamfer()`, once a build needs it.
 - **Try the language on real modules**: write two modules from the van in

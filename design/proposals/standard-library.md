@@ -30,3 +30,7 @@ Proposed:
 - Lipping was proposed as the first item, but it is a core operation
   (`design/slats.md`): it reads the board's outline, which the public API should
   not grow for it [decided]. The drawer box is the first item instead.
+- Runs: the core knows only a section that follows a centre line, and
+  `lang/std/runs.py` holds the catalogue helpers for hoses, conduit, cable
+  bundles, trunking and heater ducts [Florian, 2026-10-15]. They choose
+  sizes and bend radii and add no geometry (`runs.md`).

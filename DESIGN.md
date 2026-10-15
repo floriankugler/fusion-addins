@@ -231,7 +231,7 @@ is implemented. [Florian]
 | `standard-library.md` | `lang/std`: building blocks on the public API only |
 | `nesting.md` | What is left of nesting (built: `design/nesting.md`): pinning cut sheets, parts larger than the bed, groups, the cut list |
 | `cam.md` | A CAM plan from the layout, built by an add-in |
-| `runs.md` | Tubes, ducts and keep-outs |
+| `runs.md` | Hoses, cables, ducts and keep-outs: one run primitive that plans and is checked, routed through the boards' own openings, at the van level or in a module |
 | `detail-levels.md` | Rough and full previews |
 | `hand-made-geometry.md` | Escape hatches for what the language cannot say |
 | `copy-path.md` | Copy Path, named faces on hand-modeled bodies, the Planung check |
