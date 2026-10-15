@@ -40,7 +40,8 @@ done.
   Multi Arrange then nests as a rigid group, keeping their arrangement, as its
   own groups do now (a group name per part, set by hand in its dialog). The
   compiler would write the group into the `lang`/`part` attribute next to the
-  grain. If nesting moves into the language, its nester takes the groups too.
+  grain. The language's nest (`design/nesting.md`) should take the groups
+  too.
   [Florian, 2026-10-13]
 - **Check results in the preview's scene**: interference pairs highlighted,
   sheet fit, parts flagged as not plain flat work.

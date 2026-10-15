@@ -1,8 +1,8 @@
 # CAM from the language
 
 Status: added by Florian 2026-10-14, worked out by Claude the same day;
-nothing built. Only the points marked [Florian] are his. Needs nesting
-(`nesting.md`).
+nothing built. Only the points marked [Florian] are his. Builds on the
+nest (`design/nesting.md`).
 
 Florian's points: since the Fusion geometry is generated again on every
 compile, the CAM setups have to be made again too; Auto Setup helps, but it

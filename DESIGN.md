@@ -217,7 +217,7 @@ fuzzed (AGENTS.md, "Fuzz Tests").
 Proposed, in `design/proposals/`. Where they depend on each other Florian
 wants them done in this order: bevels before mitres and
 before fitted ends on tilted boards; tilted boards before mitres at angles
-other than 90 degrees; nesting before CAM. The spellings in the 2026-10-14
+other than 90 degrees. The spellings in the 2026-10-14
 proposals are working titles, settled in a detailed plan for each before it
 is implemented. [Florian]
 
@@ -229,7 +229,6 @@ is implemented. [Florian]
 | `tilted-boards.md` | Boards turned about one axis of their scope |
 | `mitres.md` | Mitred corners as a joint |
 | `standard-library.md` | `lang/std`: building blocks on the public API only |
-| `nesting.md` | What is left of nesting (built: `design/nesting.md`): pinning cut sheets, parts larger than the bed, groups, the cut list |
 | `cam.md` | A CAM plan from the layout, built by an add-in |
 | `runs.md` | Hoses, cables, ducts and keep-outs: one run primitive that plans and is checked, routed through the boards' own openings, at the van level or in a module |
 | `detail-levels.md` | Rough and full previews |
