@@ -27,6 +27,12 @@ Proposed:
   protocols. The standard library composes and adds no geometry of its own.
 - Cabinet types for one build stay in that build's repo
   (`build-repo.md`); `lang/std` holds what is reused across builds.
+- Decided with the syntax review (`syntax.md` items 2 and 3, 2026-10-15):
+  a carcass block is the first item, ahead of the drawer box (`left, right,
+  bottom, top, back = carcass(cab, ply15, back=ply9, joins=cabineo(count=3))`),
+  since every cabinet starts with one; and the drawer box hides the slide's
+  three calls (`drawer_box()`, `machine_box()`, `mount()`), which stay as
+  they are in the core.
 - Lipping was proposed as the first item, but it is a core operation
   (`design/slats.md`): it reads the board's outline, which the public API should
   not grow for it [decided]. The drawer box is the first item instead.

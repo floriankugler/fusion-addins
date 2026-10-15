@@ -28,7 +28,8 @@ without legs (the roof's contour, an arc written in code) is `.on(curve)`.
 The step from straight to bent is always smooth [Florian]: every turn is
 eased, its curvature rising from zero where a leg ends and falling to zero
 where the next begins (clothoids, as on roads and railways, then an arc of
-the radius), so `ease=` is above 0, its default a project rule. The legs give
+the radius), so `ease=` is above 0, a keyword on `bend()` with a package default (no
+project rules: `syntax.md` item 16, 2026-10-15). The legs give
 the shape's frame:
 
 - Legs meeting at a corner (their outer faces meet in a line) make one turn,

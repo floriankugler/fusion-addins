@@ -65,10 +65,15 @@ done.
 - **Latched drawer box detail**: a cut-out in the drawer box for the latch
   versus keeping the box clear by `latch.reach` (deferred by Florian,
   2026-10-12).
-- **A shape centred on a position**: `at=` puts a shape's matching side on
-  a position (`b.front.top.left(line)` puts a notch's left side there), so
-  a notch centred on a line is written `left(line - 7)`. Seen while writing
-  the runs proposal's examples (`proposals/runs.md`).
+- **Syntax review decisions** (`proposals/syntax.md`, 2026-10-15): the
+  items Florian decided for, to build: refuse `+`/`-` on sides and faces
+  (1), `no_interference` by default (4), `shrunk(n)`/`grown(n)` (5),
+  `anchor.center(pos)` for a shape centred on a position (6, was an item
+  here), `to(face, leave=)` (7), lowercase hardware factories (9),
+  `centers=` and `miter` (10), `material.thickness` (11), any sequence for
+  lists of parts (12), `-` and `+` on shapes (13); the carcass block (2) and
+  the drawer box (3) go into the standard library, exports as runs' ports
+  (14) and bare references in `path()` (15) into the runs proposal.
 - **Corners named by a point** (`panel.top.front(60).left(40)`) for
   `fillet()` and `chamfer()`, once a build needs it.
 - **Try the language on real modules**: write two modules from the van in

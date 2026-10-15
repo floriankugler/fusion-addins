@@ -30,6 +30,13 @@ points from 2026-10-15 are marked [Florian]:
 Every other point is [proposed] unless marked otherwise. The questions at
 the end are his to answer.
 
+Decided with the syntax review (`syntax.md` items 14 and 15, 2026-10-15),
+not yet written into the sections below: a bare reference in `path()` is a
+one-axis stop and `via()` stays for a per-corner `bend_r=` and for two or
+three references in one stop; modules export their openings
+(`cab.export("cable", bottom.cable)`) and the van level reads
+`kitchen.cable` instead of `kitchen["bottom"].cable`.
+
 Hoses, cables and heater ducts are planned alongside the furniture, so that
 there is room for them, they are organised, and the boards have the holes
 they need. By hand that is a 3D sketch of the centre line, a section

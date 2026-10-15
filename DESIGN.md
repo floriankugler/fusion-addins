@@ -236,6 +236,7 @@ is implemented. [Florian]
 | `hand-made-geometry.md` | Escape hatches for what the language cannot say |
 | `copy-path.md` | Copy Path, named faces on hand-modeled bodies, the Planung check |
 | `build-repo.md` | A repo per van, committed outputs (cut list, SVGs, lock file) |
+| `syntax.md` | Claude's syntax review of 2026-10-15, gone through with Florian: 16 items, each with his decision |
 
 Smaller items are in `design/todo.md`, known defects in `design/bugs.md`.
 
