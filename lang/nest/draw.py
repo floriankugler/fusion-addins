@@ -57,6 +57,7 @@ _STYLE = """
 .grain { stroke: #8a5a1d; stroke-width: 3; stroke-dasharray: 16 8; }
 .title { fill: #222; font-weight: bold; }
 .label { fill: #555; }
+.blankname { fill: #7a6a4a; font-weight: bold; paint-order: stroke; stroke: #f6f1e6; stroke-width: 5; }
 .note { fill: #555; }
 .problem { fill: #c0392b; }
 """
@@ -92,13 +93,14 @@ def _sheet(sheet: SheetOut, items: dict[str, Item], left: float, top: float) -> 
         x, y, w, h = b["rect"]
         out.append(f'<rect class="blank" x="{left + x:.1f}" y="{sy(y + h):.1f}" width="{w:.1f}" height="{h:.1f}">'
                    f'<title>blank {b["name"]}: {w:.0f} x {h:.0f}</title></rect>')
-        out.append(_text(left + x + 10, sy(y + h) + 30, f"{b['name']}  {w:.0f} x {h:.0f}", 24, "label"))
         for p in b["parts"]:
             item = items.get(p["path"])
             if item is None:
                 continue
             shape = item.placed(p["turn"], (x + p["at"][0], y + p["at"][1]))
             out.append(_part(shape, p["path"], item, left, sy))
+        # Over its parts, which come up to its margin.
+        out.append(_text(left + x + 6, sy(y + h) + 14, f"{b['name']}  {w:.0f} x {h:.0f}", 22, "blankname"))
     for k, cut in enumerate(sheet["cuts"], 1):
         x0, y0, x1, y1 = cut["line"]
         out.append(f'<line class="cut" x1="{left + x0:.1f}" y1="{sy(y0):.1f}" x2="{left + x1:.1f}" y2="{sy(y1):.1f}"/>')
