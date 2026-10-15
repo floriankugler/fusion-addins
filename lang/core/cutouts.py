@@ -785,17 +785,7 @@ def grown(g: BaseGeometry, d: float) -> BaseGeometry:
                 if radius + d > _EPS:
                     out.append(_circle(c, radius + d))
                 continue
-        buffered = poly.buffer(d, join_style="mitre", mitre_limit=100.0)
-        if not buffered.is_valid:
-            # A mitred offset can cross itself; made valid, an inset keeps
-            # the loops it should have dropped, which lie outside the shape
-            # shrunk with round corners, as no inset may, and an outward
-            # offset may lose parts of the shape grown with round corners,
-            # which every outward offset holds.
-            buffered = shapely.make_valid(buffered)
-            rounded = poly.buffer(d, quad_segs=64)
-            buffered = buffered.intersection(rounded) if d < 0 else unary_union([buffered, rounded])
-        buffered = _without_specks(buffered)
+        buffered = _without_specks(_mitred(poly, d))
         exact = _offset_exactly(poly, d, buffered)
         if exact is not None:
             out.append(exact)
@@ -808,6 +798,33 @@ def grown(g: BaseGeometry, d: float) -> BaseGeometry:
         out += [_onto_circles(p, targets, keep=lambda q: not on_arc(q))
                 for p in polygons_of(buffered) if p.area > _SLIVER]
     return unary_union(out) if out else Polygon()
+
+
+#: The mitre limits (times the offset) a mitred offset is built with in
+#: turn until GEOS builds it valid (`_mitred`).
+_MITRE_LIMITS = (100.0, 10.0, 5.0, 3.0, 2.0, 1.5, 1.0)
+
+
+def _mitred(poly: Polygon, d: float) -> BaseGeometry:
+    """`poly` offset by `d` with mitred corners, valid. GEOS's mitred offset
+    can cross itself, and then lose pieces: where a circle hangs on a
+    rectangle by a neck 1.2 wide, the two sharp corners of the neck sent
+    mitres 7 long past each other, and shrunk by 1 the offset lost the
+    circle shrunk to 1.75 [found by fuzzing, 2026-10-15]. So it is built
+    again with the mitres bevelled ever nearer their corners until it is
+    valid; a bevel lies between the mitre and a round join, keeping the
+    offset's distance. Failing that, it is made valid: an inset then keeps
+    the loops it should have dropped, which lie outside the shape shrunk
+    with round corners, as no inset may, and an outward offset may lose
+    parts of the shape grown with round corners, which every outward
+    offset holds."""
+    for limit in _MITRE_LIMITS:
+        out = poly.buffer(d, join_style="mitre", mitre_limit=limit)
+        if out.is_valid:
+            return out
+    rounded = poly.buffer(d, quad_segs=64)
+    made = shapely.make_valid(poly.buffer(d, join_style="mitre", mitre_limit=_MITRE_LIMITS[0]))
+    return made.intersection(rounded) if d < 0 else unary_union([made, rounded])
 
 
 def _without_specks(g: BaseGeometry) -> BaseGeometry:
@@ -979,9 +996,12 @@ def _keeps_its_distance(poly: Polygon, out: Polygon, d: float) -> bool:
     # distance and lay in the shape]. Mitred, as Fusion's offset: where a
     # tab narrower than twice the inset turns over, both join its
     # neighbours straight across, where shrinking round would bulge.
+    # (valid: GEOS's own crossed itself where a circle hangs on a rectangle
+    # by a neck, and the difference below failed [found by fuzzing,
+    # 2026-10-15])
     margin = max(tolerance, 0.25 * abs(d))
     if d < 0:
-        reach = poly.buffer(d - margin, join_style="mitre", mitre_limit=100.0)
+        reach = _mitred(poly, d - margin)
     else:
         reach = poly.buffer(d - margin, quad_segs=16) if d > margin else None
     if reach is not None and not reach.is_empty and reach.difference(out).area > 1e-4 * poly.length + 1e-6:

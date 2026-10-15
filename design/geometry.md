@@ -80,9 +80,12 @@ uncleaned spike made the whole body fail (ASM_WIRE_SELF_INTERSECTS2).
 exactly as Fusion's sketch Offset does: arcs run on along their circles,
 corners keep the full distance and stay sharp (round joins gave rings with
 radius-20 corners where Fusion has sharp ones). Where that does not hold (a
-curve vanishes, pieces merge) it mitres with its arcs put back, repairing
-mitred offsets that cross themselves and leaving out slivers and specks of
-holes. A self-check requires an inset to hold the shape shrunk by 1.25 times
+curve vanishes, pieces merge or part) it mitres with its arcs put back,
+leaving out slivers and specks of holes. GEOS's mitred offset can cross
+itself and lose pieces (two sharp corners close together send their
+mitres past each other); it is then built again with the mitres bevelled
+ever nearer their corners until it is valid, which keeps the distance as a
+mitre does, and made valid only when none is. A self-check requires an inset to hold the shape shrunk by 1.25 times
 the inset with mitred corners (where a tab narrower than twice the inset
 turns over, Fusion joins the tab's neighbours straight across, up to 1.41
 times the inset in), and an outward offset to hold the shape grown round by

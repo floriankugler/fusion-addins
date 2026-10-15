@@ -631,3 +631,48 @@ def test_an_inset_loses_nothing_farther_than_the_border():
     assert len(outline.interiors) == 0                  # the slot runs out through the corner
     inset = cutouts.grown(outline, -20)
     assert inset.bounds[0] == pytest.approx(20) and inset.contains(P(30, 90))
+
+
+def _circle_on_a_neck(x: float) -> Polygon:
+    """A circle 5.5 across at (0, 183) joined with a rectangle 325 x 309
+    turned 112 degrees about (x, 0), whose edge cuts a little off the
+    circle: the circle hangs on the rectangle by a neck, 1.2 wide with the
+    rectangle at x = -12, 3.5 wide at -13.5."""
+    from shapely import affinity
+    plank = affinity.rotate(box(x - 162.5, -154.5, x + 162.5, 154.5), 112, origin=(x, 0))
+    shape = Point(0, 183).buffer(2.75, quad_segs=8).union(plank)
+    assert isinstance(shape, Polygon)
+    return shape
+
+
+def test_an_inset_that_drops_a_circle_on_a_neck_is_refused():
+    """Found by fuzzing: a circle hung on a rectangle by a neck 3.5 wide,
+    shrunk by 0.5; offset curve by curve, the circle's arc no longer met
+    the rectangle's edge and was dropped, and the check that refuses such
+    an inset failed (GEOS: non-noded intersection), as the shape shrunk
+    mitred by 0.625 it compares with crossed itself. Now that is built
+    valid, and the inset keeps the circle."""
+    shape = _circle_on_a_neck(-13.5)
+    inset = cutouts.grown(shape, -0.5)
+    assert isinstance(inset, Polygon) and inset.difference(shape).area < 1e-3
+    assert inset.contains(Point(0, 183).buffer(2.2))
+
+
+def test_an_inset_that_parts_a_circle_from_its_neck_keeps_it_on_its_own_circle():
+    """Found by fuzzing: a circle hung on a rectangle by a neck 1.2 wide,
+    shrunk by 1, parts from it. The mitred inset GEOS built crossed itself
+    where the neck's corners sent their mitres past each other, and lost
+    the circle; made valid and held to the round inset, it kept arcs of
+    radius 1 about the neck's corners instead, which are none of the
+    shape's. Now the circle shrunk to 1.75 is kept, and the rectangle
+    shrunk straight across."""
+    from shapely.geometry.polygon import orient
+    from lang.core.geometry import polygons_of
+    inset = cutouts.grown(_circle_on_a_neck(-12), -1)
+    small, large = sorted(polygons_of(inset), key=lambda p: p.area)
+    assert large.area == pytest.approx(323 * 307) and small.contains(Point(0, 183).buffer(1.7))
+    for piece in (small, large):
+        ring = [(float(x), float(y)) for x, y in list(orient(piece, 1.0).exterior.coords)[:-1]]
+        for c in fit(ring):
+            if not isinstance(c, Line2):
+                assert math.dist(c.center, (0, 183)) < 1e-6 and c.radius == pytest.approx(1.75)

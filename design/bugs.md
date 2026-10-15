@@ -26,16 +26,6 @@ when it is fixed or decided.
   sliver at an arc's end, between whole degrees, up to r (1 - cos 0.5
   degrees) thick (0.019 mm at a radius of 500). Harmless while something
   joins it to the rest.
-- **Shrinking a circle joined to a large turned rectangle** (the arcs
-  fuzz, long profile, 2026-10-15, the same on `language` 78a9bba6): a
-  rectangle 325 x 309 turned 112 degrees about (-13, 0) joined with a circle
-  5.5 across at (0, 183), shrunk by 1 (`cutouts.grown`): GEOS fails in
-  `_keeps_its_distance` (TopologyException: non-noded intersection); with
-  the rectangle at (-12, 0), `fit` draws an arc of radius 1 on none of the
-  shape's circles. Recipes in `tests/fuzz/fuzzing.py` terms:
-  `Recipe(Rect(0, 0, 1, 1, 0), (("union", Slot(0, 183, 0, 183, 5.5, 8)),
-  ("union", Rect(-13, 0, 325, 309, 112))), grow=-1)`. Not yet marked in the
-  fuzz checks.
 - **Outline rings touching at a point**: the preview's mesh of such a part may
   not be watertight (marked `KNOWN` in the board fuzz).
 
