@@ -65,3 +65,37 @@ Proposed:
   a slot as wide as a cutter can be cut in one pass along it (Fusion's 2D
   Slot) instead of as a pocket; then the 0.1 mm a slot is now made wider
   than its cutter no longer applies.
+
+## Where Auto Setup goes wrong
+
+Florian's notes of 2026-10-15 on what Auto Setup does badly and the plan
+must do better [Florian]; the causes and the ways out are Claude's
+[proposed].
+
+- **The cutter for a pocket by its narrowest passage.** Auto Setup checks a
+  pocket template only against the pocket's concave corner arcs, its flute
+  length and the floor's area, so a pocket narrower than the cutter between
+  straight walls, or a narrow neck between two wider parts, gets a cutter
+  that does not reach it. The plan has the pocket's region exactly: a
+  cutter of radius r reaches the region opened by r (shrunk by r, grown
+  again), so the widest cutter whose opening leaves nothing but the
+  material a cutter always leaves in a corner is the one; where none of a
+  template's cutters reaches everything, the rest goes to a narrower one
+  (as the adaptive templates' 6 mm cleanup does) or is reported.
+- **A chamfered hole is drilled from the stock's top.** Fusion measures a
+  drill or bore from the hole's top, the top of its cylinder wall, which a
+  chamfered rim puts below the face; the V-bit cuts the chamfer last, so
+  while the hole is drilled that material is still there, and the drill
+  comes down to its feed height inside it. In the plan a hole's heights and
+  depth count from the face it is made from, the stock's top there, and its
+  chamfer is a V-bit operation of its own afterwards.
+- **A slot is not a dog bone.** Auto Setup takes every concave arc narrower
+  than the contour or pocket cutter for a dog bone, so the round ends of a
+  4 mm slot (a Domino 4) are milled with the dogbone template, and the
+  6 mm pocket template passes for the slot, since its ends are left out of
+  the fit check as reliefs. The plan does not guess: a slot carries its
+  centre line and width (`slot` in the layout) and is cut with a cutter
+  narrower than it, as a pocket or along its line. Dog bones should be
+  marked as such in the layout too, with the tool `dogbones(tool=)` drew
+  them for: today a `dogbones()` relief is a cut or pocket named
+  `<operation>_dogbones` and a joint's reliefs are part of its cuts.
