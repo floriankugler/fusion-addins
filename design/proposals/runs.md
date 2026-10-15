@@ -30,12 +30,11 @@ points from 2026-10-15 are marked [Florian]:
 Every other point is [proposed] unless marked otherwise. The questions at
 the end are his to answer.
 
-Decided with the syntax review (`syntax.md` items 14 and 15, 2026-10-15),
-not yet written into the sections below: a bare reference in `path()` is a
-one-axis stop and `via()` stays for a per-corner `bend_r=` and for two or
-three references in one stop; modules export their openings
-(`cab.export("cable", bottom.cable)`) and the van level reads
-`kitchen.cable` instead of `kitchen["bottom"].cable`.
+The syntax review of 2026-10-15 (`syntax.md`) is written in: bare
+references as stops (item 15), modules exporting their openings as the
+runs' ports (item 14), `center(line)` in the notch example (item 6),
+`into()` for a box side moved (item 1) and `no_interference` running for
+every module (item 4).
 
 Hoses, cables and heater ducts are planned alongside the furniture, so that
 there is room for them, they are organised, and the boards have the holes
@@ -152,8 +151,9 @@ A point fixes the centre line on all three axes:
 - A point on a face is the anchor that `at=` takes:
   `back.outer.bottom(150).right(60)`.
 - An opening means its centre: a named hole such as `top.tap`, or a named
-  pocket through. As the start or the end of a path, it lies on the face
-  the opening was made from; in the middle, the run passes through it.
+  pocket through, also one a module exports (`kitchen.cable`). As the start
+  or the end of a path, it lies on the face the opening was made from; in
+  the middle, the run passes through it.
 - Later, a connection on an external component, such as a pump's outlet
   (see `design/todo.md`).
 
@@ -174,14 +174,17 @@ a diagonal if more than one coordinate changes.
 
 ### Stops
 
-`via(...)` takes one, two or three references, each on a different axis.
-Each reference says where the centre line goes on its axis, and the other
-coordinates carry over from the stop before [from the first draft]. One
-reference makes a leg along one axis, which is nearly every leg of a real
-run; two or three make a diagonal. The axis comes from the reference, just
-as `center()` takes its axis from the position it is given. That settles the
-first draft's open point: `via(z=...)` named world axes, which build files
-avoid.
+A stop is a reference, bare, or `via(...)` with one, two or three
+references, each on a different axis [decided by Florian, 2026-10-15,
+syntax.md item 15: `via()` had wrapped every stop]. Each reference says
+where the centre line goes on its axis, and the other coordinates carry over
+from the stop before [from the first draft]. A bare reference makes a leg
+along one axis, which is nearly every leg of a real run, so a path is mostly
+references and points; `via()` is for two or three references in one stop,
+a diagonal, and for a corner's own `bend_r=` (see "Corners"). The axis comes
+from the reference, just as `center()` takes its axis from the position it
+is given. That settles the first draft's open point: `via(z=...)` named
+world axes, which build files avoid.
 
 What a reference positions follows how `on()` and `center()` place a board:
 
@@ -292,9 +295,11 @@ is the last step: it checks that what was planned in the modules fits
 
 - **A van-level run** is written after the modules, outside every
   `with module()`.
-  - It reads the parts and openings of any module, such as
-    `kitchen["bottom"].cable` and `ground.panel_front`, and passes through
-    their openings.
+  - It reads what a module exports, its openings first of all
+    (`cab.export("cable", bottom.cable)` in the module, `kitchen.cable` at
+    the van level), and may reach a module's parts (`ground.panel_front`);
+    a part named after a direction is `kitchen["bottom"]`, which the exports
+    make unnecessary [decided by Florian, 2026-10-15, syntax.md item 14].
   - When `van.py` asks with `check(no_interference)`, it is checked against
     the parts, hardware and runs of every module (see "Checks").
   - Its path is just its name, `cable_rear`.
@@ -313,9 +318,9 @@ is the last step: it checks that what was planned in the modules fits
   - the van routes all of it and the module's own run goes;
   - or the module keeps its piece, and the van routes the rest as a second
     run.
-- **Modules designed on their own fit together through their openings.**
-  The kitchen plans its hole behind the drawers, and the floor plans its
-  channel and the holes in its panels. Where those do not line up, the
+- **Modules designed on their own fit together through the openings they
+  export.** The kitchen plans its hole behind the drawers, and the floor
+  plans its channel and the holes in its panels. Where those do not line up, the
   van-level run says so, and the module that gives way is changed: its
   hole moves, or its module function takes the place as an argument.
 - **In a van nearly every place a run goes belongs to a module:** under the
@@ -341,6 +346,8 @@ is the last step: it checks that what was planned in the modules fits
 - **Ports placed in the van's build file**, from the master's boxes, and
   passed into the module functions. Set aside because that file was not
   meant to route [Florian]; with runs at the van level, there are no ports.
+  What is left of them is the exports: a module names the openings a run
+  may use (`cab.export("cable", bottom.cable)`), nothing more.
 
 ## Checks
 
@@ -351,10 +358,11 @@ is the last step: it checks that what was planned in the modules fits
   - an opening in its path that is narrower than the section.
 - **A run is checked for overlaps**, as `no_interference`
   (`design/checks.md`) checks parts. A module's runs are checked with the
-  module's `no_interference`. Van-level runs are checked only when the
-  van asks, as modules are [Florian]: `check(no_interference)` written in
-  `van.py`, outside every module, which is an error today and becomes
-  allowed. There it checks the van-level runs against the parts, hardware
+  module's `no_interference`, which runs for every module unless the module
+  turns it off (syntax.md item 4). Van-level runs are checked only when the
+  van asks [Florian]: `check(no_interference)` written in `van.py`, outside
+  every module, which is an error today and becomes allowed; the van level
+  has no module to carry a default. There it checks the van-level runs against the parts, hardware
   and runs of every module. It could also check the modules' parts against
   each other, which nothing does today [open]. A run is reported where it
   overlaps:
@@ -470,10 +478,10 @@ hose is routed through them:
 # in drawer_cabinet(), after the drawers
 back.hole(d=pe12.passage, at=back.outer.bottom(150).right(60), depth=through, name="cold")
 top.hole(d=35, at=top.top.back(200).right(60), depth=through, name="tap")
-run("cold", pe12).path(back.cold,                 # in from the wall, through its hole in the back
-                       via(back.inner.gap(60)),   # 60 in front of the back, for the bend
-                       via(top.bottom.gap(100)),  # up behind the drawers, to 100 under the top
-                       top.tap)                   # forward under the tap hole, and up into it
+run("cold", pe12).path(back.cold,              # in from the wall, through its hole in the back
+                       back.inner.gap(60),     # 60 in front of the back, for the bend
+                       top.bottom.gap(100),    # up behind the drawers, to 100 under the top
+                       top.tap)                # forward under the tap hole, and up into it
 ```
 
 The tap hole and the hole in the back are both 60 from the right side, so
@@ -495,27 +503,32 @@ that they fit:
 # the battens across, and a hole in each panel where a cable comes through
 line = f.left.into(300)                                   # the channel's middle
 for b in battens:                                         # the whole length, for later cables too
-    b.cut(rect(width=14, height=12), at=b.front.top.left(line - 7), name="cable")
-panel_front.hole(d=24, at=panel_front.top.front(kitchen_box.back - 135).left(line),
+    b.cut(rect(width=14, height=12), at=b.front.top.center(line), name="cable")
+panel_front.hole(d=24, at=panel_front.top.front(kitchen_box.back.into(135)).left(line),
                  depth=through, name="cable")             # under the kitchen
 panel_back.hole(d=24, at=panel_back.top.front(floor_back - 100).left(line),
                 depth=through, name="cable")              # at the back, for a bed
+f.export("cable_front", panel_front.cable)                # the openings, for the van's runs
+f.export("cable_back", panel_back.cable)
+f.export("underside", panel_front.bottom)                 # the channel's ceiling
 
 # in drawer_cabinet(): a hole behind the drawers, on the cabinet's cable line
 x = cab.left.into(135)
 bottom.hole(d=cable10.passage, at=bottom.top.left(x).back(back.inner.gap(15)),
             depth=through, name="cable")
+cab.export("cable", bottom.cable)                         # the opening, for the van's run
+cab.export("underside", bottom.bottom)                    # the toe kick's ceiling
 
 # van.py, after the modules
 ground = floor("floor", van.box("Boden"))
 kitchen = drawer_cabinet("kitchen", kitchen_box, 3, slide, front=kitchen_box.right, bottom_drawer=230)
 run("cable_rear", cable10).path(
-    kitchen["bottom"].cable,          # down through the hole behind the drawers
-    via(kitchen["bottom"].bottom),    # just under the bottom, in the toe kick
-    ground.panel_front.cable,         # forward to the floor's hole, and down through it
-    via(ground.panel_front.bottom),   # under the panels, in the channel
-    ground.panel_back.cable)          # to the hole at the back, and up through it
-check(no_interference)                # the van-level runs against every module
+    kitchen.cable,            # down through the hole behind the drawers
+    kitchen.underside,        # just under the bottom, in the toe kick
+    ground.cable_front,       # forward to the floor's hole, and down through it
+    ground.underside,         # under the panels, in the channel
+    ground.cable_back)        # to the hole at the back, and up through it
+check(no_interference)        # the van-level runs against every module
 ```
 
 - **Each opening places the run once.** At each hole, the corner before it
@@ -534,9 +547,9 @@ check(no_interference)                # the van-level runs against every module
   and 12 deep, so the cable has its gap of 2 below and on either side.
 - **The panel holes are 24, not 14,** because the cable bends right under
   each panel, partly inside the hole. A smaller hole would be reported.
-- **`line - 7` puts the notch's side** half its width from the channel's
-  middle, because `at=` cannot centre a shape on a position yet
-  (`design/todo.md`).
+- **`center(line)` centres each notch** on the channel's middle along the
+  batten, and `kitchen_box.back.into(135)` is 135 into the kitchen box from
+  its back side in any frame (syntax.md items 6 and 1).
 - **The cable's `bend_r` of 15** fits the 17 mm between the panel's top and
   the cable's centre line under it. A conduit with a bend radius of 80
   would be refused there.
