@@ -7,7 +7,7 @@ from shapely.geometry import box as shapely_box
 
 from lang import *
 from lang.core.cutouts import circle_geometry
-from lang.core.directions import Axis
+from lang.core.directions import Axis, InnerOuter
 from lang.core.layout import build_layout
 from lang.core.ops import Chamfer, Cut, EdgeOp, Hole, Pocket
 from lang.core.refs import Affine, as_pos
@@ -926,6 +926,60 @@ def test_a_tie_keeps_the_show_face_up():
         side.hole(d=5, depth=10, at=side.inner.center)
         side.hole(d=5, depth=10, at=side.outer.center)
     assert side.machine_face.direction == side.show_face.direction
+
+
+def test_machine_names_the_face_the_board_is_machined_from_however_it_is_named():
+    """The holes would make the inner face the machined one; `machine()`
+    wins, named as a face, inner or outer, a box side or a direction."""
+    with module("cab", Box.from_size(width=1200, depth=500, height=720)) as cab:
+        sides = [board(f"s{k}", ply15).on(cab.left + 100 * k, toward=cab.right) for k in range(5)]   # left of the middle
+    namings: list[Face | Side | Direction | InnerOuter] = [sides[0].outer, "outer", cab.left, cab.left.outward,
+                                                           sides[4].left]
+    for side, name in zip(sides, namings):
+        side.hole(d=5, depth=10, at=side.right.center)
+        side.hole(d=5, depth=10, at=side.right.front(50).bottom(50))
+        side.machine(name)
+        assert side.machine_face.direction == side.left.direction
+        assert side.to_layout()["machine"] == side.left.world_name
+        assert side.show_face.direction == side.left.direction       # machine() leaves the show face alone
+
+
+def test_machine_may_come_at_any_time_once():
+    with module("cab", Box.from_size(width=600, depth=500, height=720)) as cab:
+        early = board("early", ply15).machine(cab.right).on(cab.left)      # before the placement
+        late = board("late", ply15).on(cab.right)
+    late.hole(d=5, depth=10, at=late.inner.center)
+    late.machine(late.outer)                                             # after the placement and its operations
+    assert early.machine_face.direction == early.inner.direction
+    assert late.machine_face.direction == late.outer.direction
+    with pytest.raises(LangError, match="machine\\(\\) given twice"):
+        late.machine(late.inner)
+    assert late.machine_face.direction == late.outer.direction
+
+
+def test_machine_takes_a_big_face_of_this_board_only():
+    with module("cab", Box.from_size(width=600, depth=500, height=720)) as cab:
+        side = board("side", ply15).on(cab.left)
+        other = board("other", ply15).on(cab.right)
+        unplaced = board("unplaced", ply15).machine(cab.front).on(cab.bottom)
+        straddling = board("straddling", ply15).center(cab.left + 300).machine("inner")
+        rail = slat("rail", slat_material("oak"), section=(20, 40)).on(cab.bottom).edge_on(cab.front) \
+            .between(cab.left, cab.right)
+    side.box()
+    with pytest.raises(LangError, match="front is a narrow face.*(left or right|right or left)"):
+        side.machine(side.front)                         # placed: refused at once
+    with pytest.raises(LangError, match="not a face of this board"):
+        side.machine(other.inner)
+    with pytest.raises(LangError, match="expected 'inner' or 'outer', not 'sideways'"):
+        side.machine("sideways")  # pyright: ignore[reportArgumentType]
+    side.machine(side.inner)                             # the refusals changed nothing
+    assert side.machine_face.direction == side.inner.direction
+    with pytest.raises(LangError, match="front is a narrow face"):
+        unplaced.machine_face                            # given before the placement: refused when read
+    with pytest.raises(LangError, match="ambiguous"):
+        straddling.machine_face
+    with pytest.raises(LangError, match="a slat is not machined"):
+        rail.machine(cab.bottom)
 
 
 # -- review fixes 2026-10-12: limits ------------------------------------------------

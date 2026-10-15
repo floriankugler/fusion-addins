@@ -94,9 +94,9 @@ the other space) and the others came out a thickness too high
   Arrange's compiled parts leave out), material, thickness, whether the material
   has a grain, the grain direction (null when the build left it unset) and
   `up`, the outward normal of the face it is machined from. That face is the
-  big face more pockets, holes and chamfers are made from (a cut's chamfer
-  counts for the show face), the show face on a tie; the layout carries it as
-  `machine`. Multi Arrange uses the build's grain before its own guesses
+  one `machine()` names, else the big face more pockets, holes and chamfers
+  are made from (a cut's chamfer counts for the show face), the show face on
+  a tie; the layout carries it as `machine`. Multi Arrange uses the build's grain before its own guesses
   (texture, longest edge), lets parts of a material without grain turn
   freely, and adds all compiled parts of a material at once (Compiled parts +
   Add in its dialog), each by its machining face, so it lands machining side

@@ -25,7 +25,9 @@ design; the overview is `DESIGN.md`. Code: `lang/core/part.py`,
   fingers are the one exception, as the add-in models them (see
   `design/joints.md`).
 - Operations from two big faces, of any kind, mean the board must be flipped
-  on the machine.
+  on the machine. A board is machined from one big face (`machine()`, else
+  the one with more operations, see `design/api.md`); CAM machines that
+  side only for now (`design/proposals/cam.md`).
 - A board narrower than 0.01 mm is an error (see `design/geometry.md`).
 
 ## Shapes

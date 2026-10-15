@@ -130,6 +130,8 @@ class Board:
         self._show: str | Direction | None = None
         #: Whether the show face was read; from then on `show()` is frozen.
         self._show_used = False
+        #: The face `machine()` named, if any.
+        self._machine: str | Direction | None = None
         self.manual_part: bool = False
         #: Whether the board goes into the nest (`nest()`).
         self.nested: bool = True
@@ -277,19 +279,42 @@ class Board:
                             "before them.", self.path)
         if "show" in self._set:
             raise LangError("show() given twice.", self.path)
+        self._show = self._big_face_given(face, "show()")
         self._set.add("show")
-        if isinstance(face, str):
-            self._show = one_of(face, InnerOuter, "show()", self.path)
-        else:
-            if isinstance(face, Face):
-                if face.part is not self:
-                    raise LangError(f"show(): {face!r} is not a face of this board.", self.path)
-                d = face.direction
-            else:
-                d = face.outward if isinstance(face, Side) else face
-            # named in this board's frame, also for a side of an enclosing box
-            self._show = self.scope.frame.direction_of(d.axis, d.sign)
         return self
+
+    def machine(self, face: Face | Side | Direction | InnerOuter) -> Self:
+        """The big face the board is machined from, which faces up on the
+        machine (`machine` in the layout; the nest lays the board so):
+        `"inner"` or `"outer"`, a box side or direction
+        (`machine(cab.left)`), or one of this board's own faces
+        (`side.machine(side.inner)`). Without it the board is machined
+        from the big face more pockets, holes and chamfers are made from,
+        else from its show face (`machine_face`). It changes nothing about
+        the board's shape and is read only by the layout, so it may come at
+        any time, once."""
+        if "machine" in self._set:
+            raise LangError("machine() given twice.", self.path)
+        given = self._big_face_given(face, "machine()")
+        if self._box is not None:
+            self._machine_face(given)       # placed: a narrow face is refused at once
+        self._machine = given
+        self._set.add("machine")
+        return self
+
+    def _big_face_given(self, face: Face | Side | Direction | InnerOuter, what: str) -> str | Direction:
+        """What `show()` or `machine()` was given: "inner" or "outer", else
+        the direction, named in this board's frame, also for a side of an
+        enclosing box."""
+        if isinstance(face, str):
+            return one_of(face, InnerOuter, what, self.path)
+        if isinstance(face, Face):
+            if face.part is not self:
+                raise LangError(f"{what}: {face!r} is not a face of this board.", self.path)
+            d = face.direction
+        else:
+            d = face.outward if isinstance(face, Side) else face
+        return self.scope.frame.direction_of(d.axis, d.sign)
 
     def manual(self) -> Self:
         self._placement("manual")
@@ -692,10 +717,12 @@ class Board:
     @property
     def machine_face(self) -> Face:
         """The big face the board is machined from, the one that faces up
-        on the machine: the one more pockets, holes and chamfers are made
-        from (a cut's chamfer is on the show face), or the show face when
-        both carry as many. Through cuts and operations on narrow faces do
-        not count."""
+        on the machine: the one `machine()` names; else the one more
+        pockets, holes and chamfers are made from (a cut's chamfer is on
+        the show face), or the show face when both carry as many. Through
+        cuts and operations on narrow faces do not count."""
+        if self._machine is not None:
+            return self._machine_face(self._machine)
         counts: dict[str, int] = {}
         for op in self.ops:
             if isinstance(op, (Pocket, Hole, Chamfer, VGroove)):
@@ -708,6 +735,15 @@ class Board:
         show = self.show_face
         other = next(f for f in self.big_faces() if f.direction != show.direction)
         return other if counts.get(other.world_name, 0) > counts.get(show.world_name, 0) else show
+
+    def _machine_face(self, given: str | Direction) -> Face:
+        """The face `machine()` names; a narrow face is refused."""
+        face = self.face(given)
+        if not face.is_big:
+            big = " or ".join(f.name for f in self.big_faces())
+            raise LangError(f"machine(): {face.name} is a narrow face; a board is machined from one of its big "
+                            f"faces, {big}.", self.path)
+        return face
 
     def has_operation(self, name: str) -> bool:
         return name in self._named_ops
@@ -2318,6 +2354,9 @@ class Slat(Board):
 
     def grain(self, along: ExtentName | Side | Direction | Face) -> Self:
         raise LangError("grain(): a slat's grain runs along its length.", self.path)
+
+    def machine(self, face: Face | Side | Direction | InnerOuter) -> Self:
+        raise LangError("machine(): a slat is not machined; it is made by hand.", self.path)
 
     def _resolve(self) -> None:
         given = [what for what, v in (("on()", self._on), ("edge_on()", self._edge_on), ("center()", self._center))

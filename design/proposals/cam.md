@@ -52,11 +52,10 @@ Proposed:
   137 boards have some: the drawer backs (hook holes outside, the floor's
   groove and the finger reliefs inside) and boards machined from their
   inner face with chamfers on the show face.
-- The machining face is chosen in the layout step (`Board.machine_face`):
-  the big face more pockets, holes and chamfers are made from, else the
-  show face. A build file steers it only through `show()`; naming it
-  outright, e.g. `side.machine(side.inner)`, a property modifier like
-  `nest()` [proposed].
+- The machining face is the one `machine()` names
+  (`side.machine(side.inner)`, built 2026-10-15, see `design/api.md`), else
+  the big face more pockets, holes and chamfers are made from, else the show
+  face.
 - The hand-work list per part comes from the same step: bevels and mitres,
   lipping and banding, roundovers (notes on edges), hardware to fit, and,
   once slats take operations, those (slats are made by hand, `design/slats.md`).

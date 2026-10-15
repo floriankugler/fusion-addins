@@ -48,7 +48,8 @@ one to the other, less its inset; between a board it touches that board's
 face and reaches into it no further than `into()` says; with one limit, it
 reaches to the box's side away from it; its inner face is the one toward
 its scope's middle, and across the middle without `show()` it shows its
-top, else back, else right; a board made of a shape has its outline's box
+top, else back, else right; it is machined from the face `machine()` names,
+given at any time; a board made of a shape has its outline's box
 and fills its two limits less its inset, sits against a single one, or at
 its scope's front, left or bottom side; limits that leave it open where a
 board lies are refused, and only such ones (`_ambiguity` works them out
@@ -65,7 +66,7 @@ import math
 import random
 import traceback
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Literal
 
@@ -208,9 +209,10 @@ class BoardSpec:
     """A board in scope `scope` (0 the module, 1 the bay): on `at`, or
     centred on it, a bare position with its thickness `toward` a
     direction; between `limits`; inset; a rect of `shape`'s extents (the
-    two in-plane measures in order); its show face and grain; and the
-    operations made right after it is placed (a toe kick another board
-    stands on)."""
+    two in-plane measures in order); its show face and grain; the face
+    `machine()` names ("inner", "outer" or a direction in its scope's
+    terms); and the operations made right after it is placed (a toe kick
+    another board stands on)."""
     name: str
     t: float
     at: Ref
@@ -223,6 +225,7 @@ class BoardSpec:
     grain: str | None = None
     scope: int = 0
     ops: tuple[OpSpec, ...] = ()
+    machine: str | None = None
 
 
 @dataclass(frozen=True)
@@ -665,8 +668,10 @@ def placement_cases(draw: st.DrawFn) -> PlacementCase:
     for k in range(draw(st.integers(0, 3))):
         d.add(*draw(_extra(d, f"extra{k}")))
     ops = tuple(draw(_op(d, k)) for k in range(draw(st.integers(0, 6))))
+    boards = tuple(replace(spec, machine=draw(st.sampled_from([None, None, None, "inner", "outer", LOW[t], HIGH[t]])))
+                   for spec, t in zip(d.specs, d.t))
     return PlacementCase(
-        kind=draw(st.sampled_from(["module", "cabinet"])), size=size, boards=tuple(d.specs), first_bay=first_bay,
+        kind=draw(st.sampled_from(["module", "cabinet"])), size=size, boards=boards, first_bay=first_bay,
         first_extra=first_extra, bay=bay, ops=ops, mirrored=draw(st.booleans()), front=draw(st.integers(0, 3)),
         origin=draw(_origin()), turn=draw(st.integers(1, 3)), origin2=draw(_origin()),
         frame=draw(st.integers(1, len(WORLD_FRAMES) - 1)), flip=draw(st.booleans()), origin3=draw(_origin()),
@@ -702,6 +707,10 @@ class Built:
     boards: list[Board | None] = field(default_factory=list[Board | None])
     made: dict[str, tuple[int, int] | None] = field(default_factory=dict[str, tuple[int, int] | None])
     refused: list[str] = field(default_factory=list[str])
+    #: The board each entry of `refused` refuses, by its index there: the
+    #: path refused may be another board's (a shelf refused because the
+    #: dado it names is missing names the side).
+    refused_boards: dict[int, int] = field(default_factory=dict[int, int])
     #: Every board made, refused or not.
     made_boards: list[Board | None] = field(default_factory=list[Board | None])
     #: Per board, the limits as given; per operation, where its anchor puts
@@ -818,6 +827,7 @@ def _place_all(b: Built, indexes: range) -> None:
         try:
             x.box()
             x.show_face                 # ("inner" or "outer" of a board across the middle is refused here)
+            x.machine_face
             if b.case.boards[i].shape is not None:
                 b.placed[i] = x.outline.bounds
         except LangError as e:
@@ -828,7 +838,11 @@ def _leave_out_dependents(b: Built) -> None:
     """Leaves out every board that names one left out, made before that one
     was refused or not, and drops its own refusal: in another order it
     would not have been made, so what is built does not hang on the order
-    the refusals came in."""
+    the refusals came in. Its refusal is found by the board, not by the
+    path the error names [found 2026-10-15: a shelf refused for a side's
+    missing dado kept its refusal, under the side's path, where the back it
+    stands on was refused later, and had none where `machine()` resolved
+    the back early and refused it before the shelf was made]."""
     gone = {i for i, x in enumerate(b.boards) if x is None}
     grown = True
     while grown:
@@ -842,7 +856,10 @@ def _leave_out_dependents(b: Built) -> None:
                 gone.add(j)
                 grown = True
     index = {x.path: i for i, x in enumerate(b.made_boards) if x is not None}
-    b.refused = [p for p in b.refused if p not in index or not deps(b.case.boards[index[p]]) & gone]
+    kept = [(k, p) for k, p in enumerate(b.refused)
+            if (i := b.refused_boards.get(k, index.get(p))) is None or not deps(b.case.boards[i]) & gone]
+    b.refused_boards = {n: b.refused_boards[k] for n, (k, _) in enumerate(kept) if k in b.refused_boards}
+    b.refused = [p for _, p in kept]
 
 
 def _refuse(b: Built, i: int, e: LangError) -> None:
@@ -852,6 +869,7 @@ def _refuse(b: Built, i: int, e: LangError) -> None:
         del _scope(x).parts[x.name]
     b.boards[i] = None
     b.refused.append(e.path or f"{b.case.boards[i].name} (no path): {e}")
+    b.refused_boards[len(b.refused) - 1] = i
     b.why.append(str(e))
     b.reasons.setdefault(i, str(e))
 
@@ -1024,13 +1042,25 @@ def _place(b: Built, i: int) -> None:
             if spec.show in ("inner", "outer") and b.pick(2):
                 late.append(lambda: x.show(x.face(spec.show or "")))      # (it resolves the board: last)
             elif spec.show is not None:
-                steps.append(lambda: _show(b, x, spec.show or ""))
+                steps.append(lambda: _big_face(b, x, spec.show or "", x.show))
+            after: list[Callable[[], object]] = []
+            if spec.machine is not None:
+                # at any time: among the placement's modifiers, last, or after the operations
+                if spec.machine in ("inner", "outer") and b.pick(2):
+                    [late, after][b.pick(2)].append(lambda: x.machine(x.face(spec.machine or "")))  # (it resolves)
+                else:
+                    [steps, late, after][b.pick(3)].append(lambda: _big_face(b, x, spec.machine or "", x.machine))
             for step in b.shuffled(steps) + late:
                 step()
+            if spec.machine in ("inner", "outer"):
+                # a board across the middle is refused here, before its operations, however machine() was given
+                x.face(spec.machine)
             if spec.ops:
                 x.box()
                 for j, op in enumerate(spec.ops):
                     _make_op(b, f"{i}.{j}", op)
+            for step in after:
+                step()
         except LangError as e:
             _refuse(b, i, e)
 
@@ -1099,16 +1129,18 @@ def _grain(b: Built, x: Board, extent: str) -> None:
         b.pick(4)]()
 
 
-def _show(b: Built, x: Board, name: str) -> None:
+def _big_face(b: Built, x: Board, name: str, give: Callable[[Any], object]) -> None:
+    """`show()` or `machine()` (`give`) given a big face, named one of the
+    ways they take that leave the placement open: inner or outer, the
+    board's own face, a direction, its scope's side, the module's side."""
     if name in ("inner", "outer"):
-        x.show("inner" if name == "inner" else "outer")
+        give("inner" if name == "inner" else "outer")
         return
     s = _scope(x).side(name)
     m = b.module
     assert m is not None
     module_side = m.side(m.frame.name_of(s.outward))         # (an enclosing box's side, named its own way)
-    [lambda: x.show(x.face(name)), lambda: x.show(s.outward), lambda: x.show(s), lambda: x.show(module_side)][
-        b.pick(4)]()
+    [lambda: give(x.face(name)), lambda: give(s.outward), lambda: give(s), lambda: give(module_side)][b.pick(4)]()
 
 
 # -- operations ---------------------------------------------------------------------------------
@@ -1453,6 +1485,9 @@ def _promises(b: Built) -> list[str]:
     for i, x in enumerate(b.boards):
         if x is not None:
             problems += _board_promises(b, i, x)
+    for i, reason in b.reasons.items():
+        if "machine():" in reason:
+            problems.append(f"board {i} was refused machine() of a big face: {reason}")
     for key, index, where, (depth, thru) in b.meant:
         made = b.made.get(key)
         x = b.boards[_spec_of(b.case, key).board]
@@ -1505,6 +1540,11 @@ def _board_promises(b: Built, i: int, x: Board) -> list[str]:
             if x.show_face.name != want:
                 problems.append(f"{x.path} lies across its scope's middle and shows its {x.show_face.name} face, "
                                 f"not its {want}")
+    if spec.machine is not None:
+        want_face = x.face(spec.machine)
+        if x.machine_face.direction != want_face.direction:
+            problems.append(f"{x.path} is machined from its {x.machine_face.name} face, machine() names "
+                            f"{spec.machine} ({want_face.name})")
     return problems
 
 

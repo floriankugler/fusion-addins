@@ -60,8 +60,10 @@ python -m lang.nest out/van/layout.json --bed 2000x1000 --sheet 2470x1240 \
   refused; machining in two setups is open].
 - Per material, as the layout labels it (`birch 15`).
 - A part lies on its blank with its machining face up (`machine` in the
-  layout), so the nest sees its outline from that face: as it is where
-  u × v points out of that face, else mirrored. Never flipped [decided].
+  layout: what `machine()` names, else the face with more operations, see
+  `design/api.md`), so the nest sees its outline from that face: as it is
+  where u × v points out of that face, else mirrored. Never flipped
+  [decided].
 - Its machine outline is the outline less its through pockets and through
   holes. An opening stays open for other parts where the smallest part of
   the material could go in (its inside, the spacing in from its edge, has
