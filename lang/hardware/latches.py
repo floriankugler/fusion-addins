@@ -2,7 +2,7 @@
 one-touch latch) as hardware, as the door_latch_native add-in places them.
 
 A latch holds a door or a drawer face shut against a carcass board beside
-one of its edges: `cab.mount(DoorLatch("Pull Lock 44"), door=door,
+one of its edges: `cab.mount(latch("Pull Lock 44"), door=door,
 carcass=top)`. Its body sits on the door's inner face, the big face toward
 the carcass board, its strike (the LL-66's counter plate) on the carcass
 face, the carcass board's big face toward the door's middle, or the face
@@ -233,7 +233,7 @@ class DoorLatch:
 
     def __init__(self, model: LatchModel, *, count: int = 1, end: float = data.END_OFFSET,
                  pilot: tuple[float, float] = (data.PREDRILL_DIAMETER, data.PREDRILL_DEPTH)):
-        self.model: LatchModel = one_of(model, LatchModel, "DoorLatch()")
+        self.model: LatchModel = one_of(model, LatchModel, "latch()")
         self.pattern = data.LATCHES[model]
         make_spacing(model, count, None)
         if count > 1 and end <= 0:
@@ -393,3 +393,10 @@ class DoorLatch:
         bodies = [HardwareBodyLayout(name=f"latch_{i}", boxes=[where.world_box(s, b) for b in boxes])
                   for i, s in enumerate(where.stations, 1)]
         scope.place_hardware(scope.unique_hardware_name(f"{where.door.name}_latches"), bodies)
+
+
+def latch(model: LatchModel, *, count: int = 1, end: float = data.END_OFFSET,
+          pilot: tuple[float, float] = (data.PREDRILL_DIAMETER, data.PREDRILL_DEPTH)) -> DoorLatch:
+    """A door latch, `latch("Pull Lock 44", count=2)`: see `DoorLatch`, the
+    type it returns."""
+    return DoorLatch(model, count=count, end=end, pilot=pilot)

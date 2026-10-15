@@ -42,7 +42,7 @@ mdf = sheet_material("mdf", t=16, grain=False)
 
 def panel(name: str, length: float, width: float, mat: SheetMaterial = ply15) -> Board:
     """A board of length x width lying flat, in a module of its own."""
-    with module(name, Box.from_size(depth=length, width=width, height=mat.t)) as m:
+    with module(name, Box.from_size(depth=length, width=width, height=mat.thickness)) as m:
         b = board("panel", mat).on(m.bottom)
     return b
 
@@ -195,7 +195,7 @@ def test_a_part_is_seen_from_its_machining_face_and_maps_onto_it(on: str, machin
         p = [0.0, 0.0, 0.0]
         p["xyz".index(u)], p["xyz".index(v)], p["xyz".index(t_axis)] = pu, pv, face_t
         x, y, z = apply(item.frame.matrix(), (p[0], p[1], p[2]))
-        assert math.isclose(z, ply15.t, abs_tol=1e-9)
+        assert math.isclose(z, ply15.thickness, abs_tol=1e-9)
         points.append((x, y))
     assert Polygon(points).symmetric_difference(item.shape).area < 1e-6
 

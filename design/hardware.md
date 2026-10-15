@@ -9,7 +9,13 @@ brackets. Part of the modeling language's design; the overview is
 - Hardware carries its own rules. A drawer slide determines the drawer box
   width, length, position and floor recess, so those numbers never appear
   in cabinet code. [decided]
-- A hardware object holds the add-in's settings and is mounted with
+- A hardware object holds the add-in's settings. A build file makes it
+  with a lowercase factory, as it makes parts with `board()`:
+  `drawer_slide()`, `hinge()`, `hatch_hinge()`, `ball_catch()`, `latch()`,
+  `sliding_bracket()`, each taking its class's parameters and returning its
+  class (`DrawerSlide`, `ConcealedHinge`, `HatchHinge`, `BallCatch`,
+  `DoorLatch`, `SlidingBracket`), which stays exported for annotations
+  [decided by Florian, 2026-10-15, syntax.md item 9]. It is mounted with
   `scope.mount(hardware, ...)`, typed by the hardware's own `mount(self,
   scope, /, *, ...)` (`Mountable`, a ParamSpec), so the type checker checks
   the keywords and core knows nothing about hardware types.
@@ -40,7 +46,7 @@ brackets. Part of the modeling language's design; the overview is
 
 ## Drawer slides
 
-`lang/hardware/slides.py`: `DrawerSlide(model, nl)`, the model by name
+`lang/hardware/slides.py`: `drawer_slide(model, nl)`, the model by name
 (`"Dynapro 40"`, `"Dynapro 50/70"`, `"Movento 760H"`, `"Movento 766H"`,
 every nominal length) or a `lib.drawer_slides` model for one of its own.
 
@@ -83,7 +89,9 @@ every nominal length) or a `lib.drawer_slides` model for one of its own.
   add-in uses, measured from the runner's front, into each side's face
   toward the bay's middle (a partition between two bays takes a drawer on
   either face), holes `slide_<drawer>_a`...; a drawer runs on one pair, a
-  second mount is an error.
+  second mount is an error. `sides=` (here and in `machine_box()`) takes
+  any sequence of the two, a list or a tuple, counted when the build runs
+  [decided by Florian, 2026-10-15, syntax.md item 12].
 - The runner pair is placed as boxes [decided], one body per runner, named
   by the drawer's own left and right. Five boxes per runner (`RunnerShape`):
   the cabinet rail's flange against the carcass side and its base with the
@@ -110,8 +118,8 @@ every nominal length) or a `lib.drawer_slides` model for one of its own.
 
 ## Concealed hinges
 
-`lang/hardware/hinges.py`: `ConcealedHinge(model, count=2, end=60,
-pilot=(3.175, 3))` with the models of `lib/concealed_hinges.py` (Blum CLIP
+`lang/hardware/hinges.py`: `hinge(model, count=2, end=60, pilot=(3.175,
+3))` with the models of `lib/concealed_hinges.py` (Blum CLIP
 top 110 for thin doors, +0 and +3).
 
 - `cab.mount(hinge, door=door, carcass=left)` (`carcass=` a board, or the
@@ -138,7 +146,7 @@ top 110 for thin doors, +0 and +3).
 
 ## Hatch hinges
 
-`lang/hardware/hatch_hinges.py`: `HatchHinge("Free space 1.11",
+`lang/hardware/hatch_hinges.py`: `hatch_hinge("Free space 1.11",
 opening=107, carcass_depth=12, pilot=(2, 4))` with the specs of
 `lib/hatch_hinges.py` (or a `lib.hatch_hinges` `HingeSpec`, which takes
 more), placed as `<hatch>_hinges`, holes `hinge_<hatch>_a`... and
@@ -185,7 +193,7 @@ inspection hatch in its opening, as ball_catch drills them.
   extra one of an odd count on the named edge; on each the outer ones sit
   `end=` (40) from the ends of its straight part, the arc tangent points.
   They are numbered along each edge as the other hardware is
-  (`common.numbering`) [decided]. `BallCatch(at=[...])` takes points
+  (`common.numbering`) [decided]. `ball_catch(at=[...])` takes points
   instead.
 - Checked as in the add-in: the hatch under every ball, the slot within
   range, 14 mm to the end of a straight edge and 28 between catches,
@@ -199,7 +207,7 @@ inspection hatch in its opening, as ball_catch drills them.
 
 ## Door latches
 
-`lang/hardware/latches.py`: `DoorLatch(model, count=1, end=100,
+`lang/hardware/latches.py`: `latch(model, count=1, end=100,
 pilot=(3.175, 3))`, placed as `<door>_latches`, with door_latch_native's
 latches `"Everlock"`, `"Pull Lock 44"` and `"LL-66"` (Sugatsune),
 `cab.mount(latch, door=door, carcass=top)`.
@@ -242,7 +250,7 @@ latches `"Everlock"`, `"Pull Lock 44"` and `"LL-66"` (Sugatsune),
 `lang/hardware/sliding_brackets.py`, data in `lib/sliding_brackets.py`; no
 add-in yet. Häfele Pacofix, the same parts as Keku AS (Häfele: they "click
 with all Keku plastic fittings"), holding a removable panel on frame boards
-standing square to it: `cab.mount(SlidingBracket(), panel=cover,
+standing square to it: `cab.mount(sliding_bracket(), panel=cover,
 frame=[left, right])`, like the hinges.
 
 - The frame part goes on each frame board's inner face (toward the panel's

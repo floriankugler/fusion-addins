@@ -7,7 +7,7 @@ manufacturer's drilling template is pushed up against the top), with the
 hatch modelled closed, its inner face against the carcass front or up to
 2 mm in front of it (`lib.hatch_hinges.MAX_HATCH_GAP`).
 
-`HatchHinge("Free space 1.11")` takes the model by name, or a
+`hatch_hinge("Free space 1.11")` takes the model by name, or a
 `lib.hatch_hinges.HingeSpec` for one of your own. Mounted on the cabinet,
 `cab.mount(hinge, hatch=hatch, sides=(left, right), top=top)` drills what
 the hatch_hinge add-in drills:
@@ -165,8 +165,8 @@ class HatchHinge:
     def __init__(self, model: HatchHingeModel | data.HingeSpec, *, opening: Opening = 107,
                  carcass_depth: float = data.CARCASS_HOLE_DEPTH,
                  pilot: tuple[float, float] = (data.PILOT_DIAMETER, data.PILOT_DEPTH)):
-        spec = HATCH_HINGE_MODELS[one_of(model, HatchHingeModel, "HatchHinge()")] if isinstance(model, str) else model
-        one_of(opening, Opening, "HatchHinge(opening=)")
+        spec = HATCH_HINGE_MODELS[one_of(model, HatchHingeModel, "hatch_hinge()")] if isinstance(model, str) else model
+        one_of(opening, Opening, "hatch_hinge(opening=)")
         if opening not in (spec.opening, spec.limited_opening):
             raise LangError(f"{spec.name} opens to {spec.opening} degrees, or {spec.limited_opening} with the "
                             f"limiter; not {opening}.")
@@ -399,6 +399,14 @@ class HatchHinge:
             boxes = [world_box(starts, box) for box in self.hinge_boxes(h.gap).values()]
             bodies.append(HardwareBodyLayout(name=h.which, boxes=boxes))
         scope.place_hardware(scope.unique_hardware_name(f"{hatch.name}_hinges"), bodies)
+
+
+def hatch_hinge(model: HatchHingeModel | data.HingeSpec, *, opening: Opening = 107,
+                carcass_depth: float = data.CARCASS_HOLE_DEPTH,
+                pilot: tuple[float, float] = (data.PILOT_DIAMETER, data.PILOT_DEPTH)) -> HatchHinge:
+    """A lift-up hatch hinge, `hatch_hinge("Free space 1.11", opening=90)`:
+    see `HatchHinge`, the type it returns."""
+    return HatchHinge(model, opening=opening, carcass_depth=carcass_depth, pilot=pilot)
 
 
 _AXES: tuple[Axis, Axis, Axis] = ("x", "y", "z")

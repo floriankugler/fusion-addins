@@ -75,7 +75,7 @@ def drawer(name: str, bay: Box, panel: Box, slide: DrawerSlide) -> Scope:
     on every side. The slide sizes the box behind the face."""
     with scope(name, bay) as d:
         face = board("face", ply15).on(bay.front).between(panel).inset(GAP / 2)
-        box = slide.drawer_box(bay, front=face.back, side_thickness=ply12.t, height=bay.height - 30)
+        box = slide.drawer_box(bay, front=face.back, side_thickness=ply12.thickness, height=bay.height - 30)
 
         l = board("left", ply12).on(box.left).between(box)
         r = board("right", ply12).on(box.right).between(box)
@@ -104,5 +104,5 @@ if __name__ == "__build__":   # run as the build file, not imported
     # box is 500 wide (across the vehicle) and 600 deep (along it); inside the
     # module the cabinet is 600 wide and 500 deep.
     box = Box.from_size(width=500, depth=600, height=720)
-    slide = DrawerSlide("Dynapro 40", nl=450)
+    slide = drawer_slide("Dynapro 40", nl=450)
     drawer_cabinet("drawercab", box, 3, slide, front=box.right, bottom_drawer=230)

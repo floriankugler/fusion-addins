@@ -16,7 +16,10 @@ of the modeling language's design; the overview is `DESIGN.md`. Code:
   ```
 
   A sheet material is bought by thickness, so a board's thickness comes
-  from it; `size=` is the sheet `fits_sheet` checks against. A slat
+  from it: `ply15.thickness`, as `board.thickness` (`t=` is only the
+  constructor's keyword, as it is `lip()`'s argument) [decided by Florian,
+  2026-10-15, syntax.md item 11]; `size=` is the sheet `fits_sheet` checks
+  against. A slat
   material is only a species [decided]: solid wood is ripped to whatever a
   part needs, so a slat's section is the slat's own and a lip's thickness
   the lip's, as a board's shape is the board's. Solid wood always has

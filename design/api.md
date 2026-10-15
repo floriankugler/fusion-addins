@@ -30,7 +30,12 @@ objects are named. Part of the modeling language's design; the overview is
 Constructors carry identity, modifiers carry everything else, in the style
 of SwiftUI and jQuery. `board("left", ply15)` names a part and its material;
 where it sits and what is done to it are method calls that return the part,
-so they chain or stand on their own lines. [decided]
+so they chain or stand on their own lines. [decided] Everything a build
+file makes comes from a lowercase factory: parts (`board()`, `slat()`),
+materials (`sheet_material()`), joints (`cabineo()`) and hardware
+(`drawer_slide()`, `hinge()`); the classes behind them (`Board`,
+`DrawerSlide`) are exported for annotations [decided by Florian,
+2026-10-15, syntax.md item 9].
 
 - **Placement and property modifiers are order-free and settable once.**
   `on`, `between`, `center`, `inset`, `grain`, `show`, `manual`, `nest`, and a

@@ -41,7 +41,7 @@ def _cover(bracket: SlidingBracket | None = None, *, gap: float = 0.0, cover: Sh
     """The test box with its cover; `frame` names the frame boards the
     cover is mounted on: "left", "right" or "both"."""
     with (cabinet("cab", BOX, front=BOX.front) if front else module("cab", BOX)) as cab:
-        behind = cab.front.into(cover.t + gap)
+        behind = cab.front.into(cover.thickness + gap)
         left = board("left", ply18).on(cab.left).between(behind)
         right = board("right", ply18).on(cab.right).between(behind)
         panel = board("cover", cover).on(cab.front)

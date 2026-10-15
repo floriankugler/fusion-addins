@@ -37,8 +37,9 @@ shapes measured from Häfele's CAD models (2026-10-12).
 from __future__ import annotations
 
 import string
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, cast
 
 from shapely.geometry import Point, Polygon
 from shapely.geometry import box as shapely_box
@@ -217,7 +218,7 @@ class DrawerSlide:
     def __init__(self, model: SlideModel | data.SlideModel, nl: int, *, holes: int = 4, odd: bool = True,
                  pilot: tuple[float, float] = PILOT, bottom_recess: float | None = None,
                  hook_hole: HookHole | None = None):
-        spec = SLIDE_MODELS[one_of(model, SlideModel, "DrawerSlide()")] if isinstance(model, str) else model
+        spec = SLIDE_MODELS[one_of(model, SlideModel, "drawer_slide()")] if isinstance(model, str) else model
         if nl not in spec.nominal_lengths:
             raise LangError(f"{spec.name} is not made in NL {nl}; lengths: {spec.nominal_lengths}.")
         #: The slide's drilling data (`lib.drawer_slides`).
@@ -295,7 +296,7 @@ class DrawerSlide:
         bottom = bay.bottom.into(self.side_lift)
         return box.with_sides(bottom=bottom, top=bay.bottom.into(self.side_lift + height))
 
-    def machine_box(self, sides: tuple[Board, Board], front: Board, back: Board, floor: Board) -> None:
+    def machine_box(self, sides: Sequence[Board], front: Board, back: Board, floor: Board) -> None:
         """`slide.machine_box(sides=(l, r), front=f, back=k, floor=floor)`:
         the drawer box's cut-outs and holes. At each end of the front board
         a cut-out for the coupling and at each end of the back board one
@@ -315,7 +316,9 @@ class DrawerSlide:
         of 8 mm or more cannot go into the back, so its groove join names
         the sides and the front only. The holes are named
         `hook_<side>_a`, `_b`, ... by the side's name in the drawer's frame,
-        as the cut-outs `hook_left`, `coupling_right`."""
+        as the cut-outs `hook_left`, `coupling_right`. `sides=` is any
+        sequence of the two, a list or a tuple."""
+        sides = _two_sides(self.name, "machine_box", sides, front.scope.path)
         try:
             machining = BOX_MACHINING[_family(self.model)]
         except KeyError:
@@ -404,12 +407,13 @@ class DrawerSlide:
         return RUNNER_SHAPES[family].boxes(self.nl, self.bottom_height, self.box_length,
                                            BOX_MACHINING[family].front_cutout)
 
-    def mount(self, scope: Scope, /, *, sides: tuple[Board, Board], front: PosLike) -> None:
+    def mount(self, scope: Scope, /, *, sides: Sequence[Board], front: PosLike) -> None:
         """`drawer.mount(slide, sides=(left, right), front=face.back)`:
         pre-drills the carcass sides for this drawer, a row 38 mm above
         the bay's bottom, from the runner's front at `front`, and places
-        the runners. Nothing is drilled unless every hole fits."""
-        holes, bodies = self._plan(scope, sides, front)
+        the runners. Nothing is drilled unless every hole fits. `sides=`
+        is any sequence of the two, a list or a tuple."""
+        holes, bodies = self._plan(scope, _two_sides(self.name, "mount", sides, scope.path), front)
         diameter, depth = self.pilot
         for hole in holes:
             hole.side.add_hole(hole.face, hole.point, diameter, depth, name=hole.side.unique_op_name(hole.name))
@@ -469,6 +473,28 @@ class DrawerSlide:
                                                                  for box in self.runner_boxes().values()]))
         bodies.sort(key=lambda b: b["name"])      # left, then right
         return holes, bodies
+
+
+def drawer_slide(model: SlideModel | data.SlideModel, nl: int, *, holes: int = 4, odd: bool = True,
+                 pilot: tuple[float, float] = PILOT, bottom_recess: float | None = None,
+                 hook_hole: HookHole | None = None) -> DrawerSlide:
+    """A drawer slide, `drawer_slide("Dynapro 40", nl=450)`: see
+    `DrawerSlide`, the type it returns."""
+    return DrawerSlide(model, nl, holes=holes, odd=odd, pilot=pilot, bottom_recess=bottom_recess,
+                       hook_hole=hook_hole)
+
+
+def _two_sides(name: str, call: str, sides: Sequence[Board], path: str) -> tuple[Board, Board]:
+    """`sides=`: any sequence of exactly two boards, a list or a tuple,
+    counted when the build runs [decided by Florian, 2026-10-15, syntax.md
+    item 12]."""
+    given = cast(object, sides)      # the type checker refuses one Board; a build runs without it
+    if not isinstance(given, Sequence):
+        raise LangError(f"{name}: {call}(sides=) takes the two sides as a list or tuple, not {given!r}.", path)
+    if len(sides) != 2:
+        raise LangError(f"{name}: {call}(sides=) takes two sides, one on either side of the drawer, not "
+                        f"{len(sides)}.", path)
+    return sides[0], sides[1]
 
 
 def _sorted(a: float, b: float) -> tuple[float, float]:

@@ -5,7 +5,7 @@ The panel and each frame board stand square to each other, the panel's
 back face against the frame board's front edge or a little in front of
 it, or the frame boards reaching past it with the panel set in between
 them.
-`cab.mount(SlidingBracket(), panel=cover, frame=[left, right])` hangs the
+`cab.mount(sliding_bracket(), panel=cover, frame=[left, right])` hangs the
 panel on each frame board named and drills both parts as
 `lib.sliding_brackets` has them: the frame part's two holes into the
 frame board's inner face (the big face toward the panel's middle, or the
@@ -194,7 +194,7 @@ class SlidingBracket:
     def __init__(self, model: BracketModel = "Pacofix PF-L-R", *, count: int | None = None,
                  end: float = data.DEFAULT_END_OFFSET, at: Sequence[PosLike] | None = None,
                  frame_hole: BracketHole = "pilot", panel_hole: BracketHole = "pilot"):
-        self.spec = data.BRACKETS[one_of(model, BracketModel, "SlidingBracket()")]
+        self.spec = data.BRACKETS[one_of(model, BracketModel, "sliding_bracket()")]
         #: The boxes the brackets are drawn as.
         self.shape = BRACKET_SHAPES[model]
         # end= has a default here, so it is checked below, not by make_spacing
@@ -434,6 +434,14 @@ class SlidingBracket:
         bodies = [HardwareBodyLayout(name=f"bracket_{n}", boxes=[edge.world_box(s, b) for b in boxes])
                   for edge in edges for n, s in enumerate(edge.stations, edge.first)]
         scope.place_hardware(scope.unique_hardware_name(f"{panel.name}_brackets"), bodies)
+
+
+def sliding_bracket(model: BracketModel = "Pacofix PF-L-R", *, count: int | None = None,
+                    end: float = data.DEFAULT_END_OFFSET, at: Sequence[PosLike] | None = None,
+                    frame_hole: BracketHole = "pilot", panel_hole: BracketHole = "pilot") -> SlidingBracket:
+    """Sliding brackets for a removable panel, `sliding_bracket("Pacofix
+    PF-L", frame_hole="euro")`: see `SlidingBracket`, the type it returns."""
+    return SlidingBracket(model, count=count, end=end, at=at, frame_hole=frame_hole, panel_hole=panel_hole)
 
 
 def _hole(label: str, what: str, choice: BracketHole) -> BracketHole:

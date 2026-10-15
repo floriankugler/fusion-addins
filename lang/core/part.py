@@ -164,7 +164,7 @@ class Board:
     def thickness(self) -> float:
         material = self.material
         assert isinstance(material, SheetMaterial)
-        return material.t
+        return material.thickness
 
     @property
     def limit_axes(self) -> tuple[Axis, ...]:
@@ -1179,12 +1179,12 @@ class Board:
              name: str | None = None, chamfer: float = 0.0) -> Self: ...
 
     @overload
-    def slot(self, width: float, /, *, at: Anchor | Edge | None = None, centres: float,
+    def slot(self, width: float, /, *, at: Anchor | Edge | None = None, centers: float,
              along: ExtentName | Side | Direction | Face, depth: DepthSpec,
              name: str | None = None, chamfer: float = 0.0) -> Self: ...
 
     def slot(self, width: float, start: Anchor | Edge | None = None, end: Anchor | Edge | None = None, /, *,
-             at: Anchor | Edge | None = None, centres: float | None = None,
+             at: Anchor | Edge | None = None, centers: float | None = None,
              along: ExtentName | Side | Direction | Face | None = None, depth: DepthSpec,
              name: str | None = None, chamfer: float = 0.0) -> Self:
         """A slot `width` wide into a big face, with round ends: a pocket
@@ -1192,9 +1192,9 @@ class Board:
 
         `side.slot(8, start, end, depth=...)` runs between two anchors on
         one face, the centres of its round ends, at any angle.
-        `side.slot(8, at=..., centres=52, along="height", depth=...)` is
+        `side.slot(8, at=..., centers=52, along="height", depth=...)` is
         centred on `at=` (the centre of the show face by default), as a hole
-        is, its end centres `centres` apart along `along` (an extent name,
+        is, its end centres `centers` apart along `along` (an extent name,
         or a side, direction or face, as `grain()` takes), so 60 long
         overall. Both forms measure between the end centres.
 
@@ -1204,8 +1204,8 @@ class Board:
         narrow face is a `pocket()` of one."""
         self._operable("slot()")
         two = start is not None or end is not None
-        if two and (at is not None or centres is not None or along is not None):
-            raise LangError("slot(): give either two anchors, slot(w, start, end, ...), or at=, centres= and "
+        if two and (at is not None or centers is not None or along is not None):
+            raise LangError("slot(): give either two anchors, slot(w, start, end, ...), or at=, centers= and "
                             "along=, not both.", self.path)
         if two:
             if start is None or end is None:
@@ -1217,8 +1217,8 @@ class Board:
             face = self._slot_face(a)
             p, q = a.resolve()[0], b.resolve()[0]
         else:
-            if centres is None or along is None:
-                raise LangError("slot(): give two anchors, slot(w, start, end, ...), or centres= and along=.",
+            if centers is None or along is None:
+                raise LangError("slot(): give two anchors, slot(w, start, end, ...), or centers= and along=.",
                                 self.path)
             anchor = self._anchor(at)
             face = self._slot_face(anchor)
@@ -1230,13 +1230,13 @@ class Board:
             if axis not in axes:
                 raise LangError(f"slot(): along={along!r} runs along {axis}, which does not lie in the {face.name} "
                                 "face.", self.path)
-            if centres < NARROWEST - 1e-9:
-                raise LangError(f"slot(): centres={centres:g}; the end centres are at least {NARROWEST:g} mm apart "
+            if centers < NARROWEST - 1e-9:
+                raise LangError(f"slot(): centers={centers:g}; the end centres are at least {NARROWEST:g} mm apart "
                                 "(a round hole is hole()).", self.path)
             c = anchor.resolve()[0]
             k = axes.index(axis)
-            p = (c[0] - centres / 2, c[1]) if k == 0 else (c[0], c[1] - centres / 2)
-            q = (c[0] + centres / 2, c[1]) if k == 0 else (c[0], c[1] + centres / 2)
+            p = (c[0] - centers / 2, c[1]) if k == 0 else (c[0], c[1] - centers / 2)
+            q = (c[0] + centers / 2, c[1]) if k == 0 else (c[0], c[1] + centers / 2)
         for k, label in ((0, "start"), (1, "end")):
             point = (p, q)[k]
             if self.outline.geometry.distance(Point(point)) > ON_FACE_TOLERANCE + 1e-9:

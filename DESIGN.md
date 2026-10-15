@@ -215,8 +215,8 @@ bed, the preview's nest view, nested documents in Fusion). Everything is
 fuzzed (AGENTS.md, "Fuzz Tests").
 
 Proposed, in `design/proposals/`. Where they depend on each other Florian
-wants them done in this order: bevels before mitres and
-before fitted ends on tilted boards; tilted boards before mitres at angles
+wants them done in this order: bevels before miters and
+before fitted ends on tilted boards; tilted boards before miters at angles
 other than 90 degrees; nesting before CAM. The spellings in the 2026-10-14
 proposals are working titles, settled in a detailed plan for each before it
 is implemented. [Florian]
@@ -227,7 +227,7 @@ is implemented. [Florian]
 | `chamfers-at-angles.md` | Corner and rim chamfers given by two lengths |
 | `bevels.md` | Narrow faces cut at an angle, as hand work |
 | `tilted-boards.md` | Boards turned about one axis of their scope |
-| `mitres.md` | Mitred corners as a joint |
+| `miters.md` | Mitered corners as a joint |
 | `standard-library.md` | `lang/std`: building blocks on the public API only |
 | `nesting.md` | What is left of nesting (built: `design/nesting.md`): pinning cut sheets, parts larger than the bed, groups, the cut list |
 | `cam.md` | A CAM plan from the layout, built by an add-in |

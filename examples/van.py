@@ -38,7 +38,7 @@ def floor(name: str, box: Box) -> Scope:
     arches. Where they cross they are half lapped. The panels take the
     outline as it is and meet over the middle batten across."""
     with module(name, box) as f:
-        top = floor_level - ply12.t
+        top = floor_level - ply12.thickness
         above_floor = floor_profile.gap(2)
         inside = floor_outline.gap(3)
         pitch = van.param("Lattenabstand")
@@ -52,7 +52,7 @@ def floor(name: str, box: Box) -> Scope:
         # lets it.
         # Each is notched from the top where it crosses a batten, which is
         # notched from below.
-        edge = 3 + ply15.t / 2
+        edge = 3 + ply15.thickness / 2
         lap = half_lap(toward=f.top)
         for i, y in enumerate(spread(f.left.into(edge), f.right.into(edge), count=6)):
             if i in (0, 5):
@@ -79,6 +79,6 @@ floor("floor", van.box("Boden"))
 # The cabinet stands in the master's kitchen box, against the driver's wall,
 # and opens toward the aisle.
 kitchen_box = van.box("Moebel.Kueche")
-slide = DrawerSlide("Dynapro 40", nl=450)
+slide = drawer_slide("Dynapro 40", nl=450)
 kitchen = drawer_cabinet("kitchen", kitchen_box, 3, slide, front=kitchen_box.right, bottom_drawer=230)
 kitchen.check(inside_box, inside(floor_outline))

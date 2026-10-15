@@ -3,8 +3,8 @@
 Status: added by Florian 2026-10-14, worked out by Claude the same day;
 nothing built. Only the points marked [Florian] are his. The spellings are
 working titles, to be settled in a detailed plan before implementing
-[Florian]. Comes before mitres at angles other than 90 degrees
-(`mitres.md`); fitted ends need bevels (`bevels.md`).
+[Florian]. Comes before miters at angles other than 90 degrees
+(`miters.md`); fitted ends need bevels (`bevels.md`).
 
 Boards that lie in no plane of their scope's frame, turned about one of its
 axes [Florian: usually about one axis]. Florian's case is an overhead cabinet

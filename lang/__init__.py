@@ -19,7 +19,8 @@ from .core.refs import Pos, Side, spread, through, to
 from .core.scope import Scope, cabinet, check, module, scope
 from .core.shapes import Shape, circle, polygon, rect
 from .hardware import (BallCatch, BracketModel, CatchModel, ConcealedHinge, DoorLatch, DrawerSlide, HatchHinge,
-                       HatchHingeModel, HingeModel, LatchModel, SlideModel, SlidingBracket)
+                       HatchHingeModel, HingeModel, LatchModel, SlideModel, SlidingBracket, ball_catch, drawer_slide,
+                       hatch_hinge, hinge, latch, sliding_bracket)
 from .joints import box_joint, cabineo, clamex, domino, groove, half_lap, screws, tenons
 from .master import Master, Plane, master
 
@@ -33,6 +34,7 @@ __all__ = [
     "no_interference", "fits_sheet", "inside", "inside_box", "LangError",
     "master", "Master", "Plane", "Contour", "half_lap", "domino", "clamex", "cabineo", "tenons", "screws",
     "box_joint", "groove",
+    "drawer_slide", "hinge", "hatch_hinge", "ball_catch", "latch", "sliding_bracket",
     "DrawerSlide", "SlideModel", "ConcealedHinge", "HingeModel", "HatchHinge", "HatchHingeModel",
     "BallCatch", "CatchModel", "DoorLatch", "LatchModel", "SlidingBracket", "BracketModel",
 ]

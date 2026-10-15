@@ -13,8 +13,9 @@ from dataclasses import dataclass
 @dataclass(frozen=True)
 class SheetMaterial:
     name: str
-    #: Thickness in mm.
-    t: float
+    #: Thickness in mm, as a board's `thickness` (`sheet_material(name, t=)`
+    #: sets it) [decided by Florian, 2026-10-15, syntax.md item 11].
+    thickness: float
     #: Whether the material has a grain direction that matters.
     grain: bool = True
     #: Sheet size in mm for the sheet-fit check, None if unknown.
@@ -22,7 +23,7 @@ class SheetMaterial:
 
     @property
     def label(self) -> str:
-        return f"{self.name} {self.t:g}"
+        return f"{self.name} {self.thickness:g}"
 
 
 @dataclass(frozen=True)

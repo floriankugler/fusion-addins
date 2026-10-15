@@ -1,5 +1,5 @@
 """Slots (`Board.slot`): pockets with round ends, given by the centres of
-their ends, as two anchors or as a centre with `centres=` and `along=`; and
+their ends, as two anchors or as a centre with `centers=` and `along=`; and
 the operation names a board keeps for itself."""
 import math
 from collections.abc import Callable
@@ -50,16 +50,16 @@ def test_a_slot_runs_between_the_centres_of_its_round_ends():
     assert panel.vent.floor == Pos("z", 10)
 
 
-def test_centres_and_along_give_a_slot_centred_on_at():
+def test_centers_and_along_give_a_slot_centred_on_at():
     m, panel = _panel()
     with m:
         top = panel.top
-        panel.slot(8, at=top.front(40).left(200), centres=200, along="width", depth=5, name="by_extent")
-        panel.slot(8, at=top.front(80).left(200), centres=200, along=m.left, depth=5, name="by_side")
-        panel.slot(8, at=top.front(120).left(200), centres=200, along=panel.right, depth=5, name="by_face")
-        panel.slot(8, at=top.front(160).left(200), centres=200, along=world_frame().direction("left"), depth=5,
+        panel.slot(8, at=top.front(40).left(200), centers=200, along="width", depth=5, name="by_extent")
+        panel.slot(8, at=top.front(80).left(200), centers=200, along=m.left, depth=5, name="by_side")
+        panel.slot(8, at=top.front(120).left(200), centers=200, along=panel.right, depth=5, name="by_face")
+        panel.slot(8, at=top.front(160).left(200), centers=200, along=world_frame().direction("left"), depth=5,
                    name="by_direction")
-        panel.slot(6, centres=20, along="depth", depth=3, name="centred")      # the show face's centre
+        panel.slot(6, centers=20, along="depth", depth=3, name="centred")      # the show face's centre
     assert _slot(panel, "by_extent").slot == SlotLine((40.0, 100.0), (40.0, 300.0), 8.0)
     for name, x in (("by_side", 80.0), ("by_face", 120.0), ("by_direction", 160.0)):
         assert _slot(panel, name).slot == SlotLine((x, 100.0), (x, 300.0), 8.0)
@@ -101,7 +101,7 @@ def test_rows_of_slots_with_spread():
     with m:
         top = panel.top
         for x in spread(panel.front + 40, panel.back - 40, pitch=20):
-            panel.slot(6, at=top.front(x), centres=200, along="width", depth=through)
+            panel.slot(6, at=top.front(x), centers=200, along="width", depth=through)
     slots = [op.slot for op in panel.ops if isinstance(op, Pocket) and op.slot is not None]
     assert [s.start[0] for s in slots] == [40 + 20 * i for i in range(12)]
     assert all((s.start[1], s.end[1]) == (100, 300) for s in slots)
@@ -139,7 +139,7 @@ def test_a_slot_runs_along_the_extent_its_cabinet_names():
     box = Box.from_size(width=600, depth=500, height=700)
     with cabinet("cab", box, front=box.right) as cab:
         back = board("back", ply15).on(cab.back)
-        back.slot(6, at=back.inner.center, centres=100, along="width", depth=through, name="vent")
+        back.slot(6, at=back.inner.center, centers=100, along="width", depth=through, name="vent")
     line = _slot(back, "vent").slot
     assert line is not None
     k = back.face_axes(back.inner).index(cab.frame.axis_of_extent("width"))
@@ -171,20 +171,20 @@ def test_what_a_slot_refuses_leaves_the_board_as_it_was():
         cases: list[tuple[Callable[[], object], str]] = [
             (lambda: panel.slot(8, a, b, at=a, depth=5), "either two anchors"),    # type: ignore[call-overload]
             (lambda: panel.slot(8, a, depth=5), "give both anchors"),               # type: ignore[call-overload]
-            (lambda: panel.slot(8, depth=5), "or centres= and along="),             # type: ignore[call-overload]
-            (lambda: panel.slot(8, at=a, centres=20, depth=5), "or centres= and along="),  # type: ignore[call-overload]
+            (lambda: panel.slot(8, depth=5), "or centers= and along="),             # type: ignore[call-overload]
+            (lambda: panel.slot(8, at=a, centers=20, depth=5), "or centers= and along="),  # type: ignore[call-overload]
             (lambda: panel.slot(8, a, panel.bottom.front(80), depth=5), "different faces, top and bottom"),
             (lambda: panel.slot(8, a, other.top.front(40), depth=5), "names a point on m.other"),
             (lambda: panel.slot(8, panel.front.left(50), panel.front.left(100), depth=5), "narrow face"),
-            (lambda: panel.slot(8, at=panel.front.left(50), centres=20, along="width", depth=5), "narrow face"),
-            (lambda: panel.slot(8, at=top.center, centres=20, along="height", depth=5), "does not lie in"),
-            (lambda: panel.slot(8, at=top.center, centres=20, along="heigth", depth=5),   # type: ignore[arg-type]
+            (lambda: panel.slot(8, at=panel.front.left(50), centers=20, along="width", depth=5), "narrow face"),
+            (lambda: panel.slot(8, at=top.center, centers=20, along="height", depth=5), "does not lie in"),
+            (lambda: panel.slot(8, at=top.center, centers=20, along="heigth", depth=5),   # type: ignore[arg-type]
              "slot\\(along=\\)"),
             (lambda: panel.slot(0.005, a, b, depth=5), "at least 0.01 mm wide"),
             (lambda: panel.slot(0, a, b, depth=5), "at least 0.01 mm wide"),
             (lambda: panel.slot(-8, a, b, depth=5), "at least 0.01 mm wide"),
-            (lambda: panel.slot(8, at=top.center, centres=0.005, along="width", depth=5), "at least 0.01 mm apart"),
-            (lambda: panel.slot(8, at=top.center, centres=-20, along="width", depth=5), "at least 0.01 mm apart"),
+            (lambda: panel.slot(8, at=top.center, centers=0.005, along="width", depth=5), "at least 0.01 mm apart"),
+            (lambda: panel.slot(8, at=top.center, centers=-20, along="width", depth=5), "at least 0.01 mm apart"),
             (lambda: panel.slot(8, a, a, depth=5), "less than 0.01 mm"),
             (lambda: panel.slot(8, a, top.front(40).left(-10), depth=5), "its end centre is off the board"),
             (lambda: panel.slot(8, a, b, depth=20), "reaches past the opposite face"),

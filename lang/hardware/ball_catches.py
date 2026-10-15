@@ -31,7 +31,7 @@ hatch=hatch)` spaces `count` catches (4) over the straight edge that
 the larger half, the first and last catch on an edge sit `end` (40) from
 the ends of its straight part (where the rounded corners begin), the rest
 evenly between, and a single catch is centred (`lib.stations`). With
-`BallCatch(at=[...])` a catch goes to each point instead, moved square
+`ball_catch(at=[...])` a catch goes to each point instead, moved square
 onto the nearest straight edge of the opening. The straight edges and their ends come from
 the opening's shape: its lines, between the arcs `lang.emit.arcs` finds.
 
@@ -226,7 +226,7 @@ class BallCatch:
     def __init__(self, model: CatchModel = "GN 450", *, count: int | None = None,
                  end: float = data.DEFAULT_END_OFFSET, at: Sequence[Anchor] | None = None,
                  pilot: tuple[float, float] = (data.PILOT_DIAMETER, data.PILOT_DEPTH), gap: float | None = None):
-        self.spec = data.CATCHES[one_of(model, CatchModel, "BallCatch()")]
+        self.spec = data.CATCHES[one_of(model, CatchModel, "ball_catch()")]
         #: The boxes the catches are drawn as.
         self.shape = CATCH_SHAPES[model]
         if at is not None:
@@ -623,6 +623,15 @@ class BallCatch:
             lo[face.axis], hi[face.axis] = min(ends), max(ends)
             boxes.append({"min": [lo[a] for a in AXES], "max": [hi[a] for a in AXES]})
         return boxes
+
+
+def ball_catch(model: CatchModel = "GN 450", *, count: int | None = None,
+               end: float = data.DEFAULT_END_OFFSET, at: Sequence[Anchor] | None = None,
+               pilot: tuple[float, float] = (data.PILOT_DIAMETER, data.PILOT_DEPTH),
+               gap: float | None = None) -> BallCatch:
+    """Ball catches for an inspection hatch, `ball_catch(count=6)`: see
+    `BallCatch`, the type it returns."""
+    return BallCatch(model, count=count, end=end, at=at, pilot=pilot, gap=gap)
 
 
 def _joined_lines(curves: Sequence[Curve2]) -> list[tuple[Point2, Point2]]:

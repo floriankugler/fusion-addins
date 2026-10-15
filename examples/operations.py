@@ -27,8 +27,8 @@ with module("ops", Box.from_size(width=400, depth=300, height=100)) as m:
         panel.slot(8, top.front(60).left(120), top.front(140).left(120), depth=5, name="vent")
         panel.chamfer(panel.vent, 0.5)                              # a slot's rim, by name
         panel.slot(6, top.back(110).left(110), top.back(60).left(160), depth=through, name="angled", chamfer=0.5)
-        panel.slot(12, at=top.front(220).right(120), centres=40, along="depth", depth=4, name="mount_head")
-        panel.slot(6, at=top.front(220).right(120), centres=40, along="depth", depth=through, name="mount")
+        panel.slot(12, at=top.front(220).right(120), centers=40, along="depth", depth=4, name="mount_head")
+        panel.slot(6, at=top.front(220).right(120), centers=40, along="depth", depth=through, name="mount")
         panel.chamfer(top.outline, 2)                               # the show face's outer contour
         panel.chamfer(panel.back.bottom, 1)                         # an edge of the other big face
         panel.hole(d=8, depth=30, at=panel.front.right(50))         # into the front narrow face
