@@ -30,13 +30,14 @@ an outline in the two measures of its plane):
   to stay as they were), and written otherwise: placement modifiers,
   `between()`'s limits, boards and operations in another order where the
   order must not matter, boards resolved in another order, `side + n` for
-  `side.into(n)`, `on()` a side or a face moved without `toward=`, an
-  alias for a side, a board for its face, a mix of positions (`a + b - c`
-  among them) or a box's middle spelt another way, a box for its four
-  sides, an anchor measured from the opposite edge or given as a position,
-  its edges in the other order, a depth `to()` the other face for its
-  number, a row spread from its other end, an edge named from its other
-  face, a slot's `along=` as an extent, a side or a face.
+  `side.into(n)`, a side or a face moved there in two steps
+  (`face.gap(2 * n).into(n)`), `on()` a side or a face moved without
+  `toward=`, an alias for a side, a board for its face, a mix of positions
+  (`a + b - c` among them) or a box's middle spelt another way, a box for
+  its four sides, an anchor measured from the opposite edge or given as a
+  position, its edges in the other order, a depth `to()` the other face
+  for its number, a row spread from its other end, an edge named from its
+  other face, a slot's `along=` as an extent, a side or a face.
 
 A refusal must be one all three ways (the same boards and operations
 refused), and the preview must mesh every board as large in the other
@@ -951,13 +952,16 @@ def _position(b: Built, r: Ref) -> Any:
         sign = s.inward.sign
         if r.by == 0:
             return [s, s.position, s + 0, s.into(0)][b.pick(4)]
-        return [s.into(r.by), s + sign * r.by, s - (-sign * r.by), s.gap(-r.by)][b.pick(4)]
+        return [s.into(r.by), s + sign * r.by, s - (-sign * r.by), s.gap(-r.by), s.into(2 * r.by).gap(r.by),
+                s.gap(r.by).into(2 * r.by)][b.pick(6)]
     if r.kind == "face":
         f = _board(b, r.of).face(r.name)
         sign = f.direction.sign
         if r.by == 0:
             return [f, f.position, f + 0, f.gap(0)][b.pick(4)]
-        return [f.gap(r.by), f.into(-r.by), f + sign * r.by][b.pick(3)]
+        # (moved again, a face's side keeps the face's in and out [Florian, 2026-10-15])
+        return [f.gap(r.by), f.into(-r.by), f + sign * r.by, f.gap(2 * r.by).into(r.by),
+                f.into(r.by).gap(2 * r.by)][b.pick(5)]
     if r.kind == "op":
         name, edge = r.name.split(".")
         x = _board(b, r.of)
@@ -1071,8 +1075,8 @@ def _on(b: Built, x: Board, spec: BoardSpec) -> None:
         else:
             # (a side moved into or out of its box is a side: no toward= needed)
             [lambda: x.on(s + sign * r.by), lambda: x.on(s.into(r.by), toward=opposite),
-             lambda: x.on(s.into(r.by), toward=s.inward), lambda: x.on(s.into(r.by)), lambda: x.on(s.gap(-r.by))][
-                b.pick(5)]()
+             lambda: x.on(s.into(r.by), toward=s.inward), lambda: x.on(s.into(r.by)), lambda: x.on(s.gap(-r.by)),
+             lambda: x.on(s.into(2 * r.by).gap(r.by))][b.pick(6)]()
         return
     if r.kind == "face":
         f = _board(b, r.of).face(r.name)
@@ -1083,7 +1087,7 @@ def _on(b: Built, x: Board, spec: BoardSpec) -> None:
             # (a face moved by gap() or into() keeps its side: no toward= needed)
             [lambda: x.on(f.gap(r.by), toward=f.direction),
              lambda: x.on(f + f.direction.sign * r.by, toward=f.direction), lambda: x.on(f.gap(r.by)),
-             lambda: x.on(f.into(-r.by))][b.pick(4)]()
+             lambda: x.on(f.into(-r.by)), lambda: x.on(f.gap(2 * r.by).into(r.by))][b.pick(5)]()
         return
     raise AssertionError(r.kind)
 

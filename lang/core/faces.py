@@ -58,13 +58,15 @@ class Face(PositionArithmetic):
         it away from the part without `toward=`, as on the face itself,
         `on(back.inner.gap(15))`; anywhere else it is a position
         [decided by Florian, 2026-10-15: it was a bare position, which
-        needed toward=]."""
-        return Side(self.axis, self.value + self.direction.sign * n, inward=self.direction)
+        needed toward=]. Moved again it keeps the face's in and out:
+        `back.inner.gap(15).gap(5)` is 20 in front of the back,
+        `back.inner.gap(15).into(5)` 10 [decided by Florian, 2026-10-15]."""
+        return Side(self.axis, self.value + self.direction.sign * n, inward=self.direction, from_face=True)
 
     def into(self, n: float) -> Side:
         """The face's plane moved `n` into the part, behind the face; it
-        keeps the face's side, as `gap()` does."""
-        return Side(self.axis, self.value - self.direction.sign * n, inward=self.direction)
+        keeps the face's side and its in and out, as `gap()` does."""
+        return Side(self.axis, self.value - self.direction.sign * n, inward=self.direction, from_face=True)
 
     @property
     def is_big(self) -> bool:

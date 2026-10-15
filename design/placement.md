@@ -107,7 +107,10 @@ This only works for flat, parallel references.
   too, its direction away from the part, so `on(back.inner.gap(15))` puts
   the board 15 in front of the back without `toward=`; anywhere else it is a
   position as before [decided by Florian, 2026-10-15: they were bare
-  positions].
+  positions]. Moved again it keeps the face's in and out:
+  `back.inner.gap(15).gap(5)` is 20 in front of the back,
+  `back.inner.gap(15).into(5)` 10 [decided by Florian, 2026-10-15]; a box
+  side moved again still moves into and out of its box.
 - A part as a `between()` limit means its face toward the board;
   `part.into(n)` and `part.gap(n)` move it.
 - `spread()` gives positions along one axis (`pitch=` or `count=`, not

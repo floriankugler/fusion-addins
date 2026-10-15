@@ -16,7 +16,8 @@ with a position taken from it as in `a + b - c`.
 `Side` is a position with an inward direction, the face of a box; moved
 into or out of the box (`into`, `gap`) it is still one, and `+` and `-`
 move it along the world axis. A part's face moved by `gap()` or `into()`
-is one too, its inward direction the face's, away from the part. Anything
+is one too, its inward direction the face's, away from the part; moved
+again it keeps the face's in and out (`from_face`). Anything
 with a `position` attribute (a `Side`, a part's `Face`, a master's plane)
 is accepted where a position is expected; `as_pos` does the coercion, and
 `PositionArithmetic` gives such a class the algebra above.
@@ -24,7 +25,7 @@ is accepted where a position is expected; `as_pos` does the coercion, and
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Protocol, overload, runtime_checkable
 
 from . import directions
@@ -230,6 +231,11 @@ class Side:
     axis: Axis
     value: float
     inward: Direction
+    #: Made from a part's face (`Face.gap()`, `Face.into()`): moved again it
+    #: keeps the face's in and out, `into()` toward the part, against
+    #: `inward`, and `gap()` away from it, so `back.inner.gap(15).gap(5)` is
+    #: 20 in front of the back [decided by Florian, 2026-10-15].
+    from_face: bool = False
 
     def __post_init__(self) -> None:
         if self.inward.axis != self.axis:
@@ -243,16 +249,23 @@ class Side:
     def outward(self) -> Direction:
         return -self.inward
 
+    @property
+    def _into_sign(self) -> int:
+        """The sign on the axis of a move by `into()`."""
+        return -self.inward.sign if self.from_face else self.inward.sign
+
     def into(self, n: float) -> Side:
         """This side moved `n` into the box, its inward direction kept, so a
         board lies on it with its thickness inward, `on(cab.bottom.into(60))`
         [decided by Florian, 2026-10-14: it was a bare position, which
-        needed toward=]. `+` and `-` move it along the world axis instead."""
-        return Side(self.axis, self.value + self.inward.sign * n, self.inward)
+        needed toward=]; one made from a face moves into the face's part.
+        `+` and `-` move it along the world axis instead."""
+        return replace(self, value=self.value + self._into_sign * n)
 
     def gap(self, n: float) -> Side:
-        """This side moved `n` out of the box, its inward direction kept."""
-        return Side(self.axis, self.value - self.inward.sign * n, self.inward)
+        """This side moved `n` out of the box, its inward direction kept;
+        one made from a face moves away from the face's part."""
+        return replace(self, value=self.value - self._into_sign * n)
 
     @overload
     def __add__(self, other: Number) -> Side: ...
@@ -263,7 +276,7 @@ class Side:
 
     def __add__(self, other: Number | Pos | Affine | HasPosition) -> Side | Pos | Affine:
         if isinstance(other, (int, float)):
-            return Side(self.axis, self.value + other, self.inward)
+            return replace(self, value=self.value + other)
         return self.position + other
 
     @overload
@@ -275,11 +288,11 @@ class Side:
 
     def __sub__(self, other: Number | Pos | Affine | HasPosition) -> Side | Pos | Affine | float:
         if isinstance(other, (int, float)):
-            return Side(self.axis, self.value - other, self.inward)
+            return replace(self, value=self.value - other)
         return self.position - other
 
     def __radd__(self, other: Number) -> Side:
-        return Side(self.axis, self.value + other, self.inward)
+        return replace(self, value=self.value + other)
 
     def __mul__(self, other: Number) -> Affine:
         return self.position * other
@@ -291,7 +304,8 @@ class Side:
         return self.position / other
 
     def __repr__(self) -> str:
-        return f"Side({self.axis}, {self.value:g}, inward={self.inward.name})"
+        made = ", from a face" if self.from_face else ""
+        return f"Side({self.axis}, {self.value:g}, inward={self.inward.name}{made})"
 
 
 def spread(start: PosLike, end: PosLike, pitch: float | None = None, count: int | None = None) -> list[Pos]:

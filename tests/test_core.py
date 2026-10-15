@@ -209,6 +209,70 @@ def test_a_face_moved_by_gap_or_into_keeps_its_side():
         assert (rail.bottom.value, rail.top.value) == (680, 695)
 
 
+def test_a_face_moved_again_keeps_the_face_s_in_and_out():
+    """Decided by Florian, 2026-10-15: a side made from a face keeps the
+    face's in and out when it is moved again, so `back.inner.gap(15).gap(5)`
+    is 20 in front of the back and `back.inner.gap(15).into(5)` 10 (moved
+    as a box side, they went the other way: `into()` away from the part).
+    Its inward direction, which `on()` and the direction arguments read,
+    stays the face's. From big and narrow faces, in a module and in
+    cabinets facing each side of the van, measured in the scope's own
+    terms."""
+    van = Box.from_size(width=600, depth=500, height=700)
+    for facing in (None, "front", "right", "back", "left"):
+        name = f"cab_{facing}"
+        with (module(name, van) if facing is None else cabinet(name, van, front=van.side(facing))) as cab:
+            left = board("left", ply15).on(cab.left)
+            bottom = board("bottom", ply15).on(cab.bottom).between(left, cab.right)
+            back = board("back", ply9).on(cab.back).between(left, cab.right, bottom, cab.top)
+            panel = board("panel", ply15).on(back.inner.gap(15).gap(5))
+            inset = board("inset", ply15).on(back.inner.gap(15).into(18))
+        front, right = cab.frame.direction("front"), cab.frame.direction("right")
+        f, r = front.sign, right.sign
+        inner = back.front.value
+        # a big face: out and out again, out and back, in and in again, in and out
+        assert back.inner.gap(15).gap(5).value == inner + 20 * f
+        assert back.inner.gap(15).into(5).value == inner + 10 * f
+        assert back.inner.into(3).into(2).value == inner - 5 * f
+        assert back.inner.into(3).gap(5).value == inner + 2 * f
+        assert left.inner.gap(100).into(30).value == left.right.value + 70 * r
+        # moved along the world axis in between, it still moves as the face does
+        assert (back.inner.gap(15) + 7 * f).gap(5).value == inner + 27 * f
+        assert (7 * f + back.inner.gap(15)).into(5).value == inner + 17 * f
+        assert (back.inner.gap(15) - 7 * f).gap(5).value == inner + 13 * f
+        # narrow faces
+        assert bottom.front.gap(10).gap(5).value == bottom.front.value + 15 * f
+        assert bottom.front.gap(10).into(4).value == bottom.front.value + 6 * f
+        assert left.front.into(30).into(10).value == left.front.value - 40 * f
+        assert left.top.into(20).into(5).value == 675 and left.top.into(20).gap(25).value == 705
+        # its direction stays the face's, away from the part
+        moved = back.inner.gap(15).gap(5).into(1)
+        assert moved.from_face and moved.inward == front and moved.outward == -front
+        assert (panel.back.value, panel.front.value) == (inner + 20 * f, inner + 35 * f)
+        assert (inset.back.value, inset.front.value) == (inner - 3 * f, inner + 12 * f)
+
+
+def test_box_sides_moved_again_move_as_before():
+    """A box side moved again moves into and out of its box as it did
+    before sides made from faces kept the face's in and out [Florian,
+    2026-10-15]: `cab.bottom.into(60).into(10)` is 70 inside."""
+    van = Box.from_size(width=600, depth=500, height=700)
+    for facing in (None, "right"):
+        name = f"cab_{facing}"
+        with (module(name, van) if facing is None else cabinet(name, van, front=van.side(facing))) as cab:
+            raised = board("raised", ply15).on(cab.bottom.into(60).into(10))
+            lid = board("lid", ply15).on(cab.top.gap(5).gap(5))
+        r = cab.frame.direction("right").sign
+        assert not cab.bottom.into(60).from_face
+        assert cab.bottom.into(60).into(10) == cab.bottom.into(70) == Side("z", 70, cab.bottom.inward)
+        assert cab.bottom.into(60).gap(10) == cab.bottom.into(50)
+        assert cab.top.gap(5).gap(5).value == 710 and cab.top.gap(5).into(15).value == 690
+        assert cab.left.into(100).into(20).value == cab.left.value + 120 * r
+        assert (cab.left.into(100) + 1).gap(20).value == cab.left.value + 80 * r + 1
+        assert (raised.box().lo["z"], raised.box().hi["z"]) == (70, 85)
+        assert (lid.box().lo["z"], lid.box().hi["z"]) == (695, 710)
+
+
 def test_a_slat_lies_on_and_edge_on_moved_faces_away_from_their_parts():
     """Decided by Florian, 2026-10-15 (`Face.gap()`, `Face.into()` keep the
     face's side): `edge_on()` takes a moved face as `on()` does."""
