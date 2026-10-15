@@ -36,6 +36,38 @@ Comes before CAM (`cam.md`).
 - Two blanks side by side that the bed takes together are not cut apart
   [decided: spotted by Florian in a result].
 
+## Decided while building, for Florian to review
+
+Claude's decisions of 2026-10-14/15, built and marked [proposed] in
+`design/nesting.md`:
+
+- The workshop file is TOML (`examples/workshop.toml`): `bed`, `spacing`,
+  `margin`, `kerf`, `max_cuts`, `keep_across`, `keep_area`, `seconds`,
+  `[[sheet]]` (size along the grain first, `count` or as many as needed,
+  `material` or every material), `[[offcut]]` (material and size). The
+  command line's `--sheet` and `--offcut` replace the file's of their kind;
+  an offcut on the command line names its material (`"birch 15:1250x600"`).
+  No default bed or sheets.
+- Several build files can be nested together, their paths after the file's
+  name (`van:floor.batten0`).
+- Blanks are priced by the area they take of the sheet that suits them,
+  a strip beside them too narrow for another blank counted with them
+  (by their own area, bed-sized blanks left only waste beside them).
+- Two blanks side by side are joined (your rule) only where two margins
+  and the kerf make up the spacing.
+- The saw plan is in tenths of a millimetre, the kerf rounded up to one; a
+  sliver narrower than the kerf is trimmed off where a piece would
+  otherwise not fit the bed.
+- The nest takes 0.6 s a part, at least 5 s and at most `seconds` (40), the
+  solver's time-bound search; the fixed search is an option
+  (`--mode deterministic`).
+- A sheet over `max_cuts` is reported, not refused.
+- Manual parts are never nested; the van's long battens and floor panels
+  say `nest(False)`.
+- The nest file lists the leftovers but nothing writes them back into the
+  workshop file yet (with pinning, below).
+- Compile Layout takes a `nest.json` as well as a layout (no new button).
+
 ## Still open
 
 - **Cut sheets are pinned.** A van is built over weeks, so a sheet marked as
