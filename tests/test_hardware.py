@@ -28,7 +28,7 @@ def test_slide_dictates_the_drawer_box():
         right = board("right", ply15).on(cab.right)
         bay = cab.interior
         face = board("face", ply15).on(bay.front)
-        box = slide.drawer_box(bay, front=face.back, side_thickness=ply12.t, height=150)
+        box = slide.drawer_box(bay, front=face.back, side_thickness=ply12.thickness, height=150)
     # the drawer sides' inner faces sit 21 mm from the carcass sides
     assert box.left.value == left.inner.value + (INNER_FACE_OFFSET - 12) * left.inner.direction.sign
     assert box.right.value == right.inner.value + (INNER_FACE_OFFSET - 12) * right.inner.direction.sign

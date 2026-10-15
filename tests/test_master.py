@@ -92,7 +92,7 @@ def test_layout_records_the_snapshot(van: Master):
 
 def _battens(van: Master, *xs: float) -> list[Board]:
     outline, profile = van.contour("Bodenumriss"), van.contour("Bodenprofil")
-    top = van.plane("Bodenniveau") - ply12.t
+    top = van.plane("Bodenniveau") - ply12.thickness
     with module("floor", van.box("Boden")):
         return [board(f"batten{i}", ply15).center(Pos("x", x)).between(top, profile.gap(2), outline)
                 for i, x in enumerate(xs)]

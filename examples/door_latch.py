@@ -33,7 +33,7 @@ def latched_cabinet(name: str, box: Box, slide: DrawerSlide, model: LatchModel =
 
         # the rest, above the shelf, is the door's compartment
         lower_bay, rail_space, upper_bay, shelf_space, _ = cab.interior.split(
-            "height", [drawer_height, ply15.t, drawer_height, ply15.t])
+            "height", [drawer_height, ply15.thickness, drawer_height, ply15.thickness])
         # the rail at the front, deep enough for the strike behind the face
         rail = board("rail", ply15).on(rail_space.bottom).between(left, right, cab.front, cab.front.into(80))
         shelf = board("shelf", ply15).on(shelf_space.bottom).between(left, right, back)
@@ -60,7 +60,7 @@ def drawer(name: str, bay: Box, slide: DrawerSlide, latch: DoorLatch, catch: Boa
     with scope(name, bay) as d:
         face = board("face", ply15).on(bay.front).inset(REVEAL)
         box_top = catch.bottom.gap(latch.reach)
-        box = slide.drawer_box(bay, front=face.back, side_thickness=ply12.t,
+        box = slide.drawer_box(bay, front=face.back, side_thickness=ply12.thickness,
                                height=(box_top - bay.bottom) - slide.side_lift)
         l = board("left", ply12).on(box.left).between(box)
         r = board("right", ply12).on(box.right).between(box)

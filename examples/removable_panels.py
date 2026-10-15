@@ -24,7 +24,7 @@ def seat_base(name: str, box: Box, *, front: Side) -> Scope:
     removable cover over the front and a removable panel set in at the
     back."""
     with cabinet(name, box, front=front) as cab:
-        behind = cab.front.into(ply12.t)          # the sides' front edges, against the cover
+        behind = cab.front.into(ply12.thickness)          # the sides' front edges, against the cover
         left = board("left", ply18).on(cab.left).between(behind)
         right = board("right", ply18).on(cab.right).between(behind)
         top = board("top", ply18).on(cab.top).between(left, right, behind)

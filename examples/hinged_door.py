@@ -20,7 +20,7 @@ def hinged_cabinet(name: str, box: Box, hinge: ConcealedHinge, *, front: Side) -
     """A cabinet in its own frame with one overlay door hinged on its left
     side, the hinges `hinge`. `front=` places it (see `cabinet`)."""
     with cabinet(name, box, front=front) as cab:
-        behind = cab.front.into(ply12.t)          # the carcass stands behind the door
+        behind = cab.front.into(ply12.thickness)          # the carcass stands behind the door
         left = board("left", ply15).on(cab.left).between(behind)
         right = board("right", ply15).on(cab.right).between(behind)
         bottom = board("bottom", ply15).on(cab.bottom).between(left, right, behind)
@@ -34,7 +34,7 @@ def hinged_cabinet(name: str, box: Box, hinge: ConcealedHinge, *, front: Side) -
         # the door, on a pin 37 mm in from each end of both sides
         shelf = (board("shelf", ply15)
                  .center((bottom.top + top.bottom) / 2)
-                 .between(left.gap(1), right.gap(1), back, cab.front.into(ply12.t + 20)))
+                 .between(left.gap(1), right.gap(1), back, cab.front.into(ply12.thickness + 20)))
         for side in (left, right):
             for edge in (side.inner.front, side.inner.back):
                 side.hole(d=5, depth=10, at=edge(37).bottom(shelf.bottom - 6))

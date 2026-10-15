@@ -19,7 +19,7 @@ catch = ball_catch()    # GN 450: 4 catches 40 mm from the ends of the straight 
 # 800 across, the panel on four battens running across.
 with module("floor", Box.from_size(width=800, depth=1200, height=60)) as f:
     panel = board("panel", ply15).on(f.top).show(f.top)
-    for i, x in enumerate(spread(f.front.into(ply15.t / 2), f.back.into(ply15.t / 2), count=4)):
+    for i, x in enumerate(spread(f.front.into(ply15.thickness / 2), f.back.into(ply15.thickness / 2), count=4)):
         board(f"batten{i}", ply15).center(x).between(f.bottom, panel)
 
     # the opening between the middle battens, its corners rounded

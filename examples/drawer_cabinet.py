@@ -75,7 +75,7 @@ def drawer(name: str, bay: Box, panel: Box, slide: DrawerSlide) -> Scope:
     on every side. The slide sizes the box behind the face."""
     with scope(name, bay) as d:
         face = board("face", ply15).on(bay.front).between(panel).inset(GAP / 2)
-        box = slide.drawer_box(bay, front=face.back, side_thickness=ply12.t, height=bay.height - 30)
+        box = slide.drawer_box(bay, front=face.back, side_thickness=ply12.thickness, height=bay.height - 30)
 
         l = board("left", ply12).on(box.left).between(box)
         r = board("right", ply12).on(box.right).between(box)

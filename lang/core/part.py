@@ -164,7 +164,7 @@ class Board:
     def thickness(self) -> float:
         material = self.material
         assert isinstance(material, SheetMaterial)
-        return material.t
+        return material.thickness
 
     @property
     def limit_axes(self) -> tuple[Axis, ...]:

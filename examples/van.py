@@ -38,7 +38,7 @@ def floor(name: str, box: Box) -> Scope:
     arches. Where they cross they are half lapped. The panels take the
     outline as it is and meet over the middle batten across."""
     with module(name, box) as f:
-        top = floor_level - ply12.t
+        top = floor_level - ply12.thickness
         above_floor = floor_profile.gap(2)
         inside = floor_outline.gap(3)
         pitch = van.param("Lattenabstand")
@@ -52,7 +52,7 @@ def floor(name: str, box: Box) -> Scope:
         # lets it.
         # Each is notched from the top where it crosses a batten, which is
         # notched from below.
-        edge = 3 + ply15.t / 2
+        edge = 3 + ply15.thickness / 2
         lap = half_lap(toward=f.top)
         for i, y in enumerate(spread(f.left.into(edge), f.right.into(edge), count=6)):
             if i in (0, 5):

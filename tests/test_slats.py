@@ -181,6 +181,19 @@ def test_materials_go_with_their_parts():
             slat("s", ply15, section=(20, 40))  # type: ignore[arg-type]
 
 
+def test_a_sheet_material_says_thickness_as_its_boards_do():
+    """`ply15.thickness` as `board.thickness`, with no `.t`; `t=` stays the
+    constructor's keyword [decided by Florian, 2026-10-15, syntax.md item
+    11]. The layout writes the board's thickness as before."""
+    ply = sheet_material("birch", t=15)
+    assert ply.thickness == 15 and ply.label == "birch 15" and not hasattr(ply, "t")
+    with module("m", BOX) as m:
+        b = board("b", ply).on(m.bottom)
+    assert b.thickness == ply.thickness
+    part = build_layout()["modules"][0]["parts"][0]
+    assert part["material"] == "birch 15" and part["thickness"] == 15
+
+
 def test_a_slat_takes_no_operations():
     m, left, _, shelf = _carcass()
     with m:
