@@ -43,7 +43,9 @@ contours as limits. Part of the modeling language's design; the overview is
   axes (see `design/slats.md`).
 - Which side the thickness goes: `.on()` a module side puts the thickness
   inward, also a side moved into or out of the box (`on(cab.bottom.into(60))`);
-  `.on()` a bare plane requires a side (`toward=`).
+  `.on()` a part's face puts it away from the part, also a face moved by
+  `gap()` or `into()` (`on(back.inner.gap(15))`) [decided by Florian,
+  2026-10-15]; `.on()` a bare plane requires a side (`toward=`).
 - Limits missing from `.between()` default to the enclosing scope's box.
 - When a part is given as a limit, its face toward the board is meant: the
   face toward the other limit on that axis, or toward the middle of the
@@ -101,7 +103,11 @@ This only works for flat, parallel references.
   hold in any frame use `.into(n)` and `.gap(n)`, which need no sign
   convention and also work on contours, by offsetting the curve; on a box
   side they give a side, its inward direction kept, so a board lies on them
-  without `toward=` [decided].
+  without `toward=` [decided]. A part's face moved by them keeps its side
+  too, its direction away from the part, so `on(back.inner.gap(15))` puts
+  the board 15 in front of the back without `toward=`; anywhere else it is a
+  position as before [decided by Florian, 2026-10-15: they were bare
+  positions].
 - A part as a `between()` limit means its face toward the board;
   `part.into(n)` and `part.gap(n)` move it.
 - `spread()` gives positions along one axis (`pitch=` or `count=`, not

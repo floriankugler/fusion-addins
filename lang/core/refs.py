@@ -15,7 +15,8 @@ with a position taken from it as in `a + b - c`.
 
 `Side` is a position with an inward direction, the face of a box; moved
 into or out of the box (`into`, `gap`) it is still one, and `+` and `-`
-move it along the world axis. Anything
+move it along the world axis. A part's face moved by `gap()` or `into()`
+is one too, its inward direction the face's, away from the part. Anything
 with a `position` attribute (a `Side`, a part's `Face`, a master's plane)
 is accepted where a position is expected; `as_pos` does the coercion, and
 `PositionArithmetic` gives such a class the algebra above.
@@ -218,8 +219,10 @@ def as_pos(value: object, what: str = "position") -> Pos:
 
 @dataclass(frozen=True)
 class Side:
-    """A position with a direction pointing inward, into the box it bounds.
-    `on()` uses the direction to decide where a board's thickness goes.
+    """A position with a direction pointing inward, into the box it bounds;
+    for a part's face moved by `gap()` or `into()`, the face's direction,
+    away from the part (`lang.core.faces.Face.gap`). `on()` uses the
+    direction to decide where a board's thickness goes.
     Moving a side by a length keeps its direction; scaled, it is a
     position in a mix like any other (`0.5 * cab.bottom + 0.5 * cab.top`)
     [found by fuzzing, 2026-10-14: it had no `*` or `/`]."""

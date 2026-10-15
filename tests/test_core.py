@@ -7,6 +7,7 @@ from shapely.geometry import box as shapely_box
 
 from lang import *
 from lang.core.cutouts import circle_geometry
+from lang.core.directions import Axis
 from lang.core.layout import build_layout
 from lang.core.ops import Chamfer, Cut, EdgeOp, Hole, Pocket
 from lang.core.refs import Affine, as_pos
@@ -156,6 +157,112 @@ def test_a_side_moved_into_or_out_of_its_box_is_a_side():
     assert (lid.box().lo["z"], lid.box().hi["z"]) == (690, 705)                # 5 above, thickness down
     assert moved.value == 600 and moved.inward == cab.left.inward              # out of the box, world +x
     assert cab.left.into(100).position == Pos("x", 400) and cab.left.gap(5) - cab.left == 5
+
+
+def _extents(part: Board) -> tuple[dict[Axis, float], dict[Axis, float]]:
+    b = part.box()
+    return dict(b.lo), dict(b.hi)
+
+
+def test_a_face_moved_by_gap_or_into_keeps_its_side():
+    """Decided by Florian, 2026-10-15: `face.gap(n)` and `face.into(n)` are
+    the face's plane moved, keeping the face's side, so a board lies on them
+    away from the face's part without toward= (`on(back.inner.gap(15))`),
+    as on the face itself; they were bare positions, which needed toward=.
+    The same from big and narrow faces, in a module and in cabinets facing
+    each side of the van, measured in the scope's own terms."""
+    van = Box.from_size(width=600, depth=500, height=700)
+    for facing in (None, "front", "right", "back", "left"):
+        name = f"cab_{facing}"
+        with (module(name, van) if facing is None else cabinet(name, van, front=van.side(facing))) as cab:
+            left = board("left", ply15).on(cab.left)
+            bottom = board("bottom", ply15).on(cab.bottom).between(left, cab.right)
+            back = board("back", ply9).on(cab.back).between(left, cab.right, bottom, cab.top)
+            moved = {
+                "panel": (back.inner.gap(15), cab.front),     # a big face, out of its part
+                "inset": (back.inner.into(3), cab.front),     # a big face, into its part
+                "apron": (bottom.front.gap(10), cab.front),   # a narrow face, out of its part
+                "rail": (left.top.into(20), cab.top),         # a narrow face, into its part
+            }
+            placed = {k: board(k, ply15).on(ref) for k, (ref, _) in moved.items()}
+            spelled = {k: board(f"{k}_toward", ply15).on(ref.position, toward=toward)
+                       for k, (ref, toward) in moved.items()}
+            # toward= still decides where it is given
+            behind = board("behind", ply15).on(back.inner.gap(15), toward=cab.back)
+        front = cab.frame.direction("front")
+        f = front.sign
+        assert back.inner.name == "front" and left.top.name == "top"
+        assert all(isinstance(ref, Side) for ref, _ in moved.values())
+        assert moved["panel"][0].inward == front and moved["rail"][0].inward == cab.frame.direction("top")
+        for k in moved:
+            assert _extents(placed[k]) == _extents(spelled[k]), (facing, k)
+        panel, inset, apron, rail = (placed[k] for k in ("panel", "inset", "apron", "rail"))
+        assert panel.t_axis == back.t_axis and apron.t_axis == front.axis and rail.t_axis == "z"
+        # 15 in front of the back, its thickness on to the front
+        assert (panel.back.value, panel.front.value) == (back.front.value + 15 * f, back.front.value + 30 * f)
+        assert behind.front.value == back.front.value + 15 * f and behind.back.value == back.front.value
+        # 3 into the back, its thickness to the front
+        assert (inset.back.value, inset.front.value) == (back.front.value - 3 * f, back.front.value + 12 * f)
+        # 10 in front of the bottom's front edge
+        assert (apron.back.value, apron.front.value) == (bottom.front.value + 10 * f, bottom.front.value + 25 * f)
+        # 20 below the side's top edge, its thickness up
+        assert (rail.bottom.value, rail.top.value) == (680, 695)
+
+
+def test_a_slat_lies_on_and_edge_on_moved_faces_away_from_their_parts():
+    """Decided by Florian, 2026-10-15 (`Face.gap()`, `Face.into()` keep the
+    face's side): `edge_on()` takes a moved face as `on()` does."""
+    with module("m", Box.from_size(width=600, depth=400, height=700)) as m:
+        left = board("left", ply15).on(m.left)
+        shelf = board("shelf", ply15).on(Pos("z", 300), toward=m.top).between(left, m.right)
+        oak = slat_material("oak")
+        cleat = slat("cleat", oak, section=(20, 40)).on(left.inner.gap(2)).edge_on(shelf.bottom.into(5))
+        twin = (slat("twin", oak, section=(20, 40)).on(Pos("y", 17), toward=m.right)
+                .edge_on(Pos("z", 305), toward=m.bottom))
+    assert _extents(cleat) == _extents(twin)
+    assert (cleat.box().lo["y"], cleat.box().hi["y"], cleat.box().lo["z"], cleat.box().hi["z"]) == (17, 37, 265, 305)
+
+
+def test_a_moved_face_is_a_position_as_before_everywhere_else():
+    """`face.gap(n)` and `face.into(n)` keep the face's side since
+    2026-10-15 [Florian]; as limits, in `center()`, `spread()`, anchors,
+    `with_sides()` and the position algebra they give what the bare
+    positions they were gave."""
+    box = Box.from_size(width=600, depth=500, height=700)
+    with module("m", box) as m:
+        left = board("left", ply15).on(m.left)
+        right = board("right", ply15).on(m.right)
+        bottom = board("bottom", ply15).on(m.bottom).between(left, right)
+        back = board("back", ply9).on(m.back).between(left, right, bottom, m.top)
+        a, b, c = left.inner.gap(2), right.inner.into(5), back.inner.gap(4)
+        pa, pb, pc = a.position, b.position, c.position
+        shelf = board("shelf", ply15).on(m.bottom + 300, toward=m.top).between(a, b, c)
+        shelf_p = board("shelf_p", ply15).on(m.bottom + 300, toward=m.top).between(pa, pb, pc)
+        lone = board("lone", ply15).on(m.bottom + 400, toward=m.top).between(c)
+        lone_p = board("lone_p", ply15).on(m.bottom + 400, toward=m.top).between(pc)
+        divider = board("divider", ply15).center(left.inner.gap(100)).between(bottom, m.top)
+        divider_p = board("divider_p", ply15).center(left.inner.gap(100).position).between(bottom, m.top)
+        at = back.inner.left(left.inner.gap(30)).bottom(bottom.top.gap(40))
+        at_p = back.inner.left(left.inner.gap(30).position).bottom(bottom.top.gap(40).position)
+        back.hole(d=8, at=at, depth=5)
+    assert isinstance(a, Side) and isinstance(b, Side) and isinstance(c, Side)
+    assert (pa, pb, pc) == (Pos("y", 17), Pos("y", 590), Pos("x", 487))
+    assert _extents(shelf) == _extents(shelf_p) == ({"x": 0, "y": 17, "z": 300}, {"x": 487, "y": 590, "z": 315})
+    assert _extents(lone) == _extents(lone_p)
+    assert _extents(divider) == _extents(divider_p) and divider.box().lo["y"] == 107.5
+    assert at.resolve() == at_p.resolve() and at.resolve()[0] == (45, 55)
+    hole = back.ops[-1]
+    assert isinstance(hole, Hole) and (hole.u, hole.v) == (45, 55)
+    assert spread(a, b, count=3) == spread(pa, pb, count=3) == [Pos("y", 17), Pos("y", 303.5), Pos("y", 590)]
+    assert spread(b, a, pitch=100) == spread(pb, pa, pitch=100)
+    narrowed, narrowed_p = box.with_sides(left=a, back=c), box.with_sides(left=pa, back=pc)
+    assert (narrowed.lo, narrowed.hi) == (narrowed_p.lo, narrowed_p.hi) == ({"x": 0, "y": 17, "z": 0},
+                                                                            {"x": 487, "y": 600, "z": 700})
+    # the algebra: lengths, mixes and moves come out as they did
+    assert a - left.inner == 2 and b - a == pb - pa == 573 and a - pa == 0
+    assert (a + b) / 2 == (pa + pb) / 2 == Pos("y", 303.5)
+    assert 0.5 * a + 0.5 * b == Pos("y", 303.5) and a + b - a == pb
+    assert (a + 5).position == pa + 5 and (a - 5).position == pa - 5 and (5 + a).position == pa + 5
 
 
 def test_between_parts_uses_nearest_faces_and_box_defaults():

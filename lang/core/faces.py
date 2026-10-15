@@ -2,9 +2,10 @@
 
 `Face` is one of a board's six faces, named by direction in the frame of
 the board's scope; it is also a position (its plane), so it works in
-`on()`, `between()` and the position algebra. `Edge` is where two faces
-meet: a chamfer's target, a corner of the outline when both faces are
-narrow, and an `at=` point in the middle of the first face's edge.
+`on()`, `between()` and the position algebra, and moved by `gap()` or
+`into()` it is a `Side` that keeps the face's side. `Edge` is where two
+faces meet: a chamfer's target, a corner of the outline when both faces
+are narrow, and an `at=` point in the middle of the first face's edge.
 `Anchor` is a point on a face for `at=`, named by the edges it is measured
 from (`side.inner.front(37).bottom(z)`). `Outline` is a big face's
 outer contour, and `Operation` a named operation of a board, whose edges
@@ -19,7 +20,7 @@ from . import directions
 from .directions import Axis, Direction
 from .errors import LangError
 from .ops import Chamfer, Cut, EdgeOp, Hole, Op, VGroove
-from .refs import HasPosition, Number, Pos, PositionArithmetic, as_pos
+from .refs import HasPosition, Number, Pos, PositionArithmetic, Side, as_pos
 from .shapes import Anchor as ShapeAnchor
 
 if TYPE_CHECKING:
@@ -51,13 +52,19 @@ class Face(PositionArithmetic):
     def value(self) -> float:
         return self.position.value
 
-    def gap(self, n: float) -> Pos:
-        """A position `n` outside the face."""
-        return Pos(self.axis, self.value + self.direction.sign * n)
+    def gap(self, n: float) -> Side:
+        """The face's plane moved `n` out of the part. It keeps the face's
+        side, as a box side moved by `gap()` keeps its own: a board lies on
+        it away from the part without `toward=`, as on the face itself,
+        `on(back.inner.gap(15))`; anywhere else it is a position
+        [decided by Florian, 2026-10-15: it was a bare position, which
+        needed toward=]."""
+        return Side(self.axis, self.value + self.direction.sign * n, inward=self.direction)
 
-    def into(self, n: float) -> Pos:
-        """A position `n` inside the part, behind the face."""
-        return Pos(self.axis, self.value - self.direction.sign * n)
+    def into(self, n: float) -> Side:
+        """The face's plane moved `n` into the part, behind the face; it
+        keeps the face's side, as `gap()` does."""
+        return Side(self.axis, self.value - self.direction.sign * n, inward=self.direction)
 
     @property
     def is_big(self) -> bool:

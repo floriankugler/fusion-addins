@@ -30,13 +30,13 @@ an outline in the two measures of its plane):
   to stay as they were), and written otherwise: placement modifiers,
   `between()`'s limits, boards and operations in another order where the
   order must not matter, boards resolved in another order, `side + n` for
-  `side.into(n)`, `on()` a side moved without `toward=`, an alias for a
-  side, a board for its face, a mix of positions (`a + b - c` among them)
-  or a box's middle spelt another way, a box for its four sides, an
-  anchor measured from the opposite edge or given as a position, its
-  edges in the other order, a depth `to()` the other face for its number,
-  a row spread from its other end, an edge named from its other face, a
-  slot's `along=` as an extent, a side or a face.
+  `side.into(n)`, `on()` a side or a face moved without `toward=`, an
+  alias for a side, a board for its face, a mix of positions (`a + b - c`
+  among them) or a box's middle spelt another way, a box for its four
+  sides, an anchor measured from the opposite edge or given as a position,
+  its edges in the other order, a depth `to()` the other face for its
+  number, a row spread from its other end, an edge named from its other
+  face, a slot's `along=` as an extent, a side or a face.
 
 A refusal must be one all three ways (the same boards and operations
 refused), and the preview must mesh every board as large in the other
@@ -1077,10 +1077,13 @@ def _on(b: Built, x: Board, spec: BoardSpec) -> None:
     if r.kind == "face":
         f = _board(b, r.of).face(r.name)
         if r.by == 0:
-            [lambda: x.on(f), lambda: x.on(f.position, toward=f.direction)][b.pick(2)]()
+            [lambda: x.on(f), lambda: x.on(f.position, toward=f.direction), lambda: x.on(f.gap(0)),
+             lambda: x.on(f.into(0))][b.pick(4)]()
         else:
+            # (a face moved by gap() or into() keeps its side: no toward= needed)
             [lambda: x.on(f.gap(r.by), toward=f.direction),
-             lambda: x.on(f + f.direction.sign * r.by, toward=f.direction)][b.pick(2)]()
+             lambda: x.on(f + f.direction.sign * r.by, toward=f.direction), lambda: x.on(f.gap(r.by)),
+             lambda: x.on(f.into(-r.by))][b.pick(4)]()
         return
     raise AssertionError(r.kind)
 

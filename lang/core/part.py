@@ -190,7 +190,8 @@ class Board:
     def on(self, ref: Side | Face | PosLike, toward: Side | Direction | None = None) -> Self:
         """Which plane the board's outer big face lies in, and where the
         thickness goes. A box side knows its inward direction; a part's face
-        puts the thickness away from that part; a bare position needs
+        puts the thickness away from that part, also moved by `gap()` or
+        `into()` (`on(back.inner.gap(15))`); a bare position needs
         `toward=`, the direction the thickness extends to, as a box side
         (`toward=cab.top`) or a direction."""
         self._placement("on")
