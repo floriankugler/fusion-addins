@@ -89,7 +89,9 @@ every nominal length) or a `lib.drawer_slides` model for one of its own.
   add-in uses, measured from the runner's front, into each side's face
   toward the bay's middle (a partition between two bays takes a drawer on
   either face), holes `slide_<drawer>_a`...; a drawer runs on one pair, a
-  second mount is an error.
+  second mount is an error. `sides=` (here and in `machine_box()`) takes
+  any sequence of the two, a list or a tuple, counted when the build runs
+  [decided by Florian, 2026-10-15, syntax.md item 12].
 - The runner pair is placed as boxes [decided], one body per runner, named
   by the drawer's own left and right. Five boxes per runner (`RunnerShape`):
   the cabinet rail's flange against the carcass side and its base with the

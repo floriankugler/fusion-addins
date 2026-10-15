@@ -93,6 +93,7 @@ def hardware() -> None:
         ConcealedHinge(predrill=(3, 3))                                           # type: ignore  # pilot=
         slide = DrawerSlide("Dynapro 40", nl=450, pilot=(2, 4))
         m.mount(slide, sides=(side, other), front=door.back)                      # fine
+        m.mount(slide, sides=[side, other], front=door.back)                      # a list: fine
         m.mount(slide, sides=side, front=door.back)                               # type: ignore  # one side
         m.mount(slide, sides=(side, other))                                       # type: ignore  # front= missing
         DrawerSlide("Dynapro 41", nl=450)                                         # type: ignore  # no such model

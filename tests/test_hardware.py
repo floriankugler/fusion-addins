@@ -1,3 +1,4 @@
+import json
 import math
 import re
 from collections.abc import Callable
@@ -430,6 +431,64 @@ def test_a_refused_slide_drills_nothing(which: str, message: str):
     before = _untouched(cab)
     with pytest.raises(LangError, match=message):
         d.mount(slide, sides=sides, front=parts["face"].back)
+    assert _untouched(cab) == before
+
+
+def test_a_slide_takes_its_sides_as_a_list_or_a_tuple():
+    """`sides=` takes any sequence of the two, a list as well as a tuple,
+    in `mount()` and `machine_box()` alike [decided by Florian, 2026-10-15,
+    syntax.md item 12]."""
+    slide = drawer_slide("Dynapro 40", nl=450)
+
+    def build(as_list: bool) -> str:
+        registry.reset()
+        _, parts = _drawer(slide, machine=False)
+        l, r = parts["left"], parts["right"]
+        slide.machine_box(sides=[l, r] if as_list else (l, r), front=parts["front"], back=parts["back"],
+                          floor=parts["floor"])
+        machined = json.dumps(build_layout())
+        registry.reset()
+        _, d, carcass = _bay()
+        left, right = carcass["left"], carcass["right"]
+        d.mount(slide, sides=[left, right] if as_list else (left, right), front=carcass["face"].back)
+        return machined + json.dumps(build_layout())
+
+    made = build(as_list=True)
+    assert made == build(as_list=False)
+    assert "hook_left_a" in made and "slide_drawer1_a" in made and "runners" in made
+
+
+@pytest.mark.parametrize("count", [1, 3])
+def test_a_slide_takes_exactly_two_sides(count: int):
+    """A slide runs on two sides: one or three, in a list, are an error
+    naming the call and the count when the build runs, and nothing is
+    drilled or cut [decided by Florian, 2026-10-15, syntax.md item 12]."""
+    slide = drawer_slide("Dynapro 40", nl=450)
+    cab, d, parts = _bay()
+    before = _untouched(cab)
+    with pytest.raises(LangError, match=rf"^cab\.drawer1: Grass Dynapro \(40 kg\) NL 450: mount\(sides=\) takes two "
+                                        rf"sides, one on either side of the drawer, not {count}\.$"):
+        d.mount(slide, sides=[parts["left"], parts["right"], parts["top"]][:count], front=parts["face"].back)
+    assert _untouched(cab) == before
+    registry.reset()
+    drawer, box = _drawer(slide, machine=False)
+    before = _untouched(drawer)
+    l, r, f, k = box["left"], box["right"], box["front"], box["back"]
+    with pytest.raises(LangError, match=rf"machine_box\(sides=\) takes two sides, one on either side of the drawer, "
+                                        rf"not {count}\."):
+        slide.machine_box(sides=[l, r, f][:count], front=f, back=k, floor=box["floor"])
+    assert _untouched(drawer) == before
+
+
+def test_a_slide_refuses_one_board_for_its_sides():
+    """One board alone is no sequence: the type checker refuses it
+    (`tests/typing_checks.py`), and so does the build when it runs
+    without one [syntax.md item 12]."""
+    slide = drawer_slide("Dynapro 40", nl=450)
+    cab, d, parts = _bay()
+    before = _untouched(cab)
+    with pytest.raises(LangError, match=r"mount\(sides=\) takes the two sides as a list or tuple, not "):
+        d.mount(slide, sides=parts["left"], front=parts["face"].back)  # type: ignore[arg-type]
     assert _untouched(cab) == before
 
 
