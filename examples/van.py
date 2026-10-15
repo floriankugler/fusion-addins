@@ -79,6 +79,6 @@ floor("floor", van.box("Boden"))
 # The cabinet stands in the master's kitchen box, against the driver's wall,
 # and opens toward the aisle.
 kitchen_box = van.box("Moebel.Kueche")
-slide = DrawerSlide("Dynapro 40", nl=450)
+slide = drawer_slide("Dynapro 40", nl=450)
 kitchen = drawer_cabinet("kitchen", kitchen_box, 3, slide, front=kitchen_box.right, bottom_drawer=230)
 kitchen.check(inside_box, inside(floor_outline))

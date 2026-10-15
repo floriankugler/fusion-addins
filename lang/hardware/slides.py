@@ -217,7 +217,7 @@ class DrawerSlide:
     def __init__(self, model: SlideModel | data.SlideModel, nl: int, *, holes: int = 4, odd: bool = True,
                  pilot: tuple[float, float] = PILOT, bottom_recess: float | None = None,
                  hook_hole: HookHole | None = None):
-        spec = SLIDE_MODELS[one_of(model, SlideModel, "DrawerSlide()")] if isinstance(model, str) else model
+        spec = SLIDE_MODELS[one_of(model, SlideModel, "drawer_slide()")] if isinstance(model, str) else model
         if nl not in spec.nominal_lengths:
             raise LangError(f"{spec.name} is not made in NL {nl}; lengths: {spec.nominal_lengths}.")
         #: The slide's drilling data (`lib.drawer_slides`).
@@ -469,6 +469,15 @@ class DrawerSlide:
                                                                  for box in self.runner_boxes().values()]))
         bodies.sort(key=lambda b: b["name"])      # left, then right
         return holes, bodies
+
+
+def drawer_slide(model: SlideModel | data.SlideModel, nl: int, *, holes: int = 4, odd: bool = True,
+                 pilot: tuple[float, float] = PILOT, bottom_recess: float | None = None,
+                 hook_hole: HookHole | None = None) -> DrawerSlide:
+    """A drawer slide, `drawer_slide("Dynapro 40", nl=450)`: see
+    `DrawerSlide`, the type it returns."""
+    return DrawerSlide(model, nl, holes=holes, odd=odd, pilot=pilot, bottom_recess=bottom_recess,
+                       hook_hole=hook_hole)
 
 
 def _sorted(a: float, b: float) -> tuple[float, float]:

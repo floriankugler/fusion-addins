@@ -13,7 +13,7 @@ from lang import *
 from stock import ply15
 
 
-catch = BallCatch()     # GN 450: 4 catches 40 mm from the ends of the straight edges, pilot holes 2 x 4
+catch = ball_catch()    # GN 450: 4 catches 40 mm from the ends of the straight edges, pilot holes 2 x 4
 
 # A piece of the van floor in the van's own terms: 1200 along the vehicle,
 # 800 across, the panel on four battens running across.

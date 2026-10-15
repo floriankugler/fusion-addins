@@ -465,7 +465,7 @@ def test_the_model_by_name_or_spec():
     assert get_args(HatchHingeModel) == tuple(HATCH_HINGE_MODELS)
     assert HatchHinge("Free space 1.11").spec is FREE_SPACE_1_11
     assert HatchHinge(FREE_SPACE_1_11).spec is FREE_SPACE_1_11          # a spec of your own
-    with pytest.raises(LangError, match=r"HatchHinge\(\): expected 'Free space 1.11'"):
+    with pytest.raises(LangError, match=r"hatch_hinge\(\): expected 'Free space 1.11'"):
         HatchHinge("Free space 1.12")  # type: ignore[arg-type]
     with pytest.raises(TypeError):
         HatchHinge("Free space 1.11", 90)  # type: ignore[misc]            # settings are keyword-only

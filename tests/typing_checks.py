@@ -113,6 +113,47 @@ def hardware() -> None:
         BallCatch("GN 450", 4)                                                    # type: ignore  # count keyword-only
 
 
+def hardware_factories() -> None:
+    """The factories take their classes' parameters, checked the same."""
+    with module("m", Box.from_size(width=600, depth=400, height=700)) as m:
+        side = board("side", ply15).on(m.left)
+        other = board("other", ply15).on(m.right)
+        door = board("door", ply15).on(m.front)
+        made: ConcealedHinge = hinge(count=3, end=80, pilot=(3, 3))               # its class: fine
+        m.mount(made, door=door, carcass=side)                                    # fine
+        m.mount(hinge(), dor=door, carcass=side)                                  # type: ignore  # a misspelt keyword
+        hinge(margin=60)                                                          # type: ignore  # end=, not margin=
+        hinge(predrill=(3, 3))                                                    # type: ignore  # pilot=
+        hinge("Blum CLIP top 110 Thin +2")                                        # type: ignore  # no such model
+        hinge("Blum CLIP top 110 Thin +0", 3)                                     # type: ignore  # count keyword-only
+        slide: DrawerSlide = drawer_slide("Dynapro 40", nl=450, pilot=(2, 4))     # fine
+        m.mount(slide, sides=(side, other), front=door.back)                      # fine
+        m.mount(slide, sides=side, front=door.back)                               # type: ignore  # one side
+        drawer_slide("Dynapro 41", nl=450)                                        # type: ignore  # no such model
+        drawer_slide("Dynapro 40", 450, 4)                                        # type: ignore  # holes= keyword-only
+        drawer_slide("Dynapro 40", nl=450, hole=4)                                # type: ignore  # holes=, not hole=
+        lock: DoorLatch = latch("Pull Lock 44", count=2)                          # fine
+        m.mount(lock, door=door, carcass=side, count=2)                           # type: ignore  # count is latch's
+        latch("Pull Lock 44", 2)                                                  # type: ignore  # count keyword-only
+        latch("Pull Lock 44", predrill=(3, 3))                                    # type: ignore  # pilot=
+        latch("Pull Lock 45")                                                     # type: ignore  # no such model
+        flap: HatchHinge = hatch_hinge("Free space 1.11", opening=90)             # fine
+        m.mount(flap, hatch=door, sides=(side, other), top=m.top)                 # fine
+        hatch_hinge("Free space 1.11", 90)                                        # type: ignore  # opening keyword-only
+        hatch_hinge("Free space 1.11", opening=95)                                # type: ignore  # no such opening
+        hatch_hinge("Free space 1.12")                                            # type: ignore  # no such model
+        bracket: SlidingBracket = sliding_bracket("Pacofix PF-L", count=3, frame_hole="euro")  # fine
+        m.mount(bracket, panel=door, frame=[side, other.inner])                   # fine
+        sliding_bracket(frame_hole="m4")                                          # type: ignore  # no such hole
+        sliding_bracket("Pacofix PF-L", 3)                                        # type: ignore  # count keyword-only
+        sliding_bracket("Pacofix PF-X")                                           # type: ignore  # no such model
+        catch: BallCatch = ball_catch(count=4, end=40)                            # fine
+        ball_catch("GN 450", 4)                                                   # type: ignore  # count keyword-only
+        ball_catch("GN 451")                                                      # type: ignore  # no such model
+        ball_catch(count=4, ends=40)                                              # type: ignore  # end=, not ends=
+        del catch
+
+
 def modules() -> None:
     van = Box.from_size(width=2000, depth=1000, height=1000)
     cabinet("kitchen", van, front=van.right)

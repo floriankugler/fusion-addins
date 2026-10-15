@@ -38,8 +38,8 @@ def seat_base(name: str, box: Box, *, front: Side) -> Scope:
         # two brackets per side, 50 from the ends; pilot holes for the bent
         # frame parts at the sides' front edges, Euro screws on the rear
         # panel's System 32 line
-        cab.mount(SlidingBracket(), panel=cover, frame=[left, right])
-        cab.mount(SlidingBracket("Pacofix PF-L", frame_hole="euro"), panel=rear, frame=[left, right])
+        cab.mount(sliding_bracket(), panel=cover, frame=[left, right])
+        cab.mount(sliding_bracket("Pacofix PF-L", frame_hole="euro"), panel=rear, frame=[left, right])
         check(no_interference, fits_sheet)
     return cab
 

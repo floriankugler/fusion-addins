@@ -104,5 +104,5 @@ if __name__ == "__build__":   # run as the build file, not imported
     # box is 500 wide (across the vehicle) and 600 deep (along it); inside the
     # module the cabinet is 600 wide and 500 deep.
     box = Box.from_size(width=500, depth=600, height=720)
-    slide = DrawerSlide("Dynapro 40", nl=450)
+    slide = drawer_slide("Dynapro 40", nl=450)
     drawer_cabinet("drawercab", box, 3, slide, front=box.right, bottom_drawer=230)

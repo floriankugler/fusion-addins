@@ -50,4 +50,4 @@ if __name__ == "__build__":   # run as the build file, not imported
     # front runs along the vehicle, so in world terms the box is 350 wide
     # (across the vehicle) and 450 deep (along it).
     box = Box.from_size(width=350, depth=450, height=600)
-    hinged_cabinet("hingecab", box, ConcealedHinge("Blum CLIP top 110 Thin +0"), front=box.right)
+    hinged_cabinet("hingecab", box, hinge("Blum CLIP top 110 Thin +0"), front=box.right)

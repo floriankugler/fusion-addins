@@ -296,7 +296,7 @@ def test_the_model_names_are_the_add_ins():
 
 
 @pytest.mark.parametrize("make, message", [
-    (lambda: ConcealedHinge("Blum CLIP top 110 Thin +6"), "ConcealedHinge(): expected 'Blum CLIP top 110 Thin +0'"),  # type: ignore[arg-type]
+    (lambda: ConcealedHinge("Blum CLIP top 110 Thin +6"), "hinge(): expected 'Blum CLIP top 110 Thin +0'"),  # type: ignore[arg-type]
     (lambda: ConcealedHinge(end=26.9), "end= must be at least 27 mm, not 26.9 mm."),
     (lambda: ConcealedHinge(count=1), "a door takes at least two hinges, not 1."),
     (lambda: ConcealedHinge(pilot=(0.0, 3.0)), "the pilot diameter must be at least 0.1 mm"),

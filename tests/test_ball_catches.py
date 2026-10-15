@@ -297,7 +297,7 @@ def test_mount_and_constructor_options():
         (lambda: BallCatch(pilot=(2, 0)), "pilot= needs a diameter and a depth greater than zero, not 2 x 0"),
         (lambda: BallCatch(count=2, at=[]), "give count= or at=, not both"),
         (lambda: BallCatch(at=[]), "at= is empty"),
-        (lambda: BallCatch("GN 451"), "BallCatch(): expected 'GN 450', not 'GN 451'"),     # type: ignore[arg-type]
+        (lambda: BallCatch("GN 451"), "ball_catch(): expected 'GN 450', not 'GN 451'"),     # type: ignore[arg-type]
     ]:
         with pytest.raises(LangError) as error:
             make()

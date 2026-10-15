@@ -15,6 +15,8 @@ from lang.emit.plan import HoleStep, plan_layout
 from lang.hardware.slides import BOTTOM_HEIGHT, BOX_MACHINING, INNER_FACE_OFFSET, DrawerSlide, HookHole, SlideModel
 from lib import drawer_slides
 from lib.drawer_slides import DYNAPRO_40, DYNAPRO_50_70, MOVENTO_760H, MOVENTO_766H
+from lib.hatch_hinges import FREE_SPACE_1_11
+from lib.sliding_brackets import PACOFIX_PF_L
 from helpers import bounds, ply12, ply15, ply18, ply9
 
 
@@ -504,7 +506,7 @@ def test_slides_by_model_name():
     assert {m.name for m in SLIDE_MODELS.values()} == {m.name for m in drawer_slides.SLIDE_MODELS}
     assert DrawerSlide("Dynapro 40", nl=450).model is DYNAPRO_40
     assert DrawerSlide(MOVENTO_766H, nl=450).model is MOVENTO_766H
-    with pytest.raises(LangError, match=r"DrawerSlide\(\): expected 'Movento 760H'"):
+    with pytest.raises(LangError, match=r"drawer_slide\(\): expected 'Movento 760H'"):
         DrawerSlide("Dynapro 41", nl=450)  # type: ignore[arg-type]
 
 
@@ -558,12 +560,61 @@ def test_lang_exports_the_hardware_and_no_example_imports_it_from_elsewhere():
     import lang
     import lang.hardware
     names = {"DrawerSlide", "SlideModel", "ConcealedHinge", "HingeModel", "HatchHinge", "HatchHingeModel",
-             "BallCatch", "CatchModel", "DoorLatch", "LatchModel", "SlidingBracket", "BracketModel"}
+             "BallCatch", "CatchModel", "DoorLatch", "LatchModel", "SlidingBracket", "BracketModel",
+             "drawer_slide", "hinge", "hatch_hinge", "ball_catch", "latch", "sliding_bracket"}
     assert names <= set(lang.__all__) and names == set(lang.hardware.__all__)
     examples = Path(__file__).resolve().parent.parent / "examples"
     for path in examples.glob("*.py"):
         text = path.read_text()
         assert "lang.hardware" not in text and "from lib" not in text and "import lib" not in text, path.name
+        # hardware is made with the factories; the classes are for annotations
+        assert not re.search(r"\b(DrawerSlide|ConcealedHinge|HatchHinge|BallCatch|DoorLatch|SlidingBracket)\(",
+                             text), path.name
+
+
+_FACTORIES: list[tuple[Callable[..., object], type]] = [
+    (drawer_slide, DrawerSlide), (hinge, ConcealedHinge), (hatch_hinge, HatchHinge), (ball_catch, BallCatch),
+    (latch, DoorLatch), (sliding_bracket, SlidingBracket)]
+
+
+@pytest.mark.parametrize("factory, cls", _FACTORIES, ids=[f.__name__ for f, _ in _FACTORIES])
+def test_each_hardware_factory_has_its_class_signature(factory: Callable[..., object], cls: type):
+    """A build file makes hardware with lowercase factories, as it makes
+    parts with `board()`; each takes exactly its class's parameters, so
+    completion and the type checker see the same keywords [decided by
+    Florian, 2026-10-15, syntax.md item 9]."""
+    import inspect
+    init = inspect.signature(cls.__init__, eval_str=True)
+    made = inspect.signature(factory, eval_str=True)
+    assert list(made.parameters.values()) == list(init.parameters.values())[1:]
+    assert made.return_annotation is cls
+
+
+def test_each_hardware_factory_returns_its_class_with_the_settings_given():
+    """Each factory returns an instance of its class, with every setting
+    passed on [syntax.md item 9]."""
+    slide = drawer_slide("Movento 760H", nl=450, holes=3, odd=False, pilot=(2.5, 5), bottom_recess=13,
+                         hook_hole=(6, through))
+    assert type(slide) is DrawerSlide and slide.model is MOVENTO_760H and slide.nl == 450
+    assert (slide.holes, slide.odd, slide.pilot, slide.recess) == (3, False, (2.5, 5), 13)
+    assert slide.hook_hole == (6, through)
+    door_hinge = hinge("Blum CLIP top 110 Thin +3", count=3, end=80, pilot=(3, 4))
+    assert type(door_hinge) is ConcealedHinge and door_hinge.name == "Blum CLIP top 110 Thin +3"
+    assert (door_hinge.count, door_hinge.end, door_hinge.pilot) == (3, 80, (3, 4))
+    flap = hatch_hinge("Free space 1.11", opening=90, carcass_depth=10, pilot=(2.5, 5))
+    assert type(flap) is HatchHinge and flap.spec is FREE_SPACE_1_11
+    assert (flap.opening, flap.carcass_depth, flap.pilot) == (90, 10, (2.5, 5))
+    catch = ball_catch("GN 450", count=6, end=50, pilot=(2.5, 5), gap=3.2)
+    assert type(catch) is BallCatch and catch.name == "GN 450 ball catch"
+    assert (catch.count, catch.end, catch.at, catch.pilot, catch.gap) == (6, 50, None, (2.5, 5), 3.2)
+    lock = latch("LL-66", count=2, end=80, pilot=(2.5, 3))
+    assert type(lock) is DoorLatch and lock.name == "LL-66"
+    assert (lock.count, lock.end, lock.pilot) == (2, 80, (2.5, 3))
+    bracket = sliding_bracket("Pacofix PF-L", count=3, end=60, frame_hole="euro", panel_hole=(3, 5))
+    assert type(bracket) is SlidingBracket and bracket.spec is PACOFIX_PF_L
+    assert (bracket.count, bracket.end, bracket.at, bracket.frame_hole, bracket.panel_hole) == \
+        (3, 60, None, "euro", (3, 5))
+    assert sliding_bracket(at=[Pos("x", 100), Pos("x", 300)]).at is not None
 
 
 # -- every hardware: a refused mount changes nothing (review finding 32) --------------------------------

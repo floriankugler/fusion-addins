@@ -48,4 +48,4 @@ if __name__ == "__build__":   # run as the build file, not imported
     # the aisle: 800 along the vehicle, 330 deep across it, 400 high. Inside
     # the module the cabinet is 800 wide and 330 deep.
     box = Box.from_size(width=330, depth=800, height=400, origin=(0, 0, 1400))
-    wall_cabinet("wallcab", box, HatchHinge("Free space 1.11"), front=box.right)
+    wall_cabinet("wallcab", box, hatch_hinge("Free space 1.11"), front=box.right)

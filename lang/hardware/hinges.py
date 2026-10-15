@@ -165,7 +165,7 @@ class ConcealedHinge:
     def __init__(self, model: HingeModel = "Blum CLIP top 110 Thin +0", *, count: int = 2,
                  end: float = data.DEFAULT_END_MARGIN,
                  pilot: tuple[float, float] = (data.DEFAULT_PREDRILL_DIAMETER, data.DEFAULT_PREDRILL_DEPTH)):
-        self.model = data.HINGE_MODELS[one_of(model, HingeModel, "ConcealedHinge()")]
+        self.model = data.HINGE_MODELS[one_of(model, HingeModel, "hinge()")]
         if end < data.MIN_END_MARGIN:
             raise LangError(f"{self.name}: end= must be at least {mm(data.MIN_END_MARGIN)}, not {mm(end)}.")
         if count < 2:
@@ -312,3 +312,12 @@ class ConcealedHinge:
             boxes = [world_box(starts, box) for box in HINGE_SHAPES[self.name].boxes().values()]
             bodies.append(HardwareBodyLayout(name=f"hinge_{i}", boxes=boxes))
         scope.place_hardware(scope.unique_hardware_name(f"{door.name}_hinges"), bodies)
+
+
+def hinge(model: HingeModel = "Blum CLIP top 110 Thin +0", *, count: int = 2,
+          end: float = data.DEFAULT_END_MARGIN,
+          pilot: tuple[float, float] = (data.DEFAULT_PREDRILL_DIAMETER, data.DEFAULT_PREDRILL_DEPTH)
+          ) -> ConcealedHinge:
+    """A concealed hinge, `hinge("Blum CLIP top 110 Thin +3", count=3)`:
+    see `ConcealedHinge`, the type it returns."""
+    return ConcealedHinge(model, count=count, end=end, pilot=pilot)

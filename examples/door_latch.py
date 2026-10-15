@@ -16,11 +16,11 @@ from stock import ply9, ply12, ply15
 REVEAL = 2.0  # around each inset front
 
 
-def latched_cabinet(name: str, box: Box, slide: DrawerSlide, latch: LatchModel = "Pull Lock 44", *,
+def latched_cabinet(name: str, box: Box, slide: DrawerSlide, model: LatchModel = "Pull Lock 44", *,
                     front: Side, drawer_height: float = 180) -> Scope:
     """A cabinet in its own frame: from the bottom up a drawer bay
     `drawer_height` high, a rail, a second bay, a shelf and the door's
-    compartment above it. `latch` holds every front."""
+    compartment above it. A `model` latch holds every front."""
     with cabinet(name, box, front=front) as cab:
         left = board("left", ply15).on(cab.left)
         right = board("right", ply15).on(cab.right)
@@ -41,9 +41,9 @@ def latched_cabinet(name: str, box: Box, slide: DrawerSlide, latch: LatchModel =
         shelf.join(left, right, using=cabineo(count=2))
 
         door = board("door", ply15).on(cab.front).between(left, right, shelf.top, top).inset(REVEAL)
-        cab.mount(DoorLatch(latch, count=2), door=door, carcass=top)
+        cab.mount(latch(model, count=2), door=door, carcass=top)
 
-        drawer_latch = DoorLatch(latch)
+        drawer_latch = latch(model)
         for i, (bay, catch) in enumerate(((lower_bay, rail), (upper_bay, shelf)), 1):
             d = drawer(f"drawer{i}", bay, slide, drawer_latch, catch)
             d.mount(slide, sides=(left, right), front=d.face.back)     # pre-drills the carcass
@@ -77,4 +77,4 @@ if __name__ == "__build__":   # run as the build file, not imported
     # world terms 500 across the vehicle and 600 along it; inside the
     # module the cabinet is 600 wide and 500 deep.
     box = Box.from_size(width=500, depth=600, height=720)
-    latched_cabinet("locker", box, DrawerSlide("Dynapro 40", nl=450), front=box.right)
+    latched_cabinet("locker", box, drawer_slide("Dynapro 40", nl=450), front=box.right)
