@@ -354,6 +354,19 @@ def test_a_thin_waste_strip_goes_along_with_the_pieces_beside_it():
     assert cuts(plan) == 1
 
 
+def test_a_sliver_narrower_than_the_kerf_is_trimmed_off():
+    """A 2.5 mm strip beside a blank at the sheet's edge, narrower than the
+    kerf, left the piece over the bed [found by fuzzing, 2026-10-15]."""
+    def bed(w: float, h: float) -> bool:
+        return (w <= 781 and h <= 1166) or (w <= 1166 and h <= 781)
+    leaf = Node([676, 0, 130, 1168.5], [0])
+    out = sawing.trim_to_bed(leaf, [(130, 1166)], {0: (676.0, 0.0)}, 4, bed)
+    (used,) = leaves(out)
+    assert used.rect == [676, 0, 130, 1166] and used.blanks == [0] and cuts(out) == 1
+    (cut,) = cut_list(out, 4)
+    assert cut.line == (676, 1168, 806, 1168) and cut.piece == (676, 0, 130, 1168.5)
+
+
 def test_cuts_come_in_order_through_their_pieces():
     tree = Node([0, 0, 2000, 1000], children=[
         Node([0, 0, 1000, 1000], children=[Node([0, 0, 1000, 500], [0]), Node([0, 504, 1000, 496], [1])]),

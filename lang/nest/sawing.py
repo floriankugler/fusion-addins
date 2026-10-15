@@ -25,14 +25,16 @@ between pieces side by side, from the leaves up:
   blanks still fits the bed.
 
 A node left with one child is that child. A node with k children takes
-k - 1 cuts; a sheet's cuts are the sum. A piece the solver left wider than
+k - 1 cuts; a sheet's cuts are the sum. A piece the solver left larger than
 the bed (it records no cut beside a blank shorter than its slot) is cut
-down to its blank.
+down to its blank; where what is cut off is narrower than the kerf, the
+blade takes it all and the piece's one child stops short of its edge: a
+trim, one cut more [found by fuzzing, 2026-10-15: a 2.5 mm strip at the
+sheet's edge left a piece over the bed].
 
 `best_plan` saws with a few settings side by side (two or three stages,
 rips or cross cuts first, with or without a limit on the cuts per stage),
-`seconds` each, and keeps, in
-this order: every blank sawn; no sheet over `max_cuts`; the cheapest stock;
+`seconds` each, and keeps, in this order: every blank sawn; no sheet over `max_cuts`; the cheapest stock;
 the largest single piece kept; the fewest cuts [proposed, and the ranking
 of leftovers chosen by Florian, 2026-10-14]. When the stock on hand cannot
 take every blank, knapsack saws as many as it can.
@@ -147,6 +149,22 @@ def axis_of(kids: list[Node]) -> int:
     return 0 if a.rect[0] + a.rect[2] <= b.rect[0] + 1e-6 else 1
 
 
+def _axis(node: Node) -> int:
+    """The axis a node is cut along; for one child, a trim, the axis on
+    which the child is shorter."""
+    if len(node.children) > 1:
+        return axis_of(node.children)
+    return 0 if node.children[0].rect[2] < node.rect[2] - 1e-6 else 1
+
+
+def _trims(node: Node) -> tuple[bool, bool]:
+    """Whether a node's children stop short of its start and of its end."""
+    axis = _axis(node)
+    first, last = node.children[0], node.children[-1]
+    return (first.rect[axis] > node.rect[axis] + 1e-6,
+            last.rect[axis] + last.rect[axis + 2] < node.rect[axis] + node.rect[axis + 2] - 1e-6)
+
+
 def _grown(node: Node, axis: int, at_start: bool, amount: float, fits_bed: FitsBed) -> Node | None:
     """`node` grown by `amount` along `axis` (at its start or its end), the
     growth passed on to the pieces along that side; None when a piece
@@ -224,7 +242,9 @@ def simplify(node: Node, fits_bed: FitsBed, keeps: Keeps, join: bool = True) -> 
 
 
 def cuts(node: Node) -> int:
-    return 0 if node.leaf else len(node.children) - 1 + sum(cuts(c) for c in node.children)
+    if node.leaf:
+        return 0
+    return len(node.children) - 1 + sum(_trims(node)) + sum(cuts(c) for c in node.children)
 
 
 def leaves(node: Node) -> list[Node]:
@@ -244,13 +264,18 @@ def cut_list(node: Node, kerf: float) -> list[Cut]:
     its pieces' in turn."""
     if node.leaf:
         return []
-    axis = axis_of(node.children)
+    axis = _axis(node)
     x, y, w, h = node.rect
-    out: list[Cut] = []
-    for c in node.children[:-1]:
-        at = c.rect[axis] + c.rect[axis + 2] + kerf / 2
-        line = (at, y, at, y + h) if axis == 0 else (x, at, x + w, at)
-        out.append(Cut(line, (x, y, w, h)))
+
+    def cut(at: float) -> Cut:
+        return Cut((at, y, at, y + h) if axis == 0 else (x, at, x + w, at), (x, y, w, h))
+    out = [cut(c.rect[axis] + c.rect[axis + 2] + kerf / 2) for c in node.children[:-1]]
+    before, after = _trims(node)
+    if before:
+        out.append(cut(node.children[0].rect[axis] - kerf / 2))
+    if after:
+        last = node.children[-1]
+        out.append(cut(last.rect[axis] + last.rect[axis + 2] + kerf / 2))
     for c in node.children:
         out += cut_list(c, kerf)
     return out
@@ -387,9 +412,9 @@ def _trim(leaf: Node, blank: tuple[float, float, float, float], kerf: float, fit
     x, y, w, h = leaf.rect
     lo, hi = leaf.rect[axis], leaf.rect[axis] + leaf.rect[axis + 2]
     b_lo, b_hi = blank[axis], blank[axis] + blank[axis + 2]
-    if after and hi - b_hi > kerf:
+    if after and hi - b_hi > 1e-6:
         keep, cut = (lo, b_hi), (b_hi + kerf, hi)
-    elif not after and b_lo - lo > kerf:
+    elif not after and b_lo - lo > 1e-6:
         cut, keep = (lo, b_lo - kerf), (b_lo, hi)
     else:
         return _trim(leaf, blank, kerf, fits_bed, rest_steps)
@@ -397,6 +422,8 @@ def _trim(leaf: Node, blank: tuple[float, float, float, float], kerf: float, fit
     def piece(span: tuple[float, float]) -> Rect:
         return [span[0], y, span[1] - span[0], h] if axis == 0 else [x, span[0], w, span[1] - span[0]]
     used = _trim(Node(piece(keep), leaf.blanks, leaf.parts), blank, kerf, fits_bed, rest_steps)
+    if cut[1] - cut[0] <= 1e-6:            # no wider than the kerf: the blade takes it
+        return Node(list(leaf.rect), children=[used])
     rest = Node(piece(cut))
     return Node(list(leaf.rect), children=[used, rest] if after else [rest, used])
 

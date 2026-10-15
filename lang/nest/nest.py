@@ -39,6 +39,7 @@ from .nest_types import (NEST_VERSION, BlankOut, CutOut, LeftOutPart, MaterialOu
 from .packing import KNAPSACK, VARIABLE, Bin, pack
 from .refill import SheetState, refill
 from .sawing import Node, PartOn, Stock, leaves
+from .verify import verify
 from .workshop import Workshop, check_workshop, fits
 
 Log = Callable[[str], None]
@@ -85,7 +86,6 @@ def nest_layout(layout: Layout, workshop: Workshop, *, source: str = "", materia
         names = sorted({p["material"] for m in layout["modules"] for p in m["parts"]})
         raise LangError(f"No part of {material} to nest (the materials: {', '.join(names)}).")
     check_sizes(parts, workshop)
-    from .verify import verify
     materials: list[MaterialOut] = []
     problems: list[str] = []
     for name in sorted(parts.by_material):

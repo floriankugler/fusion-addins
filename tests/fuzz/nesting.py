@@ -361,15 +361,11 @@ def run_tree(case: TreeCase) -> list[str]:
     trimmed = trim_to_bed(simple, sizes_, origins, case.kerf, fits_bed)
     problems += _tree_problems(trimmed, case, sizes_, origins, "trimmed")
     for leaf in leaves(trimmed):
-        if leaf.used and not fits_bed(leaf.rect[2], leaf.rect[3]):
-            if len(leaf.blanks) == 1:
-                (bx, by), (bw, bh) = origins[leaf.blanks[0]], sizes_[leaf.blanks[0]]
-                x, y, w, h = leaf.rect
-                # Only what is narrower than the kerf may stay beside the blank.
-                slack = max(bx - x, by - y, x + w - bx - bw, y + h - by - bh)
-                if fits_bed(bw, bh) and slack > case.kerf + 1e-6:
-                    problems.append(f"trimmed: a piece {leaf.rect} is larger than the bed, its blank "
-                                    f"{(bx, by, bw, bh)} is not")
+        if leaf.used and not fits_bed(leaf.rect[2], leaf.rect[3]) and len(leaf.blanks) == 1:
+            (bx, by), (bw, bh) = origins[leaf.blanks[0]], sizes_[leaf.blanks[0]]
+            if fits_bed(bw, bh):
+                problems.append(f"trimmed: a piece {leaf.rect} is larger than the bed, its blank "
+                                f"{(bx, by, bw, bh)} is not")
     return problems
 
 
@@ -440,9 +436,9 @@ def run_saw(case: SawCase) -> list[str]:
         used[s.stock] = used.get(s.stock, 0) + 1
         length, width, _copies, _kind = case.stock[s.stock]
         tree_case = TreeCase((length, width), (), case.bed, case.kerf, case.keep, 0)
-        unit = sawing.UNIT
-        sizes_ = [(math.ceil(w * unit - 1e-9) / unit, math.ceil(h * unit - 1e-9) / unit) for w, h in case.blanks]
-        problems += _sawn_problems(s.tree, tree_case, sizes_, plan.origins, f"sheet {n + 1}")
+        # A piece holds its blank as given (the solver sawed it rounded up to
+        # a tenth, and a trim cuts at the blank's own end).
+        problems += _sawn_problems(s.tree, tree_case, list(case.blanks), plan.origins, f"sheet {n + 1}")
         for leaf in leaves(s.tree):
             for bi in leaf.blanks:
                 sawn[bi] = sawn.get(bi, 0) + 1

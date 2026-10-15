@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from collections import Counter
 
-from shapely import Polygon, STRtree, box
+from shapely import Polygon, STRtree, box, unary_union
 
 from .items import Item
 from .nest_types import MaterialOut, SheetOut
@@ -108,7 +108,9 @@ def _check_sheet(s: SheetOut, workshop: Workshop) -> list[str]:
                 problems.append(f"{name}: cut {k + 1} goes through a piece")
                 break
         strips.append(strip)
-    covered = sum(p.area for p in pieces) + sum(st.area for st in strips)
+    # A trim's strip runs past the piece's edge, off the sheet or over the
+    # strip of the cut before it.
+    covered = unary_union(pieces + strips).intersection(whole).area
     if abs(covered - length * width) > 1e-3 * max(1.0, kerf) * (length + width):
         problems.append(f"{name}: its pieces and cuts cover {covered / 1e6:.4f} m2 of {length * width / 1e6:.4f}")
     if len(s["cuts"]) > workshop.max_cuts:
