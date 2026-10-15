@@ -44,6 +44,22 @@ done.
   [Florian, 2026-10-13]
 - **Check results in the preview's scene**: interference pairs highlighted,
   sheet fit, parts flagged as not plain flat work.
+- **Slats beyond cosmetic** (see `design/slats.md`): operations and joints
+  on slats, all hand work, on the hand-work list (`proposals/cam.md`); the
+  rule that every connector is machined from both boards' big faces holds
+  for boards only, so a slat's side of a joint may lie in a narrow face or
+  an end (a Domino in a rail's end). Joints contacts do not cover yet: frame
+  corners in one plane (a rail's end on a stile's narrow face) and a slat
+  lying flat on a board (face to face). Angled end cuts are bevels
+  (`proposals/bevels.md`), and with them mitred lip corners, which Florian
+  needs as well as butted ones. A hinge cup across a lipped door's edge
+  needs operations on slats too. [Florian, 2026-10-14]
+- **Cut list**: slats and lips by material, section and length (the
+  material along the grain), boards by size; with the committed outputs
+  (`proposals/build-repo.md`), later [Florian, 2026-10-14]. Perhaps a check
+  of slat lengths against the stock's.
+- **Banding along curves**: lips go on straight edges only; banding could
+  follow a rounded corner or a round outline.
 - **More hardware**: whatever else the van needs. The sliding brackets have
   no add-in yet; `lib/sliding_brackets.py` is ready for one.
 - **Latched drawer box detail**: a cut-out in the drawer box for the latch

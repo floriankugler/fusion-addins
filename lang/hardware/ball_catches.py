@@ -75,7 +75,7 @@ from ..core import cutouts as cutout_geometry
 from ..core.directions import AXES, Direction, InnerOuter
 from ..core.errors import LangError, one_of
 from ..core.layout_types import BoxDict, HardwareBodyLayout
-from ..core.material import Material
+from ..core.material import SheetMaterial
 from ..core.ops import Cut
 from ..core.part import Anchor, Board, Face, Operation, board
 from ..core.refs import Pos, PosLike, Side, as_pos
@@ -264,7 +264,7 @@ class BallCatch:
 
     # -- the hatch -----------------------------------------------------------------------------------
 
-    def hatch(self, name: str, opening: Operation, material: Material | None = None, face: CatchFace = None) -> Board:
+    def hatch(self, name: str, opening: Operation, material: SheetMaterial | None = None, face: CatchFace = None) -> Board:
         """A board named `name` in `opening`, the named through cut of a
         panel: the opening's shape shrunk by `gap` all round (its arcs stay
         true arcs), of the panel's material unless `material` says
@@ -281,7 +281,9 @@ class BallCatch:
                             f"{self.gap:g} mm slot.", panel.path)
         shape = Shape(geometry)
         x0, y0, x1, y1 = shape.bounds
-        hatch = board(name, material if material is not None else panel.material, shape)
+        stock = material if material is not None else panel.material
+        assert isinstance(stock, SheetMaterial)        # a panel with an opening is a board, never a slat
+        hatch = board(name, stock, shape)
         frame = hatch.scope.frame
         inward = frame.direction_of(catch_face.axis, -catch_face.direction.sign)
         hatch.on(Pos(catch_face.axis, catch_face.value), toward=inward)

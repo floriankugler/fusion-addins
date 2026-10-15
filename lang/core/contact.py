@@ -86,7 +86,7 @@ def contacts(edge_on: Board, face_on: Board, tolerance: float = 1e-6) -> list[Co
     end = edge_on.face(edge_on.scope.frame.direction_of(normal, sign))
     face = face_on.face(face_on.scope.frame.direction_of(normal, -sign))
     found: list[Contact] = []
-    for lo, hi in _end_spans(edge_on, normal, plane, axis, tolerance):
+    for lo, hi in end_spans(edge_on, normal, plane, axis, tolerance):
         # The face-on board's outline lies in the plane of `axis` and `across`.
         corners = {axis: (lo, hi), across: (eb.lo[across], eb.hi[across])}
         u, v = face_on.u_axis, face_on.v_axis
@@ -129,7 +129,7 @@ def contacts(edge_on: Board, face_on: Board, tolerance: float = 1e-6) -> list[Co
     return found
 
 
-def _end_spans(part: Board, normal: Axis, plane: float, axis: Axis, tolerance: float) -> list[Span]:
+def end_spans(part: Board, normal: Axis, plane: float, axis: Axis, tolerance: float) -> list[Span]:
     """The stretches along `axis` where the part's outline runs in the line
     `normal = plane`: where its end face is."""
     i_normal = 0 if part.u_axis == normal else 1

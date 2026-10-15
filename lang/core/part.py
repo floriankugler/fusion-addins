@@ -22,6 +22,13 @@ too: they go into the inside corners the board has where the call is
 written, so a board relieves its corners after the cuts and joins that
 make them.
 
+A slat (`slat(name, oak, section=(20, 40))`, `Slat`) is a board whose
+thickness and width come from its section, placed by naming what its
+faces do (`on()` a wide face, `edge_on()` a narrow face, `center()` its
+middle, `between()` its ends); it takes no operations for now. A lip
+(`shelf.lip(shelf.front, 10, oak)`) cuts a board back along a narrow face
+and puts a slat in its place (see `design/slats.md`).
+
 Faces and edges are properties named by direction (`side.front`,
 `side.front.inner`), so editors can complete them; project aliases go
 through `face()` and `edge()`. A point on a face for `at=` is named
@@ -33,9 +40,9 @@ corner. `Face`, `Edge`, `Anchor`, `Outline` and `Operation` live in
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from collections.abc import Sequence
-from typing import Literal, Protocol, Self, Union, overload
+from typing import Literal, Protocol, Self, Union, cast, overload
 
 import shapely
 from shapely import affinity
@@ -53,6 +60,8 @@ from . import directions
 from . import dogbones as dogbone_geometry
 from . import scope as scopes
 from .box import Box
+from ..emit.arcs import Arc2, fit
+from .contact import end_spans
 from .contours import Contour, ContourLimit, ContourLimits, as_contour_limit
 from .directions import AXES, Axis, Direction, ExtentName, InnerOuter
 from .errors import LangError, one_of
@@ -60,7 +69,7 @@ from .faces import Anchor, Edge, Face, Operation, Outline
 from .geometry import NARROWEST, clean, parts_of, polygons_of
 from .layout_types import (ChamferLayout, CutLayout, EdgeOpLayout, HoleLayout, OpLayout,
                            PartLayout, PocketLayout, Rings, SlotLayout, VGrooveLayout)
-from .material import Material
+from .material import Material, SheetMaterial, SlatMaterial
 from .ops import MIN_CHAMFER, Chamfer, Cut, EdgeOp, Hole, Op, Pocket, SlotLine, VGroove
 from .refs import Affine, DepthSpec, HasPosition, Pos, PosLike, Side, Through, ToFace, as_pos, through
 from .shapes import Shape, box_shape, slot_shape
@@ -95,11 +104,18 @@ class Joint(Protocol):
 
 
 class Board:
+    #: What the layout calls the part; a slat says "slat".
+    kind: Literal["board", "slat"] = "board"
+
     def __init__(self, name: str, material: Material, shape: Shape | None = None):
         if not name or "." in name:
             raise LangError(f"Part name {name!r} must be non-empty and contain no dots.")
+        if self.kind == "board" and not isinstance(material, SheetMaterial):
+            raise LangError(f"board({name!r}): {material.label} is a slat material, solid wood without a "
+                            f"thickness; a board takes a sheet_material(), and solid wood makes a slat: "
+                            f"slat({name!r}, {material.name}, section=(w, h)).")
         self.name = name
-        self.material = material
+        self.material: Material = material
         self._shape = shape
         self.scope = scopes.current()
         if shape is not None:
@@ -132,6 +148,8 @@ class Board:
         self._joined: list[Op] = []
         #: Notes for the layout's problems, such as cutout pieces left out.
         self.notes: list[str] = []
+        #: The lips glued on so far (`lip()`), which nothing may reach after.
+        self._lips: list[_Lip] = []
 
     # -- identity ----------------------------------------------------------------------
 
@@ -142,7 +160,18 @@ class Board:
 
     @property
     def thickness(self) -> float:
-        return self.material.t
+        material = self.material
+        assert isinstance(material, SheetMaterial)
+        return material.t
+
+    @property
+    def limit_axes(self) -> tuple[Axis, ...]:
+        """The axes on which this part is a `between()` limit for another:
+        a board's thickness axis, its big faces; both of a slat's."""
+        return (self.t_axis,)
+
+    def _operable(self, what: str) -> None:
+        """Called first by every operation and join; a slat refuses them."""
 
     def __repr__(self) -> str:
         return f"Board({self.path})"
@@ -163,19 +192,25 @@ class Board:
         `toward=`, the direction the thickness extends to, as a box side
         (`toward=cab.top`) or a direction."""
         self._placement("on")
-        if isinstance(ref, Side) and toward is None:
-            self._on = ref
-        elif isinstance(ref, Face) and toward is None:
-            self._on = Side(ref.axis, ref.value, inward=ref.direction)
-        else:
-            if toward is None:
-                raise LangError("on(): a bare position needs toward=, the direction the thickness goes.", self.path)
-            d = toward.outward if isinstance(toward, Side) else toward
-            pos = as_pos(ref, "on()")
-            if d.axis != pos.axis:
-                raise LangError(f"on(): toward={d.name} is not on the axis of {pos}.", self.path)
-            self._on = Side(pos.axis, pos.value, inward=d)
+        self._on = self._as_side(ref, toward, "on()", "thickness")
         return self
+
+    def _as_side(self, ref: Side | Face | PosLike, toward: Side | Direction | None, what: str,
+                 size: str) -> Side:
+        """A plane and the way from it a size of the part goes, as `on()`
+        takes it: a box side, a part's face (away from that part), or a
+        bare position with `toward=`."""
+        if isinstance(ref, Side) and toward is None:
+            return ref
+        if isinstance(ref, Face) and toward is None:
+            return Side(ref.axis, ref.value, inward=ref.direction)
+        if toward is None:
+            raise LangError(f"{what}: a bare position needs toward=, the direction the {size} goes.", self.path)
+        d = toward.outward if isinstance(toward, Side) else toward
+        pos = as_pos(ref, what)
+        if d.axis != pos.axis:
+            raise LangError(f"{what}: toward={d.name} is not on the axis of {pos}.", self.path)
+        return Side(pos.axis, pos.value, inward=d)
 
     def between(self, *limits: Limit) -> Self:
         """Limits on the in-plane axes: positions, box sides, faces, parts,
@@ -295,7 +330,7 @@ class Board:
         self._outline = shape
 
     def _resolve(self) -> None:
-        t = self.material.t
+        t = self.thickness
         if self._on is not None and self._center is not None:
             raise LangError("on() and center() both given; one decides the thickness axis.", self.path)
         if self._on is not None:
@@ -473,7 +508,7 @@ class Board:
                 continue
             if isinstance(limit, (Board, PartLimit)):
                 part, offset = (limit, 0.0) if isinstance(limit, Board) else (limit.part, limit.offset)
-                if part.t_axis == axis:
+                if axis in part.limit_axes:
                     parts.append((i, part, offset))
                 continue
             pos = as_pos(limit, f"between() limit {limit!r}")
@@ -751,6 +786,7 @@ class Board:
     # -- operations (ordered) -----------------------------------------------------------------
 
     def _record(self, op: Op, name: str | None) -> None:
+        self._check_lip_reach(op, name)
         if name and name in self._named_ops:
             raise LangError(f"operation name {name!r} used twice.", self.path)
         if name and self._taken_by_board(name):
@@ -984,6 +1020,7 @@ class Board:
         pocket from the face the region enters through, or a through cut
         when it passes the whole thickness. Room around a part comes from
         `part.box().grown(...)`."""
+        self._operable("cut()")
         if isinstance(shape, (Board, Box)):
             if at is not None:
                 raise LangError("cut(): at= is not used when cutting with a part or box.", self.path)
@@ -1018,6 +1055,7 @@ class Board:
                 inner = op.op if isinstance(op, EdgeOp) else op
                 raise LangError(f"the cut{f' {name}' if name else ''} takes the board away from "
                                 f"{self._label(op, inner.name)} made before, which then {missing}", self.path)
+        self._check_lips(cut.geometry, f"the cut{f' {name}' if name else ''}")
         self._record(Cut(placed, name, chamfer), name)       # may refuse it; then the outline stays
         self.outline = cut
 
@@ -1080,6 +1118,7 @@ class Board:
                name: str | None = None, chamfer: float = 0.0) -> Self:
         """A pocket of `shape` from the face the anchor names (the centre of
         the show face by default), `depth` deep."""
+        self._operable("pocket()")
         self._check_area(shape, "pocket()")
         anchor = self._anchor(at)
         f = anchor.face
@@ -1102,6 +1141,7 @@ class Board:
         """A hole of diameter `d` at the anchor's point, into the face the
         anchor names (the centre of the show face by default), `depth`
         deep."""
+        self._operable("hole()")
         anchor = self._anchor(at)
         f = anchor.face
         if d <= 0:
@@ -1144,6 +1184,7 @@ class Board:
         centre must; the rest of the slot cuts what it reaches. A slot open
         at the board's edge is a `cut()` of a rounded rectangle. A slot on a
         narrow face is a `pocket()` of one."""
+        self._operable("slot()")
         two = start is not None or end is not None
         if two and (at is not None or centres is not None or along is not None):
             raise LangError("slot(): give either two anchors, slot(w, start, end, ...), or at=, centres= and "
@@ -1223,6 +1264,7 @@ class Board:
         A list is chamfered whole or not at all: a refused item leaves the
         board as it was [found by fuzzing, 2026-10-13: the items before it
         stayed chamfered]."""
+        self._operable("chamfer()")
         items: list[object] = list(what) if isinstance(what, (list, tuple)) else [what]
         saved = self._state()
         try:
@@ -1250,6 +1292,11 @@ class Board:
         if isinstance(what, Edge):
             if what.part is not self:
                 raise LangError(f"chamfer(): {what!r} is not an edge of this board.", self.path)
+            lipped = next((f for f in (what.a, what.b) if self._lip_on(f.world_name)), None)
+            if lipped is not None:
+                raise LangError(f"chamfer: the edge {what.name} is the lip's on the {lipped.name} face now, and a "
+                                "lip takes no operations (it is chamfered by hand, as the hand-work list will say).",
+                                self.path)
             if self._edge_rim(what).length <= NARROWEST:
                 raise LangError(f"chamfer: nothing is left of the edge {what.name}; what was made before took it "
                                 f"all.", self.path)
@@ -1262,6 +1309,9 @@ class Board:
         elif isinstance(what, Outline):
             if what.face.part is not self:
                 raise LangError(f"chamfer(): {what.face!r} is not a face of this board.", self.path)
+            if self._lips:
+                raise LangError(f"chamfer: the outline runs along the lips' glue lines ({self._lip_names()}), which "
+                                "a chamfer would bevel; chamfer the other edges one by one.", self.path)
             self._check_chamfer_depth(size, self.thickness, "the board (its outline)")
             self._check_chamfer_wall(size, self.outline.geometry.boundary, what.face.world_name,
                                       f"the {what.face.name} face's outline")
@@ -1273,6 +1323,8 @@ class Board:
             name = next((n for n, op in self._named_ops.items() if op is what), None)
             if name is None:
                 raise LangError("chamfer(): the operation is not a named operation of this board.", self.path)
+            if any(lip.cut == name for lip in self._lips):
+                raise LangError(f"chamfer: {name!r} is where a lip is glued on; a lip takes no operations.", self.path)
             depth = what.op.depth if isinstance(what, EdgeOp) else self._depth_of(what)
             self._check_chamfer_depth(size, depth, self._label(what, name))
             face = self.show_face.world_name if isinstance(what, Cut) else what.face
@@ -1300,6 +1352,7 @@ class Board:
         material where an operation made before it lies, is an error. The
         edges along a big face (`panel.front.top`) are not rounded:
         roundovers are not modeled; chamfer them."""
+        self._operable("fillet()")
         if radius <= 0:
             raise LangError(f"fillet(): the radius must be positive, got {radius:g}.", self.path)
         items: list[object] = list(what) if isinstance(what, (list, tuple)) else [what]
@@ -1407,6 +1460,7 @@ class Board:
                 raise LangError(f"{what} takes material where {label} lies, which was made before it: make it "
                                 "smaller, or make it first, before the operation or joint (connectors joined after "
                                 "it keep to the shorter contact).", self.path)
+        self._check_lips(shape.geometry, what)
         self.outline = shape
 
     def cutout(self, what: Face | Shape | None = None, at: Anchor | Edge | None = None, *,
@@ -1437,6 +1491,7 @@ class Board:
         made later inside an opening is an error. Without tabs, material
         kept around a feature in the middle of a through cutout would fall
         out, which is an error too."""
+        self._operable("cutout()")
         for label, value in (("border", border), ("around", around), ("radius", radius), ("chamfer", chamfer)):
             if value < 0:
                 raise LangError(f"cutout(): {label} must not be negative, got {value:g}.", self.path)
@@ -1685,6 +1740,7 @@ class Board:
         rounded ones get none; see `lang.core.dogbones`. When a relief
         cannot be made (it would split the board), the board is left as it
         was."""
+        self._operable("dogbones()")
         if tool <= 0:
             raise LangError(f"dogbones(): tool must be positive, got {tool:g}.", self.path)
         if relief < 0:
@@ -1742,6 +1798,186 @@ class Board:
             raise LangError(f"dogbones(at=): {face!r} is a narrow face; name a big face.", self.path)
         return dogbone_geometry.Target("face", face.world_name)
 
+    # -- lipping and edge banding ------------------------------------------------------------------
+
+    def lip(self, what: Face | Sequence[Face], t: float, material: SlatMaterial) -> Self:
+        """Lipping or edge banding: solid wood `t` thick glued onto a
+        narrow face of the board, or onto each of a list of them, as wide as
+        the board is thick and flush with both big faces:
+        `shelf.lip(shelf.front, 10, oak)`, `side.lip(side.front, 0.5, oak)`.
+
+        The board is cut back by `t` along the face (a cut named
+        `lip_front`) and keeps its box, so `shelf.front` stays the finished
+        face that gaps, hinges and limits measure from. In the cut's place
+        goes a slat of section `t` by the board's thickness, named
+        `shelf_lip_front` in the board's scope (`_1`, `_2`... when the
+        face's edge is in several pieces), cosmetic like every slat.
+
+        A strip goes along every straight edge of the outline lying in the
+        face, one strip each: along a side's front edge above its toe kick
+        only, two strips around a notch in the middle. A face with no
+        straight edge left in it, an edge that runs into a curve (a rounded
+        corner), and a big face are errors.
+
+        Where two lipped faces meet the corner is butted: the strip lipped
+        first runs through and the other stops against it, so in one call
+        the face named first runs through. Mitred corners come with end
+        cuts on slats.
+
+        Ordered like a cut: what was made before where the strip goes is
+        an error (an operation in the cut-back, a chamfer along the face's
+        edges or the outline), and so is anything after that reaches the
+        strip (a cut, fillet or chamfer at the lipped edge, an operation or
+        joint reaching into it). A refused lip changes nothing."""
+        self._operable("lip()")
+        faces: list[Face] = [what] if isinstance(what, Face) else list(what)
+        if not faces:
+            raise LangError("lip(): name the faces to lip, e.g. lip(shelf.front, 10, oak).", self.path)
+        stock = cast(object, material)
+        if not isinstance(stock, SlatMaterial):
+            raise LangError(f"lip(): a lip is solid wood; give a slat_material() such as slat_material('oak'), not "
+                            f"{getattr(stock, 'label', stock)}.", self.path)
+        if t < NARROWEST - 1e-9:
+            raise LangError(f"lip(): {t:g} thick; a lip is at least {NARROWEST:g} mm thick.", self.path)
+        for i, face in enumerate(faces):
+            if not isinstance(cast(object, face), Face) or face.part is not self:
+                raise LangError(f"lip(): {face!r} is not a face of this board.", self.path)
+            if face.is_big:
+                raise LangError(f"lip(): the {face.name} face is a big face; a lip goes on a narrow face.", self.path)
+            if any(f.direction == face.direction for f in faces[:i]):
+                raise LangError(f"lip(): the {face.name} face is named twice.", self.path)
+        saved, lips = self._state(), [replace(lip) for lip in self._lips]
+        made: list[Slat] = []
+        try:
+            for face in faces:
+                self._lip_face(face, float(t), material, made)
+        except BaseException:
+            self._restore(saved)
+            self._lips = lips
+            for strip in made:
+                strip.scope.unregister(strip)
+            raise
+        return self
+
+    def _lip_on(self, world: str) -> bool:
+        """Whether the face of this world name is lipped."""
+        return any(lip.face == world for lip in self._lips)
+
+    def _lip_names(self) -> str:
+        return ", ".join(lip.name for lip in self._lips)
+
+    def _lip_face(self, face: Face, t: float, material: SlatMaterial, made: list[Slat]) -> None:
+        world = face.world_name
+        if self._lip_on(world):
+            raise LangError(f"lip(): the {face.name} face is lipped already.", self.path)
+        for op in self.ops:
+            if isinstance(op, Chamfer) and op.what == "outline":
+                raise LangError("lip(): the outline is chamfered, which would bevel the lip's glue line too; chamfer "
+                                "the edges one by one instead.", self.path)
+            if isinstance(op, Chamfer) and world in op.what.split("."):
+                raise LangError(f"lip(): an edge of the {face.name} face is chamfered; the lip goes there, and a lip "
+                                "is chamfered by hand.", self.path)
+        a, sign, value = face.axis, face.direction.sign, face.value
+        other = self.v_axis if a == self.u_axis else self.u_axis
+        spans = [(s0, s1) for s0, s1 in end_spans(self, a, value, other, 1e-6) if s1 - s0 >= NARROWEST]
+        if not spans:
+            raise LangError(f"lip(): the outline has no straight edge left in the {face.name} face (a cut, joint "
+                            "or rounded corner took it).", self.path)
+        b = self.box()
+        ob = self.outline.bounds
+        past = ob[2 if a == self.u_axis else 3] - value if sign > 0 else value - ob[0 if a == self.u_axis else 1]
+        if past > 1e-6:
+            raise LangError(f"lip(): material reaches {past:g} past the {face.name} face (a joint's tenons or "
+                            "fingers); a lip goes on a plain edge, and a joint at a lipped face is an error.",
+                            self.path)
+        extent = b.hi[a] - b.lo[a]
+        if t >= extent - NARROWEST:
+            raise LangError(f"lip(): {t:g} thick takes all of the board, {extent:g} across from the {face.name} "
+                            "face.", self.path)
+        for s0, s1 in spans:
+            for end in (s0, s1):
+                self._check_lip_end(face, other, end)
+        inner = value - sign * t
+        lo_a, hi_a = min(inner, value), max(inner, value)
+        rects = [shapely_box(lo_a, s0, hi_a, s1) if a == self.u_axis else shapely_box(s0, lo_a, s1, hi_a)
+                 for s0, s1 in spans]
+        region = unary_union(rects)
+        if region.difference(self.outline.geometry).area > 1e-6:
+            raise LangError(f"lip(): a cut or opening made before lies where the lip on the {face.name} face goes; "
+                            "a strip is solid all along.", self.path)
+        for op in self.ops:
+            if isinstance(op, (Cut, Chamfer)):
+                continue
+            inner_op = op.op if isinstance(op, EdgeOp) else op
+            if (isinstance(op, EdgeOp) and op.face == world) or self._footprint(op).intersection(region).area > 1e-6:
+                raise LangError(f"lip(): {self._label(op, inner_op.name)} lies where the lip on the {face.name} face "
+                                "goes, made before it: make it after lip(), clear of the strip.", self.path)
+        # The earlier lips this one butts against: their strips cover its ends.
+        for lip in self._lips:
+            lip.glue = lip.glue.difference(region.buffer(1e-6))
+        shape = Shape(region)
+        if abs(shape.area - region.area) > 1e-6:
+            # [found by fuzzing, 2026-10-14: a lip 0.01 thick, its cut as narrow as cleaning removes,
+            # left the board as it was beside its strip]
+            raise LangError(f"lip(): {t:g} thick is too thin to cut the board back by; a lip is more than "
+                            f"{NARROWEST:g} mm thick.", self.path)
+        cut = self.unique_op_name(f"lip_{face.name}")
+        self._cut_through(shape, cut, 0.0)
+        line = [((inner, s0), (inner, s1)) if a == self.u_axis else ((s0, inner), (s1, inner)) for s0, s1 in spans]
+        lip = _Lip(world, face.name, cut, unary_union([LineString(seg) for seg in line]), region, [])
+        self._lips.append(lip)
+        t_axis = self.t_axis
+        across = self.scope.frame.direction_of(t_axis, 1)
+        with scopes.within(self.scope):
+            for k, (s0, s1) in enumerate(spans):
+                name = f"{self.name}_lip_{face.name}" + (f"_{k + 1}" if len(spans) > 1 else "")
+                strip = Slat(name, material, section=(t, self.thickness))
+                made.append(strip)
+                if t <= self.thickness:
+                    strip.on(Pos(a, inner), toward=face.direction)
+                    strip.edge_on(Pos(t_axis, b.lo[t_axis]), toward=across)
+                else:
+                    strip.on(Pos(t_axis, b.lo[t_axis]), toward=across)
+                    strip.edge_on(Pos(a, inner), toward=face.direction)
+                strip.between(Pos(other, s0), Pos(other, s1))
+                strip.box()
+                lip.strips.append(strip)
+
+    def _check_lip_end(self, face: Face, other: Axis, end: float) -> None:
+        """An error where the face's straight edge runs on into a curve at
+        `end` (a rounded corner, a round outline), as the emitter finds the
+        outline's arcs (`arcs.fit`): a strip ending square there would leave
+        the rounding standing beside it. A corner at any angle is fine."""
+        point = (face.value, end) if face.axis == self.u_axis else (end, face.value)
+        for ring in self.outline.rings():
+            for curve in fit(ring):
+                if isinstance(curve, Arc2) and min(math.dist(curve.a, point), math.dist(curve.b, point)) <= 1e-6:
+                    raise LangError(f"lip(): the {face.name} face's edge runs into a curve at {other} {end:g} (a "
+                                    "rounded corner); a lip goes on a straight edge between corners: lip before "
+                                    "rounding the corner, or not at all there.", self.path)
+
+    def _check_lips(self, outline: BaseGeometry, what: str) -> None:
+        """An error for an outline, as an operation would leave it, that
+        reaches into a lip's strip or takes the board away from behind it:
+        a lip takes no operations, so nothing after it may reach it."""
+        rim = outline.boundary.buffer(1e-6)
+        for lip in self._lips:
+            if outline.intersection(lip.region).area > 1e-6 or lip.glue.difference(rim).length > 1e-6:
+                raise LangError(f"{what} reaches the lip on the {lip.name} face, glued on before it; a lip takes no "
+                                "operations: make it before lip(), or clear of the strip.", self.path)
+
+    def _check_lip_reach(self, op: Op, name: str | None) -> None:
+        """An error for an operation reaching into a lip's strip: into the
+        lipped face, or with its footprint across the glue line."""
+        for lip in self._lips:
+            if (isinstance(op, EdgeOp) and op.face == lip.face) or (
+                    isinstance(op, (Pocket, Hole, VGroove, EdgeOp))
+                    and self._footprint(op).intersection(lip.region).area > 1e-6):
+                inner = op.op if isinstance(op, EdgeOp) else op
+                raise LangError(f"{self._label(op, name or inner.name)} reaches the lip on the {lip.name} face, glued "
+                                "on before it; a lip takes no operations: make it before lip(), or clear of the "
+                                "strip.", self.path)
+
     # -- operations at computed positions (joints and hardware) ------------------------------------
 
     def _big_face_of_mine(self, face: Face, what: str) -> None:
@@ -1755,6 +1991,7 @@ class Board:
         frame (world coordinates on the outline's two axes, see `face_axes`).
         For joints and hardware, which compute positions themselves; build
         files use `pocket()`."""
+        self._operable("add_pocket()")
         self._big_face_of_mine(face, "add_pocket()")
         self._check_area(shape, "add_pocket()")
         d, spec, _ = self._depth(face, depth)
@@ -1767,12 +2004,14 @@ class Board:
         round ends in the face's frame, `width` wide; see `add_pocket`.
         Joints cut their Domino and Clamex slots so, and it is what
         `slot()` makes."""
+        self._operable("add_slot()")
         self._big_face_of_mine(face, "add_slot()")
         return self._add_slot(face, start, end, width, depth, name, 0.0)
 
     def add_cut(self, shape: Shape, name: str | None = None) -> Self:
         """A through cut with `shape` already in the outline's frame (world
         coordinates on its two axes); see `add_pocket`."""
+        self._operable("add_cut()")
         self._check_area(shape, "add_cut()")
         self._cut_through(shape, name, 0.0)
         return self
@@ -1783,6 +2022,7 @@ class Board:
         frame (world coordinates on its (s, t) axes, see `face_axes`),
         `depth` deep from a plane `offset` in front of the face; see
         `add_pocket`. A box joint's grooves along its fingers are cut so."""
+        self._operable("add_edge_pocket()")
         if face.part is not self:
             raise LangError(f"add_edge_pocket(): {face!r} is not a face of this board.", self.path)
         if face.is_big:
@@ -1799,14 +2039,18 @@ class Board:
         """Widens the outline by `shape`, in the outline's frame: material a
         joint adds, such as tenons growing out of the board's end. The
         board's box, its placement, stays as it was."""
+        self._operable("add_to_outline()")
         self._check_area(shape, "add_to_outline()")
-        self.outline = self.outline.union(shape)
+        grown = self.outline.union(shape)
+        self._check_lips(grown.geometry, "a joint")
+        self.outline = grown
         return self
 
     def add_hole(self, face: Face, point: Point2, d: float, depth: DepthSpec, name: str | None = None,
                  chamfer: float = 0.0) -> Self:
         """A hole into a big face at `point` in the face's frame; see
         `add_pocket`. A chamfer on its edge is a 90 degree countersink."""
+        self._operable("add_hole()")
         self._big_face_of_mine(face, "add_hole()")
         if d <= 0:
             raise LangError(f"hole diameter must be positive, got {d}.", self.path)
@@ -1817,6 +2061,7 @@ class Board:
     def add_vgroove(self, face: Face, start: Point2, end: Point2, depth: float, name: str | None = None) -> Self:
         """A 90 degree V-groove into a big face along the line from `start`
         to `end` in the face's frame, `depth` deep; see `add_pocket`."""
+        self._operable("add_vgroove()")
         self._big_face_of_mine(face, "add_vgroove()")
         if depth <= 0 or depth >= self.thickness:
             raise LangError(f"a V-groove must be between 0 and the board's thickness deep, got {depth:g}.",
@@ -1890,6 +2135,7 @@ class Board:
         way the joint needs (a contact for a connector, a crossing for a
         half lap); nothing is joined that is not named. The joint adds
         operations to both boards."""
+        self._operable("join()")
         named: list[Board] = []
         for p in partners:
             named.extend([p] if isinstance(p, Board) else p)
@@ -1900,6 +2146,7 @@ class Board:
                 raise LangError("join(): a board cannot be joined to itself.", self.path)
             if any(q is p for q in named[:i]):
                 raise LangError(f"join(): {p.path} is named twice.", self.path)
+            p._operable(f"join() with {self.path}")
         # A failed join changes no board, whatever check inside it fails.
         saved = [(board, board._state()) for board in [self, *named]]
         try:
@@ -1936,7 +2183,8 @@ class Board:
         b = self.box()
         return {
             "path": self.path,
-            "kind": "board",
+            "kind": self.kind,
+            "section": None,
             "material": self.material.label,
             "thickness": self.thickness,
             "axes": {"t": self.t_axis, "u": self.u_axis, "v": self.v_axis},
@@ -1964,6 +2212,162 @@ class Board:
         names[inner.world_name].append("inner")
         names[Face(self, -inner.direction).world_name].append("outer")
         return names
+
+
+class Slat(Board):
+    """Solid wood defined by cross-section and length (`slat()`), with no
+    canonical top or bottom: placed by naming what its faces do,
+
+    - `on(ref, toward=)`: a wide face lies on `ref`, as a board's big face
+      does;
+    - `edge_on(ref, toward=)`: a narrow face lies on `ref`;
+    - `center(pos)`: its middle lies on `pos`, on that position's axis;
+    - `between(start, end)`: its two ends, and nothing else.
+
+    Two of the first three, on different axes; the length runs along the
+    third. A slat is a board whose thickness and width come from its
+    section: its thickness axis is the one its wide faces face along, and
+    its outline lies in the plane of its length and width, so faces,
+    anchors, limits, checks and the layout treat it as one. Its grain runs
+    along its length.
+
+    For now a slat only stands in for the real one, made by hand: it takes
+    no operations, no joins and no hardware [decided by Florian,
+    2026-10-14], each an error, and its ends are square."""
+    kind: Literal["board", "slat"] = "slat"
+
+    def __init__(self, name: str, material: SlatMaterial, section: tuple[float, float]):
+        stock = cast(object, material)
+        if not isinstance(stock, SlatMaterial):
+            raise LangError(f"slat({name!r}): {getattr(stock, 'label', stock)} is not a slat material; a slat is solid wood: give a "
+                            "slat_material(), such as slat_material('oak').")
+        try:
+            sizes = [float(x) for x in section]
+        except (TypeError, ValueError):
+            raise LangError(f"slat({name!r}): section={section!r}; give its two sizes, section=(w, h).") from None
+        if len(sizes) != 2:
+            raise LangError(f"slat({name!r}): section={section!r}; give its two sizes, section=(w, h).")
+        if min(sizes) < NARROWEST - 1e-9:
+            raise LangError(f"slat({name!r}): section={section!r}; each size is at least {NARROWEST:g} mm.")
+        #: (narrow, wide): the widths of its narrow and its wide faces.
+        self._section = (min(sizes), max(sizes))
+        self._edge_on: Side | None = None
+        self._w_axis: Axis | None = None
+        super().__init__(name, material)
+
+    def __repr__(self) -> str:
+        return f"Slat({self.path})"
+
+    @property
+    def thickness(self) -> float:
+        """The width of its narrow faces, the smaller size of its section."""
+        return self._section[0]
+
+    @property
+    def width(self) -> float:
+        """The width of its wide faces, the larger size of its section."""
+        return self._section[1]
+
+    @property
+    def section(self) -> tuple[float, float]:
+        """Its section's sizes, the smaller first."""
+        return self._section
+
+    @property
+    def limit_axes(self) -> tuple[Axis, ...]:
+        self.box()
+        assert self._w_axis is not None
+        return (self.t_axis, self._w_axis)
+
+    def _operable(self, what: str) -> None:
+        raise LangError(f"{what}: a slat takes no operations, joins or hardware for now; it stands in for the real "
+                        "one, made by hand.", self.path)
+
+    # -- placement -------------------------------------------------------------------------------
+
+    def edge_on(self, ref: Side | Face | PosLike, toward: Side | Direction | None = None) -> Self:
+        """Which plane a narrow face of the slat lies in, and which way its
+        width goes from there: a box side inward, a part's face away from
+        that part, a bare position toward `toward=`."""
+        self._placement("edge_on")
+        self._edge_on = self._as_side(ref, toward, "edge_on()", "width")
+        return self
+
+    def inset(self, n: float) -> Self:
+        raise LangError("inset(): a slat's section is its own; a clearance moves the reference, such as "
+                        "between(left.gap(2), right.gap(2)).", self.path)
+
+    def grain(self, along: ExtentName | Side | Direction | Face) -> Self:
+        raise LangError("grain(): a slat's grain runs along its length.", self.path)
+
+    def _resolve(self) -> None:
+        given = [what for what, v in (("on()", self._on), ("edge_on()", self._edge_on), ("center()", self._center))
+                 if v is not None]
+        if len(given) != 2:
+            have = "none is given" if not given else f"only {given[0]} is given" if len(given) == 1 \
+                else "all three are given"
+            raise LangError(f"a slat is placed by two of on() (a wide face), edge_on() (a narrow face) and center() "
+                            f"(its middle), on different axes; {have}.", self.path)
+        t, w = self._section
+
+        def span(side: Side, size: float) -> tuple[float, float]:
+            return (side.value, side.value + size) if side.inward.sign > 0 else (side.value - size, side.value)
+
+        if self._on is not None:
+            t_axis, (t_lo, t_hi) = self._on.axis, span(self._on, t)
+            if self._edge_on is not None:
+                w_axis, (w_lo, w_hi) = self._edge_on.axis, span(self._edge_on, w)
+            else:
+                assert self._center is not None
+                w_axis, (w_lo, w_hi) = self._center.axis, (self._center.value - w / 2, self._center.value + w / 2)
+        else:
+            assert self._edge_on is not None and self._center is not None
+            w_axis, (w_lo, w_hi) = self._edge_on.axis, span(self._edge_on, w)
+            t_axis, (t_lo, t_hi) = self._center.axis, (self._center.value - t / 2, self._center.value + t / 2)
+        if t_axis == w_axis:
+            raise LangError(f"{given[0]} and {given[1]} both place the slat on {t_axis}; they place different axes, "
+                            "and its length runs along the third.", self.path)
+        l_axis: Axis = next(x for x in AXES if x not in (t_axis, w_axis))
+        u_axis, v_axis = _in_plane(t_axis)
+        self._t_axis, self._u_axis, self._v_axis, self._w_axis = t_axis, u_axis, v_axis, w_axis
+        lo: dict[Axis, float] = {t_axis: t_lo, w_axis: w_lo}
+        hi: dict[Axis, float] = {t_axis: t_hi, w_axis: w_hi}
+        contours = ContourLimits(
+            [as_contour_limit(c) for c in self._limits if isinstance(c, (Contour, ContourLimit))],
+            t_axis, t_lo, t_hi, u_axis, v_axis, self.path)
+        if contours.edges_on(w_axis):
+            raise LangError("between(): a contour runs along the slat's length; a slat's section is the same all "
+                            "along, so a contour only gives one of its ends.", self.path)
+        used: set[int] = set()
+        a, b = self._extent(l_axis, self.scope.box, None, contours, used)
+        if b - a < NARROWEST:
+            size = "not positive" if b - a <= 1e-9 else f"{b - a:g} mm, less than {NARROWEST:g}"
+            raise LangError(f"length on {l_axis} is {size} ({a:g} to {b:g}).", self.path)
+        lo[l_axis], hi[l_axis] = a, b
+        self._check_limits_used(used, l_axis)
+        outline = box_shape(lo[u_axis], lo[v_axis], hi[u_axis], hi[v_axis])
+        if contours.trims and abs(contours.trim(outline).area - outline.area) > 1e-6:
+            raise LangError("between(): a contour in the slat's own plane would shape its side; a slat's section is "
+                            "the same all along, so a contour only gives one of its ends.", self.path)
+        self._outline = outline
+        self._box = Box(lo, hi)
+        self._grain = l_axis
+
+    def _check_limits_used(self, used: set[int], t_axis: Axis) -> None:
+        """An error for a `between()` limit off the slat's length axis
+        (here `t_axis`): between() gives a slat's ends only."""
+        for i, limit in enumerate(self._limits):
+            if i not in used:
+                what = limit.path if isinstance(limit, Board) else \
+                    limit.part.path if isinstance(limit, PartLimit) else repr(limit)
+                raise LangError(f"between(): {what} does not limit the slat's length, which runs along {t_axis}; "
+                                "between() gives a slat's two ends, on(), edge_on() and center() its section.",
+                                self.path)
+
+    def to_layout(self) -> PartLayout:
+        layout = super().to_layout()
+        layout["section"] = list(self._section)
+        return layout
 
 
 @dataclass(frozen=True)
@@ -2042,6 +2446,20 @@ def _hole_to_layout(op: Hole) -> HoleLayout:
             "depth_spec": op.depth_spec, "through": op.through, "chamfer": op.chamfer}
 
 
+@dataclass
+class _Lip:
+    """A lip on one face (`Board.lip`): the face's world name and its name
+    in the board's frame, the cut that made room for it, where it is glued
+    (the cut's edge along the face, less where a later lip butts against
+    it), what the cut took (where the strips are), and the strips."""
+    face: str
+    name: str
+    cut: str
+    glue: BaseGeometry
+    region: BaseGeometry
+    strips: list[Slat]
+
+
 @dataclass(frozen=True)
 class _BoardState:
     """A board's operations and outline at one moment (`Board._state`)."""
@@ -2053,5 +2471,11 @@ class _BoardState:
     joined: list[Op]
 
 
-def board(name: str, material: Material, shape: Shape | None = None) -> Board:
+def board(name: str, material: SheetMaterial, shape: Shape | None = None) -> Board:
     return Board(name, material, shape)
+
+
+def slat(name: str, material: SlatMaterial, *, section: tuple[float, float]) -> Slat:
+    """A slat of solid wood, its two sizes in either order:
+    `slat("cleat", oak, section=(20, 40))`."""
+    return Slat(name, material, section)

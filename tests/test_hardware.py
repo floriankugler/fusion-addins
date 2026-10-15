@@ -77,7 +77,7 @@ def test_slide_machines_the_drawer_box():
 
 
 def _drawer(slide: DrawerSlide, machine: bool = True, into: str = "lrf",
-            floor_material: Material = ply9) -> tuple[Scope, dict[str, Board]]:
+            floor_material: SheetMaterial = ply9) -> tuple[Scope, dict[str, Board]]:
     """A drawer in a 600 x 500 x 300 cabinet in the van's terms, built
     much as the example builds one: 12 mm sides, front and back, a 9 mm
     floor in grooves in the sides and the front (`into`: l, r, f, k; not

@@ -58,7 +58,7 @@ from shapely.ops import split, unary_union
 
 from boards import KNOWN, _pipeline_problems  # pyright: ignore[reportPrivateUsage]
 from fuzzing import floats, fresh, sizes
-from lang import Board, Box, LangError, Pos, board, inside, material, module
+from lang import Board, Box, LangError, Pos, board, inside, sheet_material, module
 from lang.core.contours import Contour, round_offset
 from lang.core.directions import AXES, Axis, world_frame
 from lang.core.geometry import NARROWEST, clean, polygons_of
@@ -310,7 +310,7 @@ def build(case: ContourCase, variant: Variant, name: str = "m") -> Built:
             elif limit.kind == "side":
                 limits.append(m.side(_side_name(world, limit.axis, limit.value > 0)))
             elif limit.kind == "end":
-                end = board(f"end{i}", material("birch", t=case.end_t)).on(
+                end = board(f"end{i}", sheet_material("birch", t=case.end_t)).on(
                     m.side(_side_name(world, limit.axis, limit.value > 0)))
                 end.box()
                 ends.append(end)
@@ -318,7 +318,7 @@ def build(case: ContourCase, variant: Variant, name: str = "m") -> Built:
             else:
                 c = contours[limit.index]
                 limits.append(c if limit.gap is None else c.gap(limit.gap) if limit.gap >= 0 else c.into(-limit.gap))
-        b = board("board", material("birch", t=case.t)).center(Pos(world.axis(0), world.at(0, case.at)))
+        b = board("board", sheet_material("birch", t=case.t)).center(Pos(world.axis(0), world.at(0, case.at)))
         b.between(*limits)
     return Built(world, m, b, ends, contours)
 

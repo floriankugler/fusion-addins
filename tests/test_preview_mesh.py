@@ -72,7 +72,7 @@ def test_write_scene_returns_the_problems_and_the_build_prints_them(monkeypatch:
     build = tmp_path / "build.py"
     build.write_text("from lang import *\n"
                      "with module('m', Box.from_size(width=300, depth=200, height=100)) as m:\n"
-                     "    p = board('p', material('birch', t=15)).on(m.bottom)\n"
+                     "    p = board('p', sheet_material('birch', t=15)).on(m.bottom)\n"
                      "    p.hole(8, at=p.top.center, depth=5)\n")
     run_build(build, tmp_path / "out")
     assert "preview: m.p: the preview could not cut its operations" in capsys.readouterr().err
@@ -85,7 +85,7 @@ def test_a_build_imports_its_folder_s_modules_afresh(tmp_path: Path):
     build = tmp_path / "build.py"
     build.write_text("from lang import *\nfrom sizes import WIDTH\n"
                      "with module('m', Box.from_size(width=WIDTH, depth=200, height=100)) as m:\n"
-                     "    board('p', material('birch', t=15)).on(m.bottom)\n")
+                     "    board('p', sheet_material('birch', t=15)).on(m.bottom)\n")
     first = run_build(build, tmp_path / "out", scene=False)
     (tmp_path / "sizes.py").write_text("WIDTH = 400\n")
     second = run_build(build, tmp_path / "out", scene=False)

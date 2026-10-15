@@ -86,7 +86,7 @@ def test_hidden_dog_bones_need_their_whole_width():
     with the radius before. With 1.1 of play across the reliefs fit."""
     with module("unit", Box.from_size(width=600, depth=300, height=800)) as u:
         left = board("left", ply15).on(u.left)
-        thin = board("thin", material("birch", t=5)).on(Pos("z", 100), toward=u.top).between(left, u.right)
+        thin = board("thin", sheet_material("birch", t=5)).on(Pos("z", 100), toward=u.top).between(left, u.right)
         before = state(thin, left)
         with pytest.raises(LangError, match=r"^unit\.thin: tenons with unit\.left: hidden dog bones are 6\.1 across, "
                                             r"wider than the mortises across the joint \(5\.1\)"):

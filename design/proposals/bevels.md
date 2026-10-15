@@ -26,5 +26,5 @@ is refused.
 - An operation near a bevel must lie on the true face.
 - The emitter gets one new instruction, a wedge cut off the body, and the
   mesher one boolean.
-- The end cut of a slat (`slats.md`) is the same operation and would be
+- The end cut of a slat (`design/slats.md`) is the same operation and would be
   spelled `bevel()` too.

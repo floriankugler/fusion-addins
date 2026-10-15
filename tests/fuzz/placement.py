@@ -74,7 +74,7 @@ from shapely.geometry.base import BaseGeometry
 
 from boards import _pipeline_problems  # pyright: ignore[reportPrivateUsage]
 from fuzzing import floats, fresh, sizes
-from lang import Box, Frame, LangError, Pos, Side, board, cabinet, check, inside_box, material, module, \
+from lang import Box, Frame, LangError, Pos, Side, board, cabinet, check, inside_box, sheet_material, module, \
     no_interference, rect, scope, set_frame, spread, through, to
 from lang.core.directions import AXES, Axis, as_axis, world_frame
 from lang.core.faces import Face
@@ -997,7 +997,7 @@ def _place(b: Built, i: int) -> None:
         except LangError as e:
             b.refused.append(f"{sc.path}.{spec.name}: {e}")
             return
-        x = board(spec.name, material("birch", t=spec.t), shape)
+        x = board(spec.name, sheet_material("birch", t=spec.t), shape)
         b.boards[i] = b.made_boards[i] = x
         try:
             steps: list[Callable[[], object]] = [lambda: _on(b, x, spec)]

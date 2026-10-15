@@ -248,7 +248,7 @@ def test_the_layout_carries_a_slots_centre_line():
         panel.pocket(rect(depth=20, width=20), at=top.center, depth=5, name="square")
         panel.pocket(rect(depth=40, height=6), at=panel.right.center, depth=10, name="edge")
     layout = build_layout()
-    assert layout["version"] == 4
+    assert layout["version"] >= 4          # slots came with version 4
     vent, square, edge = layout["modules"][0]["parts"][0]["ops"]
     assert vent["kind"] == "pocket" and vent["slot"] == {"start": [40.0, 100.0], "end": [40.0, 300.0], "width": 8.0}
     assert square["kind"] == "pocket" and square["slot"] is None

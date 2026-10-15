@@ -11,7 +11,7 @@ from typing import Any
 import trimesh
 from shapely.geometry import Point
 
-from lang import Board, Box, Scope, board, check, material, module, no_interference, rect
+from lang import Board, Box, Scope, board, check, sheet_material, module, no_interference, rect
 from lang.core.layout import build_layout
 from lang.core.layout_types import HardwareBodyLayout
 from lang.preview.mesh import mesh_part
@@ -19,10 +19,10 @@ from lang.preview.mesh import mesh_part
 #: The example build files, which import their stock and each other from their folder.
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
 
-ply9 = material("birch", t=9)
-ply12 = material("birch", t=12)
-ply15 = material("birch", t=15)
-ply18 = material("birch", t=18)
+ply9 = sheet_material("birch", t=9)
+ply12 = sheet_material("birch", t=12)
+ply15 = sheet_material("birch", t=15)
+ply18 = sheet_material("birch", t=18)
 
 
 def carcass(toekick: bool = False, back: bool = True) -> tuple[Scope, dict[str, Board]]:

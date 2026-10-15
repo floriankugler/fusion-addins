@@ -30,7 +30,7 @@ from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
 
 from fuzzing import floats, fresh, fit_problems, rings_of, sizes
-from lang import Board, Box, LangError, Shape, board, cross, material, module, through, to, triangles
+from lang import Board, Box, LangError, Shape, board, cross, sheet_material, module, through, to, triangles
 from lang.core.geometry import polygons_of
 from lang.core.layout import build_layout
 from lang.core.ops import MIN_CHAMFER, Cut, Pocket
@@ -324,7 +324,7 @@ def _run_cutout(case: BoardCase, name: str = "m", pipeline: bool = True) -> list
     of cases built into one layout for Fusion leaves that to the end)."""
     problems: list[str] = []
     with module(name, _module_box(case)) as m:
-        b = board("panel", material("birch", t=case.t), _outline_shape(case)).on(getattr(m, case.place))
+        b = board("panel", sheet_material("birch", t=case.t), _outline_shape(case)).on(getattr(m, case.place))
         footprints: list[tuple[str, BaseGeometry]] = []
         for i, f in enumerate(case.features):
             name = f"{f.kind}_{i}"

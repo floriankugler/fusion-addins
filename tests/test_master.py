@@ -230,7 +230,7 @@ def test_an_open_contours_clearance_counts_at_a_face_whichever_way_it_runs():
         # 3 from the contour's end at the face's corner, the arc a polygon a little inside
         assert b.box().lo["y"] == pytest.approx(110 + math.sqrt(3 ** 2 - 0.05 ** 2), abs=0.015)
     for i, points in enumerate([bent, bent[::-1]]):
-        b = board(f"bent{i}", material("thick", t=40)).center(Pos("x", 134)).between(
+        b = board(f"bent{i}", sheet_material("thick", t=40)).center(Pos("x", 134)).between(
             _contour("bent", points, False).into(17), Pos("y", 1000), Pos("z", 0), Pos("z", 50))
         assert b.box().lo["y"] == pytest.approx(6.2)
 
@@ -395,7 +395,7 @@ def test_inside_does_not_count_a_rounding_past_the_contour():
     outside". Fuzzing found it."""
     band = _contour("band", [(-3.0, 0.0), (3.0, 0.0), (3.0, 50.0), (-3.0, 50.0)], True)
     with module("m", Box({"x": -10, "y": 0, "z": 0}, {"x": 10, "y": 50, "z": 50})):
-        b = board("b", material("thin", t=6)).center(Pos("x", 1.192092896e-07)).between(band)
+        b = board("b", sheet_material("thin", t=6)).center(Pos("x", 1.192092896e-07)).between(band)
         check(inside(band))
     assert (b.box().lo["y"], b.box().hi["y"]) == (0, 50)
     assert build_layout()["problems"] == []

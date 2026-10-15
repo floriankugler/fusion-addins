@@ -229,7 +229,7 @@ class Emitter:
         if part.facts is not None:
             facts = part.facts
             body.attributes.add(ATTRIBUTE_GROUP, ATTRIBUTE_NAME, json.dumps({
-                "path": part.path, "material": facts.material, "thickness": facts.thickness,
+                "path": part.path, "kind": facts.kind, "material": facts.material, "thickness": facts.thickness,
                 "grained": facts.grained, "grain": list(facts.grain) if facts.grain else None,
                 "up": list(facts.up),
             }))

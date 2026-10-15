@@ -16,8 +16,10 @@ exports through attribute access.
 """
 from __future__ import annotations
 
+from collections.abc import Generator
+from contextlib import contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, ParamSpec, Protocol
+from typing import TYPE_CHECKING, Any, Callable, ParamSpec, Protocol, cast
 
 from . import directions
 from .box import Box
@@ -93,12 +95,28 @@ class _Root:
     def register(self, part: Board) -> None:
         registry.root_parts.append(part)
 
+    def unregister(self, part: Board) -> None:
+        registry.root_parts[:] = [p for p in registry.root_parts if p is not part]
+
 
 _root = _Root()
 
 
 def current() -> Scope | _Root:
     return _stack[-1] if _stack else _root
+
+
+@contextmanager
+def within(scope: Scope | _Root) -> Generator[None]:
+    """Makes `scope` the current one for a while, wherever the call is:
+    the parts a board makes for itself (a lip's strips) go into the board's
+    scope and are named in its frame."""
+    saved = _stack[:]
+    _stack[:] = [] if isinstance(scope, _Root) else [scope]
+    try:
+        yield
+    finally:
+        _stack[:] = saved
 
 
 directions.set_current_frame_provider(lambda: current().frame)
@@ -222,6 +240,11 @@ class Scope:
             raise LangError(f"name {part.name!r} already used in this scope.", self.path)
         self.parts[part.name] = part
 
+    def unregister(self, part: Board) -> None:
+        """Takes back a part a refused operation made (a lip's strips)."""
+        if self.parts.get(part.name) is part:
+            del self.parts[part.name]
+
     def _register_child(self, child: Scope) -> None:
         if child.name in self.parts or child.name in self.children:
             raise LangError(f"name {child.name!r} already used in this scope.", self.path)
@@ -320,7 +343,15 @@ class Scope:
     def mount(self, hardware: Mountable[P], /, *args: P.args, **kwargs: P.kwargs) -> Scope:
         """Mounts hardware in this scope: `drawer.mount(slide, sides=(left,
         right), front=face.back)`. The hardware decides what that means;
-        the keywords are its own `mount`'s, checked by the type checker."""
+        the keywords are its own `mount`'s, checked by the type checker.
+        Hardware goes on boards: a slat takes none for now."""
+        for arg in [*args, *kwargs.values()]:
+            items: list[object] = list(cast("list[object] | tuple[object, ...]", arg)) \
+                if isinstance(arg, (list, tuple)) else [arg]
+            for item in items:
+                if getattr(item, "kind", None) == "slat":
+                    raise LangError(f"mount(): {getattr(item, 'path', item)} is a slat; hardware goes on boards (a "
+                                    "slat takes no operations, joins or hardware for now).", self.path)
         hardware.mount(self, *args, **kwargs)
         return self
 

@@ -13,7 +13,7 @@ CABINET = '''from lang import *
 
 def cabinet(name: str) -> None:
     with module(name, Box.from_size(width=300, depth=200, height=400)) as m:
-        board("left", material("birch", t=15)).on(m.left)
+        board("left", sheet_material("birch", t=15)).on(m.left)
 
 if __name__ == "__build__":   # run as the build file, not imported
     cabinet("cabinet")
@@ -29,7 +29,7 @@ def write(folder: Path, name: str, text: str) -> Path:
 def folder_of_files(tmp_path: Path) -> Path:
     write(tmp_path, "cabinet.py", CABINET)
     write(tmp_path, "van.py", "from lang import *\nfrom cabinet import cabinet\nfrom parts import ply\n\ncabinet('kitchen')\n")
-    write(tmp_path, "parts.py", "from lang import *\n\nply = material('birch', t=15)\n")
+    write(tmp_path, "parts.py", "from lang import *\n\nply = sheet_material('birch', t=15)\n")
     write(tmp_path, "shelf.py", "from lang import *\nfrom lang.core import scope\n\nwith module(\n")    # mid-edit
     write(tmp_path, "notes.py", "print('no lang here')\n")
     write(tmp_path, "__init__.py", "from lang import *\n")

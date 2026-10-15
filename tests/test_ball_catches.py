@@ -215,7 +215,7 @@ def test_validation_of_the_hatch_and_the_slot():
         small = board("small", ply15).on(f.bottom).between(x + 450, x + 550, y + 300, y + 500)
         # in the opening, but 5 mm higher
         high = board("high", ply15).on(Pos("z", 5), toward=f.top).between(x + 353, x + 647, y + 203, y + 597)
-        thin = BallCatch().hatch("thin", panel.opening, material=material("birch", t=4))
+        thin = BallCatch().hatch("thin", panel.opening, material=sheet_material("birch", t=4))
         catch = BallCatch()
         for hatch, message in [
             (wide, "the slot between floor.panel and floor.wide is 4 mm wide at the opening's left edge; the GN 450 "

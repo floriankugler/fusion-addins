@@ -74,7 +74,8 @@ was measured. Part of the modeling language's design; the overview is
   without base feature or timeline group. Where Auto Setup runs is open (see
   `design/proposals/cam.md`).
 - The compiler hands each part's facts to those tools as a JSON attribute
-  `lang`/`part` on its body: path, material, thickness, whether the material
+  `lang`/`part` on its body: path, kind (a board, or a slat, which Multi
+  Arrange's compiled parts leave out), material, thickness, whether the material
   has a grain, the grain direction (null when the build left it unset) and
   `up`, the outward normal of the face it is machined from. That face is the
   big face more pockets, holes and chamfers are made from (a cut's chamfer

@@ -385,7 +385,7 @@ def _box_jointed(joint: object) -> tuple[Board, Board]:
     x 0..12), b growing the fingers, both asking for dog bones after."""
     with module("pair", Box.from_size(width=200, depth=200, height=150)) as m:
         a = board("a", ply15).on(m.left).between(Pos("x", 0), m.back, m.bottom, m.top)
-        b = board("b", material("birch", t=12)).on(Pos("x", 0), toward=m.back).between(a, m.right)
+        b = board("b", sheet_material("birch", t=12)).on(Pos("x", 0), toward=m.back).between(a, m.right)
         b.join(a, using=joint)  # type: ignore[arg-type]
         a.dogbones()
         b.dogbones()
@@ -442,7 +442,7 @@ def _fuzzed(name: str, size: tuple[float, float], t: float, place: str, origin: 
            "left": Box.from_size(width=100, depth=u, height=v, origin=origin),
            "back": Box.from_size(width=u, depth=100, height=v, origin=origin)}[place]
     with module(name, box) as m:
-        b = board("panel", material("birch", t=t), outline).on(getattr(m, place))
+        b = board("panel", sheet_material("birch", t=t), outline).on(getattr(m, place))
         u0, v0, _, _ = b.outline.bounds
         for i, (kind, face, fu, fv, a, bb, angle, depth) in enumerate(features):
             p = (u0 + fu, v0 + fv)

@@ -45,7 +45,7 @@ from boards import BoardCase, Feature, OutlineKind, Place, _module_box, _outline
 from boards import apply as apply_feature
 from boards import features as feature_cases
 from fuzzing import floats, fresh, sizes
-from lang import Board, LangError, board, material, module
+from lang import Board, LangError, board, sheet_material, module
 from lang.core import dogbones as dogbone_geometry
 from lang.core.cutouts import circle_geometry
 from lang.core.geometry import clean, polygons_of
@@ -129,7 +129,7 @@ def build(case: CornerOpCase, place: Place, origin: tuple[float, float, float], 
     accepts (a refused one is left out, as in `boards.py`)."""
     bc = BoardCase(case.t, place, origin, case.size, case.outline, case.outline_r, case.features)
     with module(name, _module_box(bc)) as m:
-        b = board("panel", material("birch", t=case.t), _outline_shape(bc)).on(getattr(m, place))
+        b = board("panel", sheet_material("birch", t=case.t), _outline_shape(bc)).on(getattr(m, place))
         # (the face a cut's chamfer is on, the show face, the first of `big_faces()`, toward
         # +t, as the features' faces are numbered: by default it is the second lying flat but
         # the first on the back)

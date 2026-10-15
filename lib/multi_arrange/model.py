@@ -179,10 +179,11 @@ def direction_of(entity) -> adsk.core.Vector3D | None:
 # -- parts compiled by the modeling language -------------------------------------
 
 #: The attribute the modeling language's compiler writes on every body it
-#: makes (lang/emit/fusion.py): JSON with the part's path, material,
-#: thickness, whether the material has a grain, the grain direction (or
-#: null) and `up`, the outward normal of the face it is machined from. The
-#: vectors are in the body's component space.
+#: makes (lang/emit/fusion.py): JSON with the part's path, its kind (a
+#: board, or a slat, which is not nested), material, thickness, whether the
+#: material has a grain, the grain direction (or null) and `up`, the outward
+#: normal of the face it is machined from. The vectors are in the body's
+#: component space.
 COMPILED_GROUP = 'lang'
 COMPILED_NAME = 'part'
 
@@ -223,6 +224,8 @@ def compiled_part(body: adsk.fusion.BRepBody) -> CompiledPart | None:
         data = json.loads(attribute.value)
     except ValueError:
         return None
+    if data.get('kind') == 'slat':
+        return None                     # solid wood by section and length: on the cut list, not nested
     up = _world_vector(data.get('up'), body)
     if up is None:
         return None

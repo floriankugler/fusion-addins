@@ -11,7 +11,7 @@ from lang.core.scope import registry
 from helpers import ply18
 
 
-ply10 = material("birch", t=10)
+ply10 = sheet_material("birch", t=10)
 
 
 def _box(lo: tuple[float, float, float], hi: tuple[float, float, float]) -> BoxDict:
@@ -110,12 +110,12 @@ def test_a_part_as_large_as_its_sheet_fits_it_far_from_the_origin():
     -1219.9, which comes out 1e-13 more than 243 [found by fuzzing,
     2026-10-14]."""
     with module("m", Box.from_size(width=300, depth=300, height=500, origin=(0, 0, -1220))) as m:
-        b = board("b", material("birch", t=9, sheet=(57, 243))).on(m.left).between(
+        b = board("b", sheet_material("birch", t=9, size=(57, 243))).on(m.left).between(
             m.bottom + 0.1, m.bottom + 243.1, m.front, m.front + 57)
     assert b.outline.height > 243
     assert fits_sheet(m) == []
     with module("n", Box.from_size(width=300, depth=300, height=500)) as n:
-        board("b", material("birch", t=9, sheet=(57, 243))).on(n.left).between(n.bottom, n.bottom + 243.01,
+        board("b", sheet_material("birch", t=9, size=(57, 243))).on(n.left).between(n.bottom, n.bottom + 243.01,
                                                                                n.front, n.front + 57)
     assert fits_sheet(n) == ["n.b (57 x 243.01) does not fit a 57 x 243 sheet"]
 
@@ -216,7 +216,7 @@ def test_a_part_is_outside_a_contour_its_clearance_leaves_nothing_of():
     to nothing is 0)."""
     wall = Contour("wall", ((0, -5, 0), (0, 45, 0), (0, 45, 6), (0, -5, 6)), True, (0, 0, 0), (1, 0, 0))
     with module("m", Box.from_size(width=40, depth=40, height=6)) as m:
-        board("b", material("birch", t=6)).on(m.bottom)
+        board("b", sheet_material("birch", t=6)).on(m.bottom)
     assert [p.split(" (")[0] for p in inside(wall, gap=5)(m)] == ["m.b is not inside wall with 5 mm clearance"]
     assert inside(wall, gap=2)(m) != [] and inside(wall)(m) == []
 
@@ -230,7 +230,7 @@ def test_a_board_whose_outline_only_touches_where_another_crosses_it_meets_nothi
     with module("m", Box.from_size(width=600, depth=400, height=720)) as m:
         panel = board("panel", ply18).on(m.bottom)
         panel.add_cut(Shape(shapely_box(15, -1, 401, 9)))           # the front 9 mm notched away from x = 15
-        board("side", material("birch", t=6)).on(m.left).between(m.front + 15)   # within the notch
+        board("side", sheet_material("birch", t=6)).on(m.left).between(m.front + 15)   # within the notch
     assert no_interference(m) == []
 
 

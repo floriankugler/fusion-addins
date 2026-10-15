@@ -36,7 +36,7 @@ from shapely.geometry.base import BaseGeometry
 from boards import _pipeline_problems  # pyright: ignore[reportPrivateUsage]
 from fuzzing import floats, fresh, sizes
 from lang import (BallCatch, Box, ConcealedHinge, DoorLatch, DrawerSlide, HatchHinge, LangError, SlidingBracket, board,
-                  cabinet, check, material, no_interference, rect, scope)
+                  cabinet, check, sheet_material, no_interference, rect, scope)
 from lang.core.cutouts import circle_geometry
 from lang.core.directions import AXES, Axis, Direction, world_frame
 from lang.core.layout import build_layout
@@ -146,7 +146,7 @@ def door_cases(draw: st.DrawFn) -> DoorCase:
 
 def build_door(case: DoorCase, front: int, origin: tuple[float, float, float], name: str = "cab") -> Built:
     box = _box(case.size, front, origin)
-    ply = material("birch", t=case.side_t)
+    ply = sheet_material("birch", t=case.side_t)
     settings = dict(case.params)
     model = settings.pop("model")
     with cabinet(name, box, front=getattr(box, FRONTS[front])) as cab:
@@ -155,7 +155,7 @@ def build_door(case: DoorCase, front: int, origin: tuple[float, float, float], n
         right = board("right", ply).on(cab.right).between(*behind) if behind else board("right", ply).on(cab.right)
         top = board("top", ply).on(cab.top).between(left, right, *behind)
         bottom = board("bottom", ply).on(cab.bottom).between(left, right, *behind)
-        door = board("door", material("birch", t=case.door_t)).on(cab.front)
+        door = board("door", sheet_material("birch", t=case.door_t)).on(cab.front)
         if case.inset:
             door.between(left, right, top, bottom)
         door.inset(case.reveal)
@@ -223,7 +223,7 @@ def panel_cases(draw: st.DrawFn) -> PanelCase:
 
 def build_panel(case: PanelCase, front: int, origin: tuple[float, float, float], name: str = "cab") -> Built:
     box = _box(case.size, front, origin)
-    ply = material("birch", t=case.frame_t)
+    ply = sheet_material("birch", t=case.frame_t)
     settings = dict(case.params)
     model = settings.pop("model")
     with cabinet(name, box, front=getattr(box, FRONTS[front])) as cab:
@@ -232,7 +232,7 @@ def build_panel(case: PanelCase, front: int, origin: tuple[float, float, float],
         right = board("right", ply).on(cab.right).between(*behind) if behind else board("right", ply).on(cab.right)
         top = board("top", ply).on(cab.top).between(left, right, *behind)
         bottom = board("bottom", ply).on(cab.bottom).between(left, right, *behind)
-        panel = board("panel", material("birch", t=case.panel_t)).on(cab.front)
+        panel = board("panel", sheet_material("birch", t=case.panel_t)).on(cab.front)
         if case.set_in:
             panel.between(left, right, bottom, top).inset(case.gap)
         check(no_interference)
@@ -294,9 +294,9 @@ def hatch_cases(draw: st.DrawFn) -> HatchCase:
 
 def build_hatch(case: HatchCase, front: int, origin: tuple[float, float, float], name: str = "cab") -> Built:
     box = _box(case.size, front, origin)
-    ply = material("birch", t=case.t)
+    ply = sheet_material("birch", t=case.t)
     with cabinet(name, box, front=getattr(box, FRONTS[front])) as cab:
-        hatch = board("hatch", material("birch", t=case.hatch_t)).on(cab.front).between(
+        hatch = board("hatch", sheet_material("birch", t=case.hatch_t)).on(cab.front).between(
             cab.left.into(case.side_gap), cab.right.into(case.side_gap), cab.bottom, cab.top.into(case.drop))
         behind = cab.front.into(case.hatch_t + case.gap)
         left = board("left", ply).on(cab.left).between(behind, cab.back)
@@ -353,7 +353,7 @@ def build_catch(case: CatchCase, front: int, origin: tuple[float, float, float],
     w, d, h = case.size
     fu, fv, r = case.opening
     with cabinet(name, box, front=getattr(box, FRONTS[front])) as cab:
-        panel = board("panel", material("birch", t=case.panel_t))
+        panel = board("panel", sheet_material("birch", t=case.panel_t))
         if case.on == "bottom":
             panel.on(cab.bottom).show(cab.top)
             shape = rect(width=fu * w, depth=fv * d)
@@ -424,24 +424,24 @@ def drawer_cases(draw: st.DrawFn) -> DrawerCase:
 
 def build_drawer(case: DrawerCase, front: int, origin: tuple[float, float, float], name: str = "cab") -> Built:
     box = _box(case.size, front, origin)
-    ply = material("birch", t=case.side_t)
+    ply = sheet_material("birch", t=case.side_t)
     slide = DrawerSlide(case.model, case.nl, **dict(case.params))  # pyright: ignore[reportArgumentType]
     with cabinet(name, box, front=getattr(box, FRONTS[front])) as cab:
         left = board("left", ply).on(cab.left)
         right = board("right", ply).on(cab.right)
         bottom = board("bottom", ply).on(cab.bottom).between(left, right)
         top = board("top", ply).on(cab.top).between(left, right)
-        back = board("back", material("birch", t=9)).on(cab.back).between(left, right, bottom, top)
+        back = board("back", sheet_material("birch", t=9)).on(cab.back).between(left, right, bottom, top)
         bay = cab.interior
         with scope("drawer", bay) as d:
-            face = board("face", material("birch", t=15)).on(bay.front).between(bay).inset(case.reveal)
+            face = board("face", sheet_material("birch", t=15)).on(bay.front).between(bay).inset(case.reveal)
             dbox = slide.drawer_box(bay, front=face.back, side_thickness=case.box_t, height=bay.height - case.height)
-            t = material("birch", t=case.box_t)
+            t = sheet_material("birch", t=case.box_t)
             l = board("left", t).on(dbox.left).between(dbox)
             r = board("right", t).on(dbox.right).between(dbox)
             f = board("front", t).on(dbox.front).between(l, r, dbox.bottom, dbox.top)
             k = board("back", t).on(dbox.back).between(l, r, dbox.bottom, dbox.top)
-            floor = board("floor", material("birch", t=9)).on(dbox.bottom + slide.recess).between(l, r, f, k)
+            floor = board("floor", sheet_material("birch", t=9)).on(dbox.bottom + slide.recess).between(l, r, f, k)
             slide.machine_box(sides=(l, r), front=f, back=k, floor=floor)
         check(no_interference)
 

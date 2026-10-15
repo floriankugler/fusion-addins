@@ -47,7 +47,7 @@ Proposed:
   is worked out with nesting and CAM [Florian].
 - The hand-work list per part comes from the same step: bevels and mitres,
   lipping and banding, roundovers (notes on edges), hardware to fit, and,
-  once slats take operations, those (slats are made by hand, `slats.md`).
+  once slats take operations, those (slats are made by hand, `design/slats.md`).
 - With tool data known, the checks can refuse features narrower than the
   smallest cutter (`design/checks.md`).
 - Slots carry their centre line in the layout (`design/operations.md`), so

@@ -43,7 +43,7 @@ def _inset_door(latch: DoorLatch | None = None, carcass: str = "top", front: boo
     box = Box.from_size(width=600, depth=500, height=720)
     with (cabinet("cab", box, front=box.front) if front else module("cab", box)) as cab:
         parts = _carcass(cab)
-        door = board("door", material("birch", t=thickness)).on(cab.front).between(
+        door = board("door", sheet_material("birch", t=thickness)).on(cab.front).between(
             parts["left"], parts["right"], parts["bottom"], parts["top"]).inset(2)
         parts["door"] = door
         if latch is not None:

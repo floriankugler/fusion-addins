@@ -37,7 +37,7 @@ from shapely.geometry import box as shapely_box
 
 from boards import _pipeline_problems  # pyright: ignore[reportPrivateUsage]
 from fuzzing import floats, fresh, sizes
-from lang import Box, LangError, Pos, Shape, board, material, module
+from lang import Box, LangError, Pos, Shape, board, sheet_material, module
 from lang.core.contact import Contact
 from lang.core.crossing import crossing
 from lang.core.cutouts import circle_geometry
@@ -249,7 +249,7 @@ def build(case: PairCase, name: str = "m") -> Built:
     far = case.side_t + case.reach
     width = far + (case.side_t if case.two_sides else 0.0) + 10
     with module(name, Box.from_size(width=width, depth=lx + 2 * _IN, height=lz + 2 * _IN)) as m:
-        side = board("side", material("birch", t=case.side_t)).on(Pos("y", 0), toward=m.right).between(
+        side = board("side", sheet_material("birch", t=case.side_t)).on(Pos("y", 0), toward=m.right).between(
             Pos("x", _IN), Pos("x", _IN + lx), Pos("z", _IN), Pos("z", _IN + lz))
         a0, a1 = sorted(case.along)
         if case.standing:                   # thick on x, along z
@@ -258,7 +258,7 @@ def build(case: PairCase, name: str = "m") -> Built:
             length, room = lx, lz
         lo, hi = _IN + a0 * length, _IN + max(a1, a0 + 0.02) * length
         start = _IN + case.across * (room - case.shelf_t)
-        shelf = board("shelf", material("birch", t=case.shelf_t))
+        shelf = board("shelf", sheet_material("birch", t=case.shelf_t))
         if case.standing:
             shelf.on(Pos("x", start), toward=m.back).between(Pos("z", lo), Pos("z", hi), Pos("y", case.side_t),
                                                              Pos("y", far))
@@ -267,7 +267,7 @@ def build(case: PairCase, name: str = "m") -> Built:
                                                             Pos("y", far))
         other = None
         if case.two_sides:
-            other = board("other", material("birch", t=case.side_t)).on(Pos("y", far), toward=m.right).between(
+            other = board("other", sheet_material("birch", t=case.side_t)).on(Pos("y", far), toward=m.right).between(
                 Pos("x", _IN), Pos("x", _IN + lx), Pos("z", _IN), Pos("z", _IN + lz))
         if case.rounded > 0:
             r = case.rounded * min(lx, lz)
@@ -672,19 +672,19 @@ def build_corner(case: CornerCase, name: str = "m") -> Built:
     far = case.side_t + case.reach
     width = far + (case.side_t if case.two_sides else 0.0) + 10
     with module(name, Box.from_size(width=width, depth=case.length + 2 * _IN, height=case.height + 2 * _IN)) as m:
-        side = board("side", material("birch", t=case.side_t)).on(Pos("y", 0), toward=m.right).between(
+        side = board("side", sheet_material("birch", t=case.side_t)).on(Pos("y", 0), toward=m.right).between(
             Pos("x", _IN), Pos("x", _IN + case.length), Pos("z", _IN), Pos("z", _IN + case.height))
         z0, z1 = _IN + case.low * case.height, _IN + case.high * case.height
         if case.at_far_end:
             x = _IN + case.length + case.offset
-            front = board("front", material("birch", t=case.front_t)).on(Pos("x", x), toward=m.front)
+            front = board("front", sheet_material("birch", t=case.front_t)).on(Pos("x", x), toward=m.front)
         else:
             x = _IN - case.offset
-            front = board("front", material("birch", t=case.front_t)).on(Pos("x", x), toward=m.back)
+            front = board("front", sheet_material("birch", t=case.front_t)).on(Pos("x", x), toward=m.back)
         front.between(Pos("z", z0), Pos("z", z1), Pos("y", case.side_t), Pos("y", far))
         other = None
         if case.two_sides:
-            other = board("other", material("birch", t=case.side_t)).on(Pos("y", far), toward=m.right).between(
+            other = board("other", sheet_material("birch", t=case.side_t)).on(Pos("y", far), toward=m.right).between(
                 Pos("x", _IN), Pos("x", _IN + case.length), Pos("z", _IN), Pos("z", _IN + case.height))
     return Built(side, front, other)
 
@@ -763,16 +763,16 @@ def build_cross(case: CrossCase, name: str = "m") -> Built:
     lx, ly, lz = _CROSS
     with module(name, Box.from_size(width=ly, depth=lx, height=lz)) as m:
         ax = case.a_at * (lx - case.a_t)
-        a = board("a", material("birch", t=case.a_t)).on(Pos("x", ax), toward=m.back).between(
+        a = board("a", sheet_material("birch", t=case.a_t)).on(Pos("x", ax), toward=m.back).between(
             Pos("y", 0), Pos("y", case.ends[0] * ly), Pos("z", case.a_z[0] * lz), Pos("z", case.a_z[1] * lz))
         by = case.b_at * (ly - case.b_t)
-        b = board("b", material("birch", t=case.b_t)).on(Pos("y", by), toward=m.right).between(
+        b = board("b", sheet_material("birch", t=case.b_t)).on(Pos("y", by), toward=m.right).between(
             Pos("x", 0), Pos("x", case.ends[1] * lx), Pos("z", case.b_z[0] * lz), Pos("z", case.b_z[1] * lz))
         other = None
         if case.second:
             y2 = (by + case.b_t + ly) / 2
             if y2 + case.b_t <= ly:
-                other = board("c", material("birch", t=case.b_t)).on(Pos("y", y2), toward=m.right).between(
+                other = board("c", sheet_material("birch", t=case.b_t)).on(Pos("y", y2), toward=m.right).between(
                     Pos("x", 0), Pos("x", case.ends[1] * lx), Pos("z", case.b_z[0] * lz), Pos("z", case.b_z[1] * lz))
     return Built(b, a, other)
 
@@ -1036,12 +1036,12 @@ class Frame:
 def build_frame(case: FrameCase, name: str = "m") -> Frame:
     lx, ly, lz = case.size
     with module(name, Box.from_size(width=ly, depth=lx, height=lz)) as m:
-        l = board("l", material("birch", t=case.side_t)).on(m.left)
-        r = board("r", material("birch", t=case.side_t)).on(m.right)
-        f = board("f", material("birch", t=case.end_t)).on(m.front).between(l, r)
-        k = board("k", material("birch", t=case.end_t)).on(m.back).between(l, r)
+        l = board("l", sheet_material("birch", t=case.side_t)).on(m.left)
+        r = board("r", sheet_material("birch", t=case.side_t)).on(m.right)
+        f = board("f", sheet_material("birch", t=case.end_t)).on(m.front).between(l, r)
+        k = board("k", sheet_material("birch", t=case.end_t)).on(m.back).between(l, r)
         z = case.floor_at * (lz - case.floor_t)
-        floor = board("floor", material("birch", t=case.floor_t)).on(Pos("z", z), toward=m.top).between(l, r, f, k)
+        floor = board("floor", sheet_material("birch", t=case.floor_t)).on(Pos("z", z), toward=m.top).between(l, r, f, k)
     return Frame({"l": l, "r": r, "f": f, "k": k}, floor)
 
 

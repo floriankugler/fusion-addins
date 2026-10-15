@@ -20,12 +20,12 @@ const failed = (builds, version, log = 'Traceback: boom') => ({ builds, state: '
 const building = (builds, version) => ({ builds, state: 'building', version, log: '' });
 
 test('the layout version the page reads', () => {
-  assert.equal(LAYOUT_VERSION, 4);
+  assert.equal(LAYOUT_VERSION, 5);
   assert.equal(layoutVersionProblem({ version: LAYOUT_VERSION }), null);
-  assert.equal(layoutVersionProblem({ version: 2 }), 'layout version 2, this viewer reads 4');
-  assert.equal(layoutVersionProblem({ version: 5 }), 'layout version 5, this viewer reads 4');
-  assert.equal(layoutVersionProblem({}), 'layout version missing, this viewer reads 4');
-  assert.equal(layoutVersionProblem(null), 'layout version missing, this viewer reads 4');
+  assert.equal(layoutVersionProblem({ version: 2 }), 'layout version 2, this viewer reads 5');
+  assert.equal(layoutVersionProblem({ version: 6 }), 'layout version 6, this viewer reads 5');
+  assert.equal(layoutVersionProblem({}), 'layout version missing, this viewer reads 5');
+  assert.equal(layoutVersionProblem(null), 'layout version missing, this viewer reads 5');
 });
 
 test('setHidden hides and shows paths', () => {

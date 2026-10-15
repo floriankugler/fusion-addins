@@ -355,7 +355,7 @@ def test_a_board_with_no_room_is_refused_wherever_the_module_lies():
     40 mm box has no room, but with the box from 0.84 its extent came out
     20.84 to 20.840000000000003 and the board was built, 3.5e-15 mm wide.
     No board narrower than 0.01 mm is meant."""
-    ply20 = material("birch", t=20)
+    ply20 = sheet_material("birch", t=20)
     for name, y in (("at0", 0.0), ("at084", 0.84)):
         with module(name, Box.from_size(width=40, depth=300, height=400, origin=(0, y, 0))) as m:
             left = board("left", ply20).on(m.left)
@@ -524,7 +524,7 @@ def test_layout_json_roundtrip(tmp_path: Path) -> None:
     cab.export("worktop", cab.top)
     cab.check(no_interference)
     layout = write_layout(tmp_path / "layout.json")
-    assert layout["version"] == 4
+    assert layout["version"] == 5
     module_layout = layout["modules"][0]
     assert module_layout["exports"] == {"worktop": {"axis": "z", "value": 720.0}}
     assert [p["path"] for p in module_layout["parts"]] == ["cab.left", "cab.right", "cab.bottom", "cab.back"]
@@ -1143,7 +1143,7 @@ def test_a_hole_through_the_board_that_leaves_a_corner_hanging_at_a_point_splits
     of that circle is; one touching the edge further in, which cuts
     nothing off, is kept, as Fusion builds it."""
     with module("m", Box.from_size(width=746, depth=519, height=100, origin=(origin, origin, 0))) as m:
-        panel = board("panel", material("birch", t=31)).on(m.bottom)
+        panel = board("panel", sheet_material("birch", t=31)).on(m.bottom)
     corner = (origin + 482, origin + 59)
     with pytest.raises(LangError, match="the hole 'corner' goes through the board and splits it in pieces"):
         panel.add_hole(panel.top, corner, 118, through, name="corner")
@@ -1162,7 +1162,7 @@ def test_a_cut_that_leaves_a_corner_hanging_at_a_point_splits_the_board(origin: 
     touches the edge further in, and cuts nothing off, is kept, as Fusion
     builds it [Florian, 2026-10-12]."""
     with module("m", Box.from_size(width=746, depth=519, height=100, origin=(origin, origin, 0))) as m:
-        panel = board("panel", material("birch", t=31)).on(m.bottom)
+        panel = board("panel", sheet_material("birch", t=31)).on(m.bottom)
         with pytest.raises(LangError, match="the cut splits the board in pieces"):
             panel.add_cut(Shape(circle_geometry((origin + 482, origin + 59), 59)))
         with pytest.raises(LangError, match="the cut corner splits the board in pieces"):
@@ -1236,13 +1236,13 @@ def test_pockets_from_either_face_through_together_may_not_leave_nothing_or_spli
     or holes from opposite faces meet as deep as the board together, they
     go through there, and are held to what a pocket through it is."""
     with module("m", Box.from_size(width=40, depth=40, height=100)) as m:
-        panel = board("panel", material("birch", t=6)).on(m.bottom)
+        panel = board("panel", sheet_material("birch", t=6)).on(m.bottom)
         panel.add_pocket(panel.top, Shape(Point(0, 0).buffer(80.5, quad_segs=64)), 3, name="top_dish")
         with pytest.raises(LangError, match=r"^m\.panel: the pocket 'bottom_dish' goes through the board with the "
                                             r"pocket 'top_dish' from the other face and leaves nothing of it\.$"):
             panel.add_pocket(panel.bottom, Shape(Point(0, 0).buffer(81, quad_segs=64)), 3, name="bottom_dish")
     with module("n", Box.from_size(width=40, depth=40, height=100)) as n:
-        strip = board("strip", material("birch", t=6)).on(n.bottom)
+        strip = board("strip", sheet_material("birch", t=6)).on(n.bottom)
         strip.add_pocket(strip.top, Shape(shapely_box(-1, 15, 41, 25)), 3, name="top_band")
         with pytest.raises(LangError, match="goes through the board with the pocket 'top_band' from the other face "
                                             "and splits it in pieces"):

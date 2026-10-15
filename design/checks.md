@@ -57,7 +57,8 @@ or into other hardware.
 
 ## fits_sheet
 
-Checks each part against its material's sheet size, within 1e-6 mm. Nesting
+Checks each part against its material's sheet size (`size=`), within 1e-6
+mm; a slat is on no sheet and passes. Nesting
 against the machine's bed is proposed in `design/proposals/nesting.md`.
 
 ## Not built

@@ -36,7 +36,7 @@ BENT = data.PACOFIX_PF_L_R
 BENT_SHAPE = BRACKET_SHAPES[BENT.name]
 
 
-def _cover(bracket: SlidingBracket | None = None, *, gap: float = 0.0, cover: Material = ply12,
+def _cover(bracket: SlidingBracket | None = None, *, gap: float = 0.0, cover: SheetMaterial = ply12,
            frame: str = "both", front: bool = False) -> tuple[Scope, dict[str, Board]]:
     """The test box with its cover; `frame` names the frame boards the
     cover is mounted on: "left", "right" or "both"."""
@@ -215,7 +215,7 @@ def test_euro_and_custom_holes():
     assert {(d, depth) for *_, d, depth in _holes(parts["left"])} == {(data.EURO_DIAMETER, data.EURO_DEPTH)}
     assert {(d, depth) for *_, d, depth in _holes(parts["cover"])} == {(2.5, 8.0)}
     registry.reset()
-    _, parts = _cover(SlidingBracket(PF_L, panel_hole="euro"), cover=material("birch", t=15))
+    _, parts = _cover(SlidingBracket(PF_L, panel_hole="euro"), cover=sheet_material("birch", t=15))
     assert {(d, depth) for *_, d, depth in _holes(parts["cover"])} == {(5.0, 11.0)}
 
 
@@ -224,17 +224,17 @@ def test_euro_holes_stop_2_short_of_the_far_face(t: float, depth: float):
     """Florian 2026-10-12: Euro holes are 11 deep, but never deeper than
     the board less 2 (10 on a 12 mm board), in the frame boards and the
     panel alike; the 18 mm sides keep 11. Explicit sizes stay as given."""
-    _, parts = _cover(SlidingBracket(PF_L, frame_hole="euro", panel_hole="euro"), cover=material("birch", t=t))
+    _, parts = _cover(SlidingBracket(PF_L, frame_hole="euro", panel_hole="euro"), cover=sheet_material("birch", t=t))
     assert {(d, dp) for *_, d, dp in _holes(parts["cover"])} == {(5.0, depth)}
     assert {(d, dp) for *_, d, dp in _holes(parts["left"])} == {(5.0, 11.0)}
     registry.reset()
-    _, parts = _cover(SlidingBracket(PF_L, panel_hole=(5, 11)), cover=material("birch", t=12))
+    _, parts = _cover(SlidingBracket(PF_L, panel_hole=(5, 11)), cover=sheet_material("birch", t=12))
     assert {(d, dp) for *_, d, dp in _holes(parts["cover"])} == {(5.0, 11.0)}
 
 
 def test_euro_holes_need_a_board_thicker_than_the_wall():
     with pytest.raises(LangError, match="too thin for Euro holes"):
-        _cover(SlidingBracket(PF_L, panel_hole="euro"), cover=material("veneer", t=2))
+        _cover(SlidingBracket(PF_L, panel_hole="euro"), cover=sheet_material("veneer", t=2))
     assert _holes(registry.roots[0].part("left")) == []
 
 
@@ -249,7 +249,7 @@ def test_holes_as_deep_as_a_board_is_thick_are_refused_before_drilling():
     """Holes 11 deep, given as such, into a 9 mm cover: refused, and
     nothing drilled ("euro" would make them 7 deep there)."""
     with pytest.raises(LangError, match="panel_hole depth"):
-        _cover(SlidingBracket(PF_L, panel_hole=(5, 11)), cover=material("birch", t=9))
+        _cover(SlidingBracket(PF_L, panel_hole=(5, 11)), cover=sheet_material("birch", t=9))
     left = registry.roots[0].part("left")
     assert _holes(left) == [] and registry.roots[0].hardware == []
 

@@ -16,6 +16,7 @@ from .contours import Contour, footprint, round_offset
 from .directions import AXES, Axis
 from .errors import LangError
 from .geometry import polygons_of
+from .material import SheetMaterial
 from .ops import Hole, Pocket
 from .scope import Check, Scope
 
@@ -213,13 +214,14 @@ _MOST_SEGMENTS = 8192
 
 def fits_sheet(scope: Scope) -> list[str]:
     """Parts whose outline does not fit their material's sheet, either way
-    round. A part as large as its sheet fits, give or take 1e-6 mm: its
+    round; slats are on no sheet. A part as large as its sheet fits, give or take 1e-6 mm: its
     extent is a difference of world coordinates, which far from the origin
     comes out a little larger [found by fuzzing, 2026-10-14: a part from
     -1219.9 to -976.9 is 243.0000000000001 high]."""
     problems: list[str] = []
     for part in scope.all_parts():
-        sheet = part.material.sheet
+        # (a slat is solid wood, by section and length, on no sheet)
+        sheet = part.material.size if isinstance(part.material, SheetMaterial) else None
         if sheet is None:
             continue
         w, h = part.outline.width, part.outline.height

@@ -33,11 +33,12 @@ where it sits and what is done to it are method calls that return the part,
 so they chain or stand on their own lines. [decided]
 
 - **Placement and property modifiers are order-free and settable once.**
-  `on`, `between`, `center`, `inset`, `grain`, `show`, `manual`. Setting one
+  `on`, `between`, `center`, `inset`, `grain`, `show`, `manual`, and a slat's
+  `edge_on` (`design/slats.md`). Setting one
   twice is an error. The result never depends on the order they were
   written in.
 - **Operation modifiers are ordered.** `cut`, `pocket`, `hole`, `slot`, `chamfer`,
-  `fillet`, `cutout`, `dogbones`, and the joins. A cut changes the outline
+  `fillet`, `cutout`, `dogbones`, `lip`, and the joins. A cut changes the outline
   for everything after it, and so does a fillet (or chamfer) on a corner of
   the outline; a chamfer on a pocket must follow the pocket. The order on
   the page is the order in the layout.

@@ -28,5 +28,5 @@ Proposed:
 - Cabinet types for one build stay in that build's repo
   (`build-repo.md`); `lang/std` holds what is reused across builds.
 - Lipping was proposed as the first item, but it is a core operation
-  (`lipping.md`): it reads the board's outline, which the public API should
+  (`design/slats.md`): it reads the board's outline, which the public API should
   not grow for it [decided]. The drawer box is the first item instead.

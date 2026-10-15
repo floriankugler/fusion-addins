@@ -267,7 +267,7 @@ def test_box_joint_errors():
     with pytest.raises(LangError, match="pair.a is 2.5 thick, not thicker than the tool's radius"):
         registry.reset()
         with module("pair", Box.from_size(width=200, depth=200, height=150)) as m:
-            a = board("a", material("veneer", t=2.5)).on(m.left)
+            a = board("a", sheet_material("veneer", t=2.5)).on(m.left)
             b = board("b", ply12).on(m.front).between(a, m.right)
             b.join(a, using=box_joint())
 

@@ -8,7 +8,7 @@ import pytest
 from lang.build import main
 
 HEAD = """from lang import *
-ply = material("birch", t=15)
+ply = sheet_material("birch", t=15)
 with module("m", Box.from_size(width=400, depth=300, height=100)) as m:
     with board("panel", ply).on(m.bottom).show(m.top) as panel:
 """

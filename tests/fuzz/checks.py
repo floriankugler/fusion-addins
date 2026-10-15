@@ -60,7 +60,7 @@ from shapely.ops import unary_union
 
 from boards import KNOWN
 from fuzzing import floats, fresh, sizes
-from lang import (Box, LangError, Pos, Shape, board, cabinet, fits_sheet, inside, inside_box, material, module,
+from lang import (Box, LangError, Pos, Shape, board, cabinet, fits_sheet, inside, inside_box, sheet_material, module,
                   no_interference, scope, through)
 from lang.core import directions
 from lang.core.contours import Contour
@@ -609,7 +609,7 @@ def _build_plank(p: Plank, k: int, pl: Placement, refused: dict[tuple[int, int],
     ub, ub0, ub1 = _world(pl, b, p.range(b))
     affine = _affine(pl, p, _plane(t_axis)[0])
     shape = _local_outline(p)
-    stock = material("birch", t=p.t, sheet=p.sheet)
+    stock = sheet_material("birch", t=p.t, size=p.sheet)
     x = board(f"p{k}", stock, None if shape is None else Shape(affinity.affine_transform(shape, affine)))
     up = directions.world_frame().direction_of(t_axis, 1)
     x.on(Pos(t_axis, t_lo), toward=up).between(Pos(ua, ua0), Pos(ua, ua1), Pos(ub, ub0), Pos(ub, ub1))

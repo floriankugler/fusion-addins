@@ -8,7 +8,7 @@ unnecessary, and the check fails.
 # pyright: reportUnnecessaryTypeIgnoreComment=true
 from lang import *
 
-ply15 = material("birch", t=15)
+ply15 = sheet_material("birch", t=15)
 
 
 def operations() -> None:
@@ -31,6 +31,25 @@ def operations() -> None:
         side.slot(8, at=a, centres=52, along="heigth", depth=10)              # type: ignore  # a misspelt extent
         side.slot(width=8, at=a, centres=52, along="height", depth=10)        # type: ignore  # width by position
         side.slot(8, a, b)                                                    # type: ignore  # no depth
+
+
+
+def slats() -> None:
+    oak = slat_material("oak")
+    with module("s", Box.from_size(width=600, depth=400, height=700)) as m:
+        cleat = slat("cleat", oak, section=(20, 40)).on(m.left).edge_on(m.top)   # fine
+        cleat.center(m.center("depth"))                                       # fine (refused at run time)
+        slat("rail", oak, (20, 40))                                           # type: ignore  # section= by keyword
+        slat("rail", ply15, section=(20, 40))                                 # type: ignore  # a sheet material
+        slat("rail", oak, section=20)                                         # type: ignore  # two sizes
+        slat_material("oak", 20, 40)                                          # type: ignore  # only a species
+        board("top", oak)                                                     # type: ignore  # a slat material
+        shelf = board("shelf", ply15).on(m.bottom)
+        shelf.lip(shelf.front, 10, oak)                                       # fine
+        shelf.lip([shelf.left, shelf.right], 0.5, oak)                        # a list: fine
+        shelf.lip(shelf.back, 10, ply15)                                      # type: ignore  # lips are solid wood
+        shelf.lip(shelf.back, t=10)                                           # type: ignore  # no material
+        shelf.edge_on(m.left)                                                 # type: ignore  # a board has no edge_on
 
 
 def joints() -> None:

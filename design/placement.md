@@ -34,6 +34,11 @@ contours as limits. Part of the modeling language's design; the overview is
   shrinks the outline by `n` on every side of its box, which is how an inset
   front gets its gap; there are no one-off modifiers such as margin or lift,
   because `.on(box.bottom + slide.recess)` already says lift.
+- A slat (`slat(name, material, section=(w, h))`) is placed by naming what
+  its faces do: `.on()` a wide face, `.edge_on()` a narrow face, `.center()`
+  its middle, two of them on different axes, and `.between()` its two ends
+  only; as a limit for another part it gives its faces on both of its cross
+  axes (see `design/slats.md`).
 - Which side the thickness goes: `.on()` a module side puts the thickness
   inward, also a side moved into or out of the box (`on(cab.bottom.into(60))`);
   `.on()` a bare plane requires a side (`toward=`).

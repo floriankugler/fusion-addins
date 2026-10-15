@@ -47,7 +47,7 @@ if TYPE_CHECKING:
                                      PartLayout, PocketLayout, Rings)
 
 #: The layout version this plan reads (`lang.core.layout_types.LAYOUT_VERSION`).
-LAYOUT_VERSION = 4
+LAYOUT_VERSION = 5
 
 Axis = Literal["x", "y", "z"]
 AXES: tuple[Axis, Axis, Axis] = ("x", "y", "z")
@@ -195,6 +195,9 @@ class PartFacts:
     the material as the layout labels it, the thickness in mm."""
     material: str
     thickness: float
+    #: "board", or "slat": solid wood by section and length, which nesting
+    #: and the CAM setup leave out.
+    kind: str
     #: Whether the material has a grain at all.
     grained: bool
     #: The grain direction, or None when the build left it unset.
@@ -412,7 +415,7 @@ def plan_part(part: PartLayout, frame: LayoutFrame, problems: list[str]) -> Part
     show = p.face(part["show"])
     machine = p.face(part["machine"])
     grain = part["grain"]
-    plan.facts = PartFacts(part["material"], part["thickness"], part["grained"],
+    plan.facts = PartFacts(part["material"], part["thickness"], part["kind"], part["grained"],
                            _unit(_as_axis(grain), 1) if grain else None, machine.normal)
     named = named_ops(part)
     for op in part["ops"]:

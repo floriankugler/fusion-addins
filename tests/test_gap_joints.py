@@ -46,7 +46,7 @@ def test_a_countersink_must_lie_on_the_face_it_is_sunk_into():
     error; without one, or 10 in from the edge, the screws are fine."""
     with module("unit", Box.from_size(width=600, depth=300, height=800)) as u:
         left = board("left", ply15).on(u.left)
-        thin = material("birch", t=4)
+        thin = sheet_material("birch", t=4)
         flush = board("flush", thin).on(Pos("x", 0), toward=u.back).between(left, Pos("y", 300), Pos("z", 100),
                                                                               Pos("z", 300))
         before = [list(left.ops), list(flush.ops)]

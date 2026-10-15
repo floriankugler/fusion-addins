@@ -73,7 +73,7 @@ def test_examples_build_as_lang_build_builds_them(tmp_path: Path):
     (folder / "shelf.py").write_text(
         "from lang import *\n"
         "with module('shelf', Box.from_size(width=400, depth=300, height=100)) as m:\n"
-        "    board('top', material('ply', t=15)).on(m.bottom)\n")
+        "    board('top', sheet_material('ply', t=15)).on(m.bottom)\n")
     (path,) = fusion_batch.build_examples(tmp_path / "out", folder)
     assert path == tmp_path / "out" / "shelf" / "layout"
     assert json.loads(Path(f"{path}.volumes.json").read_text()) == {"shelf.top": pytest.approx(400 * 300 * 15)}

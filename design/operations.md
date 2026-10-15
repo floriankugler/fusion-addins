@@ -11,11 +11,12 @@ design; the overview is `DESIGN.md`. Code: `lang/core/part.py`,
   and difference of 2D shapes. The composition happens in 2D before
   thickness is applied, so a board is flat by construction. [decided]
 - Board versus slat is a matter of stock form, not species: a glued-up solid
-  wood panel is a board. Slats are not built yet (see
-  `design/proposals/slats.md`).
+  wood panel is a board. A board's material is a `sheet_material()`; solid
+  wood by section and length is a slat, and `lip()` glues it along a
+  board's edge (see `design/slats.md`).
 - The operations per board are the layout: `cut` (through, changes the
   outline), `pocket`, `hole` and `slot` (2D shape plus depth plus face), `chamfer`,
-  `fillet`, `cutout`, `dogbones`, V-grooves (made by joints), and what joins
+  `fillet`, `cutout`, `dogbones`, `lip`, V-grooves (made by joints), and what joins
   and hardware add. A cut starts at the face of the board it is declared on.
 - Operations on a narrow face can be written (`side.front.right(50)` as an
   anchor) and are emitted, but no joint or connector uses them: the 3-axis

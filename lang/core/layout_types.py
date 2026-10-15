@@ -1,11 +1,12 @@
-"""The layout file's shape, version 4.
+"""The layout file's shape, version 5.
 
 This is the contract between the language and its consumers (the preview
 mesher, the Fusion emitter, the viewer page). Bump LAYOUT_VERSION on
 incompatible changes; `lang.emit.plan` and the viewer repeat it and refuse
 other versions.
 
-Version 4 (2026-10-14): a pocket carries `slot`, its centre line when it
+Version 5 (2026-10-14): parts are boards or slats (`kind`), and a slat
+carries its `section`. Version 4 (2026-10-14): a pocket carries `slot`, its centre line when it
 is a slot. Version 3 (2026-10-12): every key below is written; the top-level
 `problems` list every problem once, the modules' repeat their own; a
 depth through a narrow face is the part's extent across it. Version 2
@@ -16,7 +17,7 @@ from __future__ import annotations
 
 from typing import Literal, NotRequired, TypedDict
 
-LAYOUT_VERSION = 4
+LAYOUT_VERSION = 5
 
 #: One or more polygons as rings of [u, v] points, one polygon after the
 #: other: its exterior ring, counter-clockwise, then its holes, clockwise.
@@ -116,7 +117,11 @@ OpLayout = CutLayout | PocketLayout | HoleLayout | ChamferLayout | VGrooveLayout
 
 class PartLayout(TypedDict):
     path: str
-    kind: Literal["board"]
+    #: A board, or a slat (solid wood by section and length, cosmetic for
+    #: now: it has no operations).
+    kind: Literal["board", "slat"]
+    #: A slat's section, the smaller size first; None for a board.
+    section: list[float] | None
     material: str
     thickness: float
     axes: AxesDict

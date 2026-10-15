@@ -277,7 +277,7 @@ def test_pieces_rounded_as_a_router_would_keep_their_new_arcs_off_a_large_arc():
     from lang.core.geometry import polygons_of
     from lang.core.shapes import Shape
     with module("m", Box.from_size(width=631, depth=100, height=1124)) as m:
-        back = board("back", material("birch", t=9), Shape(box(0, 0, 631, 1124)).rounded(197.5322915245099)).on(m.back)
+        back = board("back", sheet_material("birch", t=9), Shape(box(0, 0, 631, 1124)).rounded(197.5322915245099)).on(m.back)
         inner, outer = back.big_faces()[1], back.big_faces()[0]
         back.cutout(inner, pattern=triangles(9, 5, 27.5), border=7.809625022994677, around=27.5, radius=11,
                     depth=to(outer, -1), name="openings")
@@ -353,7 +353,7 @@ def test_a_line_meeting_a_large_arc_keeps_its_place_where_a_piece_is_rounded_as_
     from shapely.geometry import box as shapely_box
     from lang.core.shapes import Shape
     with module("m", Box.from_size(width=465, depth=2088.5397851525, height=100)) as m:
-        panel = board("panel", material("birch", t=24), Shape(box(0, 0, 2088.5397851525, 465)).rounded(202.89706660649423))
+        panel = board("panel", sheet_material("birch", t=24), Shape(box(0, 0, 2088.5397851525, 465)).rounded(202.89706660649423))
         panel.on(m.bottom)
         pocket = affinity.rotate(shapely_box(85 - 41.25, 428.5 - 15.92, 85 + 41.25, 428.5 + 15.92), 30, origin=(85, 428.5))
         panel.add_pocket(panel.big_faces()[0], Shape(pocket), 5.5)
@@ -490,7 +490,7 @@ def test_an_opening_that_touches_itself_at_a_point_is_an_error():
     from shapely import affinity
     from lang.core.shapes import Shape
     with module("m", Box.from_size(width=41, depth=40, height=100)) as m:
-        panel = board("panel", material("birch", t=6)).on(m.bottom)
+        panel = board("panel", sheet_material("birch", t=6)).on(m.bottom)
         top = panel.big_faces()[0]
         panel.add_hole(top, (0, 0), 2, through)
         panel.add_pocket(top, Shape(affinity.rotate(box(-27, -7.5, 27, 7.5), 45, origin=(0, 0))), through)
@@ -608,7 +608,7 @@ def test_a_border_next_to_a_notch_by_a_rounded_corner_keeps_its_width():
     from shapely.geometry import box as shapely_box
     from lang.core.shapes import Shape
     with module("m", Box.from_size(width=354, depth=354, height=100)) as m:
-        panel = board("panel", material("birch", t=6), Shape(shapely_box(0, 0, 354, 354)).rounded(47.015625)).on(m.bottom)
+        panel = board("panel", sheet_material("birch", t=6), Shape(shapely_box(0, 0, 354, 354)).rounded(47.015625)).on(m.bottom)
         panel.add_cut(Shape(affinity.rotate(shapely_box(341.5, 17, 343.5, 23), 45, origin=(342.5, 20))))
         (outline,) = panel.outline.polygons()
         panel.cutout(border=20, around=20, radius=0)
