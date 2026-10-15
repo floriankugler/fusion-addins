@@ -75,7 +75,10 @@ so they chain or stand on their own lines. [decided]
 - **Strict typing.** The package is checked with pyright in strict mode and
   ships a `py.typed` marker, so build files get completion and errors in the
   editor. Positions, sides, faces, anchor and depth specs and the layout
-  file are all typed; the layout file's shape lives in `layout_types.py` and
+  file are all typed, a side or a face plus a number among the type errors
+  (a position with a direction moves by `into()` and `gap()`,
+  `design/placement.md`) [decided by Florian, 2026-10-15, syntax.md item
+  1]; the layout file's shape lives in `layout_types.py` and
   is the contract the emitter is checked against. A hardware object's
   `mount` names its parts as typed keywords, which `cab.mount(hardware,
   ...)` passes on through a ParamSpec, so `cab.mount(hinge, dor=door)` is a

@@ -188,7 +188,7 @@ def test_no_interference_sees_the_rounded_corner():
             if rounded:
                 panel.fillet(panel.front.left, 50)
             # a 10 x 10 block in the corner, which the fillet leaves clear
-            board("puck", ply15).on(m.bottom).between(m.front, m.front + 10, m.left, m.left + 10)
+            board("puck", ply15).on(m.bottom).between(m.front, m.front.into(10), m.left, m.left.into(10))
         assert no_interference(m) == expected
 
 

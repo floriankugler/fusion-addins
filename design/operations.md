@@ -61,7 +61,7 @@ with board("left", ply15, rect(depth=500, height=720)) as side:
     side.chamfer(side.front.inner, 1)                     # one edge
     side.chamfer(side.toekick, 1)                         # the contour a named cut made
     side.fillet(side.back.top, 20)                        # a corner of the outline, rounded through the board
-    for z in spread(side.bottom + 100, side.top - 100, pitch=32):
+    for z in spread(side.bottom.into(100), side.top.into(100), pitch=32):
         side.hole(d=5, depth=10, at=side.inner.front(37).bottom(z))   # a shelf-pin column
 
 shape = rect(depth=500, height=720).clip(top=380, back=120)   # the top back corner cut off, 380 x 120
@@ -115,7 +115,7 @@ screw holes for adjustable mounting, pass-throughs for straps and cables
   (`along=cab.top`), and must lie in the face's plane.
 
 ```python
-for z in spread(back.bottom + 60, back.top - 60, pitch=20):     # vents, centred across the back
+for z in spread(back.bottom.into(60), back.top.into(60), pitch=20):   # vents, centred across the back
     back.slot(6, at=back.inner.bottom(z), centres=120, along="width", depth=through)
 
 a, b = side.inner.front(40).bottom(100), side.inner.front(40).bottom(140)

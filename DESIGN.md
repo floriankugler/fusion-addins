@@ -160,7 +160,7 @@ def carcass(name, box, *, front):
         back.join(left, right, bottom, top, using=domino("4x20", count=2))
 
         for side in (left, right):                         # shelf-pin columns, lined up
-            for z in spread(bottom.top + 100, top.bottom - 100, pitch=32):
+            for z in spread(bottom.top.gap(100), top.bottom.gap(100), pitch=32):
                 side.hole(d=5, depth=10, at=side.inner.front(37).bottom(z))
 
         cab.export("worktop", top.top)                     # for whatever stands on it

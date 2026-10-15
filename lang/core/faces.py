@@ -2,10 +2,11 @@
 
 `Face` is one of a board's six faces, named by direction in the frame of
 the board's scope; it is also a position (its plane), so it works in
-`on()`, `between()` and the position algebra, and moved by `gap()` or
-`into()` it is a `Side` that keeps the face's side. `Edge` is where two
-faces meet: a chamfer's target, a corner of the outline when both faces
-are narrow, and an `at=` point in the middle of the first face's edge.
+`on()`, `between()` and the position algebra but for a length added, and
+moved by `gap()` or `into()` it is a `Side` that keeps the face's side.
+`Edge` is where two faces meet: a chamfer's target, a corner of the
+outline when both faces are narrow, and an `at=` point in the middle of
+the first face's edge.
 `Anchor` is a point on a face for `at=`, named by the edges it is measured
 from (`side.inner.front(37).bottom(z)`). `Outline` is a big face's
 outer contour, and `Operation` a named operation of a board, whose edges
@@ -20,7 +21,7 @@ from . import directions
 from .directions import Axis, Direction
 from .errors import LangError
 from .ops import Chamfer, Cut, EdgeOp, Hole, Op, VGroove
-from .refs import HasPosition, Number, Pos, PositionArithmetic, Side, as_pos
+from .refs import DirectedArithmetic, HasPosition, Number, Pos, Side, as_pos
 from .shapes import Anchor as ShapeAnchor
 
 if TYPE_CHECKING:
@@ -29,10 +30,12 @@ if TYPE_CHECKING:
 Point2 = tuple[float, float]
 
 
-class Face(PositionArithmetic):
+class Face(DirectedArithmetic):
     """One of the six faces of a board. Its direction is named in the frame
     of the board's scope, whatever frame named it when it was asked for,
-    so `name` reads as the build file writes it."""
+    so `name` reads as the build file writes it. A position plus or minus
+    a length is an error on it, as on a box side: `gap()` and `into()` move
+    it (`DirectedArithmetic`)."""
 
     def __init__(self, part: Board, direction: Direction):
         self.part = part
@@ -61,12 +64,21 @@ class Face(PositionArithmetic):
         needed toward=]. Moved again it keeps the face's in and out:
         `back.inner.gap(15).gap(5)` is 20 in front of the back,
         `back.inner.gap(15).into(5)` 10 [decided by Florian, 2026-10-15]."""
-        return Side(self.axis, self.value + self.direction.sign * n, inward=self.direction, from_face=True)
+        return Side(self.axis, self.value + self.direction.sign * n, inward=self.direction, from_face=True,
+                    label=f"{self._label}.gap({n:g})")
 
     def into(self, n: float) -> Side:
         """The face's plane moved `n` into the part, behind the face; it
         keeps the face's side and its in and out, as `gap()` does."""
-        return Side(self.axis, self.value - self.direction.sign * n, inward=self.direction, from_face=True)
+        return Side(self.axis, self.value - self.direction.sign * n, inward=self.direction, from_face=True,
+                    label=f"{self._label}.into({n:g})")
+
+    @property
+    def _label(self) -> str:
+        return f"{self.part.name}.{self.name}"
+
+    def _directed(self) -> tuple[str, str, str | None]:
+        return "a face", self._label, self.part.path
 
     @property
     def is_big(self) -> bool:

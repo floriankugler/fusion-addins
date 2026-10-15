@@ -33,7 +33,7 @@ with module("ops", Box.from_size(width=400, depth=300, height=100)) as m:
         panel.chamfer(panel.back.bottom, 1)                         # an edge of the other big face
         panel.hole(d=8, depth=30, at=panel.front.right(50))         # into the front narrow face
         panel.pocket(rect(depth=40, height=6), at=panel.right.center, depth=10)   # slot in the right narrow face
-        for x in spread(panel.front + 40, panel.back - 40, pitch=100):
+        for x in spread(panel.front.into(40), panel.back.into(40), pitch=100):
             panel.hole(d=5, depth=8, at=top.right(25).front(x))     # a column 25 mm from the right edge
 
     # a standing board, to check that a vertical show face and its edges resolve

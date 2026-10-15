@@ -100,7 +100,7 @@ def test_rows_of_slots_with_spread():
     m, panel = _panel()
     with m:
         top = panel.top
-        for x in spread(panel.front + 40, panel.back - 40, pitch=20):
+        for x in spread(panel.front.into(40), panel.back.into(40), pitch=20):
             panel.slot(6, at=top.front(x), centres=200, along="width", depth=through)
     slots = [op.slot for op in panel.ops if isinstance(op, Pocket) and op.slot is not None]
     assert [s.start[0] for s in slots] == [40 + 20 * i for i in range(12)]

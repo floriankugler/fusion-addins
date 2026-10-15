@@ -29,9 +29,9 @@ an outline in the two measures of its plane):
   module mirrored the other way or not (the cabinets in it mirrored back
   to stay as they were), and written otherwise: placement modifiers,
   `between()`'s limits, boards and operations in another order where the
-  order must not matter, boards resolved in another order, `side + n` for
-  `side.into(n)`, a side or a face moved there in two steps
-  (`face.gap(2 * n).into(n)`), `on()` a side or a face moved without
+  order must not matter, boards resolved in another order, a face moved as
+  a bare position (`face.position + n`), a side or a face moved there in
+  two steps (`face.gap(2 * n).into(n)`), `on()` a side or a face moved without
   `toward=`, an alias for a side, a board for its face, a mix of positions
   (`a + b - c` among them) or a box's middle spelt another way, a box for
   its four sides, an anchor measured from the opposite edge or given as a
@@ -56,8 +56,10 @@ again: a board twice, boards overlapping, a position or a face moved by
 `gap()` inside a board, a single limit at the box's middle, a board as the
 only limit centred in it) [the rules decided by Florian, 2026-10-14]; an
 operation lies where its anchor says, as deep as its depth says, and a row
-has as many holes as fit; a refused operation changes nothing; and the
-layout plans, draws and meshes.
+has as many holes as fit; a refused operation changes nothing; a side or
+a face plus or minus a length is refused, naming `into()` and `gap()`
+[decided by Florian, 2026-10-15, syntax.md item 1]; and the layout plans,
+draws and meshes.
 """
 from __future__ import annotations
 
@@ -949,18 +951,18 @@ def _position(b: Built, r: Ref) -> Any:
     """A position: a Side, a Face, a Pos."""
     if r.kind == "side":
         s = _side_of(b, r)
-        sign = s.inward.sign
         if r.by == 0:
-            return [s, s.position, s + 0, s.into(0)][b.pick(4)]
-        return [s.into(r.by), s + sign * r.by, s - (-sign * r.by), s.gap(-r.by), s.into(2 * r.by).gap(r.by),
-                s.gap(r.by).into(2 * r.by)][b.pick(6)]
+            return [s, s.position, s.gap(0), s.into(0)][b.pick(4)]
+        # (a side plus a length is refused, syntax.md item 1: `_directed_promises`)
+        return [s.into(r.by), s.gap(-r.by), s.into(2 * r.by).gap(r.by), s.gap(r.by).into(2 * r.by)][b.pick(4)]
     if r.kind == "face":
         f = _board(b, r.of).face(r.name)
         sign = f.direction.sign
         if r.by == 0:
-            return [f, f.position, f + 0, f.gap(0)][b.pick(4)]
-        # (moved again, a face's side keeps the face's in and out [Florian, 2026-10-15])
-        return [f.gap(r.by), f.into(-r.by), f + sign * r.by, f.gap(2 * r.by).into(r.by),
+            return [f, f.position, f.into(0), f.gap(0)][b.pick(4)]
+        # (moved again, a face's side keeps the face's in and out [Florian, 2026-10-15]; a bare position
+        # keeps its arithmetic)
+        return [f.gap(r.by), f.into(-r.by), f.position + sign * r.by, f.gap(2 * r.by).into(r.by),
                 f.into(r.by).gap(2 * r.by)][b.pick(5)]
     if r.kind == "op":
         name, edge = r.name.split(".")
@@ -971,8 +973,10 @@ def _position(b: Built, r: Ref) -> Any:
     if r.kind == "mid":
         assert r.a is not None and r.b is not None
         a, c, f = _position(b, r.a), _position(b, r.b), r.by
+        # (a length goes on a bare position: on a side or a face it is refused, syntax.md item 1)
+        pa, pc = as_pos(a), as_pos(c)
         if f == 0.5:
-            spellings: list[Callable[[], Any]] = [lambda: (a + c) / 2, lambda: a + (c - a) / 2, lambda: (c + a) / 2,
+            spellings: list[Callable[[], Any]] = [lambda: (a + c) / 2, lambda: pa + (c - a) / 2, lambda: (c + a) / 2,
                                                   lambda: 0.5 * a + 0.5 * c, lambda: (a + c) * 0.5,
                                                   lambda: a + c - c + (c - a) / 2]
             if (r.a.kind == r.b.kind == "side" and r.a.of == r.b.of and r.a.by == r.b.by == 0
@@ -981,7 +985,7 @@ def _position(b: Built, r: Ref) -> Any:
                 assert box is not None
                 spellings.append(lambda: box.center(extent))
         else:
-            spellings = [lambda: a + (c - a) * f, lambda: (1 - f) * a + f * c, lambda: c + (a - c) * (1 - f),
+            spellings = [lambda: pa + (c - a) * f, lambda: (1 - f) * a + f * c, lambda: pc + (a - c) * (1 - f),
                          lambda: c + a - c + (c - a) * f]
         return spellings[b.pick(len(spellings))]()
     raise AssertionError(r.kind)
@@ -1074,7 +1078,7 @@ def _on(b: Built, x: Board, spec: BoardSpec) -> None:
              lambda: x.on(s.into(0))][b.pick(4)]()
         else:
             # (a side moved into or out of its box is a side: no toward= needed)
-            [lambda: x.on(s + sign * r.by), lambda: x.on(s.into(r.by), toward=opposite),
+            [lambda: x.on(s.position + sign * r.by, toward=s.inward), lambda: x.on(s.into(r.by), toward=opposite),
              lambda: x.on(s.into(r.by), toward=s.inward), lambda: x.on(s.into(r.by)), lambda: x.on(s.gap(-r.by)),
              lambda: x.on(s.into(2 * r.by).gap(r.by))][b.pick(6)]()
         return
@@ -1086,7 +1090,7 @@ def _on(b: Built, x: Board, spec: BoardSpec) -> None:
         else:
             # (a face moved by gap() or into() keeps its side: no toward= needed)
             [lambda: x.on(f.gap(r.by), toward=f.direction),
-             lambda: x.on(f + f.direction.sign * r.by, toward=f.direction), lambda: x.on(f.gap(r.by)),
+             lambda: x.on(f.position + f.direction.sign * r.by, toward=f.direction), lambda: x.on(f.gap(r.by)),
              lambda: x.on(f.into(-r.by)), lambda: x.on(f.gap(2 * r.by).into(r.by))][b.pick(5)]()
         return
     raise AssertionError(r.kind)
@@ -1449,7 +1453,7 @@ def _short(v: Any) -> str:
 def _promises(b: Built) -> list[str]:
     """What the boards and operations of the case built as written must
     be (see the module's docstring)."""
-    problems: list[str] = _ambiguity_promises(b)
+    problems: list[str] = _ambiguity_promises(b) + _directed_promises(b)
     for i, x in enumerate(b.boards):
         if x is not None:
             problems += _board_promises(b, i, x)
@@ -1473,6 +1477,36 @@ def _promises(b: Built) -> list[str]:
         if len(got) != len(want) or any(abs(p - q) > 1e-6 for p, q in zip(got, want)):
             problems.append(f"the row {key} spreads {[round(p - start, 6) for p in got]} from its start, "
                             f"{[round(p - start, 6) for p in want]} fit")
+    return problems
+
+
+def _directed_promises(b: Built) -> list[str]:
+    """A side or a face a board is placed on, plus or minus a length, is
+    refused, naming `into()` and `gap()` by that length; with positions it
+    computes as they do [decided by Florian, 2026-10-15, syntax.md item 1]."""
+    problems: list[str] = []
+    for i, spec in enumerate(b.case.boards):
+        r = spec.at
+        if b.boards[i] is None or r.kind not in ("side", "face"):
+            continue
+        try:
+            ref: Any = _side_of(b, r) if r.kind == "side" else _board(b, r.of).face(r.name)
+        except _Missing:
+            continue
+        n = r.by or spec.t
+        fix = (f".into({abs(n):g})", f".gap({abs(n):g})")
+        for spelt, move in ((f"{ref!r} + {n:g}", lambda: ref + n), (f"{ref!r} - {n:g}", lambda: ref - n),
+                            (f"{n:g} + {ref!r}", lambda: n + ref)):
+            try:
+                move()
+            except LangError as e:
+                if not all(f in str(e) for f in fix):
+                    problems.append(f"{spelt} is refused without naming into() and gap() by {abs(n):g}: {e}")
+            else:
+                problems.append(f"{spelt} is not refused")
+        p = ref.position
+        if ref - p != 0 or (ref + p) / 2 != p or 0.5 * ref + 0.5 * p != p or abs(abs(ref.into(n) - ref) - abs(n)) > 1e-9:
+            problems.append(f"{ref!r} computes with a position otherwise than its position does")
     return problems
 
 

@@ -453,7 +453,7 @@ def test_a_connector_must_lie_where_the_face_on_board_covers_the_end():
         left = board("left", ply15).on(cab.left)
         right = board("right", ply15).on(cab.right)
         bottom = board("bottom", ply15).on(cab.bottom).between(left, right, cab.front, Pos("x", 495))
-        back = board("back", ply9).on(cab.back).between(left, right, cab.bottom + 15, cab.top)
+        back = board("back", ply9).on(cab.back).between(left, right, cab.bottom.into(15), cab.top)
         (c,) = contacts(back, bottom)
         assert (c.across_lo, c.across_hi, back.show_face.value) == (491, 495, 500)
         before = state(back, bottom)

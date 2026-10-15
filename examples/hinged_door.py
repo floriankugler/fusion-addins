@@ -37,7 +37,7 @@ def hinged_cabinet(name: str, box: Box, hinge: ConcealedHinge, *, front: Side) -
                  .between(left.gap(1), right.gap(1), back, cab.front.into(ply12.t + 20)))
         for side in (left, right):
             for edge in (side.inner.front, side.inner.back):
-                side.hole(d=5, depth=10, at=edge(37).bottom(shelf.bottom - 6))
+                side.hole(d=5, depth=10, at=edge(37).bottom(shelf.bottom.gap(6)))
 
         door = board("door", ply12).on(cab.front).inset(GAP / 2)
         cab.mount(hinge, door=door, carcass=left)

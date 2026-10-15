@@ -35,7 +35,7 @@ contours as limits. Part of the modeling language's design; the overview is
   shape, so it may come after the placement is used). `.inset(n)`
   shrinks the outline by `n` on every side of its box, which is how an inset
   front gets its gap; there are no one-off modifiers such as margin or lift,
-  because `.on(box.bottom + slide.recess)` already says lift.
+  because `.on(box.bottom.into(slide.recess))` already says lift.
 - A slat (`slat(name, material, section=(w, h))`) is placed by naming what
   its faces do: `.on()` a wide face, `.edge_on()` a narrow face, `.center()`
   its middle, two of them on different axes, and `.between()` its two ends
@@ -81,14 +81,15 @@ offset). [decided as a need]
 
 | Fusion extrude option       | In the language                              |
 |-----------------------------|----------------------------------------------|
-| Start from offset           | `.on()` a reference, moved with `+`/`-`      |
+| Start from offset           | `.on()` a reference moved by `into()`/`gap()` |
 | Start from object + offset  | the same; the reference is the object        |
 | Extent to object + offset   | `.between()` for parts, `depth=to(...)` for cuts |
 | Extent through all          | `depth=through`                              |
 
 References can be computed with, for example `(bottom.top + top.bottom) / 2`:
 
-- position +/- length gives a position;
+- position +/- length gives a position, for a bare position; for a side
+  or a face it is an error (below);
 - position - position gives a length;
 - a weighted mix of positions whose weights add up to 1 gives a position,
   also with positions taken away: `a + b - c` [decided]; a length taken
@@ -98,9 +99,20 @@ References can be computed with, for example `(bottom.top + top.bottom) / 2`:
 
 This only works for flat, parallel references.
 
-- `+` and `-` move along the world axis (`cab.bottom + 60` is 60 inside only
-  where the world's top is its axis's positive end, the van's). Fits that
-  hold in any frame use `.into(n)` and `.gap(n)`, which need no sign
+- A side or a face plus or minus a length is an error, for the type
+  checker and when the build runs, naming the fix: `cab.front + 40: a side
+  has a direction; write cab.front.into(40) or cab.front.gap(40)`. Along
+  the world axis it moved inward in one frame and outward in another, so a
+  cabinet placed with another `front=` silently flipped it [decided by
+  Florian, 2026-10-15, syntax.md item 1]. This holds for a box side, a side
+  moved by `into()` or `gap()`, a part's face and a face moved by them, the
+  number on either side of the operator. A side or a face plus a position
+  (the mix), minus one (a length), `*` and `/` work as before, and bare
+  positions keep all their arithmetic: a master's plane (`floor_level +
+  20`), an operation's edges (`left.toekick.top + 5`), `spread()`'s
+  positions, `box.center()`, and a side's or a face's `.position`, which
+  drops its direction.
+- `.into(n)` and `.gap(n)` move a side or a face; they need no sign
   convention and also work on contours, by offsetting the curve; on a box
   side they give a side, its inward direction kept, so a board lies on them
   without `toward=` [decided]. A part's face moved by them keeps its side

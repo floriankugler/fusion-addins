@@ -51,7 +51,7 @@ def test_slide_machines_the_drawer_box():
             r = board("right", ply12).on(box.right).between(box.front, box.back, box.bottom, box.top)
             f = board("front", ply12).on(box.front).between(l, r, box.bottom, box.top)
             k = board("back", ply12).on(box.back).between(l, r, box.bottom, box.top)
-            floor = board("floor", ply9).on(box.bottom + slide.recess).between(l.into(5), r.into(5), f, k)
+            floor = board("floor", ply9).on(box.bottom.into(slide.recess)).between(l.into(5), r.into(5), f, k)
             slide.machine_box(sides=(l, r), front=f, back=k, floor=floor)
     # the sides' inner faces (left is -y here), the floor's underside above the box bottom
     li, ri = l.inner.value, r.inner.value
@@ -93,7 +93,7 @@ def _drawer(slide: DrawerSlide, machine: bool = True, into: str = "lrf",
             r = board("right", ply12).on(box.right).between(box.front, box.back, box.bottom, box.top)
             f = board("front", ply12).on(box.front).between(l, r, box.bottom, box.top)
             k = board("back", ply12).on(box.back).between(l, r, box.bottom, box.top)
-            floor = board("floor", floor_material).on(box.bottom + slide.recess).between(l, r, f, k)
+            floor = board("floor", floor_material).on(box.bottom.into(slide.recess)).between(l, r, f, k)
             named = {"l": l, "r": r, "f": f, "k": k}
             floor.join(*(named[c] for c in into), using=groove(5, clearance=(0.5, 0.5)))
             if machine:
@@ -146,7 +146,7 @@ def test_a_floor_placed_into_the_back_without_a_groove_is_checked_too():
             r = board("right", ply12).on(box.right).between(box.front, box.back, box.bottom, box.top)
             f = board("front", ply12).on(box.front).between(l, r, box.bottom, box.top)
             k = board("back", ply12).on(box.back).between(l, r, box.bottom, box.top)
-            floor = board("floor", ply9).on(box.bottom + slide.recess).between(l, r, f, k.into(5))
+            floor = board("floor", ply9).on(box.bottom.into(slide.recess)).between(l, r, f, k.into(5))
             with pytest.raises(LangError, match=r"would run into cab\.drawer1\.floor: leave the back board out"):
                 slide.machine_box(sides=(l, r), front=f, back=k, floor=floor)
 
