@@ -29,6 +29,15 @@ when it is fixed or decided.
 - **Outline rings touching at a point**: the preview's mesh of such a part may
   not be watertight (marked `KNOWN` in the board fuzz).
 
+- **A board cut in two by a through pocket and a cut together.** A through
+  pocket over the board's edge and a later cut (a notch) can leave a piece
+  of the board apart, 1639 mm² in the case found; each alone is allowed,
+  and the split check looks at the outline only. Fusion would draw a body
+  in two lumps; the nest refuses such a part by name ("its machine outline
+  is in 2 pieces"). Found by the nest fuzz, 2026-10-14; marked `KNOWN` in
+  `tests/fuzz/nesting.py` (`_refused_in_pieces`). Refusing it in the
+  layout step is for Florian to decide.
+
 ## Checks
 
 - **`no_interference` sees arcs as polygons.** A pocket's or an outline's

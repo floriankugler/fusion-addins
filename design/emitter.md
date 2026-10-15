@@ -66,10 +66,26 @@ was measured. Part of the modeling language's design; the overview is
 - The compiled examples come out as the preview's: every body one solid,
   volumes within 0.03 % (the polygons' chord errors).
 
+## Nested documents
+
+A nest file (`design/nesting.md`) is drawn a document per material:
+`lang/emit/nested.py` plans it (Fusion-free, unit tested), `NestEmitter`
+draws it, and Compile Layout takes a `nest.json` as it takes a layout. Each
+piece of stock is a component, each blank one in it at its place holding the
+blank as a see-through stock body and its parts' bodies flat, machining face
+up, named by path, with their facts moved along. A part is drawn where the
+layout has it, with the steps of its module document, and the finished body
+is copied into place by the nest's transform; every component sits at the
+origin. Drawn inside a component whose occurrence was moved, most parts
+failed ("the path is tangent to the profile": Fusion read the profiles in
+the other space) and the others came out a thickness too high
+[2026-10-14].
+
 ## Handing parts to Multi Arrange and Auto Setup
 
-- After a compile, Multi Arrange nests and Auto Setup derives CAM from the
-  geometry. Multi Arrange works in the compiled direct documents as they are:
+- After a compile, Auto Setup derives CAM from the geometry; the language
+  nests on its own (above), and Multi Arrange stays a way to nest in
+  Fusion. Multi Arrange works in the compiled direct documents as they are:
   it solves in a parametric scratch document and places the nested copies
   without base feature or timeline group. Where Auto Setup runs is open (see
   `design/proposals/cam.md`).

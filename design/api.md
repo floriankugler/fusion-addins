@@ -33,8 +33,8 @@ where it sits and what is done to it are method calls that return the part,
 so they chain or stand on their own lines. [decided]
 
 - **Placement and property modifiers are order-free and settable once.**
-  `on`, `between`, `center`, `inset`, `grain`, `show`, `manual`, and a slat's
-  `edge_on` (`design/slats.md`). Setting one
+  `on`, `between`, `center`, `inset`, `grain`, `show`, `manual`, `nest`, and a
+  slat's `edge_on` (`design/slats.md`). Setting one
   twice is an error. The result never depends on the order they were
   written in.
 - **Operation modifiers are ordered.** `cut`, `pocket`, `hole`, `slot`, `chamfer`,

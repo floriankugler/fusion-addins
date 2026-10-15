@@ -15,6 +15,7 @@ Fusion documents. This file is the overview; the details are in `design/`:
 | `design/checks.md` | `no_interference`, `inside_box`, `inside()`, `fits_sheet` |
 | `design/geometry.md` | Polygons and arcs, cleaning, tolerances, offsets |
 | `design/emitter.md` | The Fusion backend, compile speed, Fusion findings |
+| `design/nesting.md` | Nesting: parts on blanks the bed takes, sawn out of the stock on hand; the workshop and nest files |
 | `design/preview.md` | The browser preview |
 | `design/proposals/` | Features worked out but not built, one file each (listed below) |
 | `design/todo.md` | A loose list of things to do |
@@ -52,9 +53,9 @@ Not goals:
 
 - A general-purpose CAD language.
 - Replacing Fusion. It stays the kernel, the viewer, and the place for
-  toolpaths and post-processing. Nesting and the choice of CAM operations may
-  move into the language (`design/proposals/nesting.md`, `cam.md`);
-  generating G-code stays a non-goal.
+  toolpaths and post-processing. Nesting is in the language
+  (`design/nesting.md`); the choice of CAM operations may follow
+  (`design/proposals/cam.md`); generating G-code stays a non-goal.
 - Describing parts that are curved in 3D (upholstered parts, parts curved two
   ways). Those stay hand-modeled and are referenced by name. Boards bent about
   one axis may come in (`design/proposals/bent-boards.md`).
@@ -77,6 +78,9 @@ Not goals:
   features. The only code that imports `adsk`, with the snapshot writer.
 - **Preview**: a second consumer of the layout file that meshes the parts and
   shows them in a browser, without Fusion.
+- **Nest**: the parts of a build per material on blanks the machine's bed
+  takes, sawn out of the stock on hand (a workshop file), written to a nest
+  file the preview shows and the emitter draws, a document per material.
 
 ```
 Master document --(snapshot, in Fusion, rarely)--> snapshot.json
@@ -84,12 +88,16 @@ Master document --(snapshot, in Fusion, rarely)--> snapshot.json
 Python source ---------------------------------------> layout step (plain Python,
                                                        anywhere, < 1 s)
                                                        |
-                                         +-------------+-------------+
-                                         v                           v
-                               preview (browser, instant)    emit (in Fusion, seconds,
-                                                             one direct document per module)
+                                  +--------------------+--------------------+
+                                  v                    v                    v
+                        preview (browser,     nest (plain Python,    emit (in Fusion, seconds,
+                        instant)              seconds a material,    one direct document per
+                                  ^           workshop file)         module)
+                                  |                    |                    ^
+                                  +---- nest view -----+---- nest.json -----+
+                                                             (a document per material)
 
-afterwards, unchanged: Multi Arrange (nesting) and Auto Setup (CAM)
+afterwards: Auto Setup (CAM); Multi Arrange stays a fallback for nesting in Fusion
 ```
 
 Three steps with files between them. The layout step can use shapely and
@@ -182,11 +190,12 @@ lang/
                contours, checks, material, layout and layout_types, errors
   joints/      half laps, connectors, tenons, screws, box joints, grooves
   hardware/    slides, hinges, hatch hinges, ball catches, latches, sliding brackets
-  emit/        plan, loops, arcs (Fusion-free); fusion (draws); the snapshot writer
+  emit/        plan, loops, arcs, nested (Fusion-free); fusion (draws); the snapshot writer
+  nest/        nesting: workshop file, parts, PackingSolver, saw plans, refill, verify, drawing
   preview/     mesher, server, three.js viewer
   master.py    reading the snapshot
-  build.py     `python -m lang.build`
-addins-src/compiler/   Snapshot Master and Compile Layout buttons
+  build.py     `python -m lang.build`; `python -m lang.nest` nests
+addins-src/compiler/   Snapshot Master and Compile Layout (layouts and nests) buttons
 lib/           data shared with the add-ins (connector_data, stations, drawer_slides, ...)
 examples/      build files; van_snapshot.json is the sample master's snapshot
 tests/         pytest suite; tests/fuzz the Hypothesis fuzzing (AGENTS.md)
@@ -201,7 +210,8 @@ limits, every operation (cuts, pockets, holes, slots, chamfers, fillets, cutouts
 dog bones), half laps, Dominos, Clamex, Cabineos, tenons, screws, box joints,
 grooves, drawer slides, concealed hinges, hatch hinges, ball catches, door
 latches, sliding brackets, slats and lips (cosmetic slats for now), the checks,
-and the folder preview. Everything is
+the folder preview, and nesting (sheets and offcuts sawn into blanks for the
+bed, the preview's nest view, nested documents in Fusion). Everything is
 fuzzed (AGENTS.md, "Fuzz Tests").
 
 Proposed, in `design/proposals/`. Where they depend on each other Florian
@@ -219,7 +229,7 @@ is implemented. [Florian]
 | `tilted-boards.md` | Boards turned about one axis of their scope |
 | `mitres.md` | Mitred corners as a joint |
 | `standard-library.md` | `lang/std`: building blocks on the public API only |
-| `nesting.md` | Nesting in the language with PackingSolver: sheets of several sizes sawn into blanks for the bed, offcuts, grain, parts in openings (tried in `experiments/nesting/`) |
+| `nesting.md` | What is left of nesting (built: `design/nesting.md`): pinning cut sheets, parts larger than the bed, groups, the cut list |
 | `cam.md` | A CAM plan from the layout, built by an add-in |
 | `runs.md` | Tubes, ducts and keep-outs |
 | `detail-levels.md` | Rough and full previews |
@@ -240,7 +250,8 @@ Smaller items are in `design/todo.md`, known defects in `design/bugs.md`.
 - `lib/group_edit.py`: stored settings per add-in result.
 - `lib/auto_setup/`: recognition of holes, pockets, contours, rim chamfers
   and V-grooves, and template-based CAM operations.
-- `lib/multi_arrange/`: nesting, including the note on document write cost.
+- `lib/multi_arrange/`: nesting in Fusion with its Arrange, including the note
+  on document write cost; the language nests on its own now.
 - `tools/perf/compile_bench.py` and `tools/perf/results/`: the compile-speed
   benchmark, also a worked example of the emitter's feature calls.
 - `addins-src/connectors_native/main.py`: a full native add-in (inputs,

@@ -20,7 +20,8 @@ for a check, too slow for the loop. [decided as a need]
   graphics inside Fusion's viewport (same mesh, in the van you are looking
   at, worth adding later).
 - Not shown: results of the raw API escape hatch, hand-body booleans,
-  appearance rendering. Those are Fusion's job, as are nesting and CAM.
+  appearance rendering. Those are Fusion's job, as is CAM; the nest is
+  drawn by the nest step and shown as it is.
 
 ## The mesher
 
@@ -68,6 +69,15 @@ for a check, too slow for the loop. [decided as a need]
   `tests/test_viewer_js.py`), and a rebuild frees the old scene's GPU
   resources.
 - Click-to-path in the viewer is the Copy Path helper outside Fusion.
+- The nest view (button or key `k`, `preview.nest(on)` from code) shows the
+  design's nest as the nest step drew it (`nest.svg` beside the build, see
+  `design/nesting.md`): the sheets with their numbered saw cuts, blanks,
+  kept rests and waste, the parts labelled with their grain; a part
+  clicked there is selected in the model. The side panel says whether the
+  nest is of the layout on screen (its layout hash) or an older one, and
+  Nest again runs `python -m lang.nest` with the workshop file beside the
+  build file, one nest at a time and never on a save (a nest takes seconds
+  to minutes); a failed nest shows its log.
 
 ## Serving a folder
 

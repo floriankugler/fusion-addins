@@ -30,7 +30,9 @@ contours as limits. Part of the modeling language's design; the overview is
 
 - The constructor is `board(name, material, shape=None)`; the placement
   modifiers are `.on(ref, toward=)`, `.between(*limits)`, `.center(pos)`,
-  `.inset(n)`, `.grain(along)`, `.show(face)`, `.manual()`. `.inset(n)`
+  `.inset(n)`, `.grain(along)`, `.show(face)`, `.manual()`, `.nest(False)`
+  (left out of the nest, `design/nesting.md`; like `.show()` it changes no
+  shape, so it may come after the placement is used). `.inset(n)`
   shrinks the outline by `n` on every side of its box, which is how an inset
   front gets its gap; there are no one-off modifiers such as margin or lift,
   because `.on(box.bottom + slide.recess)` already says lift.

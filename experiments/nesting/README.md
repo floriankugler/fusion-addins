@@ -1,5 +1,8 @@
 # Nesting experiments
 
+Built into the language since (`lang/nest`, `design/nesting.md`); this
+folder stays as the experiments were.
+
 A tryout of nesting solvers for "Nesting" under "Still to do" in DESIGN.md
 (branch `claude/modeling-language-features-6de0e5`), before anything goes
 into the language. Nothing here is used by `lang/`. Florian's must-haves
