@@ -64,9 +64,9 @@ otherwise or beyond what is written here: a nest marked by sheets is frozen
 whole too, so what its sheets not made held goes into the second nest
 like a changed part, and its file never changes (the blanks' names hold);
 being made is per nest and its second nests, so a remake makes a part made
-elsewhere again; the latest mark or fix of a part wins; tomlkit is not in
-the venv, so the ledger is rewritten line by line, read back and checked;
-the fingerprint is taken in the four quarter turns of the part's plane,
+elsewhere again; the latest mark or fix of a part wins; the ledger goes
+through tomlkit (added to the venv after the first build of this stage,
+which rewrote it line by line), read back and checked; the fingerprint is taken in the four quarter turns of the part's plane,
 rounded to 1/1024 mm.
 
 The syntax review's item 16 (`syntax.md`, 2026-10-15) decided against a

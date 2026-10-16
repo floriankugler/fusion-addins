@@ -365,19 +365,22 @@ and now and then a change in between means making parts again [decided
   marking sheets as made, and only that (never a plain run), takes the
   pieces on hand they were sawn from out of the ledger and puts their kept
   rests in. A piece comes out of the first entry of its material and size:
-  its `count` lowered on its own line, or the entry removed with the
-  comment lines right above its `[[stock]]` and a blank line after it; a
-  piece the ledger no longer has (used elsewhere) is noted, not an error.
-  A rest goes in at the end as a `[[stock]]` entry (several of one size on
-  one sheet as one with a count) under a comment saying which nest and
-  sheet kept it and when. Everything else stays as Florian wrote it, his
-  comments and the order of his entries among them, since the ledger is
-  rewritten line by line (tomlkit is not in the venv). A ledger that is not
-  TOML, not the ledger's keys, or written otherwise than as `[[stock]]`
-  tables is refused and left as it was, and the text written is read back
-  and must give exactly the stock meant. Where there is none and a rest is
-  kept, it is made beside the build file. A sheet marked again changes
-  nothing.
+  its `count` lowered, or the entry removed with the comment lines right
+  above its `[[stock]]` and one blank line around it; a piece the ledger no
+  longer has (used elsewhere) is noted, not an error. A rest goes in at
+  the end as a `[[stock]]` entry (several of one size on one sheet as one
+  with a count) under a comment saying which nest and sheet kept it and
+  when. The ledger goes through tomlkit (`ledger.py`, 0.15.2 tried), so
+  everything else stays as Florian wrote it: his comments, blank lines and
+  spellings (quoted keys, a count in hex, a header's own comment) and the
+  order of his entries; only a header spelt `[[ stock ]]` comes back as
+  `[[stock]]`. The stock written as an inline array (`stock =
+  [{material = ..., size = ...}]`) is edited in place, a rest appended to
+  the array with its comment beside it where the array spans lines. A
+  ledger that is not TOML or not the ledger's keys is refused and left as
+  it was, and the text written is read back and must give exactly the
+  stock meant. Where there is none and a rest is kept, it is made beside
+  the build file. A sheet marked again changes nothing.
 - Not taken as a change: the nest's own values (another margin, another
   bed) and the stock; a nest compares its parts. A part moved to another
   nest of the build is gone from one and new to the other. Two nests not
