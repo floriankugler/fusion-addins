@@ -2,9 +2,9 @@
 
 Status: proposed, nothing built. Florian's idea, raised in the CAM review of
 2026-10-15 (`cam.md`) and worked out with him in conversation on 2026-10-15
-and 16; this file replaces the `environment.md` of the 15th. Points marked
-[Florian] are his, [decided] his decisions, [proposed] Claude's; the
-questions at the end are his to answer.
+and 16; this file replaces the `environment.md` of the 15th, and its open
+questions were settled with him on the 16th (the last section). Points
+marked [Florian] are his, [decided] his decisions, [proposed] Claude's.
 
 The syntax review's item 16 (`syntax.md`, 2026-10-15) decided against a
 defaults object for the modeling calls. Florian reopened it the next day:
@@ -99,8 +99,25 @@ spalt = van.setting("Spalt")       # Setting[float] in mm; its default is the ma
   object.
 - A key may validate its value (`spacing` positive) and names its unit in
   its docstring; everything is mm unless it says otherwise.
+- **A keyword is a binding on the node the call makes** [decided
+  2026-10-16, Florian's answer to the defaults question]. The core reads a
+  key through the chain, and a call's keyword for it uses the key on the
+  node it makes first: `board("back", ply9)` is `material(ply9)` on the
+  board, `chamfer(what, size=0.5)` is `chamfer_size(0.5)` on the
+  operation, `nest(False)` and `grain()` on a board are `nest` and `grain`
+  there, `dogbones(tool=8)` is `dogbone_tool(8)` on the operation. So a
+  key that replaces a required argument has **no default**: `chamfer(what)`
+  in a chain that uses no `chamfer_size` is an error naming the key, as a
+  missing `size=` is today, and a build opts into a standard with a line
+  that says so. SwiftUI's `.font()` is the same shape, a modifier that sets
+  what the view reads.
+- **One spelling per key per node** [decided 2026-10-16]: a keyword or
+  modifier where a call makes the node, `use()` in a scope, `.use()` on a
+  scope, nest, part or operation only for keys that no call there has a
+  keyword for (the CAM's, appearance). `left.use(nest(False))` is not
+  offered next to `left.nest(False)`.
 
-**Namespaces** [proposed, question 5]: keys live with their readers and are
+**Namespaces** [decided 2026-10-16]: keys live with their readers and are
 named by domain, so `margin` of the nest and `margin` of a box joint do not
 collide and a binding shows its domain where it is written. The language's
 own design keys are exported from `lang` (`material`, `grain`, `nest`,
@@ -194,11 +211,14 @@ with module("van", van.box("Innenraum")):                # the root module, writ
   so `k.left` and the exports work as before. `with module(...)` stays for
   bodies written in place, such as the root's.
 - `module` has two roles, a scope when given a name and a box, a decorator
-  when given a function; `@module.body` is the alternative spelling
-  (question 1).
-- A module's own keywords and its settings are kept apart [proposed,
-  question 2]: a parameter (`drawers=4`) changes what the module is and the
-  signature documents it; a setting changes how its parts are made.
+  when given a function [decided 2026-10-16: one word for one thing; not
+  `@module.body`].
+- A module's own keywords and its settings are kept apart [decided
+  2026-10-16]: a parameter (`drawers=4`) changes what the module is and
+  the signature documents it; a setting changes how its parts are made,
+  and nobody needs to override `drawers` from the root. The same question
+  SwiftUI's environment poses, what goes in and what stays a parameter,
+  answered the same way [Florian].
 
 ## Nests in modules
 
@@ -250,10 +270,13 @@ provenance [proposed].
 ## What would flow
 
 Surveyed 2026-10-16 from the code: what a key would replace, its default
-today, who reads it. Not all at once: `material`, `chamfer_size`, the
-nest's and the CAM's keys first, a joint's or a piece of hardware's when a
-build wants to standardize it [proposed, question 3]. The inventory is not
-a key; tolerances are fixed [decided] and `check()` already flows per
+today, who reads it. Not all at once [decided 2026-10-16]: first
+`material`, `nest` and `grain`, which replace the per-board modifiers and
+settle the `default_grain` loose end, and `chamfer_size` as the example of
+a key an operation reads; the nest's and the CAM's keys when nesting and
+CAM are developed further; a joint's or a piece of hardware's when a build
+wants to standardize it. Every key is API surface. The inventory is not a
+key; tolerances are fixed [decided] and `check()` already flows per
 module.
 
 | Domain | Key | Replaces | Default today | Read by | Join |
@@ -261,8 +284,8 @@ module.
 | core | `material` | `board(name, material)` | required | the board, at resolve | per part |
 | core | `grain` | `grain()`; `Scope.default_grain`, set by nothing | unset | layout | per part |
 | core | `nest` | `nest(bool)` per board | True | nest | per part |
-| ops | `chamfer_size` | `chamfer(what, size)` | required (question 4) | `chamfer()` | per part |
-| ops | `fillet_radius` | `fillet(what, radius)` | required (question 4) | `fillet()` | per part |
+| ops | `chamfer_size` | `chamfer(what, size)` | none: required unless used above | `chamfer()` | per part |
+| ops | `fillet_radius` | `fillet(what, radius)` | none: required unless used above | `fillet()` | per part |
 | ops | `dogbone_tool`, `dogbone_relief` | `tool=6, relief=0.1` on `dogbones()`, `tenons()`, `groove()`, `box_joint()` | 6, 0.1 | the operation | per part |
 | ops | `cutout_border`, `cutout_around`, `cutout_radius` | `cutout()` keywords from `lib/cutout_patterns` | 20, 20, 8 | `cutout()` | per part |
 | ops | `lip_thickness`, `lip_material` | `lip(what, t, material)` | required | `lip()` | per part |
@@ -305,16 +328,28 @@ meaningless above a part), the checks' tolerances, the inventory.
 - The master's Change Parameters dialog edits the build's standards.
 - Every effective value says where it came from.
 
-## Questions for Florian
+## Settled 2026-10-16
 
-1. `@module` with two roles, or `@module.body` for the decorator.
-2. A module's own keywords kept apart from its settings, or `drawers=4` a
-   setting too.
-3. Which keys first; the table proposes `material`, `chamfer_size`, the
-   nest's and the CAM's.
-4. Keys that replace a required argument (`chamfer_size`, `fillet_radius`):
-   a default (1 mm?) or none, so that a chamfer without a size in a chain
-   that sets none stays an error.
-5. Namespaces by domain as proposed, or one flat namespace.
-6. The inventory ledger's format and name (`inventory.toml`, one kind of
-   entry, proposed).
+The questions the first draft left open, and Florian's answers [decided]:
+
+1. The decorator is `@module`, the same word as the scope.
+2. A module's own keywords (`drawers=4`) stay keywords, apart from settings.
+3. First keys: `material`, `nest`, `grain`, and `chamfer_size` as the
+   example of a key an operation reads; nesting and CAM keys once those are
+   further along; joints and hardware when a build asks.
+4. No defaults for keys that replace a required argument; a call's keyword
+   is a binding on the node it makes, and the core reads the key (Keys,
+   above).
+5. Namespaces by domain.
+6. `inventory.toml`, one kind of entry.
+7. One spelling per key per node: `nest()`, `grain()` and the material
+   argument stay the part-level spelling; `.use()` on a part is for keys
+   without a keyword.
+
+To build, in this order [proposed]: the mechanism (`setting`, bindings,
+`use`, `.use`, `value`, the chain within the build, freezing, provenance in
+the layout) with `material`, `nest`, `grain` and `chamfer_size`; `@module`
+with lazy modules and `.use()`, and `module(front=)` taking over from
+`cabinet()`; `van.setting()` in the master index. Nests per module, the
+nesting and CAM keys and the inventory ledger follow with the nest and the
+CAM plan.
