@@ -99,9 +99,15 @@ def rewrite(text: str, change: Change, where: str = NAME) -> tuple[str, list[str
     for k, (start, end) in enumerate(entries):
         if counts[k] == 0:
             gone.update(range(start, end))
-            # One blank line after it goes too where one is left before it.
+            # One blank line after it goes too where one is left before it;
+            # at the end, the blank lines before it.
             if end < len(lines) and not lines[end].strip() and (start == 0 or not lines[start - 1].strip()):
                 gone.add(end)
+            j = start - 1
+            while all(i in gone or not lines[i].strip() for i in range(end, len(lines))) and j >= 0 \
+                    and not lines[j].strip():
+                gone.add(j)
+                j -= 1
         elif counts[k] != stock[k].count:
             _set_count(lines, headers[k], end, counts[k], where, k)
     out = [line for j, line in enumerate(lines) if j not in gone]
