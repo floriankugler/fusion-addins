@@ -2,7 +2,6 @@
 of a folder are build files, which designs a change makes stale, which
 ones it builds, a build that fails or runs too long keeping the last good
 one, and the files it serves."""
-import json
 import os
 from pathlib import Path
 
