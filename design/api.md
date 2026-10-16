@@ -28,9 +28,10 @@ objects are named. Part of the modeling language's design; the overview is
 ## API form
 
 Constructors carry identity, modifiers carry everything else, in the style
-of SwiftUI and jQuery. `board("left", ply15)` names a part and its material;
-where it sits and what is done to it are method calls that return the part,
-so they chain or stand on their own lines. [decided] Everything a build
+of SwiftUI and jQuery. `board("left", ply15)` names a part and its material
+(`board("left")` takes its scopes', Settings below); where it sits and what
+is done to it are method calls that return the part, so they chain or stand
+on their own lines. [decided] Everything a build
 file makes comes from a lowercase factory: parts (`board()`, `slat()`),
 materials (`sheet_material()`), joints (`cabineo()`) and hardware
 (`drawer_slide()`, `hinge()`); the classes behind them (`Board`,
@@ -145,6 +146,109 @@ materials (`sheet_material()`), joints (`cabineo()`) and hardware
   `a + b` on shapes, as shapely, CadQuery and build123d users expect
   [decided by Florian, 2026-10-15, syntax.md item 13].
 
+## Settings
+
+The values a build standardizes (a material, a chamfer size, later the
+nest's and the CAM's) flow down the build as settings, set once where they
+apply and overridden below, as SwiftUI's environment does [Florian,
+2026-10-16]. Code: `lang/core/settings.py`, the core's keys in
+`lang/core/keys.py`; what is still to come (nests per module, the nesting
+and CAM keys) in `design/proposals/settings.md`.
+
+- **Keys.** `setting(default, name)` makes a typed key where the code that
+  reads it lives: `drawer_gap = setting(3.0, "drawer_gap")` is a
+  `Setting[float]`. `setting(..., name)` makes one without a default, typed
+  by its annotation (`front_gap: Setting[float] = setting(..., "front_gap")`),
+  and reading it where nothing uses it is an error naming the key and how
+  to set it. A key called with a value is a binding, `drawer_gap(2.5)`,
+  checked when it is made; bindings travel in lists (`use(*house)`).
+- **Using.** `use(*bindings)` uses them on the scope whose `with` block is
+  being written, outside every module on the root; `cab.use(...)`,
+  `part.use(...)` and `part.toekick.use(...)` on a scope, a part or a named
+  operation in hand, each returning it. A node uses a key once, and a
+  `use()` that is refused uses none of its bindings.
+- **Reading.** `value(key)` where the call is, and `cab.value(key)`,
+  `part.value(key)`, `part.toekick.value(key)` from a node's point of
+  view: the nearest node along the chain that uses the key (the operation,
+  the part, its scopes innermost first, the root), else the key's default.
+- **Freezing** [proposed in `design/proposals/settings.md`, built so]. A
+  read freezes the key for the nodes it passed, from the reader up to the
+  node it found the value at: a later use of the key there is an error
+  naming the reader and its line, since what was read would no longer
+  hold. A use above that node is no error, as the reader does not see it.
+  Settings written at the top of a scope never meet it. Keys nothing reads
+  during the build (`nest`, `grain`) are never frozen.
+- **A keyword is a binding on the node the call makes** [decided
+  2026-10-16]: `board("back", ply9)` uses `material(ply9)` on the board,
+  `chamfer(what, 0.5)` gives the chamfer its own size, `nest(False)` and
+  `grain()` on a board use those keys there. A key that replaces a required
+  argument has no default: `chamfer(what)` with no `chamfer_size` used
+  above it is an error naming the key, as a missing size was, so a build
+  opts into a standard with a line that says so.
+- **One spelling per key per node** [decided 2026-10-16]: a board says its
+  material, grain and nest with its own call and modifiers, and
+  `board.use()` refuses those keys, naming the spelling; `.use()` on a
+  board or an operation is for keys no call there has a keyword for.
+- **The core's keys** are exported bare from `lang`; the others will come
+  from their packages, named by domain (`nesting.margin`, `cam.tabs`)
+  [decided 2026-10-16]:
+  - `material`, no default: a board without one of its own takes the
+    nearest one used above it, read when its placement resolves, and none
+    along its chain is an error. A slat names its own and takes none.
+  - `grain`, unset: what `grain()` takes, an extent read in the frame of
+    the node that uses it (`use(grain("depth"))` in a module opening
+    sideways is its depth). It applies to the boards of a grained material
+    that have no `grain()` of their own; one along a board's thickness is
+    an error naming where it came from. A slat's runs along its length.
+  - `nest`, True: `use(nest(False))` keeps every board under a scope out of
+    the nest, and `nest(True)` takes one back in.
+  - `chamfer_size`, no default: the size of a chamfer that gives none,
+    read where the chamfer is written.
+- **The master's parameters** become settings where the build's index of
+  the master binds them: `spalt = van.setting("Spalt")` (`design/master.md`).
+- **Provenance.** The layout carries per part the settings set along its
+  chain as they hold for it, each with the node that set it (`settings`;
+  values that are not JSON data are left out), the keys it read whose
+  default came from the master ("master: Spalt"), and its named
+  operations' own (`op_settings`). The preview lists them with the
+  selected part's info: `material birch 15: kitchen`.
+
+## Modules
+
+- `with module(name, box, front=None)` writes a module's body in place, as
+  the root's is. [decided]
+- A module type is a function that takes its scope, made with `@module`
+  [decided 2026-10-16: one word for one thing]:
+
+  ```python
+  @module
+  def kitchen(cab: Scope, *, drawers: int = 3) -> None:
+      use(material(ply15))
+      left = board("left").on(cab.left)
+      ...
+
+  kitchen_box = van.box("Kueche")
+  k = kitchen(kitchen_box, front=kitchen_box.right, drawers=4).use(chamfer_size(0.5))
+  ```
+
+  The call is a constructor, `kitchen(box, front=None, name=None,
+  mirrored=False, **the body's keywords)`, typed through a ParamSpec, and
+  returns the module's scope, named after the function unless `name=`
+  says otherwise. The body's own parameters are keywords after the scope
+  (a positional one, or one called `box`, `front`, `name` or `mirrored`,
+  is an error), and they change what the module is, where settings change
+  how its parts are made [decided 2026-10-16].
+- **Lazy, as boards are** [proposed in `design/proposals/settings.md`, built
+  so]. The call fixes the module's parent (the scope current at it), path,
+  box and frame; its body runs once, the first time its parts are needed:
+  a part, child scope or export by name (`k.worktop`, `k["left"]`), its
+  parts, a check, the layout, `with k:`, at the latest when the build file
+  has run. Its box's sides (`k.left`) need no body. So `.use()` on what
+  the call returns comes first, and settings the parent uses after the
+  call still apply; a use of a key the body read is the freezing error.
+  A body returns nothing (it is an error if it does) and publishes what
+  others need with `export()`.
+
 ## Names and paths
 
 - Every object has a path, for example
@@ -196,25 +300,26 @@ materials (`sheet_material()`), joints (`cabineo()`) and hardware
   in the build file with `set_frame(Frame(...))`; every build starts from
   the default frame (`registry.reset()` restores it) and `world_frame()`
   reads the frame in use.
-- A cabinet is written in its own frame and placed: `cabinet(name, box,
-  front=box.right)` makes it open toward the box's right side; top stays up,
-  left and right are a cabinetmaker's, standing in front of it;
-  `mirrored=True` swaps them. Inside, `cab.back`, `side.inner.front(37)`,
-  `rect(depth=...)` and `width`, `depth`, `height` are the module's own,
-  child scopes inherit the frame, and the layout file carries world names,
-  so the preview and the emitter never see module frames. A cabinet type is
-  written once and placed on either wall, rotated or mirrored. [decided]
-- `front=` is what makes a module a cabinet, and the constructor says so
-  [decided]: `cabinet(name, box, front=...)` with `front=` required, and
-  `module(name, box)` for van-level modules such as the floor, the ceiling
-  or wall panels, which take the enclosing frame as it is, in the van's own
-  terms, the driver's left. `module(..., front=)` is an error pointing to
-  `cabinet()`, and `cabinet()` refuses a front facing up or down. A cabinet
-  says which way it opens, also when that is the van's front
-  (`front=box.front`): seen from its front, a module in the van's terms that
-  opens toward the windshield has its left on the right, since one front
-  cannot serve a left measured facing it (the driver's) and one measured
-  looking at it (the cabinetmaker's).
+- A cabinet is a module written in its own frame and placed:
+  `module(name, box, front=box.right)` makes it open toward the box's right
+  side; top stays up, left and right are a cabinetmaker's, standing in
+  front of it; `mirrored=True` swaps them. Inside, `cab.back`,
+  `side.inner.front(37)`, `rect(depth=...)` and `width`, `depth`, `height`
+  are the module's own, child scopes inherit the frame, and the layout file
+  carries world names, so the preview and the emitter never see module
+  frames. A cabinet type is written once and placed on either wall,
+  rotated or mirrored. [decided]
+- `front=` is what makes a module a cabinet [decided 2026-10-12; one
+  constructor since 2026-10-16, `module()` having taken over from
+  `cabinet()`]: `module(name, box)` without it for van-level modules such
+  as the floor, the ceiling or wall panels, which take the enclosing frame
+  as it is, in the van's own terms, the driver's left; `front=` a side of
+  the box or a direction, never up or down. A cabinet says which way it
+  opens, also when that is the van's front (`front=box.front`): seen from
+  its front, a module in the van's terms that opens toward the windshield
+  has its left on the right, since one front cannot serve a left measured
+  facing it (the driver's) and one measured looking at it (the
+  cabinetmaker's).
 - Hardware is placed by the drawer's or door's own left and right, seen from
   its front, so it comes out the same in either kind of module and is never
   mirrored.

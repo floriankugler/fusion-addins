@@ -69,8 +69,9 @@ contours as limits. Part of the modeling language's design; the overview is
   would lie; with none, at the scope's front, left and bottom side (or the
   origin without a box); and its box is its outline's.
 - Grain is required whenever the material has grain, as an axis in module
-  space, with a scope-level default; defaulting by the longer side is wrong
-  for fronts.
+  space, with a scope-level default, the `grain` setting
+  (`use(grain("height"))`, `design/api.md`, Settings); defaulting by the
+  longer side is wrong for fronts.
 
 ## References instead of numbers
 

@@ -60,11 +60,17 @@ done.
 - **Latched drawer box detail**: a cut-out in the drawer box for the latch
   versus keeping the box clear by `latch.reach` (deferred by Florian,
   2026-10-12).
-- **`default_grain`** in `lang/core/scope.py` is set by nothing (placement.md
-  promises a scope-level grain default): drop it, give `module()` and
-  `cabinet()` a `grain=`, or make it a setting
-  (`proposals/settings.md`). The loose end of the syntax review's item 16
-  (`proposals/syntax.md`, 2026-10-15).
+- **Errors at the layout step name no line**: a board resolves lazily, so a
+  missing placement or material, or an inherited grain along its
+  thickness, is found when the layout resolves it and `lang.build` prints
+  no line of the build file. A board could remember where `board()` made
+  it and name that line.
+- **`nest` names two things in stage 2 of the settings**: the core's key
+  (`use(nest(False))`) and the declaration of a nest in a module
+  (`nest("carcass", material=ply15)`, `proposals/settings.md`), besides the
+  `lang.nest` package, which `lang/__init__.py` keeps from replacing the
+  key. One callable can tell them by their arguments, or the key's name
+  changes.
 - **Corners named by a point** (`panel.top.front(60).left(40)`) for
   `fillet()` and `chamfer()`, once a build needs it.
 - **Try the language on real modules**: write two modules from the van in

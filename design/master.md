@@ -13,9 +13,10 @@ Part of the modeling language's design; the overview is `DESIGN.md`. Code:
 - Four kinds of reference [decided]: planes, which give a position;
   contours, which give a shape to follow; placeholder boxes, rough bodies
   drawn in the master to divide up the room, which become module boxes
-  (`cabinet("kitchen", van.box("Kueche"), front=...)`); and the master's
-  user parameters, which are plain numbers (`van.param("Bodenhoehe")`). A
-  box's front is stated in Python at placement, never read from the master.
+  (`module("kitchen", van.box("Kueche"), front=...)`); and the master's
+  user parameters, which are plain numbers (`van.param("Bodenhoehe")`), or
+  settings (`van.setting("Bodenhoehe")`, below). A box's front is stated in
+  Python at placement, never read from the master.
 - Naming uses what is visibly named in Fusion: one construction plane per
   plane reference, one sketch per contour (the sketch name is the reference
   name), one component or body per box, one user parameter per number. No
@@ -88,6 +89,15 @@ The snapshot is the compile's only view of the master. [decided]
   the snapshots it read (file, source, hash, boxes, contours), and the
   preview draws the boxes as translucent ghosts with their names and the
   contours as lines (`m` toggles them).
+- The master's parameters as settings [Florian, 2026-10-16,
+  `design/proposals/settings.md`]: `spalt = van.setting("Spalt")` in the
+  build's index of the master is a `Setting[float]` (`design/api.md`,
+  Settings) whose default is the parameter's value as `param()` gives it,
+  so Change Parameters in Fusion edits the build's standards and a module
+  that needs another value uses one (`use(spalt(2.0))`) without touching
+  the master. Provenance names the default "master: Spalt"; the same name
+  gives the same key. Bound by name in the index, not for every parameter,
+  since the type checker cannot know names invented from a file.
 - The sample master is built by `tools/van_master.py` in Fusion (rebuild it
   rather than keep a saved document); its snapshot is
   `examples/van_snapshot.json`, the test fixture, and `examples/van.py` is

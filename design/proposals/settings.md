@@ -1,10 +1,28 @@
 # Settings: values that flow down the build
 
-Status: proposed, nothing built. Florian's idea, raised in the CAM review of
-2026-10-15 (`cam.md`) and worked out with him in conversation on 2026-10-15
-and 16; this file replaces the `environment.md` of the 15th, and its open
-questions were settled with him on the 16th (the last section). Points
-marked [Florian] are his, [decided] his decisions, [proposed] Claude's.
+Status: Florian's idea, raised in the CAM review of 2026-10-15 (`cam.md`)
+and worked out with him in conversation on 2026-10-15 and 16; this file
+replaces the `environment.md` of the 15th, and its open questions were
+settled with him on the 16th (the last section). Points marked [Florian]
+are his, [decided] his decisions, [proposed] Claude's.
+
+Built 2026-10-16, stage 1 of the build order below: the mechanism (keys,
+bindings, `use()` and `.use()` on scopes, parts and named operations,
+`value()`, the chain within the build, set once, freezing as proposed,
+provenance in the layout, version 7), the core's keys `material`, `grain`,
+`nest` and `chamfer_size`, `@module` with lazy bodies, `module(front=)`
+in place of `cabinet()`, and `van.setting()`. They are described in
+`design/api.md` (Settings, Modules, Frames) and `design/master.md`; this
+file keeps the design and what is still to come, stages 2 to 4. Built
+otherwise than written here: the freezing error fires only where the use
+would change what was read (a use above the node a read found its value
+at is shadowed for that reader and allowed); a key read from its default
+is listed in the layout only when the default came from somewhere ("master:
+Spalt"); the root, outside every module, is a node that `use()` there sets;
+and the `lang.nest` subpackage keeps out of the `lang.nest` key's way (the
+package's module class ignores Python putting the subpackage there), which
+stage 2's `nest("carcass", ...)` declaration will have to share the name
+with.
 
 The syntax review's item 16 (`syntax.md`, 2026-10-15) decided against a
 defaults object for the modeling calls. Florian reopened it the next day:

@@ -52,7 +52,9 @@ for a check, too slow for the loop. [decided as a need]
   the build file writes them (a cabinet's own front and left, inner and outer
   where they resolve; the layout carries them per part as `faces`). Colors by
   material from a fixed palette. The layout's problems are listed as text; a
-  selected part's info gives its grain. Proposed and not built: the grain as
+  selected part's info gives its grain and its settings, one line each with
+  the node that set it (`material birch 15: kitchen`; the layout's
+  `settings`, `design/api.md`, Settings). Proposed and not built: the grain as
   a stripe on each board, and check results drawn in the scene (interference
   pairs, sheet fit).
 - Camera and visibility from code: the page exposes `window.preview`

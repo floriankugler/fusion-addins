@@ -65,7 +65,11 @@ Not goals:
 
 - **Module**: one piece of furniture or assembly (kitchen, bed, floor). It
   compiles on its own into its own Fusion document. A **cabinet** is a module
-  with a front, written in its own frame.
+  with a front, written in its own frame. A module type is a function made
+  with `@module`, called like a constructor; its body runs lazily.
+- **Settings**: typed values that flow down the build, from the root through
+  modules and scopes to parts and operations, each used once where it
+  applies and read by what is below (`design/api.md`, Settings).
 - **Master document**: a hand-made Fusion document with named planes,
   sketches, placeholder boxes and parameters for the whole van. The compiler
   reads it and never writes to it.
@@ -149,36 +153,36 @@ from lang import *
 from stock import ply9, ply15
 
 
-def carcass(name, box, *, front):
-    with cabinet(name, box, front=front) as cab:          # written in its own frame
-        left = board("left", ply15).on(cab.left)
-        right = board("right", ply15).on(cab.right)
-        for side in (left, right):                         # a toe kick notch, named
-            side.cut(rect(depth=60, height=100), at=side.outer.bottom.front, name="toekick")
-        bottom = board("bottom", ply15).on(left.toekick.top, toward=cab.top).between(left, right)
-        top = board("top", ply15).on(cab.top).between(left, right)
-        back = board("back", ply9).on(cab.back).between(left, right, bottom, top)
+@module                                                    # a module type
+def carcass(cab: Scope) -> None:
+    use(material(ply15))                                   # every board's, unless it names its own
+    left = board("left").on(cab.left)
+    right = board("right").on(cab.right)
+    for side in (left, right):                             # a toe kick notch, named
+        side.cut(rect(depth=60, height=100), at=side.outer.bottom.front, name="toekick")
+    bottom = board("bottom").on(left.toekick.top, toward=cab.top).between(left, right)
+    top = board("top").on(cab.top).between(left, right)
+    back = board("back", ply9).on(cab.back).between(left, right, bottom, top)
 
-        bottom.join(left, right, using=cabineo(count=3))
-        top.join(left, right, using=cabineo(count=3))
-        back.join(left, right, bottom, top, using=domino("4x20", count=2))
+    bottom.join(left, right, using=cabineo(count=3))
+    top.join(left, right, using=cabineo(count=3))
+    back.join(left, right, bottom, top, using=domino("4x20", count=2))
 
-        for side in (left, right):                         # shelf-pin columns, lined up
-            for z in spread(bottom.top.gap(100), top.bottom.gap(100), pitch=32):
-                side.hole(d=5, depth=10, at=side.inner.front(37).bottom(z))
+    for side in (left, right):                             # shelf-pin columns, lined up
+        for z in spread(bottom.top.gap(100), top.bottom.gap(100), pitch=32):
+            side.hole(d=5, depth=10, at=side.inner.front(37).bottom(z))
 
-        cab.export("worktop", top.top)                     # for whatever stands on it
-        check(fits_sheet)
-    return cab
+    cab.export("worktop", top.top)                         # for whatever stands on it
+    check(fits_sheet)
 
 
 box = Box.from_size(width=500, depth=600, height=720)
-carcass("carcass", box, front=box.right)
+carcass(box, front=box.right)                              # written in its own frame
 ```
 
 No board has a size of its own (the toe kick notch is the one number on a
-board), no joint names an edge, and the cabinet is placed by naming which way
-it opens. The build files in `examples/` are the reference for everything
+board), the material is said once, no joint names an edge, and the cabinet
+is placed by naming which way it opens. The build files in `examples/` are the reference for everything
 else, and the tests build every one of them: the drawer cabinet with its
 slides, box-jointed drawers and grooved floors (`drawer_cabinet.py`), the van
 floor against the sample master (`van.py`), and one file each for operations,
@@ -190,8 +194,9 @@ the inspection hatch and removable panels.
 ```
 lang/
   core/        no Fusion: refs, box, directions, faces, shapes, geometry, part,
-               scope, ops, corners, cutouts, dogbones, contact, crossing,
-               contours, checks, material, layout and layout_types, errors
+               scope, settings and keys, ops, corners, cutouts, dogbones,
+               contact, crossing, contours, checks, material, layout and
+               layout_types, errors
   joints/      half laps, connectors, tenons, screws, box joints, grooves
   hardware/    slides, hinges, hatch hinges, ball catches, latches, sliding brackets
   std/         the standard library: carcass, drawer box, written on the public API only
@@ -216,9 +221,12 @@ dog bones), half laps, Dominos, Clamex, Cabineos, tenons, screws, box joints,
 grooves, drawer slides, concealed hinges, hatch hinges, ball catches, door
 latches, sliding brackets, slats and lips (cosmetic slats for now), the checks,
 the folder preview, nesting (sheets and offcuts sawn into blanks for the
-bed, the preview's nest view, nested documents in Fusion), and the standard
-library's carcass and drawer box, which give the examples' layouts unchanged. Everything is
-fuzzed (AGENTS.md, "Fuzz Tests").
+bed, the preview's nest view, nested documents in Fusion), the standard
+library's carcass and drawer box, which give the examples' layouts unchanged,
+and the settings' first stage (keys, the chain, freezing, provenance in the
+layout and the preview, `material`, `grain`, `nest` and `chamfer_size`,
+lazy module types, `module(front=)`, the master's parameters as settings).
+Everything is fuzzed (AGENTS.md, "Fuzz Tests").
 
 Proposed, in `design/proposals/`. Where they depend on each other Florian
 wants them done in this order: bevels before miters and
@@ -236,7 +244,7 @@ is implemented. [Florian]
 | `miters.md` | Mitered corners as a joint |
 | `standard-library.md` | What is left of the standard library (built: `design/std.md`): cabinet types per build repo, further blocks |
 | `cam.md` | A CAM plan from the layout, built by an add-in |
-| `settings.md` | Settings that flow down the build and are overridden at any level: design standards, nesting and CAM values, the master's parameters; lazy modules, nests per module (Florian's idea, 2026-10-15/16) |
+| `settings.md` | Settings that flow down the build and are overridden at any level (Florian's idea, 2026-10-15/16). Built: stage 1, the mechanism, the core's keys, lazy modules, the master's parameters (`design/api.md`); to come: nests per module with the nesting keys, fingerprints and pinning, the CAM's keys |
 | `runs.md` | Hoses, cables, ducts and keep-outs: one run primitive that plans and is checked, routed through the boards' own openings, at the van level or in a module |
 | `detail-levels.md` | Rough and full previews |
 | `hand-made-geometry.md` | Escape hatches for what the language cannot say |

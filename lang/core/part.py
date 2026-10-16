@@ -5,7 +5,8 @@ order-free modifiers (`on`, `between`, `center`, `inset`, `grain`, `show`,
 `manual`, `nest`) and machined with ordered operations (`cut`, `pocket`, `hole`,
 `slot`, `chamfer`, `fillet`). Every modifier returns the board. Placement is
 resolved lazily the first time a face, the box or the layout is asked for;
-from then on the placement modifiers are frozen.
+from then on the modifiers that make its box are frozen (`grain`, `nest`,
+`show` and `machine` change no shape and may come later, once).
 
 A board is a node of the settings' chain (`settings.py`), and so is each
 named operation. The core's keys are defined here, next to what reads
