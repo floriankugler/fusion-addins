@@ -79,5 +79,5 @@ floor("floor", van.box("Boden"))
 # and opens toward the aisle.
 kitchen_box = van.box("Moebel.Kueche")
 slide = drawer_slide("Dynapro 40", nl=450)
-kitchen = drawer_cabinet("kitchen", kitchen_box, 3, slide, front=kitchen_box.right, bottom_drawer=230)
+kitchen = drawer_cabinet(kitchen_box, front=kitchen_box.right, name="kitchen", n=3, slide=slide, bottom_drawer=230)
 kitchen.check(inside_box, inside(floor_outline))

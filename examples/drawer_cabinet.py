@@ -4,9 +4,11 @@ the carcass. The slide dictates the drawer box and pre-drills the carcass
 sides; the bottom and top are joined to the sides with Cabineos, the back
 to all four with Dominos. The drawer boxes are box-jointed at their
 corners, their floors set into grooves in all four boards. The carcass
-and the drawer boxes come from the standard library (`lang.std`). Built on its
-own, it stands in a box of its own; van.py imports `drawer_cabinet` and
-places it in the master's kitchen box."""
+and the drawer boxes come from the standard library (`lang.std`). The
+cabinet is a module type (`@module`), its boards of the 15 mm birch it
+uses unless they name their own. Built on its own, it stands in a box of
+its own; van.py imports `drawer_cabinet` and places it in the master's
+kitchen box."""
 from lang import *
 from lang.std import carcass, drawer_box
 
@@ -15,41 +17,41 @@ from stock import ply9, ply12, ply15
 GAP = 3  # between fronts
 
 
-def drawer_cabinet(name: str, box: Box, n: int, slide: DrawerSlide, *, front: Side,
-                   bottom_drawer: float | None = None) -> Scope:
-    """A drawer cabinet in its own frame: front is where the drawers open,
-    wherever the cabinet stands. `front=` places it (see `cabinet`). With
-    `bottom_drawer=` the lowest bay gets that height and the others share
-    the rest; otherwise all bays are equal."""
-    with module(name, box, front=front) as cab:
-        # The carcass, from the standard library: sides with a toe kick notch
-        # (named, so its edges can be referred to), the bottom on the notch
-        # rather than on the floor, a top and a 9 mm back. Cabineos into the
-        # sides, from the faces that are not the show faces (here the inner
-        # ones); Dominos all round the back, slotted into the inner faces
-        # too, so each carcass board is machined from one side. The back
-        # carries the Dominos' marks on its show face.
-        left, right, bottom, top, _back = carcass(cab, ply15, back=ply9, toekick=(60, 100), joins=cabineo(count=3))
+@module
+def drawer_cabinet(cab: Scope, *, n: int, slide: DrawerSlide, bottom_drawer: float | None = None) -> None:
+    """A drawer cabinet with `n` drawers in its own frame: front is where
+    the drawers open, wherever the cabinet stands; the call's `front=`
+    places it (`drawer_cabinet(box, front=box.right, n=3, slide=slide)`).
+    With `bottom_drawer=` the lowest bay gets that height and the others
+    share the rest; otherwise all bays are equal."""
+    use(material(ply15))
+    # The carcass, from the standard library: sides with a toe kick notch
+    # (named, so its edges can be referred to), the bottom on the notch
+    # rather than on the floor, a top and a 9 mm back. Cabineos into the
+    # sides, from the faces that are not the show faces (here the inner
+    # ones); Dominos all round the back, slotted into the inner faces
+    # too, so each carcass board is machined from one side. The back
+    # carries the Dominos' marks on its show face.
+    left, right, bottom, top, _back = carcass(cab, ply15, back=ply9, toekick=(60, 100), joins=cabineo(count=3))
 
-        # shelf-pin holes on the inner faces, lined up on both sides
-        for side in (left, right):
-            for z in spread(bottom.top.gap(100), top.bottom.gap(100), pitch=32):
-                side.hole(d=5, depth=10, at=side.inner.front(37).bottom(z))
+    # shelf-pin holes on the inner faces, lined up on both sides
+    for side in (left, right):
+        for z in spread(bottom.top.gap(100), top.bottom.gap(100), pitch=32):
+            side.hole(d=5, depth=10, at=side.inner.front(37).bottom(z))
 
-        # The opening above the bottom is what the drawers occupy; the area
-        # the faces share is the opening less half a gap all round, so that
-        # the outer faces keep a full gap to the carcass. Both are divided
-        # the same way.
-        opening = cab.interior.with_sides(bottom=bottom.top)
-        fronts = opening.shrunk(GAP / 2)
-        bays = divide(opening, n, bottom_drawer)
-        panels = divide(fronts, n, bottom_drawer)
-        for i, (bay, panel) in enumerate(zip(bays, panels), 1):
-            drawer(f"drawer{i}", bay, panel, slide, sides=(left, right))   # pre-drills the carcass
+    # The opening above the bottom is what the drawers occupy; the area
+    # the faces share is the opening less half a gap all round, so that
+    # the outer faces keep a full gap to the carcass. Both are divided
+    # the same way.
+    opening = cab.interior.with_sides(bottom=bottom.top)
+    fronts = opening.shrunk(GAP / 2)
+    bays = divide(opening, n, bottom_drawer)
+    panels = divide(fronts, n, bottom_drawer)
+    for i, (bay, panel) in enumerate(zip(bays, panels), 1):
+        drawer(f"drawer{i}", bay, panel, slide, sides=(left, right))   # pre-drills the carcass
 
-        cab.export("worktop", top.top)   # for whatever stands on the cabinet
-        check(fits_sheet)
-    return cab
+    cab.export("worktop", top.top)   # for whatever stands on the cabinet
+    check(fits_sheet)
 
 
 def divide(space: Box, n: int, first: float | None) -> list[Box]:
@@ -67,7 +69,7 @@ def drawer(name: str, bay: Box, panel: Box, slide: DrawerSlide, *, sides: tuple[
     on every side. The slide sizes the box behind the face and hangs it on
     the carcass `sides`."""
     with scope(name, bay) as d:
-        face = board("face", ply15).on(bay.front).between(panel).inset(GAP / 2)
+        face = board("face").on(bay.front).between(panel).inset(GAP / 2)      # the cabinet's material
         # The box behind the face, from the standard library. Box joints at
         # the four corners: the sides run the full length and get the
         # notches, the front and back grow the fingers, which show on the
@@ -91,4 +93,4 @@ if __name__ == "__build__":   # run as the build file, not imported
     # module the cabinet is 600 wide and 500 deep.
     box = Box.from_size(width=500, depth=600, height=720)
     slide = drawer_slide("Dynapro 40", nl=450)
-    drawer_cabinet("drawercab", box, 3, slide, front=box.right, bottom_drawer=230)
+    drawer_cabinet(box, front=box.right, name="drawercab", n=3, slide=slide, bottom_drawer=230)
