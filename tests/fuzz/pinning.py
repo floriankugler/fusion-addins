@@ -31,11 +31,14 @@ unchanged; and the inventory holds what the model says after every mark
 (a piece on hand used comes out of the first entry of its size, its count
 lowered or the entry gone, a kept rest goes in at the end, a sheet marked
 twice does nothing the second time), with every comment kept in order but
-those above the entries removed.
+those of the entries removed, and never two blank lines in a row. The
+inventory is written as `[[stock]]` tables, or now and then as an inline
+array over several lines.
 """
 from __future__ import annotations
 
 import random
+import re
 import tempfile
 import tomllib
 from dataclasses import dataclass
@@ -80,6 +83,8 @@ class PinCase:
     parts: tuple[tuple[int, str], ...]
     entries: tuple[Entry, ...]
     steps: tuple[Step, ...]
+    #: The stock written as an inline array over several lines, not as [[stock]] tables.
+    inline: bool = False
 
 
 @st.composite
@@ -102,7 +107,7 @@ def pin_cases(draw: st.DrawFn) -> PinCase:
                           draw(st.integers(0, 9)), draw(st.integers(0, 2 ** 16))))
         else:
             steps.append(("fix", draw(st.integers(0, 9))))
-    return PinCase(parts, entries, tuple(steps))
+    return PinCase(parts, entries, tuple(steps), draw(st.integers(0, 3)) == 0)
 
 
 # -- the inventory and its model ----------------------------------------------------------------
@@ -113,6 +118,21 @@ def _ledger_text(case: PinCase) -> tuple[str, list[Any]]:
     count], its comments, above it and between its keys)."""
     lines = ["# The stock on hand.", ""]
     items: list[Any] = [("comment", "# The stock on hand.")]
+    if case.inline:
+        # One entry a line, its comment beside it; a loose comment a line of its own.
+        lines.append("stock = [")
+        for k, e in enumerate(case.entries):
+            length, width = SIZES[e.size]
+            count = f", count = {e.count}" if e.count is not None else ""
+            mine = [f"# entry {k}"] if e.above else []
+            lines.append(f'    {{material = "{MATERIALS[e.material]}", size = [{length:g}, {width:g}]{count}}},'
+                         + "".join(f"  {c}" for c in mine))
+            items.append(("entry", [MATERIALS[e.material], length, width, e.count or 1], mine))
+            if e.after:
+                lines.append(f"    # loose after {k}")
+                items.append(("comment", f"# loose after {k}"))
+        lines.append("]")
+        return "\n".join(lines) + "\n", items
     for k, e in enumerate(case.entries):
         above = [f"# entry {k}"] if e.above else []
         lines += above
@@ -121,9 +141,10 @@ def _ledger_text(case: PinCase) -> tuple[str, list[Any]]:
         lines += ["[[stock]]", f'material{eq}"{MATERIALS[e.material]}"']
         inside = [f"# inside {k}"] if e.inside else []
         lines += inside + [f"size{eq}[{length:g}, {width:g}]"]
+        counted = [] if e.count is None or e.tight else ["# as counted"]
         if e.count is not None:
-            lines.append(f"count{eq}{e.count}" + ("" if e.tight else "   # as counted"))
-        items.append(("entry", [MATERIALS[e.material], length, width, e.count or 1], above + inside))
+            lines.append(f"count{eq}{e.count}" + "".join(f"   {c}" for c in counted))
+        items.append(("entry", [MATERIALS[e.material], length, width, e.count or 1], above + inside + counted))
         lines.append("")
         if e.after:
             lines += [f"# loose after {k}", ""]
@@ -138,10 +159,12 @@ def _ledger_problems(path: Path, items: list[Any], when: str) -> list[str]:
     problems: list[str] = []
     if [(o.material, o.length, o.width, o.count) for o in got] != want:
         problems.append(f"{when}: the inventory holds {got}, the model's {want}")
-    comments = [line.strip() for line in text.splitlines() if line.strip().startswith("#")]
+    comments = [m.group(0).strip() for line in text.splitlines() for m in re.finditer(r"#.*", line)]
     want_comments = [c for kind, *rest in items for c in ([rest[0]] if kind == "comment" else rest[1])]
     if comments != want_comments:
         problems.append(f"{when}: the inventory's comments are {comments}, the model's {want_comments}")
+    if "\n\n\n" in text or text.startswith("\n"):
+        problems.append(f"{when}: the inventory has two blank lines in a row, or one at its start")
     return problems
 
 
