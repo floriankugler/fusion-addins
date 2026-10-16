@@ -46,6 +46,7 @@ from shapely.geometry.polygon import orient
 from ..core.errors import LangError
 from ..core.geometry import parts_of
 from ..core.layout_types import Layout, PartLayout, Rings
+from .fingerprint import fingerprint as part_fingerprint
 from .workshop import Workshop, fits
 
 #: How far (mm) the solver's polygon may be simplified (see the module's doc).
@@ -127,6 +128,8 @@ class Item:
     #: A `nest(False)` board named in the nest: its own blank, sawn to size,
     #: its solver polygon its bounding rectangle.
     own: bool = False
+    #: Its hash as machined (`fingerprint`), "" where not taken.
+    fingerprint: str = ""
     area: float = field(init=False)
 
     def __post_init__(self) -> None:
@@ -189,7 +192,9 @@ def parts_of_layout(layout: Layout, spacing: float, material: str | None = None,
                 elif why != "nest(False)":
                     raise LangError(f"{part['path']} is a {why} part, which is never nested.")
                 else:
-                    own.setdefault(part["material"], []).append(_own_item(part, frame))
+                    item = _own_item(part, frame)
+                    item.fingerprint = part_fingerprint(part, layout["frame"])
+                    own.setdefault(part["material"], []).append(item)
                 continue
             shape, pf = _machine_outline(part, frame)
             raw.setdefault(part["material"], []).append((part, shape, pf))
@@ -198,7 +203,8 @@ def parts_of_layout(layout: Layout, spacing: float, material: str | None = None,
         entries = raw.get(name, [])
         smallest = min((shape.area for _p, shape, _f in entries), default=0.0)
         by_material[name] = [_item(part, shape, pf, max(spacing, (spacing_of or {}).get(part["path"], spacing)),
-                                   spacing, smallest) for part, shape, pf in entries] + own.get(name, [])
+                                   spacing, smallest, part_fingerprint(part, layout["frame"]))
+                             for part, shape, pf in entries] + own.get(name, [])
     return Parts(by_material, left_out)
 
 
@@ -274,7 +280,8 @@ def _machine_outline(part: PartLayout, frame: dict[str, tuple[str, int]],
     return shape, pf
 
 
-def _item(part: PartLayout, shape: Polygon, pf: PartFrame, spacing: float, least: float, smallest: float) -> Item:
+def _item(part: PartLayout, shape: Polygon, pf: PartFrame, spacing: float, least: float, smallest: float,
+          fingerprint: str = "") -> Item:
     """The part as the nest takes it; `spacing` its own, `least` the
     nest's, the solver's spacing: the solver's polygon is grown by the
     difference besides its own growth."""
@@ -297,7 +304,7 @@ def _item(part: PartLayout, shape: Polygon, pf: PartFrame, spacing: float, least
     pf = PartFrame(pf.t, pf.u, pf.v, pf.mirror, pf.up, pf.t_lo, pf.t_hi, x0, y0)
     grained, turns = _turns(part, pf)
     return Item(part["path"], part["material"], part["thickness"], shape, simple, turns, grained, pf,
-                part["machine"], spacing)
+                part["machine"], spacing, fingerprint=fingerprint)
 
 
 def _own_item(part: PartLayout, frame: dict[str, tuple[str, int]]) -> Item:

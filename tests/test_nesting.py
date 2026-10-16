@@ -26,6 +26,7 @@ from lang.emit.nested import NEST_VERSION as EMIT_NEST_VERSION, apply, plan_nest
 from lang.nesting import sawing
 from lang.nesting.__main__ import main as nest_main
 from lang.nesting.draw import draw_nest
+from lang.nesting.fingerprint import fingerprints
 from lang.nesting.inventory import inventory_from, read_inventory
 from lang.nesting.items import OUTSIDE, Item, Parts, check_sizes, parts_of_layout, turned
 from lang.nesting.nest import Options, nest_layout, nest_parts
@@ -732,8 +733,12 @@ def test_a_nest_of_the_build_is_nested_with_its_settings_and_named_and_dated():
     layout = build_layout()
     when = datetime(2026, 10, 16, 9, 30)
     nest, _parts = nest_layout(layout, "m.carcass", options=Options(saw_seconds=0.1), written=when)
-    assert nest["version"] == NEST_VERSION == 2 and nest["name"] == "m.carcass"
-    assert nest["written"].startswith("2026-10-16T09:30:00")
+    assert nest["version"] == NEST_VERSION == 3 and nest["name"] == "m.carcass"
+    assert nest["written"].startswith("2026-10-16T09:30:00") and nest["follows"] == "" and nest["reasons"] == {}
+    prints = fingerprints(layout)
+    placed = [p for s in nest["materials"][0]["sheets"] for b in s["blanks"] for p in b["parts"]]
+    assert sorted(p["path"] for p in placed) == ["m.bottom", "m.top"]
+    assert all(p["fingerprint"] == prints[p["path"]] for p in placed)
     settings = nest["settings"]
     assert settings["margin"] == 12 and settings["seconds"] == 0.5 and settings["refill"] is False
     assert settings["sources"]["nesting.margin"] == "m.carcass" and settings["sources"]["nesting.bed"] == "root"

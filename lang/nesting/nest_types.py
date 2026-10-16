@@ -1,7 +1,12 @@
-"""The nest file's shape, version 2: what `python -m lang.nesting` writes
+"""The nest file's shape, version 3: what `python -m lang.nesting` writes
 per nest (`nest.json`), read by the preview and the Fusion emitter
 (`lang.emit.nested`, which repeats `NEST_VERSION` and refuses others).
 
+Version 3 (2026-10-16): each part placed carries its `fingerprint`
+(`lang.nesting.fingerprint`), its hash as machined, by which a nest is
+compared with the build and a nest marked as made with what is made
+since (`lang.nesting.pinning`); a second nest, made beside a nest marked
+as made, names the nest it `follows` and the `reasons` each part is in it.
 Version 2 (2026-10-16): a nest of the build, named (`name`) and dated
 (`written`); `settings` the values resolved from the build's settings with
 their sources and the stock given; per material `bought` counts the sheets
@@ -10,7 +15,7 @@ bought only and `on_hand_used` lists the pieces of the inventory used
 blank whether it is a `nest(False)` board's own (`own_blank`). What the
 emitter reads (`materials`: `material`, `thickness`, `sheets`: `name`,
 `stock`, `size`, `blanks`: `name`, `rect`, `parts`: `path`, `transform`;
-`problems`) is as in version 1.
+`problems`) is as in version 1 in both.
 
 Millimetres. A sheet's frame: x along its length (the grain), y across,
 from its corner. A blank's frame likewise, from the blank's corner; each
@@ -21,11 +26,13 @@ from __future__ import annotations
 
 from typing import Literal, TypedDict
 
-NEST_VERSION = 2
+NEST_VERSION = 3
 
 
 class PlacedPart(TypedDict):
     path: str
+    #: Its hash as machined (`lang.nesting.fingerprint`).
+    fingerprint: str
     #: The machining face (world name), which faces up.
     up: str
     #: The turn (degrees, counter-clockwise) of the part's outline as seen
@@ -134,9 +141,16 @@ class NestSettings(TypedDict):
 
 class NestFile(TypedDict):
     version: int
-    #: The nest's path in the build (`kitchen.carcass`); "" for a nest of
-    #: parts given another way (tests).
+    #: The nest's path in the build (`kitchen.carcass`), or a second nest's
+    #: (`kitchen.carcass-2`); "" for a nest of parts given another way (tests).
     name: str
+    #: For a second nest, made beside a nest marked as made
+    #: (`lang.nesting.pinning`): the build's nest it follows
+    #: (`kitchen.carcass`), and why each part is in it (`changed`: made, and
+    #: changed since; `not made`: in a nest before it, not on a sheet made;
+    #: `new`: in none of them). Else "" and {}.
+    follows: str
+    reasons: dict[str, str]
     #: When the nest was written, ISO 8601 with the time zone.
     written: str
     #: The layout nested: its build file (or layout file) and the hash of

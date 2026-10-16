@@ -23,8 +23,9 @@ if TYPE_CHECKING:
     from ..core.layout_types import Layout
 
 #: The nest file version this reads (`lang.nesting.nest_types.NEST_VERSION`);
-#: a test keeps the two equal. Version 2 kept what this reads as it was.
-NEST_VERSION = 2
+#: a test keeps the two equal. Versions 2 and 3 kept what this reads as it
+#: was (3 added the parts' fingerprints and the second nests' fields).
+NEST_VERSION = 3
 #: mm between two pieces of stock in the document.
 GAP = 200.0
 

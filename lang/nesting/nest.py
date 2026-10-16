@@ -100,7 +100,8 @@ def nest_parts(layout: Layout, paths: Collection[str] | None, workshop: Workshop
                spacing_of: Mapping[str, float] | None = None, sources: Mapping[str, str] | None = None,
                left_out: Sequence[str] | None = None, material: str | None = None, source: str = "",
                options: Options | None = None, log: Log | None = None,
-               written: datetime | None = None) -> tuple[NestFile, Parts]:
+               written: datetime | None = None, follows: str = "",
+               reasons: Mapping[str, str] | None = None) -> tuple[NestFile, Parts]:
     """Nests the layout's parts at `paths` (all nested ones when None, of
     every material or the one named) with the values and stock in
     `workshop`, a part's spacing from `spacing_of` where it asks for more;
@@ -141,7 +142,7 @@ def nest_parts(layout: Layout, paths: Collection[str] | None, workshop: Workshop
         "on_hand": [o.spelled() for o in workshop.on_hand],
     }
     nest: NestFile = {
-        "version": NEST_VERSION, "name": name,
+        "version": NEST_VERSION, "name": name, "follows": follows, "reasons": dict(reasons or {}),
         "written": (written or datetime.now()).astimezone().isoformat(timespec="seconds"),
         "source": source, "layout_hash": layout_hash(layout), "settings": settings,
         "materials": materials, "left_out": _left_out(layout, left_out) if left_out is not None
@@ -400,8 +401,8 @@ def _material_out(items: list[Item], material: str, states: list[SheetState], re
                 for p in leaf.parts:
                     item = items[p.item]
                     at = (p.at[0] - x, p.at[1] - y)
-                    placed.append({"path": item.path, "up": item.up, "turn": p.turn, "at": [at[0], at[1]],
-                                   "transform": item.frame.placed(p.turn, at)})
+                    placed.append({"path": item.path, "fingerprint": item.fingerprint, "up": item.up, "turn": p.turn,
+                                   "at": [at[0], at[1]], "transform": item.frame.placed(p.turn, at)})
                     parts_area += item.area
                 blanks.append({"name": f"{n}.{len(blanks) + 1}", "rect": [x, y, w, h], "parts": placed,
                                "own_blank": any(items[p.item].own for p in leaf.parts)})
