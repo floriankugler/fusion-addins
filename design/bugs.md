@@ -35,8 +35,9 @@ when it is fixed or decided.
   and the split check looks at the outline only. Fusion would draw a body
   in two lumps; the nest refuses such a part by name ("its machine outline
   is in 2 pieces"). Found by the nest fuzz, 2026-10-14; marked `KNOWN` in
-  `tests/fuzz/nesting.py` (`_refused_in_pieces`). Refusing it in the
-  layout step is for Florian to decide.
+  `tests/fuzz/nesting.py` (`_refused_in_pieces`). Decided 2026-10-16: the
+  layout step refuses it on the cut (`design/nesting.md`, Still open); not
+  built yet.
 
 ## Checks
 

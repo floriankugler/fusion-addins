@@ -36,12 +36,8 @@ done.
   runs along the grain (Multi Arrange already reads 3D wood textures'
   direction, see its model.py). Not needed for nesting, which reads the
   attribute. Also a grain stripe in the preview.
-- **Manufacturing groups**: parts marked in the build as one group, which
-  Multi Arrange then nests as a rigid group, keeping their arrangement, as its
-  own groups do now (a group name per part, set by hand in its dialog). The
-  compiler would write the group into the `lang`/`part` attribute next to the
-  grain. The language's nest (`design/nesting.md`) should take the groups
-  too.
+- **Manufacturing groups**: decided 2026-10-16 for grain matching, nested
+  by the language's nest only; see `design/nesting.md`, Still open.
   [Florian, 2026-10-13]
 - **Check results in the preview's scene**: interference pairs highlighted,
   sheet fit, parts flagged as not plain flat work.
@@ -55,10 +51,8 @@ done.
   (`proposals/bevels.md`), and with them mitred lip corners, which Florian
   needs as well as butted ones. A hinge cup across a lipped door's edge
   needs operations on slats too. [Florian, 2026-10-14]
-- **Cut list**: slats and lips by material, section and length (the
-  material along the grain), boards by size; with the committed outputs
-  (`proposals/build-repo.md`), later [Florian, 2026-10-14]. Perhaps a check
-  of slat lengths against the stock's.
+- **Cut list**: decided 2026-10-16, with bought hardware, written by the
+  build as CSV; see `design/nesting.md`, Still open [Florian, 2026-10-14].
 - **Banding along curves**: lips go on straight edges only; banding could
   follow a rounded corner or a round outline.
 - **More hardware**: whatever else the van needs. The sliding brackets have
@@ -80,6 +74,10 @@ done.
   concealed_hinge_native, hatch_hinge, ball_catch, door_latch_native,
   connectors_native and tenons_native now read their dimensions and stations
   from `lib/`; they were compared headless only (2026-10-12).
+- **Open Compile Layout with a nest file once in Fusion**: a `nest.json`
+  was drawn through MCP only (2026-10-14); click through the dialog with
+  one, with a screenshot, the next time the nest is worked on [Florian,
+  2026-10-16].
 - **Naming**: the package name; German or English path names (suggestion:
   English, with an optional label override for the machine); "module" and
   "layout" collide with Python's and nesting's terms (see `build-repo.md`).
