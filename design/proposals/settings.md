@@ -24,11 +24,13 @@ settings are for what flows.
 - **One mechanism for everything that flows** [Florian]: design standards,
   nesting values and CAM values go down the same chain, from the same
   spelling, in Python. No TOML for manufacturing values.
-- **Inputs are Python, outputs are data** [Florian]: the build, the
-  workshop (bed, saw) and the standards are code; the layout, nests, plans
-  and drawings are files the tools write. One exception: the **inventory**
-  of stock on hand is a ledger file, since the nest writes usable offcuts
-  back into it.
+- **Inputs are Python, outputs are data** [Florian]: the build, its
+  standards and the machine are code; the layout, nests, plans and
+  drawings are files the tools write. The machine's values (the bed, the
+  saw's kerf, the cuts per sheet) are settings like any other, used at the
+  root, so there is no workshop file [Florian, 2026-10-16]. One exception:
+  the **inventory** of stock on hand is a ledger file, since the nest
+  writes usable rests back into it.
 - **Nests are declared in the module** that needs them [Florian], with
   settings of their own.
 - **`cabinet()` folds into `module(name, box, front=None)`** [decided]: a
@@ -113,7 +115,8 @@ Like `check()` and `module.check()`: the function acts on the scope whose
 `with` block is being written, the method on a node held in hand.
 
 ```python
-use(material(ply15), chamfer_size(1.0), nesting.spacing(10))   # the current scope
+use(material(ply15), chamfer_size(1.0), nesting.spacing(10))   # the current scope, any number
+use(*house)                                                     # a list of bindings, unpacked
 kitchen.use(chamfer_size(0.5))                                  # a module, from outside
 front.use(cam.finishing_stepdown(1.0))                          # a part
 left.toekick.use(cam.tabs("none"))                              # a named operation
@@ -159,8 +162,17 @@ def kitchen(cab: Scope, *, drawers: int = 3) -> None:
 
 # build.py
 with module("van", van.box("Innenraum")):                # the root module, written in place
-    use(material(ply15), chamfer_size(1.0), drawer_gap(2.5),
-        nesting.spacing(10), nesting.margin(10), cam.breakthrough(0.2), cam.tab_width(8))
+    use(
+        material(ply15),
+        chamfer_size(1.0),
+        drawer_gap(2.5),
+        nesting.bed((2000, 1000)),                       # the machine is settings too
+        nesting.kerf(4),
+        nesting.spacing(10),
+        nesting.margin(10),
+        cam.breakthrough(0.2),
+        cam.tab_width(8),
+    )
     k = kitchen(van.box("Küche"), front=kitchen_front, drawers=4).use(chamfer_size(0.5))
     b = bed(van.box("Bett"), front=bed_front).use(material(ply18), spalt(2.0))
     nest("remake", [k.left, b.front])                    # across modules
@@ -192,7 +204,8 @@ with module("van", van.box("Innenraum")):                # the root module, writ
 
 `nest(name, material=...)` or `nest(name, parts)` inside a body registers a
 nest on the module, like `check()`; it selects this module's parts of a
-material, or the parts named, and takes `.use()` for nest-level values.
+material, or the parts named, and takes `.use()` for nest-level values,
+another bed among them for a nest cut on another machine.
 What no declared nest names falls into one nest per material, so a module
 that declares none behaves as today. A nest at the root may name parts of
 several modules (remakes). Nests are named by module and nest
@@ -215,13 +228,14 @@ provenance [proposed].
 
 ## Inputs, outputs, inventory
 
-- Python: the build, its modules and standards, `master.py`, and
-  `workshop.py` for the machine (bed, kerf, saw cuts per sheet, the time
-  the nest may take), which rarely changes.
-- The inventory ledger (TOML or JSON, name open): the sheets on hand by
-  material and size with counts, and the offcuts; the nest reads it and
-  writes usable offcuts back [Florian]. A material's `size=` stays the sheet
-  one buys.
+- Python: the build, its modules and standards, `master.py`. The machine
+  is settings (`nesting.bed`, `nesting.kerf`, `nesting.max_cuts`), used at
+  the root and by a nest that goes elsewhere [Florian].
+- The inventory ledger (`inventory.toml` [proposed]): one kind of entry, a
+  piece of stock on hand by material and size with a count, full sheets
+  and offcuts alike [Florian: no distinction]; the nest reads it, uses what
+  is on hand before it buys, and writes usable rests back. What can be
+  bought is the material's `size=`, and the nest reports what it bought.
 - Outputs: the layout, the nests, the CAM plan, the drawings. None is an
   input; what pinning would change is parked.
 - The layout carries, per part, the keys set along its source chain,
@@ -238,9 +252,9 @@ provenance [proposed].
 Surveyed 2026-10-16 from the code: what a key would replace, its default
 today, who reads it. Not all at once: `material`, `chamfer_size`, the
 nest's and the CAM's keys first, a joint's or a piece of hardware's when a
-build wants to standardize it [proposed, question 3]. Workshop facts (the
-bed, the kerf) and the inventory are not keys; tolerances are fixed
-[decided] and `check()` already flows per module.
+build wants to standardize it [proposed, question 3]. The inventory is not
+a key; tolerances are fixed [decided] and `check()` already flows per
+module.
 
 | Domain | Key | Replaces | Default today | Read by | Join |
 |---|---|---|---|---|---|
@@ -259,9 +273,10 @@ bed, the kerf) and the inventory are not keys; tolerances are fixed
 | joints | `clamex_model`, `cabineo_model`, `screw_diameter`, `station_end` | factory defaults, `lib/stations` | "P-10", "8", `SCREW_DIAMETER`, per joint | the joint | per part |
 | hardware | per factory: `hinge_model`, `hinge_count`, `hinge_end`, `hinge_pilot`; likewise latch, ball catch, hatch hinge, sliding bracket, slides | the factories' keywords | "Blum CLIP top 110 Thin +0", 2, ...; "GN 450"; "Pacofix PF-L-R"; opening 107 | the hardware | per part |
 | std | `drawer_gap`, `drawer_floor`, `carcass_back`, `carcass_toekick`, `carcass_joins` | `carcass()`, `drawer_box()` keywords | ply9, (60, 100), ... | the helper | per part |
+| nesting | `bed`, `kerf`, `max_cuts` | `Workshop.bed`, `.kerf`, `.max_cuts` | required, 4, 5 | nest | agree |
 | nesting | `spacing` | `Workshop.spacing` | 10 | nest | max |
 | nesting | `margin` | `Workshop.margin` | 10 | nest | agree |
-| nesting | `keep_across`, `keep_area`, `max_cuts`, `seconds`, `refill` | `Workshop`, `Options` | 300, 0.25, 5, 0.6 s a part, on | nest | agree |
+| nesting | `keep_across`, `keep_area`, `seconds`, `refill` | `Workshop`, `Options` | 300, 0.25, 0.6 s a part, on | nest | agree |
 | nesting | `turns` | none (grain decides) | by grain | nest | per part |
 | cam | `contour_template`, `pocket_template`, `bore_template`, `drill_template`, `dogbone_template`, `chamfer_template`, `groove_template`, `cutter` | Auto Setup's dialog defaults | "Kontur 6mm", "Tasche adaptiv 8mm", ...; dc or udc | plan | agree per operation |
 | cam | `finish_outer`, `finish_inner`, `finish_pockets` | the finishing checkboxes | off | plan | per part |
@@ -275,7 +290,7 @@ bed, the kerf) and the inventory are not keys; tolerances are fixed
 | appearance | `detail` | `proposals/detail-levels.md` | full | preview | per part |
 
 Not settings: `show()` (a rule per board), `machine()` (a face reference,
-meaningless above a part), the checks' tolerances, the bed and the kerf.
+meaningless above a part), the checks' tolerances, the inventory.
 
 ## What it buys
 
@@ -301,4 +316,5 @@ meaningless above a part), the checks' tolerances, the bed and the kerf.
    a default (1 mm?) or none, so that a chamfer without a size in a chain
    that sets none stays an error.
 5. Namespaces by domain as proposed, or one flat namespace.
-6. The inventory ledger's format and name.
+6. The inventory ledger's format and name (`inventory.toml`, one kind of
+   entry, proposed).
