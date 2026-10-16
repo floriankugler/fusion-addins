@@ -18,7 +18,9 @@ the cross boards, the left rail with corner dog bones (the default), the
 right one with hidden ones, which the cross boards cover."""
 from lang import *
 
-from stock import ply15
+from stock import ply15, workshop
+
+use(*workshop)   # the machine the nests are made for
 
 
 with module("panels", Box.from_size(width=600, depth=400, height=200)) as m:

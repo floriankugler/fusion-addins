@@ -11,7 +11,7 @@ with Dominos."""
 from lang import *
 from lang.std import carcass
 
-from stock import ply9, ply18
+from stock import ply9, ply18, workshop
 
 GAP = 1.5   # between the hatch and its neighbours, at each side
 
@@ -38,6 +38,7 @@ def wall_cabinet(name: str, box: Box, hinge: HatchHinge, *, front: Side) -> Scop
 
 
 if __name__ == "__build__":   # run as the build file, not imported
+    use(*workshop)   # the machine the nests are made for
     # Hung on the driver's wall (left, -y) above the worktop, opening toward
     # the aisle: 800 along the vehicle, 330 deep across it, 400 high. Inside
     # the module the cabinet is 800 wide and 330 deep.

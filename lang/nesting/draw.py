@@ -1,7 +1,8 @@
-"""Draws a nest as SVG: per material, each piece of stock with its saw cuts
-(numbered in the order they are made), its blanks with their parts
-(labelled, the grain marked), the rests kept as stock and the waste, and a
-line saying what it uses. The preview shows it in its nest view; each part
+"""Draws a nest as SVG: its name, then per material each piece of stock
+with its saw cuts (numbered in the order they are made), its blanks with
+their parts (labelled, the grain marked; a `nest(False)` board's own blank
+hatched), the rests kept as stock and the waste, and a line saying what it
+uses. The preview shows it in its nest view; each part
 is a group with `data-path`, which the page selects in the scene.
 """
 from __future__ import annotations
@@ -13,18 +14,21 @@ from collections.abc import Callable, Sequence
 from shapely import Polygon
 
 from .items import Item
-from .nest_types import MaterialOut, Nest, SheetOut
+from .nest_types import MaterialOut, NestFile, SheetOut
 
 PAD = 80.0          # mm around and between the sheets
 TITLE = 70.0        # mm of room for a material's title
 
 
-def draw_nest(nest: Nest, items: dict[str, Item]) -> str:
+def draw_nest(nest: NestFile, items: dict[str, Item]) -> str:
     """The SVG text: every material, one sheet under the other."""
     widths = [s["size"][0] for m in nest["materials"] for s in m["sheets"]] or [1000.0]
     width = max(widths) + 2 * PAD
     out: list[str] = []
     y = PAD
+    if nest["name"]:
+        out.append(_text(PAD, y + 40, f"{nest['name']} (written {nest['written']})", 48, "title"))
+        y += TITLE + 10
     for m in nest["materials"]:
         out.append(_text(PAD, y + 40, _material_line(m), 44, "title"))
         y += TITLE
@@ -41,12 +45,18 @@ def draw_nest(nest: Nest, items: dict[str, Item]) -> str:
     height = y + PAD
     return (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width:.0f} {height:.0f}" '
             f'width="{width / 5:.0f}" height="{height / 5:.0f}" font-family="sans-serif">\n'
-            f'<style>{_STYLE}</style>\n' + "\n".join(out) + "\n</svg>\n")
+            f'<style>{_STYLE}</style>\n{_DEFS}\n' + "\n".join(out) + "\n</svg>\n")
+
+
+_DEFS = ('<defs><pattern id="own" width="24" height="24" patternUnits="userSpaceOnUse" '
+         'patternTransform="rotate(45)"><rect width="24" height="24" fill="#f6f1e6"/>'
+         '<line x1="0" y1="0" x2="0" y2="24" stroke="#d8cdb4" stroke-width="6"/></pattern></defs>')
 
 
 _STYLE = """
 .sheet { fill: #e9e4d8; stroke: #333; stroke-width: 3; }
 .blank { fill: #f6f1e6; stroke: #7a6a4a; stroke-width: 2; }
+.blank.own { fill: url(#own); stroke-dasharray: 12 6; }
 .kept { fill: #cfe8c4; stroke: #4c7a3c; stroke-width: 2; }
 .waste { fill: #c9c9c9; stroke: #888; stroke-width: 1.5; }
 .cut { stroke: #c0392b; stroke-width: 4; stroke-dasharray: 24 10; }
@@ -64,9 +74,9 @@ _STYLE = """
 
 
 def _material_line(m: MaterialOut) -> str:
-    bought = ", ".join(f"{n} x {size}" for size, n in m["bought"].items()) or "no sheets"
-    offcuts = f", offcuts {', '.join(m['offcuts_used'])}" if m["offcuts_used"] else ""
-    return (f"{m['material']}: {bought}{offcuts}; parts {m['parts_area']:.2f} m², used {m['used_area']:.2f} m², "
+    bought = ", ".join(f"{n} x {size}" for size, n in m["bought"].items()) or "nothing"
+    on_hand = f", on hand {', '.join(m['on_hand_used'])}" if m["on_hand_used"] else ""
+    return (f"{m['material']}: bought {bought}{on_hand}; parts {m['parts_area']:.2f} m², used {m['used_area']:.2f} m², "
             f"kept {m['kept_area']:.2f} m²" + (f"; left over {len(m['unplaced'])}" if m["unplaced"] else ""))
 
 
@@ -79,7 +89,7 @@ def _sheet(sheet: SheetOut, items: dict[str, Item], left: float, top: float) -> 
     parts_area = sum(items[p["path"]].area for b in sheet["blanks"] for p in b["parts"] if p["path"] in items)
     kept = sum(r["rect"][2] * r["rect"][3] for r in sheet["rests"] if r["keep"])
     waste = length * width - parts_area - kept
-    kind = "offcut" if sheet["stock"] == "offcut" else "sheet"
+    kind = f"{sheet['stock']} {'bought' if sheet['bought'] else 'on hand'}"
     out = [f'<g class="stock" data-sheet="{sheet["name"]}">',
            f'<rect class="sheet" x="{left:.1f}" y="{top:.1f}" width="{length:.1f}" height="{width:.1f}"/>']
     for r in sheet["rests"]:
@@ -91,8 +101,9 @@ def _sheet(sheet: SheetOut, items: dict[str, Item], left: float, top: float) -> 
             out.append(_text(left + x + 10, sy(y + h) + 34, f"{w:.0f} x {h:.0f}", 26, "label"))
     for b in sheet["blanks"]:
         x, y, w, h = b["rect"]
-        out.append(f'<rect class="blank" x="{left + x:.1f}" y="{sy(y + h):.1f}" width="{w:.1f}" height="{h:.1f}">'
-                   f'<title>blank {b["name"]}: {w:.0f} x {h:.0f}</title></rect>')
+        own = " own" if b["own_blank"] else ""
+        out.append(f'<rect class="blank{own}" x="{left + x:.1f}" y="{sy(y + h):.1f}" width="{w:.1f}" '
+                   f'height="{h:.1f}"><title>{"own " if own else ""}blank {b["name"]}: {w:.0f} x {h:.0f}</title></rect>')
         for p in b["parts"]:
             item = items.get(p["path"])
             if item is None:
@@ -100,7 +111,8 @@ def _sheet(sheet: SheetOut, items: dict[str, Item], left: float, top: float) -> 
             shape = item.placed(p["turn"], (x + p["at"][0], y + p["at"][1]))
             out.append(_part(shape, p["path"], item, left, sy))
         # Over its parts, which come up to its margin.
-        out.append(_text(left + x + 6, sy(y + h) + 14, f"{b['name']}  {w:.0f} x {h:.0f}", 22, "blankname"))
+        out.append(_text(left + x + 6, sy(y + h) + 14, f"{b['name']}  {w:.0f} x {h:.0f}" +
+                         (" sawn to size" if own else ""), 22, "blankname"))
     for k, cut in enumerate(sheet["cuts"], 1):
         x0, y0, x1, y1 = cut["line"]
         out.append(f'<line class="cut" x1="{left + x0:.1f}" y1="{sy(y0):.1f}" x2="{left + x1:.1f}" y2="{sy(y1):.1f}"/>')

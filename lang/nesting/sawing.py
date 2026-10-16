@@ -24,6 +24,10 @@ between pieces side by side, from the leaves up:
   along it take it along (each grows across it), when every piece holding
   blanks still fits the bed.
 
+A piece holding a `nest(False)` board's own blank (`own`) is never joined
+or grown: it is cut down to its blank, whatever the bed, and what comes
+off it is a rest like any.
+
 A node left with one child is that child. A node with k children takes
 k - 1 cuts; a sheet's cuts are the sum. A piece the solver left larger than
 the bed (it records no cut beside a blank shorter than its slot) is cut
@@ -43,7 +47,7 @@ from __future__ import annotations
 
 import importlib
 import math
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Collection, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any
@@ -101,7 +105,7 @@ class Stock:
     #: How many; -1: as many as needed.
     copies: int
     cost: float
-    #: "sheet" or "offcut".
+    #: "bought" (a sheet, as many as needed) or "on_hand" (the inventory's).
     kind: str
     #: What the caller knows it by.
     key: int
@@ -165,29 +169,30 @@ def _trims(node: Node) -> tuple[bool, bool]:
             last.rect[axis] + last.rect[axis + 2] < node.rect[axis] + node.rect[axis + 2] - 1e-6)
 
 
-def _grown(node: Node, axis: int, at_start: bool, amount: float, fits_bed: FitsBed) -> Node | None:
+def _grown(node: Node, axis: int, at_start: bool, amount: float, fits_bed: FitsBed,
+           own: Collection[int] = ()) -> Node | None:
     """`node` grown by `amount` along `axis` (at its start or its end), the
     growth passed on to the pieces along that side; None when a piece
-    holding blanks would no longer fit the bed."""
+    holding blanks would no longer fit the bed, or one holds an own blank."""
     r = list(node.rect)
     if at_start:
         r[axis] -= amount
     r[axis + 2] += amount
     if node.leaf:
-        if node.used and not fits_bed(r[2], r[3]):
+        if node.used and (not fits_bed(r[2], r[3]) or _holds_own(node, own)):
             return None
         return Node(r, list(node.blanks), list(node.parts))
     kids = list(node.children)
     if len(kids) > 1 and axis_of(kids) == axis:
         k = 0 if at_start else len(kids) - 1
-        g = _grown(kids[k], axis, at_start, amount, fits_bed)
+        g = _grown(kids[k], axis, at_start, amount, fits_bed, own)
         if g is None:
             return None
         kids[k] = g
     else:
         new: list[Node] = []
         for c in kids:
-            g = _grown(c, axis, at_start, amount, fits_bed)
+            g = _grown(c, axis, at_start, amount, fits_bed, own)
             if g is None:
                 return None
             new.append(g)
@@ -195,12 +200,17 @@ def _grown(node: Node, axis: int, at_start: bool, amount: float, fits_bed: FitsB
     return Node(r, children=kids)
 
 
-def simplify(node: Node, fits_bed: FitsBed, keeps: Keeps, join: bool = True) -> Node:
+def _holds_own(node: Node, own: Collection[int]) -> bool:
+    return any(b in own for b in node.blanks)
+
+
+def simplify(node: Node, fits_bed: FitsBed, keeps: Keeps, join: bool = True, own: Collection[int] = ()) -> Node:
     """Leaves out the cuts that are not needed (see the module's doc);
-    `join`: whether two pieces holding blanks may be one."""
+    `join`: whether two pieces holding blanks may be one; `own`: the own
+    blanks, whose pieces stay as they are."""
     if node.leaf:
         return node
-    kids = [simplify(c, fits_bed, keeps, join) for c in node.children]
+    kids = [simplify(c, fits_bed, keeps, join, own) for c in node.children]
     changed = True
     while changed:
         changed = False
@@ -211,23 +221,23 @@ def simplify(node: Node, fits_bed: FitsBed, keeps: Keeps, join: bool = True) -> 
                 if a.rest and b.rest:
                     kids[i:i + 2] = [Node(r)]
                 elif (not kept(a, keeps) and not kept(b, keeps) and fits_bed(r[2], r[3])
-                      and (join or not (a.used and b.used))):
+                      and (join or not (a.used and b.used)) and not _holds_own(a, own) and not _holds_own(b, own)):
                     kids[i:i + 2] = [Node(r, a.blanks + b.blanks, a.parts + b.parts)]
                 else:
                     continue
             elif a.rest and not kept(a, keeps) and not b.leaf:
                 axis = axis_of(kids)
-                g = _grown(b, axis, True, b.rect[axis] - a.rect[axis], fits_bed)
+                g = _grown(b, axis, True, b.rect[axis] - a.rect[axis], fits_bed, own)
                 if g is None:
                     continue
-                kids[i:i + 2] = [simplify(g, fits_bed, keeps, join)]
+                kids[i:i + 2] = [simplify(g, fits_bed, keeps, join, own)]
             elif b.rest and not kept(b, keeps) and not a.leaf:
                 axis = axis_of(kids)
                 g = _grown(a, axis, False, (b.rect[axis] + b.rect[axis + 2]) - (a.rect[axis] + a.rect[axis + 2]),
-                           fits_bed)
+                           fits_bed, own)
                 if g is None:
                     continue
-                kids[i:i + 2] = [simplify(g, fits_bed, keeps, join)]
+                kids[i:i + 2] = [simplify(g, fits_bed, keeps, join, own)]
             else:
                 continue
             changed = True
@@ -235,7 +245,7 @@ def simplify(node: Node, fits_bed: FitsBed, keeps: Keeps, join: bool = True) -> 
     if len(kids) == 1:
         only = kids[0]
         # The one child takes the node's whole place.
-        if only.leaf and (only.rest or fits_bed(node.rect[2], node.rect[3])):
+        if only.leaf and (only.rest or fits_bed(node.rect[2], node.rect[3]) or _holds_own(only, own)):
             return Node(list(node.rect), only.blanks, only.parts)
         return only
     return Node(list(node.rect), children=kids)
@@ -390,18 +400,26 @@ _TRIMS = ((0, True), (1, True), (0, False), (1, False))
 
 
 def trim_to_bed(node: Node, sizes: Sequence[tuple[float, float]], origins: dict[int, tuple[float, float]],
-                kerf: float, fits_bed: FitsBed) -> Node:
+                kerf: float, fits_bed: FitsBed, own: Collection[int] = ()) -> Node:
     """Cuts a piece holding one blank down to the blank where the piece is
-    larger than the bed."""
+    larger than the bed, and a piece holding an own blank down to it
+    whatever its size."""
     if not node.leaf:
-        return Node(list(node.rect), children=[trim_to_bed(c, sizes, origins, kerf, fits_bed)
+        return Node(list(node.rect), children=[trim_to_bed(c, sizes, origins, kerf, fits_bed, own)
                                                for c in node.children])
-    if not node.blanks or fits_bed(node.rect[2], node.rect[3]):
+    if not node.blanks:
         return node
-    assert len(node.blanks) == 1, "pieces holding several blanks are only joined where they fit the bed"
     bw, bh = sizes[node.blanks[0]]
+    if _holds_own(node, own):
+        assert len(node.blanks) == 1, "a piece holding an own blank is never joined"
+        done: FitsBed = lambda w, h: w <= bw + 1e-6 and h <= bh + 1e-6  # noqa: E731 - cut down to the blank
+    elif fits_bed(node.rect[2], node.rect[3]):
+        return node
+    else:
+        assert len(node.blanks) == 1, "pieces holding several blanks are only joined where they fit the bed"
+        done = fits_bed
     bx, by = origins[node.blanks[0]]
-    return _trim(node, (bx, by, bw, bh), kerf, fits_bed, _TRIMS)
+    return _trim(node, (bx, by, bw, bh), kerf, done, _TRIMS)
 
 
 def _trim(leaf: Node, blank: tuple[float, float, float, float], kerf: float, fits_bed: FitsBed,
@@ -440,10 +458,11 @@ SETTINGS: list[dict[str, Any]] = [dict(stages=s, first=f, max1=m1, max2=m2)
 
 def best_plan(blanks: Sequence[tuple[float, float]], stock: list[Stock], kerf: float, max_cuts: int,
               fits_bed: FitsBed, keeps: Keeps, seconds: float = 1.0,
-              settings: Sequence[dict[str, Any]] = SETTINGS, join: bool = True) -> Plan:
+              settings: Sequence[dict[str, Any]] = SETTINGS, join: bool = True, own: Collection[int] = ()) -> Plan:
     """Saws `blanks` (w along the grain, h) out of `stock` with each setting
     and keeps the best (see the module's doc); `kerf` in tenths of a
-    millimetre (`Workshop.saw_kerf`)."""
+    millimetre (`Workshop.saw_kerf`); `own`: the blanks that are boards'
+    own, sawn to size."""
     assert abs(kerf * UNIT - round(kerf * UNIT)) < 1e-9, "the kerf is rounded to the plan's unit"
     def solve(knapsack: bool, s: dict[str, Any]) -> tuple[list[tuple[Node, int]], dict[int, tuple[float, float]]]:
         return _solve(blanks, stock, kerf, seconds, knapsack, **s)
@@ -452,7 +471,7 @@ def best_plan(blanks: Sequence[tuple[float, float]], stock: list[Stock], kerf: f
         # The solver lets go of the GIL: the settings run side by side.
         with ThreadPoolExecutor(max_workers=len(settings)) as pool:
             solved = list(pool.map(solve, [knapsack] * len(settings), settings))
-        return [_judge(trees, origins, len(blanks), stock, max_cuts, fits_bed, keeps, blanks, kerf, s, join)
+        return [_judge(trees, origins, len(blanks), stock, max_cuts, fits_bed, keeps, blanks, kerf, s, join, own)
                 for (trees, origins), s in zip(solved, settings)]
 
     tried = run(knapsack=False)
@@ -468,8 +487,8 @@ def best_plan(blanks: Sequence[tuple[float, float]], stock: list[Stock], kerf: f
 
 def _judge(trees: list[tuple[Node, int]], origins: dict[int, tuple[float, float]], n_blanks: int,
            stock: list[Stock], max_cuts: int, fits_bed: FitsBed, keeps: Keeps, sizes: Sequence[tuple[float, float]],
-           kerf: float, setting: dict[str, Any], join: bool) -> Plan:
-    sheets = [Sawn(trim_to_bed(simplify(t, fits_bed, keeps, join), sizes, origins, kerf, fits_bed), k)
+           kerf: float, setting: dict[str, Any], join: bool, own: Collection[int] = ()) -> Plan:
+    sheets = [Sawn(trim_to_bed(simplify(t, fits_bed, keeps, join, own), sizes, origins, kerf, fits_bed, own), k)
               for t, k in trees]
     for (raw, _k), sawn in zip(trees, sheets):
         for leaf in leaves(sawn.tree):

@@ -23,8 +23,8 @@ if TYPE_CHECKING:
     from ..core.layout_types import Layout
 
 #: The nest file version this reads (`lang.nesting.nest_types.NEST_VERSION`);
-#: a test keeps the two equal.
-NEST_VERSION = 1
+#: a test keeps the two equal. Version 2 kept what this reads as it was.
+NEST_VERSION = 2
 #: mm between two pieces of stock in the document.
 GAP = 200.0
 

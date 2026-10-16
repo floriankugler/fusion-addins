@@ -1,0 +1,8 @@
+# The stock on hand for the examples (lang/nesting/inventory.py): full
+# sheets and offcuts alike, by material as the layout labels it, the size
+# along the grain first (mm), and how many (1 if not given). The nest uses
+# these before it buys the material's sheets (stock.py: 2500 x 1250).
+
+[[stock]]
+material = "birch 15"
+size = [1250, 600]

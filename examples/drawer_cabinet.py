@@ -12,7 +12,7 @@ kitchen box."""
 from lang import *
 from lang.std import carcass, drawer_box
 
-from stock import ply9, ply12, ply15
+from stock import ply9, ply12, ply15, workshop
 
 GAP = 3  # between fronts
 
@@ -87,6 +87,7 @@ def drawer(name: str, bay: Box, panel: Box, slide: DrawerSlide, *, sides: tuple[
 
 
 if __name__ == "__build__":   # run as the build file, not imported
+    use(*workshop)   # the machine the nests are made for
     # The cabinet stands against the driver's wall (left, -y) and opens toward
     # the aisle. Its 600 mm front runs along the vehicle, so in world terms the
     # box is 500 wide (across the vehicle) and 600 deep (along it); inside the

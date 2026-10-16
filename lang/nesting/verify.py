@@ -5,13 +5,15 @@ the tests and fuzz tests check with it too.
 Per piece of stock: its pieces (blanks and rests) lie on it apart from each
 other, and with the saw's cuts they cover it whole; each cut is a straight
 line through the piece it splits, edge to edge, crossing no other piece; at
-most `max_cuts` cuts; each blank goes on the bed; a rest is marked kept
-exactly when the workshop keeps it. Per blank: each part's true machine
-outline, turned and moved as the nest says, lies on the blank the margin
-in from its edge and at least the spacing from every other part, turned by
-one of its own turns. Per material: every part is placed once, or listed
-as left over; no more sheets of a size are used than are on hand, nor
-offcuts.
+most `max_cuts` cuts; each blank goes on the bed but a `nest(False)`
+board's own; a rest is marked kept exactly when the nest keeps it. Per
+blank: each part's true machine outline, turned and moved as the nest
+says, lies on the blank the margin in from its edge and at least the
+larger of the two parts' spacings from every other part, turned by one of
+its own turns; an own blank holds its board alone, its outline whole,
+within it. Per material: every part is placed once, or listed as left
+over; the sheets bought are the material's size, and no more pieces of
+the stock on hand are used than there are.
 """
 from __future__ import annotations
 
@@ -38,9 +40,12 @@ def verify(out: MaterialOut, items: list[Item], workshop: Workshop) -> list[str]
         for blank in sheet["blanks"]:
             name = f"blank {blank['name']}"
             _x, _y, w, h = blank["rect"]
-            if not fits(w, h, workshop.bed):
+            own = [by_path[p["path"]].own for p in blank["parts"] if p["path"] in by_path]
+            if any(own) != blank["own_blank"] or (any(own) and len(blank["parts"]) != 1):
+                problems.append(f"{name}: an own blank holds its board alone, and is marked so")
+            if not blank["own_blank"] and not fits(w, h, workshop.bed):
                 problems.append(f"{name} ({w:g} x {h:g}) does not fit the bed")
-            m = workshop.margin
+            m = 0.0 if blank["own_blank"] else workshop.margin
             inner = box(m - TOLERANCE, m - TOLERANCE, w - m + TOLERANCE, h - m + TOLERANCE)
             shapes: list[Polygon] = []
             paths: list[str] = []
@@ -57,7 +62,7 @@ def verify(out: MaterialOut, items: list[Item], workshop: Workshop) -> list[str]
                     problems.append(f"{part['path']}: not the margin {m:g} inside {name}")
                 shapes.append(shape)
                 paths.append(part["path"])
-            problems += _check_spacing(shapes, paths, workshop.spacing)
+            problems += _check_spacing(shapes, [by_path[p] for p in paths])
     for item in items:
         n = seen[item.path]
         if item.path in out["unplaced"]:
@@ -121,38 +126,37 @@ def _check_sheet(s: SheetOut, workshop: Workshop) -> list[str]:
     return problems
 
 
-def _check_spacing(shapes: list[Polygon], paths: list[str], spacing: float) -> list[str]:
+def _check_spacing(shapes: list[Polygon], items: list[Item]) -> list[str]:
+    """Each two parts at least the larger of their spacings apart."""
     problems: list[str] = []
     if len(shapes) < 2:
         return problems
     tree = STRtree(shapes)
+    widest = max(item.spacing for item in items)
     for i, s in enumerate(shapes):
-        for j in tree.query(s, predicate="dwithin", distance=spacing - TOLERANCE):
+        for j in tree.query(s, predicate="dwithin", distance=widest - TOLERANCE):
             j = int(j)
-            if j > i:
-                gap = s.distance(shapes[j])
-                problems.append(f"{paths[i]} and {paths[j]}: {gap:.4f} apart, less than {spacing:g}"
-                                if gap > 0 else f"{paths[i]} and {paths[j]} overlap")
+            spacing = max(items[i].spacing, items[j].spacing)
+            if j > i and (gap := s.distance(shapes[j])) < spacing - TOLERANCE:
+                problems.append(f"{items[i].path} and {items[j].path}: {gap:.4f} apart, less than {spacing:g}"
+                                if gap > 0 else f"{items[i].path} and {items[j].path} overlap")
     return problems
 
 
 def _check_stock(out: MaterialOut, workshop: Workshop) -> list[str]:
     problems: list[str] = []
     material = out["material"]
-    on_hand: dict[str, int | None] = {}
-    for s in workshop.sheets_for(material):
-        key = f"{s.length:g}x{s.width:g}"
-        if (key in on_hand and on_hand[key] is None) or s.count is None:
-            on_hand[key] = None
-        else:
-            on_hand[key] = (on_hand.get(key) or 0) + s.count
+    sheet = workshop.sheet_for(material)
     for key, n in out["bought"].items():
-        if key not in on_hand:
-            problems.append(f"{n} sheets {key}, a size not on hand")
-        elif (limit := on_hand[key]) is not None and n > limit:
-            problems.append(f"{n} sheets {key}, {limit} on hand")
-    offcuts = Counter(f"{o.length:g}x{o.width:g}" for o in workshop.offcuts_for(material))
-    for key, n in Counter(out["offcuts_used"]).items():
-        if n > offcuts[key]:
-            problems.append(f"{n} offcuts {key} used, {offcuts[key]} on hand")
+        if sheet is None or key != sheet.label():
+            problems.append(f"{n} sheets {key} bought, not the material's size "
+                            f"({sheet.label() if sheet else 'none to buy'})")
+    on_hand: Counter[str] = Counter()
+    for o in workshop.on_hand_for(material):
+        on_hand[o.label()] += o.count
+    for key, n in Counter(out["on_hand_used"]).items():
+        if n > on_hand[key]:
+            problems.append(f"{n} pieces {key} on hand used, {on_hand[key]} on hand")
+    if sum(out["bought"].values()) + len(out["on_hand_used"]) != len(out["sheets"]):
+        problems.append("the stock bought and on hand used is not the stock sawn")
     return problems

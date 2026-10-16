@@ -10,7 +10,9 @@ kitchen's place all come from the master.
 """
 from lang import *
 
-from stock import ply12, ply15
+from stock import ply12, ply15, workshop
+
+use(*workshop)   # the machine the nests are made for
 from drawer_cabinet import drawer_cabinet
 
 # The master's axes are the world axes; this is the van's choice of front,

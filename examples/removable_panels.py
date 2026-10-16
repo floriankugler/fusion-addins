@@ -15,7 +15,7 @@ the cab and opens toward the rear."""
 from lang import *
 from lang.std import carcass
 
-from stock import ply12, ply18
+from stock import ply12, ply18, workshop
 
 CLEARANCE = 1.5  # around the rear panel
 
@@ -42,6 +42,7 @@ def seat_base(name: str, box: Box, *, front: Side) -> Scope:
 
 
 if __name__ == "__build__":   # run as the build file, not imported
+    use(*workshop)   # the machine the nests are made for
     # Across the vehicle, opening toward the rear (+x): 800 wide across
     # the vehicle, 400 deep along it, 450 high.
     box = Box.from_size(width=800, depth=400, height=450)

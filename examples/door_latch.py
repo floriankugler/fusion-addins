@@ -12,7 +12,7 @@ opens toward the aisle, like the drawer cabinet."""
 from lang import *
 from lang.std import carcass, drawer_box
 
-from stock import ply9, ply12, ply15
+from stock import ply9, ply12, ply15, workshop
 
 REVEAL = 2.0  # around each inset front
 
@@ -65,6 +65,7 @@ def drawer(name: str, bay: Box, slide: DrawerSlide, latch: DoorLatch, catch: Boa
 
 
 if __name__ == "__build__":   # run as the build file, not imported
+    use(*workshop)   # the machine the nests are made for
     # Against the driver's wall (left, -y), opening toward the aisle: in
     # world terms 500 across the vehicle and 600 along it; inside the
     # module the cabinet is 600 wide and 500 deep.

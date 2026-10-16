@@ -8,7 +8,9 @@ inner face, which carries the chamfer."""
 from lang import *
 from lang.std import carcass
 
-from stock import ply15
+from stock import ply15, workshop
+
+use(*workshop)   # the machine the nests are made for
 
 
 box = Box.from_size(width=600, depth=400, height=700)
