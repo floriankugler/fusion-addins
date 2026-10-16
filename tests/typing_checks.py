@@ -218,6 +218,21 @@ def settings() -> None:
     del g, s
 
 
+def nests() -> None:
+    """A nest is declared by material or by boards; the nesting keys are typed."""
+    with module("m", Box.from_size(width=600, depth=400, height=700)) as m:
+        left = board("left", ply15).on(m.left)
+        carcass: Nest = m.nest("carcass", material=ply15).use(nesting.margin(15), nesting.bed((2000, 1000)))
+        m.nest("fronts", [left]).use(nesting.spacing(20), nesting.refill(False))           # fine
+        m.nest("both", [left], material=ply15)                                   # type: ignore  # one or the other
+        m.nest("none")                                                           # type: ignore  # a material or boards
+        m.nest("one", left)                                                      # type: ignore  # a list of boards
+        m.nest("oak", material=slat_material("oak"))                             # type: ignore  # a sheet material
+        carcass.use(nesting.bed(2000))                                           # type: ignore  # a size, two numbers
+        carcass.use(nesting.max_cuts(2.5))                                       # type: ignore  # a whole number
+        _ = carcass.value(nesting.margin) + 1                                    # fine
+
+
 def std() -> None:
     """The standard library's blocks are typed like the core."""
     oak = slat_material("oak")
