@@ -14,6 +14,7 @@ from shapely.geometry import Point
 from lang import Board, Box, Scope, board, check, sheet_material, module, no_interference, rect
 from lang.core.layout import build_layout
 from lang.core.layout_types import HardwareBodyLayout
+from lang.core.scope import registry
 from lang.preview.mesh import mesh_part
 
 #: The example build files, which import their stock and each other from their folder.
@@ -77,15 +78,17 @@ def bounds(body: HardwareBodyLayout) -> tuple[list[float], list[float]]:
 
 
 def run_example(path: Path, run_name: str = "__build__") -> None:
-    """Runs a build file in this process, its registry kept for the test,
-    with the examples' folder on the import path as `lang.build` puts the
-    build file's folder there (a copy in a temporary folder still finds
-    `stock` and `drawer_cabinet`)."""
+    """Runs a build file in this process, and its lazy modules' bodies, as
+    `lang.build.run` does, its registry kept for the test, with the
+    examples' folder on the import path as `lang.build` puts the build
+    file's folder there (a copy in a temporary folder still finds `stock`
+    and `drawer_cabinet`)."""
     folders = [str(EXAMPLES)] + ([str(path.parent)] if path.parent != EXAMPLES else [])
     before = set(sys.modules)
     sys.path[:0] = folders
     try:
         runpy.run_path(str(path), run_name=run_name)
+        registry.run_bodies()
     finally:
         del sys.path[:len(folders)]
         for name in set(sys.modules) - before:       # imported afresh by the next test
