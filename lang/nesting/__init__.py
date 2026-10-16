@@ -11,7 +11,7 @@ file imports from here, without the solvers. After the layout step, like
 the preview: `resolve` reads a nest's parts and values from the layout,
 `inventory` the stock on hand, `items` the parts as the nest sees them,
 `packing` nests them with PackingSolver, `sawing` saws the blanks out of
-the stock, `refill` empties a sheet into the others, `nest` runs the steps
+the stock, `refilling` empties a sheet into the others, `nest` runs the steps
 per material, `verify` checks the result apart from the solvers, `draw`
 draws it. The nest file's shape is in `nest_types`; the Fusion emitter
 draws a nest through `lang.emit.nested`.

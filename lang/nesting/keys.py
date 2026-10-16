@@ -93,7 +93,7 @@ rate: Setting[float] = Setting(0.6, "nesting.rate", check=_mm)
 #: birch 15 came out on 7 sheets in 20 s and on 5 in 40 s].
 least_seconds: Setting[float] = Setting(5.0, "nesting.least_seconds", check=_positive)
 #: Whether refill empties the bought sheet with the least on it into the
-#: room on the others (`refill`).
+#: room on the others (`refilling`).
 refill: Setting[bool] = Setting(True, "nesting.refill", check=_flag)
 
 #: Every nesting key, in the order the nest file lists them.

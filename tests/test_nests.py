@@ -261,3 +261,17 @@ def test_two_materials_of_one_label_are_an_error():
         board("right", sheet_material("birch", t=15, size=(2500, 1250))).on(m.right)
     with pytest.raises(LangError, match="two materials are called birch 15"):
         build_layout()
+
+
+def test_the_nesting_keys_are_not_shadowed_by_the_package_s_modules():
+    """Importing a submodule of `lang.nesting` sets an attribute of the
+    package: a module named like a key would replace it (`refill` did)."""
+    import importlib
+    import pkgutil
+
+    import lang.nesting as package
+    from lang.nesting.keys import KEYS
+    for info in pkgutil.iter_modules(package.__path__):
+        importlib.import_module(f"lang.nesting.{info.name}")
+    for key in KEYS:
+        assert getattr(package, key.name.split(".", 1)[1]) is key

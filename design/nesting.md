@@ -129,7 +129,7 @@ Per material (`nest.py`):
 4. Where the stock on hand runs short (sheets with a count), the parts of
    the blanks it could not take are nested again on what is left, twice
    more at most; what still finds no stock is reported as left over.
-5. Refill (`refill.py`): the bought sheet with the least on it is emptied
+5. Refill (`refilling.py`): the bought sheet with the least on it is emptied
    into the room on the others, in the pieces holding blanks (around their
    parts) and in each sheet's largest rest while it has two cuts to spare,
    cut down to what it takes; again while it works. An offcut is never
