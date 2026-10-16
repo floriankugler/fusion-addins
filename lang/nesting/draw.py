@@ -76,7 +76,8 @@ _STYLE = """
 def _material_line(m: MaterialOut) -> str:
     bought = ", ".join(f"{n} x {size}" for size, n in m["bought"].items()) or "nothing"
     on_hand = f", on hand {', '.join(m['on_hand_used'])}" if m["on_hand_used"] else ""
-    return (f"{m['material']}: bought {bought}{on_hand}; parts {m['parts_area']:.2f} m², used {m['used_area']:.2f} m², "
+    return (f"{m['material']}: bought {bought}{on_hand}; parts {m['parts_area']:.2f} m², "
+            f"used {m['used_area']:.2f} m², "
             f"kept {m['kept_area']:.2f} m²" + (f"; left over {len(m['unplaced'])}" if m["unplaced"] else ""))
 
 
@@ -103,7 +104,8 @@ def _sheet(sheet: SheetOut, items: dict[str, Item], left: float, top: float) -> 
         x, y, w, h = b["rect"]
         own = " own" if b["own_blank"] else ""
         out.append(f'<rect class="blank{own}" x="{left + x:.1f}" y="{sy(y + h):.1f}" width="{w:.1f}" '
-                   f'height="{h:.1f}"><title>{"own " if own else ""}blank {b["name"]}: {w:.0f} x {h:.0f}</title></rect>')
+                   f'height="{h:.1f}"><title>{"own " if own else ""}blank {b["name"]}: {w:.0f} x {h:.0f}'
+                   '</title></rect>')
         for p in b["parts"]:
             item = items.get(p["path"])
             if item is None:

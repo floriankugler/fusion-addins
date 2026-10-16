@@ -911,8 +911,8 @@ def test_the_command_line_reads_the_inventory_and_its_nests_share_it(tmp_path: P
 
 
 def test_the_command_line_goes_on_past_a_nest_it_cannot_nest(tmp_path: Path, capsys: pytest.CaptureFixture[str]):
-    (tmp_path / "shop.py").write_text(_SHOP + "    n.nest('wide', [board('wide', thin).on(n.top)]).use(nesting.bed((300, "
-                                              "300)))\n")
+    wide = "    n.nest('wide', [board('wide', thin).on(n.top)]).use(nesting.bed((300, 300)))\n"
+    (tmp_path / "shop.py").write_text(_SHOP + wide)
     out = tmp_path / "out"
     assert nest_main([str(tmp_path / "shop.py"), "--out", str(out), "--no-refill"]) == 1
     err = capsys.readouterr().err

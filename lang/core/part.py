@@ -398,7 +398,8 @@ class Board:
         """Whether the board goes into the nest (`lang.nesting`): `nest(False)`
         for one sawn or cut by hand (a strip ripped on the saw, a panel
         larger than the machine's bed), which goes on the cut list by size
-        instead; the board's own `nest` setting, which `use(nest(False))`
+        instead, or is sawn to size as its own blank by a nest that names it
+        (`Scope.nest`); the board's own `nest` setting, which `use(nest(False))`
         gives every board in a scope. Boards are nested unless they or their
         scopes say otherwise; a manual part never is, nor a slat (slats go
         on the cut list by length). It changes nothing about the board's

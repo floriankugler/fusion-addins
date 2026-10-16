@@ -80,9 +80,10 @@ class Nest:
         boards' `material`, `grain` and `nest` are theirs, not a nest's."""
         for binding in bindings:
             key = getattr(binding, "key", None)
-            if key in keys.OWN_SPELLING:
-                raise LangError(f"use({binding!r}) on a nest: {key.name} is a board's, said on the board "  # pyright: ignore[reportOptionalMemberAccess]
-                                f"({keys.OWN_SPELLING[key]}) or in its scope.", self.path)
+            spelling = keys.OWN_SPELLING.get(key) if key is not None else None
+            if key is not None and spelling is not None:
+                raise LangError(f"use({binding!r}) on a nest: {key.name} is a board's, said on the board "
+                                f"({spelling}) or in its scope.", self.path)
         self.settings.use(*bindings)
         return self
 

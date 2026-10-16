@@ -44,7 +44,8 @@ def inventory_from(data: dict[str, Any], where: str = "the inventory") -> list[O
     if unknown:
         raise LangError(f"{where}: unknown key {', '.join(unknown)}; the inventory lists [[stock]] entries.")
     entries = data.get("stock", [])
-    if not isinstance(entries, list) or not all(isinstance(e, dict) for e in entries):  # pyright: ignore[reportUnknownVariableType]
+    tables = isinstance(entries, list) and all(isinstance(e, dict) for e in entries)  # pyright: ignore[reportUnknownVariableType]
+    if not tables:
         raise LangError(f"{where}: write each piece of stock as a [[stock]] table.")
     out: list[OnHand] = []
     for k, entry in enumerate(entries, 1):  # pyright: ignore[reportUnknownVariableType, reportUnknownArgumentType]
