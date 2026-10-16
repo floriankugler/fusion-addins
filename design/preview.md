@@ -82,7 +82,8 @@ for a check, too slow for the loop. [decided as a need]
   and shows the one chosen (`await preview.showNest('kitchen.carcass')`);
   it says whether the nest's parts are as nested, by their fingerprints
   (so a change to another module leaves it good), which changed, which are
-  new and which are gone, or that it is not nested yet, and Nest again
+  new and which are gone, or that it is not nested yet (also where its
+  file is of an older version, without fingerprints), and Nest again
   runs `python -m lang.nesting <build> <nest>` for it, with the inventory
   beside the build file, one nest at a time and never on a save (a nest
   takes seconds to minutes); a failed nest shows its log.

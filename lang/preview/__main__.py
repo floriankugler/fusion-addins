@@ -462,7 +462,10 @@ class _Handler(http.server.SimpleHTTPRequestHandler):
             self.send_header("Content-Length", "0")
             self.end_headers()
             return
-        if url.path == "/made" and nest:
+        given = [nest, *query.get("sheet", []), *query.get("part", [])]
+        if any(v.startswith("-") for v in given):       # read as the command's options
+            status, text = 400, "a nest, a sheet or a part does not start with -"
+        elif url.path == "/made" and nest:
             status, text = self.designs.pin(design, ["--made", nest, *query.get("sheet", [])])
         elif url.path == "/fixed" and nest and query.get("part"):
             status, text = self.designs.pin(design, ["--fixed", nest, *query["part"]])

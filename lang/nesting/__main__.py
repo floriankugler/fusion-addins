@@ -124,6 +124,8 @@ def _run(args: argparse.Namespace) -> int:
     name = source.stem if source.suffix != ".json" else source.parent.name
     out_dir: Path = args.out or Path("out") / name
     inventory_file: Path = args.inventory or source.parent / NAME
+    if args.inventory is not None and not args.inventory.exists():
+        raise LangError(f"{args.inventory}: no such inventory.")
     if args.made is not None:
         return _mark(out_dir, args.made[0], args.made[1:], inventory_file)
     inventory: list[OnHand] = read_inventory(inventory_file) if inventory_file.exists() else []
@@ -155,8 +157,10 @@ def _run(args: argparse.Namespace) -> int:
         if run.standing is not None:
             target = second_folder(folder, run.k)
             if run.name in by_path:
-                raise LangError(f"{run.name} is the name of {path}'s next nest, as it is marked as made, and of "
-                                "a nest of the build; give that nest another name.")
+                failed += 1
+                print(f"{path}: error: {run.name} is the name of its next nest, as it is marked as made, and of a "
+                      "nest of the build; give that nest another name.", file=sys.stderr)
+                continue
             _say_standing(path, run.standing)
             if not run.standing.reasons:
                 print(f"{path}: everything made, nothing to nest")

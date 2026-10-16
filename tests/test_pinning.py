@@ -381,6 +381,26 @@ def test_status_says_what_changed_and_writes_nothing(tmp_path: Path, capsys: pyt
     assert {p: p.read_bytes() for p in (tmp_path / "out").rglob("*") if p.is_file()} == before
 
 
+def test_a_nest_of_the_build_named_like_a_second_nest_is_refused_and_the_others_nested(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]):
+    build = tmp_path / "shop.py"
+    build.write_text(_shop(count=2))
+    assert _nest(build) == 0 and _nest(build, "--made", "m.birch_15") == 0
+    build.write_text(_shop("    m.nest('birch_15-2', [m['p1']])\n", count=2)
+                     + "    board('p2', ply).on(m.top).between(m.front.into(350), m.front, m.left, m.left.gap(500))\n")
+    assert _nest(build) == 1
+    said = capsys.readouterr()
+    assert "m.birch_15: error: m.birch_15-2 is the name of its next nest" in said.err
+    assert (tmp_path / "out" / "m" / "birch_15-2" / "nest.json").exists()     # the declared one, nested still
+
+
+def test_an_inventory_named_must_be_there(tmp_path: Path, capsys: pytest.CaptureFixture[str]):
+    build = tmp_path / "shop.py"
+    build.write_text(_shop(count=1))
+    assert _nest(build, "--inventory", str(tmp_path / "nowhere.toml")) == 1
+    assert "nowhere.toml: no such inventory" in capsys.readouterr().err
+
+
 def test_marking_runs_no_build_and_refuses_a_nest_not_nested(tmp_path: Path, capsys: pytest.CaptureFixture[str]):
     build = tmp_path / "shop.py"
     build.write_text(_shop(count=1))
