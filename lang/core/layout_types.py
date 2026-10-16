@@ -198,7 +198,7 @@ class HardwareLayout(TypedDict):
 class NestLayout(TypedDict):
     """A nest of the build (`lang.core.nests`): declared on a scope, or the
     default nest of a module's nested boards of a material that no declared
-    nest names."""
+    nest of the module takes."""
     #: Its scope's path and its name (`kitchen.carcass`); a default nest's
     #: name is its material's label made file-safe (`kitchen.birch_15`, at
     #: the root `birch_15`).
@@ -206,7 +206,7 @@ class NestLayout(TypedDict):
     #: The module it belongs to ("" at the root).
     module: str
     #: How its parts were chosen: the nested boards of a material in its
-    #: scope, boards named, or what no declared nest names.
+    #: scope, boards named, or what no declared nest of its module takes.
     by: Literal["material", "parts", "default"]
     #: Its material's label (`birch 15`), None for one of boards named.
     material: str | None

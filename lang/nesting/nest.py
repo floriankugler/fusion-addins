@@ -35,7 +35,7 @@ from datetime import datetime
 
 from ..core.errors import LangError
 from ..core.layout import layout_hash
-from ..core.layout_types import Layout
+from ..core.layout_types import Layout, NestLayout
 from . import sawing
 from .items import Item, LeftOut, Parts, check_sizes, parts_of_layout, turned
 from .keys import KEYS
@@ -83,17 +83,25 @@ class Options:
 
 
 def nest_layout(layout: Layout, name: str, inventory: Sequence[OnHand] = (), *, source: str = "",
-                options: Options | None = None, log: Log | None = None,
-                written: datetime | None = None) -> tuple[NestFile, Parts]:
+                options: Options | None = None, log: Log | None = None, written: datetime | None = None,
+                second: tuple[str, Mapping[str, str]] | None = None) -> tuple[NestFile, Parts]:
     """Nests the build's nest `name` (`kitchen.carcass`) with its values
     and stock (`resolve`) and the `inventory`'s pieces on hand; returns the
-    nest file's content and the parts nested."""
+    nest file's content and the parts nested. `second`: a second nest of
+    it instead (`lang.nesting.pinning`), its name and its parts with why
+    each is in it, its values its parts' and the nest's own."""
     nest = nest_of(layout, name)
+    follows = ""
+    reasons: Mapping[str, str] = {}
+    if second is not None:
+        follows, reasons = name, second[1]
+        derived: NestLayout = {**nest, "path": second[0], "parts": list(reasons)}
+        nest = derived
     resolved = resolve(layout, nest)
     workshop = workshop_of(layout, nest, resolved, inventory)
-    return nest_parts(layout, nest["parts"], workshop, name=name, spacing_of=resolved.spacing,
+    return nest_parts(layout, nest["parts"], workshop, name=nest["path"], spacing_of=resolved.spacing,
                       sources=resolved.sources, left_out=nest["left_out"], source=source, options=options, log=log,
-                      written=written)
+                      written=written, follows=follows, reasons=reasons)
 
 
 def nest_parts(layout: Layout, paths: Collection[str] | None, workshop: Workshop, *, name: str = "",
