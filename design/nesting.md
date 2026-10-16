@@ -19,23 +19,30 @@ python -m lang.nest out/van/layout.json --bed 2000x1000 --sheet 2470x1240 \
     --sheet "birch 15:1525x1525*2" --offcut "birch 15:1250x600"
 ```
 
-- The machine and the stock come from a workshop file (TOML [proposed],
-  `examples/workshop.toml`, read by `workshop.py`): the bed, the spacing
+- The machine and the stock come from a workshop file (TOML; decided
+  2026-10-16 to go: the machine's values become settings set in the build
+  and the stock on hand an inventory ledger, `proposals/settings.md`; the
+  file stays until that is built), `examples/workshop.toml`, read by
+  `workshop.py`: the bed, the spacing
   between parts, the margin to a blank's edge, the saw's kerf, the most
   cuts per sheet, the keep threshold, the nest's time, and the stock on
   hand: `[[sheet]]` sizes (along the grain first; a count, or as many as
   needed; for one material or every one) and `[[offcut]]`s (a material
   and a size). The command line gives any of it instead: `--sheet` replaces
   all the file's sheets, `--offcut` all its offcuts, the numbers theirs; an
-  offcut there names its material, `"birch 15:1250x600"` [proposed].
+  offcut there names its material, `"birch 15:1250x600"` [decided
+  2026-10-16].
   The bed and the sheets are given when nesting is run [decided]; there is
   no default for either, and a nest without them is refused.
 - Defaults: spacing and margin 10, kerf 4, at most 5 cuts a sheet
   [decided: about 5], a rest kept from 300 mm across and 0.25 m²
   [decided 2026-10-14]; the nest's time per material 0.6 s a part, at
-  least 5 s and at most `seconds` (40) [proposed, measured below].
+  least 5 s and at most `seconds` (40) [decided 2026-10-16, measured below;
+  the rate and the least time become settings, `proposals/settings.md`].
 - Several build files (or layout files) are nested together; their parts'
-  paths then start with the file's name (`van:floor.batten0`) [proposed].
+  paths then start with the file's name (`van:floor.batten0`) [proposed;
+  decided 2026-10-16: not needed, a nest is of a module or a build; to be
+  removed, Still open].
   `--material` nests one material only, `--no-refill` leaves refill out,
   `--mode deterministic` runs the solver's one fixed search instead of the
   best it finds in its time (see Measured).
@@ -57,7 +64,7 @@ python -m lang.nest out/van/layout.json --bed 2000x1000 --sheet 2470x1240 \
 - A part no blank can take, larger than the bed with its margins either
   way round or than all the stock of its material (along its grain where it
   has one), is refused by name, with `nest(False)` as the way out [decided:
-  refused; machining in two setups is open].
+  refused; machining in two setups dropped for now, 2026-10-16].
 - Per material, as the layout labels it (`birch 15`).
 - A part lies on its blank with its machining face up (`machine` in the
   layout: what `machine()` names, else the face with more operations, see
@@ -80,7 +87,9 @@ python -m lang.nest out/van/layout.json --bed 2000x1000 --sheet 2470x1240 \
   180 degrees when its grain runs along its u, 90 or 270 along its v; a part
   whose grain the build left unset, or of a material without grain, turns
   by quarter turns [decided 2026-10-14: free, 90 degree steps]. Never by
-  other angles, so its faces stay along the axes in Fusion.
+  other angles, so its faces stay along the axes in Fusion and in CAM
+  [decided 2026-10-16: small hidden parts might nest closer at any angle,
+  which is not worth it].
 
 ## Nest first, saw after
 
@@ -91,9 +100,9 @@ Per material (`nest.py`):
    250 to 1000 across, plus the stock's and the bed's own sizes) of those
    some sheet can give, each priced by the area it takes of the sheet that
    suits it best, counting with it a strip beside it too narrow for the
-   smallest blank, plus 0.05 m² for the sawing [proposed: priced by their
-   own area, bed-sized blanks won, one a sheet with only waste beside it;
-   measured below]; on the offcuts the bed takes as they are, and on the
+   smallest blank, plus 0.05 m² for the sawing [decided 2026-10-16; priced
+   by their own area, bed-sized blanks won, one a sheet with only waste
+   beside it; measured below]; on the offcuts the bed takes as they are, and on the
    bed-sized pieces of offcuts it does not take (both priced next to
    nothing, so they go first). One setting, not several tried [decided]. A
    nest that found nothing in its time is given twice as long, four times
@@ -103,8 +112,9 @@ Per material (`nest.py`):
 3. The blanks are sawn out of the sheets and the offcuts larger than the
    bed (`sawing.py`): PackingSolver's guillotine solver, straight cuts right
    through, the kerf between, each blank in the sheet's grain, in tenths of
-   a millimetre (the kerf rounded up to one) [proposed]. Ten settings side by side (two
-   or three stages, rips or cross cuts first, limits on the cuts per stage),
+   a millimetre (the kerf rounded up to one) [decided 2026-10-16]. Ten settings side by side (two
+   or three stages, rips or cross cuts first, limits on the cuts per stage;
+   rips first is to be the rule, Still open),
    a second each; the plan is made as simple as it allows, then kept by,
    in this order: every blank sawn, no sheet over `max_cuts`, the cheapest
    stock, the largest single piece kept, the fewest cuts [decided: the
@@ -112,10 +122,10 @@ Per material (`nest.py`):
    one; pieces holding blanks and rests too small to keep, side by side,
    are one piece when the bed takes them together [decided], two holding
    blanks only where two margins and the kerf make up the spacing (their
-   parts are that far apart) [proposed]; a rest too small to keep goes along with the
+   parts are that far apart) [decided 2026-10-16]; a rest too small to keep goes along with the
    pieces beside it; a piece the solver left larger than the bed is cut
    down to its blank, also where what comes off is narrower than the kerf
-   (the blade takes it whole: a trim) [proposed].
+   (the blade takes it whole: a trim) [decided 2026-10-16].
 4. Where the stock on hand runs short (sheets with a count), the parts of
    the blanks it could not take are nested again on what is left, twice
    more at most; what still finds no stock is reported as left over.
@@ -128,7 +138,7 @@ Per material (`nest.py`):
 A rest of a sheet is stock, kept, from `keep_across` and `keep_area`
 (300 mm, 0.25 m²); smaller ones are waste. A sheet over the cut limit is
 reported, not refused: a sheet larger than the bed both ways needs two cuts
-whatever the limit [proposed].
+whatever the limit [decided 2026-10-16: five cuts is a target].
 
 ## The nest file
 
@@ -147,8 +157,9 @@ left out and why, the problems, the settings, and the hash of the layout
 nested (`lang.core.layout.layout_hash`), which tells whether a nest is the
 layout's at hand.
 
-Writing the leftovers back into the workshop file as offcuts waits for
-cut sheets being pinned (Still open, below).
+The leftovers of the sheets cut go into the inventory ledger once a nest is
+marked as made (pinning, Still open, below), not back into the workshop
+file.
 
 ## Checked
 
@@ -169,7 +180,8 @@ its piece.
 - The preview shows a design's nest (`nest.svg` in its out directory) in
   its nest view (`design/preview.md`), and nests it again on request.
 - The compiler's Compile Layout takes a `nest.json` too and draws a
-  document per material (no button of its own [proposed];
+  document per material (no button of its own [decided 2026-10-16]; its
+  dialog not yet clicked through with a nest file, `design/todo.md`;
   `lang/emit/nested.py` plans it, Fusion-free): per
   piece of stock a component, the pieces one above the other along y, per
   blank a component at its place holding the blank as a see-through stock
@@ -183,48 +195,140 @@ its piece.
 
 ## Still open
 
-- **Cut sheets are pinned.** A van is built over weeks, so a sheet marked as
-  cut keeps its nest; later nests take only the parts not cut yet and report
-  parts that changed after they were cut [open]. With it, the leftovers of
-  the sheets cut go back into the workshop file as offcuts.
-- **Parts larger than the bed**: today `nest(False)` (sawn by hand), as the
-  nest refuses them by name; machined in two setups, moved between them,
-  is open.
-- **Manufacturing groups** nested rigid (`design/todo.md`) [open: not
-  tried].
-- **Nesting a selection.** A nest takes a build's parts, all materials or
-  one (`--material`). Florian wants any nestable material on its own, and
-  any part or group of parts, since parts have to be made again now and
-  then; a `nest(False)` board that still has operations goes through the
-  same path to get its blank and setup (`proposals/cam.md`) [Florian,
-  2026-10-15; decided as a need].
-- **A name and a time.** A nest has neither. The CAM plan names its setups
-  and NC programs after the nest's blanks (`1.2`), so the nest itself needs
-  a name, from its sources and the time it was written, and the nest file a
-  timestamp [decided 2026-10-15].
-- **`nest(False)` for a whole module or scope** at once, as a setting
-  (`proposals/settings.md`) [proposed]; a rule by kind of part was decided
-  against (`proposals/syntax.md`, item 16). Nests declared per module, with
-  settings of their own, are in that proposal too [Florian, 2026-10-16].
-- **The cut list**: slats by length, `nest(False)` boards by size
-  (`design/proposals/build-repo.md`).
-- **The saw plan**: reordering its cuts (the simplifying keeps the solver's
-  order, a rip first where it cut across first, so a plan may take a cut
-  more than it could); trimming factory edges (the guillotine solver takes
-  trims); refill on a sheet whose cut budget is spent.
-- **Offcuts with an outline** (an L-shaped piece) **and defects**:
-  PackingSolver takes both (the experiments), the workshop file has
-  rectangles only.
-- **Irregular parts**: whether a time budget for knapsack on one sheet
-  fewer is worth it, or the first nest is enough.
+Gone through with Florian on 2026-10-16; nothing of it is built. The
+settings (`proposals/settings.md`) and the nests defined in the build come
+first [Florian, 2026-10-16]; the build order is in that proposal.
+
+### Decided, to build
+
+- **One source per nest.** Nesting several build files together is not
+  needed: a nest is of a module or of a build [decided 2026-10-16]. Remove
+  the merge and its `van:` path prefixes from `lang.nest`; the
+  measurements over all the examples merge their layouts in a test helper.
+- **A cut through a through pocket.** The layout step refuses a cut that
+  splits a board together with the through pockets and holes made before
+  it, as it refuses such a pocket after a cut [decided 2026-10-16]; the
+  message names the cut and the pocket. Then the nest fuzz's `KNOWN` and
+  the entry in `design/bugs.md` go.
+- **The nest file's stock.** `bought` counts the sheets on hand (those with
+  a count) as bought, and `settings.seconds` records the limit, not the time
+  each material had. Bugs.
+- **Rips first.** Florian rips a sheet along its length first, then cross
+  cuts [decided 2026-10-16]: the saw step tries only settings whose first
+  cuts are rips (with three stages: rip, cross cut, rip within a piece),
+  once measured on the examples what that costs in sheets, rests and cuts.
+  Reordering cuts is then needed within that order only, perhaps not at
+  all: the simplifying joins pieces within one strip, so a plan may still
+  take a cut more than it could.
+- **Refill past the cut limit.** Refill may take a sheet a cut or two over
+  `max_cuts` when that empties a bought sheet, reported as over like any
+  [decided 2026-10-16]. A rest the bed takes as it is needs no cut and is
+  offered whatever the sheet's cuts; today a rest is offered only while its
+  sheet has two cuts to spare.
+- **`nest(False)` boards in the saw plan.** A `nest(False)` board that comes
+  out of a sheet is sawn out of its material's sheets like a blank, rips
+  first, counted in the sheets used, the rests beside it kept [decided
+  2026-10-16]. It is its own blank, sawn to size and possibly larger than
+  the bed, so the checks that a blank fits the bed and the joining of
+  pieces leave it out.
+- **Fingerprints.** Each part in the nest file carries a hash of itself as
+  machined: its machine outline in its nest frame, its operations, thickness,
+  material, grain and machining face, not where it sits in the build. The
+  command and the preview then say which parts changed since a nest, and a
+  nest stays good when only another module changed (the layout's hash says
+  only that something did) [decided 2026-10-16]. The nest file's version 2,
+  with `lang.emit.nested`. The first step of pinning.
+- **The cut list**, written by the build as CSV beside `layout.json`, by
+  module [decided 2026-10-16]: slats and lips by species, section and
+  length, a plain list (not fitted onto stock lengths); `nest(False)` boards
+  by material, thickness and length × width (the grain along the length),
+  with their operations as a note; manual parts by name; bought hardware,
+  counted by what it is. The layout names a mount only by its place
+  (`kitchen.drawer1.runners`), so it has to say what each is (product,
+  size, article number): a layout version.
+- **Manufacturing groups**, for grain matching, their only use [decided
+  2026-10-16]: fronts in one face nested as they sit in it, so the grain
+  runs on across them. Said in the build, one call over the boards
+  [proposed]. The members share material, thickness, the direction of their
+  plane, the machining face and the grain, else the group is refused by
+  name. A group is one item of several shapes (PackingSolver takes that, no
+  bridges), turned only as its grain allows. Its gaps stay as designed: the
+  designer makes them wide enough for the smallest bit, and the nest refuses
+  a group with a narrower one (the smallest bit a workshop value until the
+  CAM plan's tool data); within a group the checks allow gaps under the
+  spacing, and the CAM plan has to know that one pass cuts both edges of
+  such a gap. No group attribute for Multi Arrange [decided]. A layout
+  version, one bump with the hardware's.
 - **Reproducible nests**: the nest runs for its time and keeps the best it
-  found, so a slower or busier machine may find another (a changed nest
-  shows in a diff), and too short a time costs sheets (7 instead of 5 for
-  the examples' 62 parts in 20 s). `--mode deterministic` runs one fixed
-  search instead, which split 124 parts into many small blanks (Measured,
-  below); the saw step is time-bound either way.
-- **Any angle** for parts whose grain does not matter: not offered, so
-  every face stays along an axis in Fusion.
+  found, so another run may find another nest, and too short a time costs
+  sheets (7 instead of 5 for the examples' 62 parts in 20 s). The nest file
+  is the record [decided 2026-10-16]: a nest is made on request only, its
+  fingerprints tell whether it still holds, and pinning keeps what was cut.
+  `--mode deterministic` stays an option; it split 124 parts into many
+  small blanks (Measured, below), so measure it on a module's nest before
+  anything else.
+- **Compile Layout with a nest file**, clicked through once in Fusion
+  (`design/todo.md`).
+
+### With the nests defined in the build
+
+The settings proposal (`proposals/settings.md`, from the CAM review of
+2026-10-15) moves nests into the build: defined in Python in the module
+that needs them, for a material or chosen parts, each named, with the
+values a nest reads (the bed, spacing, margin, time, ...) flowing down from
+the build's root as settings; the workshop file goes with them [Florian,
+2026-10-16]. Worked out there:
+
+- **A name and a time.** A nest is named where it is defined; the nest file
+  records the name and when it was written. Its blanks' names (`birch 15
+  1.2`) then hold for good, which the CAM plan names its setups by.
+- **Nesting a selection** (a material, parts, a module, as when parts are
+  made again) is defining such a nest.
+- **A `nest(False)` board named in a nest** is its own blank, sawn to size,
+  with no margin; the CAM plan machines its operations and no outline
+  [proposed].
+- **`nest(False)` for a whole module**, as a setting used on the module
+  (`use(nest(False))`). It means sawn by hand (in the saw plan and on the
+  cut list), not "not in this nest", so it stays a mark on the boards
+  [proposed].
+- **The nest's time**: the rate per part and the least time become
+  settings, as do the bed, the kerf and the cuts per sheet; the workshop
+  file goes, the stock on hand into the inventory ledger.
+- **Pinning** [decided 2026-10-16: yes, after the nest definitions]. A van
+  is built over weeks; Florian machines a module's sheets in one go, and
+  now and then a change in between means making parts again.
+  - A nest is marked as made, whole or by sheets (a click in the preview's
+    nest view, or a command), in a state file beside the nests, not in the
+    build file. A nest marked so is frozen: its result is read from its
+    file, never nested again.
+  - Running the same nest again compares its parts' fingerprints with the
+    build: parts made and unchanged are left out; changed and new parts are
+    nested anew, in a second nest beside the first; parts gone from the
+    build are reported. A changed part can be marked as fixed (a hole added
+    by hand), so it is not nested again.
+  - The stock: the inventory ledger (`inventory.toml`, one kind of entry
+    for sheets and rests alike, `proposals/settings.md`), one per project,
+    as there is one project at a time. The kept rests of a nest marked as
+    made go into it and the pieces it used come out; Florian adds the sheets
+    he buys and deletes by hand what is used for something else, so the nest
+    rewrites it keeping what he wrote.
+
+### Dropped [decided 2026-10-16]
+
+- **Offcuts with an outline** (an L-shaped piece) **and defects**: the saw
+  plan's rests are rectangles and a blank's waste is a thin frame; a damaged
+  offcut goes in as its largest clean rectangle. Both solvers would take
+  them (the experiments).
+- **Factory-edge trims**: the margin on the bed takes them.
+- **Parts larger than the bed**, machined in two setups: for now
+  `nest(False)`, sawn by hand, their operations hand work.
+- **Irregular parts**, knapsack on one sheet fewer: the parts are mostly
+  rectangular.
+- **A wider web around weak parts**: 13 to 19 mm holds nothing either; a
+  small part is anchored to larger ones by tabs, the CAM plan's work.
+- **A rule** that sets `nest(False)` for a whole kind of part
+  (`proposals/syntax.md`, item 16).
+- **Any angle** (What is nested, Turns).
 
 ## Measured
 
