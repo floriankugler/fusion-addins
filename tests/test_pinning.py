@@ -186,6 +186,9 @@ def test_second_nests_are_named_after_the_first_with_a_counter_and_marked_in_ord
     mark(state, second, None, WHEN)
     assert chain(state, "m.carcass") == ["m.carcass", "m.carcass-2"] and open_name(state, "m.carcass") == "m.carcass-3"
     assert state["made"]["m.carcass"]["m.top"]["by"] == "m.carcass-2 birch 15 sheet 1"   # one chain
+    # What the first left went into the second, made: its sheets are marked no more.
+    with pytest.raises(LangError, match="m.carcass: what is not made of it was nested anew in m.carcass-2"):
+        mark(state, TWO, [("birch 15", "2")], WHEN)
 
 
 def test_the_state_file_reads_back_and_refuses_what_it_is_not(tmp_path: Path):

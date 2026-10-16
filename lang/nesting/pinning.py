@@ -334,6 +334,10 @@ def mark(state: State, nest: NestFile, sheets: Sequence[tuple[str, str]] | None,
                         f"({entry['written']}); the marks are the earlier file's.")
     if entry is None and name != base and open_name(state, base) != name:
         raise LangError(f"{name} follows {base}, whose nests before it are not all marked as made.")
+    marked = chain(state, base)
+    if name in marked[:-1]:
+        raise LangError(f"{name}: what is not made of it was nested anew in {marked[marked.index(name) + 1]}, "
+                        "which is marked as made; mark the sheets of the last nest.")
     chosen = sheets_of(nest) if sheets is None else list(sheets)
     if not chosen:
         raise LangError(f"{name}: it has no sheet to mark as made.")

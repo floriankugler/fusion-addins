@@ -26,13 +26,20 @@ Given a single build file, it builds into --out itself, on every save,
 whether a page shows it or not.
 
 The nest view: a design's nests are those its layout lists (declared in
-the build, else one per material per module); each one's files
-(`python -m lang.nesting`, written under the design's out directory as
-`<module>/<nest>/nest.json` and `nest.svg`) are shown when there are any,
-marked stale when their layout is not the one built last. The page's
-"nest again" (POST /nest?design=...&nest=kitchen.carcass) nests the chosen
-nest again, with the inventory beside the build file, one nest at a time.
-Nests are never run on a save: one takes seconds to minutes.
+the build, else one per material per module), each followed by its second
+nests where it is marked as made (`lang.nesting.pinning`); each one's
+files (`python -m lang.nesting`, written under the design's out directory
+as `<module>/<nest>/nest.json` and `nest.svg`) are shown when there are
+any, with what changed since by the parts' fingerprints (a nest stays good
+when only another module changed) and, for a nest marked as made, its
+sheets made and what is not made of it. The page's "nest again" (POST
+/nest?design=...&nest=kitchen.carcass) nests the chosen nest again (a nest
+marked as made: its second nest), with the inventory beside the build
+file, one nest at a time. Nests are never run on a save: one takes seconds
+to minutes. The marks (POST /made?design=...&nest=...[&sheet=2...], POST
+/fixed?design=...&nest=...&part=...) run `python -m lang.nesting --made`
+or `--fixed` and answer with what it printed; they wait while a nest of
+the design runs.
 """
 from __future__ import annotations
 
@@ -174,17 +181,37 @@ class Designs:
             return {"folder": self.folder.name, "designs": list(self.designs), "design": state}
 
     def ask_nest(self, name: str, nest: str) -> bool:
-        """Asks for one of the design's nests by path; False when there is
-        no such design or its layout has no such nest."""
+        """Asks for one of the design's nests by path (a second nest: the
+        nest it follows); False when there is no such design or its layout
+        has no such nest."""
         with self.cond:
             design = self.designs.get(name)
-            if design is None or not any(n["path"] == nest for n in _nests(design)):
+            nest = _base_of(design, nest) if design is not None else ""
+            if design is None or not nest:
                 return False
             if nest not in design.nesting:
                 design.nesting.append(nest)
             design.nest_failed.discard(nest)
             self.cond.notify_all()
             return True
+
+    def pin(self, name: str, args: list[str]) -> tuple[int, str]:
+        """Runs a mark (`--made ...` or `--fixed ...`) for a design: the
+        HTTP status and what the command printed."""
+        with self.cond:
+            design = self.designs.get(name)
+            if design is None:
+                return 404, f"no design {name}"
+            if design.nesting:
+                return 409, f"a nest of {name} is running ({design.nesting[0]}); mark it when it is done"
+        command = [sys.executable, "-m", "lang.nesting", str(design.file), *args, "--out", str(design.out)]
+        try:
+            result = subprocess.run(command, capture_output=True, text=True, cwd=str(REPO), timeout=TIMEOUT)
+            log, ok = (result.stdout + result.stderr).strip(), result.returncode == 0
+        except subprocess.TimeoutExpired:
+            log, ok = f"error: the mark took longer than {TIMEOUT:g} s and was stopped.", False
+        print(f"{design.file.stem}: {' '.join(args)}: {'ok' if ok else 'FAILED'}", flush=True)
+        return (200 if ok else 400), log
 
     def nest_forever(self) -> None:
         while True:
@@ -236,50 +263,153 @@ def _folders(design: Design) -> list[tuple[str, str]]:
     return [(n["path"], nest_folder(n).as_posix()) for n in _nests(design)]  # pyright: ignore[reportArgumentType]
 
 
+def _base_of(design: Design, nest: str) -> str:
+    """The layout's nest a nest named stands for: itself, or the one a
+    second nest follows (`kitchen.carcass-2`); "" for none."""
+    paths = {path for path, _folder in _folders(design)}
+    if nest in paths:
+        return nest
+    head, _, k = nest.rpartition("-")
+    return head if k.isdigit() and head in paths else ""
+
+
 def nest_state(design: Design) -> list[dict[str, Any]]:
-    """The design's nests as the page shows them, each by its path and its
-    folder (`dir`, under the design's url) with its state: `none`,
-    `running`, `failed` (the log), `ok` or `stale` (its layout is not the
-    one built last), and its version (the nest file's time) for the page
-    to reload it."""
+    """The design's nests as the page shows them: each nest of its layout,
+    then its second nests where it is marked as made, each by its path and
+    its folder (`dir`, under the design's url) with:
+
+    - `state`: `none` (not nested), `running`, `failed` (the log), `ok`
+      (its parts are as the build has them), `changed` (parts changed since
+      it was written, or another set of parts: nest again), `made` (marked
+      as made, every sheet), `sheets` (some of its sheets marked);
+    - `version` (the nest file's time) for the page to reload it;
+    - `follows`: the nest a second nest follows, else "";
+    - `sheets`, as [material, name], and `made`, those marked made;
+    - `changed`, `new`, `gone`: for a nest not marked, its parts changed,
+      new to it and gone from it since its file; for the first nest of one
+      marked, against what is made: `changed` (made, changed since), `new`,
+      `not_made` (on a sheet not made), which its second nest takes, `gone`
+      (made, not in the build's nest now), and `made_parts`, by what each
+      was made; `next`, for a nest marked whose next nest is marked too,
+      that one (its sheets cannot be marked any more)."""
+    from lang.core.errors import LangError
+    from lang.nesting.pinning import (chain, changes, empty, open_name, read_state, second_folder, sheets_of,
+                                      standing)
+    from lang.nesting.resolve import nest_folder
     out: list[dict[str, Any]] = []
-    for path, folder in _folders(design):
-        entry: dict[str, Any] = {"path": path, "dir": folder + "/"}
-        file = design.out / folder / "nest.json"
-        if path in design.nesting:
-            entry["state"] = "running"
-        elif path in design.nest_failed:
-            entry |= {"state": "failed", "log": _read(design.out / folder / "nest.log")}
-        else:
-            try:
-                nest = json.loads(file.read_text())
-                entry["version"] = str(file.stat().st_mtime_ns)
-                fresh = nest.get("layout_hash") == _layout_hash(design.out / "layout.json")
-                entry["state"] = "ok" if fresh else "stale"
-            except (OSError, ValueError):
-                entry["state"] = "none"
+    try:
+        state = read_state(design.out)
+    except LangError:
+        state = empty()
+    prints = _fingerprints(design.out / "layout.json")
+    for nest in _nests(design):
+        base = nest["path"]
+        folder = nest_folder(nest)  # pyright: ignore[reportArgumentType]
+        current = {p: prints[p] for p in nest["parts"] if p in prints}
+        busy = "running" if base in design.nesting else "failed" if base in design.nest_failed else None
+        marked = chain(state, base)
+        if not marked:
+            entry = _nest_entry(design, base, folder, "")
+            file = entry.pop("file", None)
+            if busy:
+                entry["state"] = busy
+            elif file is not None:
+                found = changes(file, current)
+                entry |= {"state": "changed" if found else "ok", "changed": found.changed, "new": found.new,
+                          "gone": found.gone}
+            if busy == "failed":
+                entry["log"] = _read(design.out / folder / "nest.log")
+            out.append(entry)
+            continue
+        files: dict[str, Any] = {}
+        for k, name in enumerate(marked, 1):
+            entry = _nest_entry(design, name, folder if k == 1 else second_folder(folder, k), base if k > 1 else "")
+            file = entry.pop("file", None)
+            if file is not None:
+                files[name] = file
+            made = state["nests"][name]["sheets"]
+            entry["made"] = [[m, sheet] for m, sheets in made.items() for sheet in sheets]
+            whole = file is None or len(entry["made"]) >= len(sheets_of(file))
+            entry["state"] = "made" if whole else "sheets"
+            if k < len(marked):
+                entry["next"] = marked[k]       # what it left was nested anew there, and that is marked
+            out.append(entry)
+        st = standing(state, base, current, files)
+        out[-len(marked)] |= {"changed": st.changed, "new": st.new, "not_made": st.not_made, "gone": st.gone,
+                              "made_parts": st.made}
+        name = open_name(state, base)
+        k = len(marked) + 1
+        entry = _nest_entry(design, name, second_folder(folder, k), base)
+        file = entry.pop("file", None)
+        if busy:
+            entry["state"] = busy
+            if busy == "failed":
+                entry["log"] = _read(design.out / folder / "nest.log")
+        elif file is not None:
+            wanted = {p: current[p] for p in st.reasons}
+            found = changes(file, wanted)
+            entry |= {"state": "changed" if found else "ok", "changed": found.changed, "new": found.new,
+                      "gone": found.gone}
+        elif not st.reasons:
+            continue                    # nothing is left for a second nest
         out.append(entry)
     return out
 
 
-_hashes: dict[Path, tuple[int, str | None]] = {}
+def _nest_entry(design: Design, path: str, folder: Path, follows: str) -> dict[str, Any]:
+    """A nest's entry with what its file says (`file`, popped by the
+    caller), `state` `none` without one."""
+    from lang.nesting.pinning import sheets_of
+    entry: dict[str, Any] = {"path": path, "dir": folder.as_posix() + "/", "follows": follows, "state": "none",
+                             "sheets": [], "made": [], "changed": [], "new": [], "gone": []}
+    file = design.out / folder / "nest.json"
+    nest = _nest_file(file)
+    if nest is not None:
+        entry |= {"file": nest, "version": str(file.stat().st_mtime_ns),
+                  "sheets": [[m, s] for m, s in sheets_of(nest)]}
+    return entry
 
 
-def _layout_hash(path: Path) -> str | None:
-    """The hash of a built layout (`lang.core.layout.layout_hash`), kept
-    while the file is unchanged."""
-    from lang.core.layout import layout_hash
+_nest_files: dict[Path, tuple[int, Any]] = {}
+
+
+def _nest_file(path: Path) -> Any:
+    """A nest file of this version (with fingerprints), kept while it is
+    unchanged; None for none or another version."""
+    from lang.nesting.nest_types import NEST_VERSION
     try:
         mtime = path.stat().st_mtime_ns
     except OSError:
         return None
-    cached = _hashes.get(path)
+    cached = _nest_files.get(path)
     if cached is None or cached[0] != mtime:
         try:
-            cached = (mtime, layout_hash(json.loads(path.read_text())))
+            nest = json.loads(path.read_text())
+            cached = (mtime, nest if isinstance(nest, dict) and nest.get("version") == NEST_VERSION else None)  # pyright: ignore[reportUnknownMemberType]
         except (OSError, ValueError):
             cached = (mtime, None)
-        _hashes[path] = cached
+        _nest_files[path] = cached
+    return cached[1]
+
+
+_prints: dict[Path, tuple[int, dict[str, str]]] = {}
+
+
+def _fingerprints(path: Path) -> dict[str, str]:
+    """The parts' fingerprints of a built layout (`lang.nesting.fingerprint`),
+    kept while the file is unchanged."""
+    from lang.nesting.fingerprint import fingerprints
+    try:
+        mtime = path.stat().st_mtime_ns
+    except OSError:
+        return {}
+    cached = _prints.get(path)
+    if cached is None or cached[0] != mtime:
+        try:
+            cached = (mtime, fingerprints(json.loads(path.read_text())))
+        except (OSError, ValueError, KeyError, TypeError):
+            cached = (mtime, {})
+        _prints[path] = cached
     return cached[1]
 
 
@@ -325,14 +455,27 @@ class _Handler(http.server.SimpleHTTPRequestHandler):
 
     def do_POST(self) -> None:
         url = urlsplit(self.path)
-        if url.path != "/nest":
+        query = parse_qs(url.query)
+        design, nest = query.get("design", [""])[0], query.get("nest", [""])[0]
+        if url.path == "/nest":
+            ok = self.designs.ask_nest(design, nest)
+            self.send_response(200 if ok else 404)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        if url.path == "/made" and nest:
+            status, text = self.designs.pin(design, ["--made", nest, *query.get("sheet", [])])
+        elif url.path == "/fixed" and nest and query.get("part"):
+            status, text = self.designs.pin(design, ["--fixed", nest, *query["part"]])
+        else:
             self.send_error(404)
             return
-        query = parse_qs(url.query)
-        ok = self.designs.ask_nest(query.get("design", [""])[0], query.get("nest", [""])[0])
-        self.send_response(200 if ok else 404)
-        self.send_header("Content-Length", "0")
+        body = text.encode()
+        self.send_response(status)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
         self.end_headers()
+        self.wfile.write(body)
 
     def translate_path(self, path: str) -> str:
         path = path.split("?", 1)[0].split("#", 1)[0]

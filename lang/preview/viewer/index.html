@@ -53,7 +53,16 @@
   #nestView svg { width: 100%; height: auto; }
   #nestView g.part { cursor: pointer; }
   #nestView g.part.selected path { fill: #f0a830; }
+  /* pinning: the sheets marked made, the parts changed since or gone */
+  #nestView g.stock.made > rect.sheet { fill: #dfe3ec; stroke: #34507a; stroke-width: 12; }
+  #nestView g.stock.made > rect.blank { fill: #e6e9f0; stroke: #34507a; }
+  #nestView g.part.changed path { fill: #e0736c; stroke: #8a1d16; }
+  #nestView g.part.gone path { fill: #c4c4c4; stroke: #777; }
   #nestInfo.stale { color: var(--accent); }
+  #nestInfo, #nestLog { white-space: pre-wrap; }
+  #nestSheets { flex-wrap: wrap; gap: 4px; }
+  #nestSheets button { min-width: 2.2em; }
+  #nestSheets button.made { background: #dfe3ec; border-color: #34507a; }
   /* a big face's name sits under the part's name, which marks the same spot */
   .labels.with-names .flabel.big { margin-top: 19px; }
 </style>
@@ -77,6 +86,9 @@
   <div class="row"><label for="nestPick">nest</label><select id="nestPick" style="flex:1;min-width:0" disabled></select></div>
   <div id="nestInfo" class="keys">no nest</div>
   <div class="row"><button id="nestShow" disabled>show nest</button><button id="nestRun">nest again</button></div>
+  <div class="row"><button id="nestMade" disabled title="mark the nest as made, every sheet: it is frozen, and the inventory is written back">mark made</button><span class="keys">sheets</span><span id="nestSheets" class="row"></span></div>
+  <div class="row"><button id="nestFix" hidden title="the selected part was changed by hand as the build has it now">fixed by hand</button></div>
+  <div id="nestLog" class="keys"></div>
 
   <h2>SpaceMouse</h2>
   <div id="smStatus" class="keys">connecting…</div>
@@ -153,7 +165,7 @@ import { LineGeometry } from 'three/addons/lines/LineGeometry.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { attachSpaceMouse } from './spacemouse.js';
 import { AXIS, ISO, UP, share, disposeTree, clearGroup } from './scene-utils.js';
-import { layoutVersionProblem, setHidden as markHidden, toggleHides, isolate as isolatePaths, LoadTracker, nestStatusText, chosenNest, settingsText } from './state.js';
+import { layoutVersionProblem, setHidden as markHidden, toggleHides, isolate as isolatePaths, LoadTracker, nestStatusText, chosenNest, settingsText, sheetNames, sheetMade, fixable } from './state.js';
 
 const $ = (id) => document.getElementById(id);
 const view = $('view');
@@ -851,6 +863,7 @@ function select(path) {
   });
   labelsDirty = true;
   showSelected();
+  updateFix();
   renderList();
   $('parts').querySelector('.node.leaf.selected')?.scrollIntoView({ block: 'nearest' });
   if (path) navigator.clipboard?.writeText(path).catch(() => {});
@@ -1295,6 +1308,13 @@ window.preview = {
   nest: (on = true) => { if ($('nestShow').disabled) on = false; showNest(on); return nestShown; },
   /** The design's nests by path (module.nest), the one shown first. */
   nests: () => { const v = $('nestPick').value; return v ? [v, ...nestsListed.filter((p) => p !== v)] : []; },
+  /** The design's nests as the server last gave them (status.json): state, sheets made, parts changed. */
+  nestStates: () => structuredClone(nestsNow),
+  /** Marks a nest as made, whole or the sheets given as [material, name]; resolves with {ok, text}, the
+   * command's answer (null when the dialog is declined). */
+  markMade: (nest, sheets = []) => markMade(nest, sheets),
+  /** Marks a part of a nest made and changed since as fixed by hand; resolves with {ok, text}. */
+  markFixed: (nest, part) => markFixed(nest, part),
   /** Shows the nest named (module.nest) in the nest view; resolves once it is on screen, or with false when the
    * design has no such nest or it is not nested yet. */
   showNest: async (path) => {
@@ -1465,23 +1485,41 @@ async function update(d) {
 let nestShown = false;
 let nestVersion = null;         // the chosen nest and its file's version on screen
 let nestsListed = [];           // the nests' paths in the list
+let nestsNow = [];              // the nests' entries as the server last gave them
+let nestChosen = null;          // the one shown
 const nestWanted = new Map();   // per design, the nest chosen
 
 async function updateNest(nests) {
+  nestsNow = nests;
   const paths = nests.map((n) => n.path);
   if (paths.join('\n') !== nestsListed.join('\n')) {
     nestsListed = paths;
-    $('nestPick').replaceChildren(...paths.map((p) => new Option(p, p)));
+    $('nestPick').replaceChildren(...nests.map((n) => new Option(n.follows ? `  ${n.path} (beside it)` : n.path, n.path)));
   }
   const n = chosenNest(nests, nestWanted.get(design));
+  nestChosen = n;
   $('nestPick').disabled = !n;
   if (n) $('nestPick').value = n.path;
   const info = $('nestInfo');
   info.textContent = nestStatusText(n);
-  info.className = 'keys' + (n?.state === 'stale' || n?.state === 'failed' ? ' stale' : '');
-  const has = n?.state === 'ok' || n?.state === 'stale';
+  info.className = 'keys' + (n?.state === 'changed' || n?.state === 'failed' ? ' stale' : '');
+  const has = !!n?.version;
+  const busy = nests.some((x) => x.state === 'running');
   $('nestShow').disabled = !has;
-  $('nestRun').disabled = !n || n.state === 'running';
+  $('nestRun').disabled = !n || busy;
+  $('nestRun').textContent = n && (n.follows || n.state === 'made' || n.state === 'sheets') ? 'nest what is not made' : 'nest again';
+  $('nestMade').disabled = !has || busy || n.state === 'made' || !!n.next;
+  $('nestSheets').replaceChildren(...(has ? n.sheets : []).map((sheet) => {
+    const b = document.createElement('button');
+    const made = sheetMade(n, sheet);
+    b.textContent = sheetNames([sheet], n.sheets);
+    b.className = made ? 'made' : '';
+    b.title = made ? `${sheet[0]} sheet ${sheet[1]}: made` : `mark ${sheet[0]} sheet ${sheet[1]} as made`;
+    b.disabled = made || busy || !!n.next;
+    b.onclick = () => markMade(n.path, [sheet]);
+    return b;
+  }));
+  updateFix();
   if (!has) {
     if (nestShown) showNest(false);
     nestVersion = null;
@@ -1499,6 +1537,47 @@ async function updateNest(nests) {
     }
     markNestSelection();
   }
+  if (has) markPinning(n);
+}
+
+/** The sheets marked made and the parts changed since or gone, on the drawing. */
+function markPinning(n) {
+  const view = $('nestView');
+  for (const g of view.querySelectorAll('g.stock')) {
+    g.classList.toggle('made', sheetMade(n, [g.dataset.material, g.dataset.sheet]));
+  }
+  for (const g of view.querySelectorAll('g.part')) {
+    g.classList.toggle('changed', (n.changed ?? []).includes(g.dataset.path));
+    g.classList.toggle('gone', (n.gone ?? []).includes(g.dataset.path));
+  }
+}
+
+/** The "fixed by hand" button, for the selected part where it is made and changed since. */
+function updateFix() {
+  const n = nestChosen;
+  const on = !!selectedPath && fixable(n, selectedPath);
+  $('nestFix').hidden = !on;
+  if (on) $('nestFix').textContent = `fixed by hand: ${selectedPath}`;
+}
+
+async function pin(what, query) {
+  $('nestLog').textContent = '…';
+  const response = await fetch(`${what}?design=${encodeURIComponent(design)}&${query}`, { method: 'POST' });
+  const text = await response.text();
+  $('nestLog').textContent = text;
+  await poll();
+  return { ok: response.ok, text };
+}
+
+function markMade(nest, sheets = []) {
+  const what = sheets.length ? `${sheetNames(sheets)} of ${nest}` : `${nest}, every sheet`;
+  if (!confirm(`Mark ${what} as made? The nest is then frozen, and the inventory is written back.`)) return null;
+  return pin('made', `nest=${encodeURIComponent(nest)}` +
+    sheets.map(([m, s]) => `&sheet=${encodeURIComponent(`${m}:${s}`)}`).join(''));
+}
+
+function markFixed(nest, part) {
+  return pin('fixed', `nest=${encodeURIComponent(nest)}&part=${encodeURIComponent(part)}`);
 }
 
 function markNestSelection() {
@@ -1520,6 +1599,13 @@ $('nestRun').onclick = async () => {
   $('nestRun').disabled = true;
   $('nestInfo').textContent = nestStatusText({ state: 'running' });
   await fetch(`nest?design=${encodeURIComponent(design)}&nest=${encodeURIComponent(nest)}`, { method: 'POST' });
+};
+$('nestMade').onclick = () => { if (nestChosen) markMade(nestChosen.path); };
+$('nestFix').onclick = () => {
+  const n = nestChosen;
+  if (n && selectedPath && confirm(`Mark ${selectedPath} as fixed by hand, made as the build has it now?`)) {
+    markFixed(n.path, selectedPath);
+  }
 };
 
 // -- reload loop ---------------------------------------------------------------

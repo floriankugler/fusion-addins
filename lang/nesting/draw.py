@@ -2,8 +2,11 @@
 with its saw cuts (numbered in the order they are made), its blanks with
 their parts (labelled, the grain marked; a `nest(False)` board's own blank
 hatched), the rests kept as stock and the waste, and a line saying what it
-uses. The preview shows it in its nest view; each part
-is a group with `data-path`, which the page selects in the scene.
+uses. The preview shows it in its nest view; each piece of stock is a
+group with `data-material` and `data-sheet`, which the page marks made,
+and each part one with `data-path`, which the page selects in the scene
+and marks changed (a second nest's part says in its title why it is in
+it).
 """
 from __future__ import annotations
 
@@ -27,13 +30,14 @@ def draw_nest(nest: NestFile, items: dict[str, Item]) -> str:
     out: list[str] = []
     y = PAD
     if nest["name"]:
-        out.append(_text(PAD, y + 40, f"{nest['name']} (written {nest['written']})", 48, "title"))
+        follows = f", nesting anew what is not made of {nest['follows']}" if nest["follows"] else ""
+        out.append(_text(PAD, y + 40, f"{nest['name']} (written {nest['written']}{follows})", 48, "title"))
         y += TITLE + 10
     for m in nest["materials"]:
         out.append(_text(PAD, y + 40, _material_line(m), 44, "title"))
         y += TITLE
         for sheet in m["sheets"]:
-            out.append(_sheet(sheet, items, PAD, y))
+            out.append(_sheet(sheet, m["material"], items, PAD, y, nest["reasons"]))
             y += sheet["size"][1] + 60 + PAD
     if nest["left_out"]:
         out.append(_text(PAD, y + 30, "Not nested: " + ", ".join(f"{p['path']} ({p['why']})" for p in nest["left_out"]),
@@ -81,7 +85,8 @@ def _material_line(m: MaterialOut) -> str:
             f"kept {m['kept_area']:.2f} m²" + (f"; left over {len(m['unplaced'])}" if m["unplaced"] else ""))
 
 
-def _sheet(sheet: SheetOut, items: dict[str, Item], left: float, top: float) -> str:
+def _sheet(sheet: SheetOut, material: str, items: dict[str, Item], left: float, top: float,
+           reasons: dict[str, str]) -> str:
     length, width = sheet["size"]
 
     def sy(y: float) -> float:          # sheet y (up) to SVG y (down)
@@ -91,7 +96,7 @@ def _sheet(sheet: SheetOut, items: dict[str, Item], left: float, top: float) -> 
     kept = sum(r["rect"][2] * r["rect"][3] for r in sheet["rests"] if r["keep"])
     waste = length * width - parts_area - kept
     kind = f"{sheet['stock']} {'bought' if sheet['bought'] else 'on hand'}"
-    out = [f'<g class="stock" data-sheet="{sheet["name"]}">',
+    out = [f'<g class="stock" data-material="{html.escape(material)}" data-sheet="{sheet["name"]}">',
            f'<rect class="sheet" x="{left:.1f}" y="{top:.1f}" width="{length:.1f}" height="{width:.1f}"/>']
     for r in sheet["rests"]:
         x, y, w, h = r["rect"]
@@ -111,7 +116,7 @@ def _sheet(sheet: SheetOut, items: dict[str, Item], left: float, top: float) -> 
             if item is None:
                 continue
             shape = item.placed(p["turn"], (x + p["at"][0], y + p["at"][1]))
-            out.append(_part(shape, p["path"], item, left, sy))
+            out.append(_part(shape, p["path"], item, left, sy, reasons.get(p["path"], "")))
         # Over its parts, which come up to its margin.
         out.append(_text(left + x + 6, sy(y + h) + 14, f"{b['name']}  {w:.0f} x {h:.0f}" +
                          (" sawn to size" if own else ""), 22, "blankname"))
@@ -129,7 +134,7 @@ def _sheet(sheet: SheetOut, items: dict[str, Item], left: float, top: float) -> 
     return "\n".join(out)
 
 
-def _part(shape: Polygon, path: str, item: Item, left: float, to_y: Callable[[float], float]) -> str:
+def _part(shape: Polygon, path: str, item: Item, left: float, to_y: Callable[[float], float], why: str) -> str:
     def ring(coords: Sequence[tuple[float, ...]]) -> str:
         pts = list(coords)[:-1]
         return "M " + " L ".join(f"{left + p[0]:.1f} {to_y(p[1]):.1f}" for p in pts) + " Z"
@@ -138,7 +143,8 @@ def _part(shape: Polygon, path: str, item: Item, left: float, to_y: Callable[[fl
     x0, _y0, x1, _y1 = shape.bounds
     size = max(12.0, min(40.0, math.sqrt(shape.area) / 7))
     name = path.rsplit(".", 1)[-1]
-    out = [f'<g class="part" data-path="{html.escape(path)}"><title>{html.escape(path)}</title>',
+    title = html.escape(path + (f" ({why})" if why else ""))
+    out = [f'<g class="part" data-path="{html.escape(path)}"><title>{title}</title>',
            f'<path d="{d}"/>']
     if item.grained:
         length = min(0.5 * (x1 - x0), 240.0)
