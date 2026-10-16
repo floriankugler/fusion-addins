@@ -286,11 +286,12 @@ to come (the CAM keys, pinning) in `design/proposals/settings.md`.
   another bed for a nest cut on another machine; the boards' `material`,
   `grain` and `nest` are refused), `.value(key)` its own, else its scope's
   chain's, `.parts` its boards as the build stands.
-- What no declared nest names makes a nest per material per module (a
-  top-level scope that is no module counts as one, boards outside every
-  scope make the root's), named after the material's label made file-safe
-  (`kitchen.birch_15`): a build that declares none nests each module by
-  material. A declared nest that would take the default's name is an
+- What no declared nest of its module takes makes a nest per material per
+  module (a top-level scope that is no module counts as one, boards
+  outside every scope make the root's), named after the material's label
+  made file-safe (`kitchen.birch_15`): a build that declares none nests
+  each module by material, and a board a remake around its module names
+  stays in its module's nest too. A declared nest that would take the default's name is an
   error, and one that takes no board a problem in the layout.
 - The layout (version 8) lists each module's nests, declared and default:
   path, module, how the parts were chosen, the material, the parts' paths,

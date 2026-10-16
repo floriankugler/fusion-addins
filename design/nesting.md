@@ -17,8 +17,8 @@ open is under "Still open", the experiments behind it are at the end and in
 
 A nest is declared in the module that needs it, `cab.nest("carcass",
 material=ply15)` or `cab.nest("fronts", [front1, front2])`, with settings
-of its own (`.use(nesting.margin(15))`); what no declared nest names makes
-one nest per material per module, named after the material
+of its own (`.use(nesting.margin(15))`); what no declared nest of its
+module takes makes one nest per material per module, named after the material
 (`kitchen.birch_15`), so a build that declares none nests each module's
 boards by material [Florian, 2026-10-16; `design/api.md`, Nests]. The
 package is `lang.nesting`, the boards' key `nest`, the declaration a method
@@ -91,8 +91,9 @@ python -m lang.nesting out/van/layout.json --inventory stock.toml
 
 - A nest's parts: those a nest by material takes (its material's boards in
   its scope that are nested), those a nest names, or a module's nested
-  boards of a material that no declared nest names. A board is in one nest
-  of its module at most; a nest around it may name it again (a remake).
+  boards of a material that no declared nest of the module takes. A board
+  is in one nest of its module at most; a nest around it may name it again
+  (a remake), which leaves it in its module's nest.
 - Nested are boards but those marked `nest(False)` (strips ripped on the
   saw, panels larger than the bed; they go on the cut list by size) and
   manual parts [decided]; never a slat or a lip, which go on the cut list

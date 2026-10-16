@@ -62,8 +62,9 @@ def test_a_nest_names_boards_anywhere_in_its_scope_and_a_root_module_those_of_it
     assert n["van.remake"]["by"] == "parts" and n["van.remake"]["material"] is None
     assert n["van.remake"]["parts"] == ["van.a.left", "van.b.shelf"] and n["van.remake"]["module"] == "van"
     assert n["van.strips"]["parts"] == ["van.a.right"]              # a nest(False) board: its own blank
-    # Named by a nest, a board is in no default nest.
-    assert n["van.a.birch_15"]["parts"] == ["van.a.back"] and "van.b.birch_12" not in n
+    # Named by a nest around their modules, boards stay in their modules' nests.
+    assert n["van.a.birch_15"]["parts"] == ["van.a.left", "van.a.back"]
+    assert n["van.a.birch_15"]["left_out"] == ["van.a.right"] and n["van.b.birch_12"]["parts"] == ["van.b.shelf"]
     assert n["van.b.birch_15"]["parts"] == ["van.b.left", "van.b.right", "van.b.back"]
 
 
@@ -137,6 +138,22 @@ def test_a_board_may_be_in_a_nest_of_its_module_and_one_around_it():
         van.nest("remake", [unit["left"]])
     n = nests()
     assert "van.unit.left" in n["van.unit.carcass"]["parts"] and n["van.remake"]["parts"] == ["van.unit.left"]
+
+
+def test_a_remake_around_a_module_leaves_the_board_in_its_module_s_default_nest():
+    """A root module's nest naming a board takes it from no nest of the
+    board's own module: the module's default nest still has it (the stage 2
+    review: the default nest left out every board any nest named)."""
+    with module("van", BOX) as van:
+        unit = shelf_unit("unit", BOX)
+        van.nest("remake", [unit["left"], unit.child("drawer")["bottom"]])
+        board("floor", ply15).on(van.bottom).between(unit.left, unit.right)
+        van.nest("floor", [van["floor"]])
+    n = nests()
+    assert n["van.unit.birch_15"]["parts"] == ["van.unit.left", "van.unit.right", "van.unit.back"]
+    assert n["van.unit.birch_9"]["parts"] == ["van.unit.drawer.bottom"]
+    assert n["van.remake"]["parts"] == ["van.unit.left", "van.unit.drawer.bottom"]
+    assert "van.birch_15" not in n                       # a nest of its own module takes the floor
 
 
 def test_a_manual_board_named_in_a_nest_is_refused():

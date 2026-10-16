@@ -13,11 +13,13 @@ Its name is unique in its module and holds no dot or path separator; its
 path is the scope's and its name (`kitchen.carcass`). A board is in one
 nest of its module at most.
 
-What no declared nest names makes one nest per material per module, named
-after the material's label made file-safe (`kitchen.birch_15`): a build
-that declares none nests each module's boards by material. Its module is
-the innermost module around a board (a top-level scope that is no module
-counts as one; boards outside every scope make the root's, `birch_15`).
+What no declared nest of its module takes makes one nest per material per
+module, named after the material's label made file-safe
+(`kitchen.birch_15`): a build that declares none nests each module's
+boards by material, and a board a nest around its module names (a remake)
+stays in its module's nest too. Its module is the innermost module around
+a board (a top-level scope that is no module counts as one; boards outside
+every scope make the root's, `birch_15`).
 
 The layout step resolves the selections (`layout_nests`) and writes each
 module's nests, declared and default, with their parts' paths and the
@@ -188,9 +190,10 @@ def layout_nests(roots: Sequence[Scope], loose: Sequence[Board]) -> dict[str, li
     """Every nest of the build by the path of the top-level scope it is in
     ("" for the boards outside every scope): the nests declared, in the
     order of their scopes and declarations, then a default nest per module
-    and material for the nested boards no declared nest names. A board in
-    two nests of one module, a manual board named, and a default nest's
-    name taken by a declared one are errors."""
+    and material for the nested boards no declared nest of their module
+    takes (a nest around the module, a remake, may name them again). A
+    board in two nests of one module, a manual board named, and a default
+    nest's name taken by a declared one are errors."""
     declared: list[tuple[Scope, Nest, list[Board]]] = []
     for root in roots:
         for scope in _scopes(root):
@@ -201,7 +204,6 @@ def layout_nests(roots: Sequence[Scope], loose: Sequence[Board]) -> dict[str, li
                         raise LangError(f"{nest.path} names {b.path}, which is made by hand (manual()) and not "
                                         "nested.", nest.path)
                 declared.append((root, nest, parts))
-    named: set[int] = {id(b) for _r, _n, parts in declared for b in parts}
     taken: dict[tuple[int, int], Nest] = {}           # (module, board) -> nest
     for _root, nest, parts in declared:
         module = home(nest.scope)
@@ -221,7 +223,7 @@ def layout_nests(roots: Sequence[Scope], loose: Sequence[Board]) -> dict[str, li
     groups: dict[tuple[str, str], tuple[str, list[Board]]] = {}
     for root, boards in [(r.path, r.all_parts()) for r in roots] + [("", list(loose))]:
         for b in boards:
-            if not nested(b) or id(b) in named:
+            if not nested(b) or _taken_at_home(b, taken):
                 continue
             module = _module_of(b)
             groups.setdefault((module, b.material.label), (root, []))[1].append(b)
@@ -233,8 +235,14 @@ def layout_nests(roots: Sequence[Scope], loose: Sequence[Board]) -> dict[str, li
                             "give the declared nest another name.", path)
         paths[path] = label
         out.setdefault(root, []).append(_record(path, module, "default", label, boards, {}))
-    _left_out(out, roots, loose, named, declared)
+    _left_out(out, roots, loose, taken, declared)
     return {root: nests for root, nests in out.items() if nests or root}
+
+
+def _taken_at_home(board: Board, taken: dict[tuple[int, int], Nest]) -> bool:
+    """Whether a declared nest of the board's own module takes it."""
+    scope = board.scope
+    return isinstance(scope, Scope) and (id(home(scope)), id(board)) in taken
 
 
 def _scopes(scope: Scope) -> list[Scope]:
@@ -247,17 +255,17 @@ def _record(path: str, module: str, by: str, material: str | None, parts: list[B
             "parts": [b.path for b in parts], "left_out": [], "settings": settings}
 
 
-def _left_out(out: dict[str, list[NestLayout]], roots: Sequence[Scope], loose: Sequence[Board], named: set[int],
-              declared: list[tuple[Scope, Nest, list[Board]]]) -> None:
-    """Lists each board of a sheet material that no nest takes (`nest(False)`,
-    manual) with the nests of its module and material that choose by
-    material and whose scope holds it, so a nest's file says what of its
-    kind stayed out."""
+def _left_out(out: dict[str, list[NestLayout]], roots: Sequence[Scope], loose: Sequence[Board],
+              taken: dict[tuple[int, int], Nest], declared: list[tuple[Scope, Nest, list[Board]]]) -> None:
+    """Lists each board of a sheet material that no nest of its module
+    takes (`nest(False)`, manual) with the nests of its module and material
+    that choose by material and whose scope holds it, so a nest's file says
+    what of its kind stayed out."""
     by_path = {n["path"]: n for nests in out.values() for n in nests}
     domains = [(nest, home(nest.scope).path, {id(b) for b in own_boards(nest.scope)})
                for _root, nest, _parts in declared if nest.material is not None]
     for b in [b for r in roots for b in r.all_parts()] + list(loose):
-        if b.kind != "board" or nested(b) or id(b) in named:
+        if b.kind != "board" or nested(b) or _taken_at_home(b, taken):
             continue
         label = b.material.label
         module = _module_of(b)

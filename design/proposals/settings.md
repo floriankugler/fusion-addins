@@ -39,9 +39,10 @@ blank; the preview listing a design's nests. Described in
 or beyond what is written here: a nest by material takes its scope's
 boards and its sub-scopes', not a module's inside it (which has nests of
 its own); "what no
-declared nest names" is any declared nest, so a board a remake names
-leaves its module's default nest (with pinning the first nest is frozen
-anyway); the nests of one run of the command share the stock on hand in
+declared nest names" is what no declared nest of the board's module takes,
+so a board a remake around its module names stays in its module's nest
+(as built first, any declared nest took it out; corrected with stage 3);
+the nests of one run of the command share the stock on hand in
 their order; the `spacing` join grows the solver's polygon of a part that
 asks for more than the nest's least by the difference, so between two
 parts the larger holds; the `lang.nesting` module `refill` became

@@ -15,7 +15,8 @@ and sub-scopes, by material (some before the boards they take) or by
 boards named anywhere in their scope. `nests_problems` builds it and
 compares every nest in the layout with the model's: each declared nest's
 boards, a default nest per module and material for the nested boards no
-declared nest names, the errors of a manual board named or a board in two
+declared nest of their module takes (a nest of the first module naming a
+board of a module inside it leaves it in that module's), the errors of a manual board named or a board in two
 nests of one module; each nest's values as `resolve` gives them with the
 model's (its own, else its parts' along their chains, else the default,
 the first key the parts disagree on or none gives refused, each part's
@@ -202,7 +203,8 @@ def model_nests(case: NestsCase) -> tuple[dict[str, dict[str, Any]], str | None]
     elif any(a.module == b.module and set(pa) & set(pb) for k, (a, pa) in enumerate(zip(case.nests, chosen))
              for b, pb in list(zip(case.nests, chosen))[k + 1:]):
         error = "is in two nests of"
-    named = {p for parts in chosen for p in parts}
+    # A board stays in its module's default nest unless a nest of that module takes it.
+    named = {(i, j) for decl, parts in zip(case.nests, chosen) for i, j in parts if i == decl.module}
     for k, (decl, parts) in enumerate(zip(case.nests, chosen)):
         out[f"{scope_path(case, decl.module, decl.scope)}.n{k}"] = {
             "module": module_path(case, decl.module), "by": "material" if decl.material is not None else "parts",
@@ -218,6 +220,20 @@ def model_nests(case: NestsCase) -> tuple[dict[str, dict[str, Any]], str | None]
         out[f"{module_path(case, i)}.{file_safe(label)}"] = {
             "module": module_path(case, i), "by": "default", "material": label,
             "parts": [board_path(case, a, b) for a, b in parts], "decl": None, "boards": parts}
+    # Left out: the boards of a nest's module and material that are not nested and that no nest of
+    # their module takes, in its scope for a nest by material.
+    for path, n in out.items():
+        n["left_out"] = []
+        if n["by"] == "parts":
+            continue
+        decl = case.nests[n["decl"]] if n["decl"] is not None else None
+        i = decl.module if decl is not None else next(k for k in range(len(case.modules))
+                                                       if module_path(case, k) == n["module"])
+        for j in _ordered(case, i):
+            b = case.modules[i].boards[j]
+            if (MATS[b.material].label == n["material"] and not _nested(b) and (i, j) not in named
+                    and (decl is None or decl.scope == -1 or b.scope == decl.scope)):
+                n["left_out"].append(board_path(case, i, j))
     return out, error
 
 
@@ -378,7 +394,7 @@ def _compare(case: NestsCase, layout: Layout, want: dict[str, dict[str, Any]]) -
         return [f"the nests are {sorted(got)}, the model's {sorted(want)}"]
     for path, w in want.items():
         g = got[path]
-        for field in ("module", "by", "material", "parts"):
+        for field in ("module", "by", "material", "parts", "left_out"):
             if g[field] != w[field]:
                 problems.append(f"{path}: its {field} is {g[field]!r}, the model's {w[field]!r}")
         if not w["parts"]:
