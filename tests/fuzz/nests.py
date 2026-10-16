@@ -222,7 +222,7 @@ def model_nests(case: NestsCase) -> tuple[dict[str, dict[str, Any]], str | None]
             "parts": [board_path(case, a, b) for a, b in parts], "decl": None, "boards": parts}
     # Left out: the boards of a nest's module and material that are not nested and that no nest of
     # their module takes, in its scope for a nest by material.
-    for path, n in out.items():
+    for n in out.values():
         n["left_out"] = []
         if n["by"] == "parts":
             continue
