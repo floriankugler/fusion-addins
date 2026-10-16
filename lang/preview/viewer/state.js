@@ -27,15 +27,22 @@ export function layoutVersionProblem(layout) {
 
 // -- the nest ---------------------------------------------------------------
 
-/** The nest's state as the side panel says it (`nest` in status.json). */
+/** A nest's state as the side panel says it (an entry of `nests` in status.json). */
 export function nestStatusText(nest) {
   switch (nest?.state) {
     case 'ok': return 'nest of this layout';
     case 'stale': return 'nest of an older layout: nest again';
     case 'running': return 'nesting… (seconds to minutes)';
     case 'failed': return 'the nest failed:\n' + (nest.log ?? '').trim();
-    default: return 'no nest: python -m lang.nesting, or nest again';
+    default: return nest ? 'not nested yet: nest again, or python -m lang.nesting' : 'the layout lists no nest';
   }
+}
+
+/** The nest the panel shows of a design's `nests` (status.json): the one
+ * wanted (by path) if it is listed, else the first; null for none. */
+export function chosenNest(nests, wanted) {
+  if (!nests?.length) return null;
+  return nests.find((n) => n.path === wanted) ?? nests[0];
 }
 
 // -- hidden parts ----------------------------------------------------------

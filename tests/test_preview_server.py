@@ -106,7 +106,7 @@ def test_only_the_designs_pages_show_are_built(tmp_path: Path):
     state = designs.status("van", page="a")
     assert state["designs"] == ["cabinet", "shelf", "van"]
     assert state["design"] == {"name": "van", "url": "out/van/", "version": None, "builds": 0, "state": "building",
-                               "nest": {"state": "none"}}
+                               "nests": []}
     assert designs.next_build() is designs.designs["van"]
     designs.status("cabinet", page="a")                  # the page switched
     assert designs.next_build() is designs.designs["cabinet"]
@@ -150,35 +150,50 @@ def test_a_build_that_runs_too_long_is_stopped_and_keeps_the_last_good_one(tmp_p
     assert "took longer than 1 s and was stopped" in (out / "build.log").read_text()
 
 
-def test_the_nest_state_says_whether_the_nest_is_the_built_layout_s(tmp_path: Path):
-    path = write(tmp_path, "cabinet.py", CABINET)
+NESTED = """from lang import *
+ply = sheet_material('birch', t=15, size=(2470, 1240))
+use(nesting.bed((2000, 1000)), nesting.seconds(0.3), nesting.refill(False))
+with module('cabinet', Box.from_size(width=300, depth=200, height=400)) as m:
+    board('left', ply).on(m.left)
+    board('right', ply).on(m.right)
+    m.nest('sides', [m['left']])
+"""
+
+
+def test_the_nests_listed_say_whether_each_is_the_built_layout_s(tmp_path: Path):
+    path = write(tmp_path, "cabinet.py", NESTED)
     designs = Designs(path, tmp_path / "out")
     design = designs.designs["cabinet"]
-    assert nest_state(design) == {"state": "none"}
+    assert nest_state(design) == []                                # not built yet
     assert rebuild(path, design.out)
-    write(tmp_path, "workshop.toml", "bed = [2000, 1000]\nseconds = 0.3\n[[sheet]]\nsize = [2470, 1240]\n")
-    assert designs.ask_nest("cabinet") and not designs.ask_nest("gone")
-    assert nest_state(design) == {"state": "running"}
-    assert renest(path, design.out)
-    design.nesting = False
-    state = nest_state(design)
+    assert nest_state(design) == [{"path": "cabinet.sides", "dir": "cabinet/sides/", "state": "none"},
+                                  {"path": "cabinet.birch_15", "dir": "cabinet/birch_15/", "state": "none"}]
+    assert designs.ask_nest("cabinet", "cabinet.sides")
+    assert not designs.ask_nest("gone", "cabinet.sides") and not designs.ask_nest("cabinet", "cabinet.oak")
+    assert nest_state(design)[0]["state"] == "running" and nest_state(design)[1]["state"] == "none"
+    assert renest(path, design.out, "cabinet.sides", "cabinet/sides")
+    design.nesting.clear()
+    state = nest_state(design)[0]
     assert state["state"] == "ok" and state["version"]
-    assert {"nest.json", "nest.svg", "nest.layout.json", "nest.log"} <= {p.name for p in design.out.iterdir()}
+    folder = design.out / "cabinet" / "sides"
+    assert {"nest.json", "nest.svg", "nest.layout.json", "nest.log"} <= {p.name for p in folder.iterdir()}
+    assert not (design.out / "cabinet" / "birch_15").exists()           # only the nest asked for
     layout = json.loads((design.out / "layout.json").read_text())
     layout["modules"][0]["parts"][0]["thickness"] = 18.0          # built again since
     (design.out / "layout.json").write_text(json.dumps(layout))
-    assert nest_state(design)["state"] == "stale"
+    assert nest_state(design)[0]["state"] == "stale"
 
 
 def test_a_failed_nest_says_why(tmp_path: Path):
     path = write(tmp_path, "cabinet.py", CABINET)
     out = tmp_path / "out"
-    assert not renest(path, out)                                   # no workshop: no bed
     designs = Designs(path, out)
     design = designs.designs["cabinet"]
-    design.nest_failed = True
-    state = nest_state(design)
-    assert state["state"] == "failed" and "No bed given" in state["log"]
+    assert rebuild(path, out)
+    assert not renest(path, out, "cabinet.birch_15", "cabinet/birch_15")       # no bed set anywhere
+    design.nest_failed.add("cabinet.birch_15")
+    (state,) = nest_state(design)
+    assert state["state"] == "failed" and "no nesting.bed is used for it" in state["log"]
 
 
 def _handler(out: Path) -> _Handler:

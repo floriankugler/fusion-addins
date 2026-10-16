@@ -25,12 +25,14 @@ camera, or shows the build's error.
 Given a single build file, it builds into --out itself, on every save,
 whether a page shows it or not.
 
-The nest view: a design's nest (`python -m lang.nesting`, written into its
-out directory as `nest.json` and `nest.svg`) is shown when there is one,
-marked stale when its layout is not the one built last; the page's Nest
-button (POST /nest?design=...) nests the design again, with the workshop
-file beside its build file, one nest at a time. Nests are never run on a
-save: one takes seconds to minutes.
+The nest view: a design's nests are those its layout lists (declared in
+the build, else one per material per module); each one's files
+(`python -m lang.nesting`, written under the design's out directory as
+`<module>/<nest>/nest.json` and `nest.svg`) are shown when there are any,
+marked stale when their layout is not the one built last. The page's
+"nest again" (POST /nest?design=...&nest=kitchen.carcass) nests the chosen
+nest again, with the inventory beside the build file, one nest at a time.
+Nests are never run on a save: one takes seconds to minutes.
 """
 from __future__ import annotations
 
@@ -45,7 +47,7 @@ import subprocess
 import sys
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, quote, unquote, urlsplit
@@ -93,8 +95,10 @@ class Design:
     building: bool = False
     ok: bool = False                # whether its last build went through
     builds: int = 0                 # builds finished since the server started
-    nesting: bool = False           # a nest running or asked for
-    nest_failed: bool = False       # whether the last nest asked for failed
+    #: The nests asked for, by path, the first one running.
+    nesting: list[str] = field(default_factory=list[str])
+    #: The nests whose last run asked for failed.
+    nest_failed: set[str] = field(default_factory=set[str])
 
     @property
     def version(self) -> str | None:
@@ -165,17 +169,20 @@ class Designs:
             state = None if design is None else {
                 "name": name, "url": design.url, "version": design.version, "builds": design.builds,
                 "state": "building" if design.stale or design.building else "ok" if design.ok else "failed",
-                "nest": nest_state(design),
+                "nests": nest_state(design),
             }
             return {"folder": self.folder.name, "designs": list(self.designs), "design": state}
 
-    def ask_nest(self, name: str) -> bool:
-        """Asks for the design's nest; False when there is no such design."""
+    def ask_nest(self, name: str, nest: str) -> bool:
+        """Asks for one of the design's nests by path; False when there is
+        no such design or its layout has no such nest."""
         with self.cond:
             design = self.designs.get(name)
-            if design is None:
+            if design is None or not any(n["path"] == nest for n in _nests(design)):
                 return False
-            design.nesting, design.nest_failed = True, False
+            if nest not in design.nesting:
+                design.nesting.append(nest)
+            design.nest_failed.discard(nest)
             self.cond.notify_all()
             return True
 
@@ -184,9 +191,13 @@ class Designs:
             with self.cond:
                 while (design := next((d for d in self.designs.values() if d.nesting), None)) is None:
                     self.cond.wait()
-            ok = renest(design.file, design.out)
+                nest = design.nesting[0]
+                folder = next((d for path, d in _folders(design) if path == nest), nest.replace(".", "/"))
+            ok = renest(design.file, design.out, nest, folder)
             with self.cond:
-                design.nesting, design.nest_failed = False, not ok
+                design.nesting.remove(nest)
+                if not ok:
+                    design.nest_failed.add(nest)
 
     def next_build(self) -> Design | None:
         """A stale design that a page shows; given a single build file, that
@@ -210,22 +221,45 @@ class Designs:
                 design.builds += 1
 
 
-def nest_state(design: Design) -> dict[str, Any]:
-    """The design's nest as the page shows it: `none`, `running`, `failed`
-    (the log), `ok` or `stale` (its layout is not the one built last), and
-    its version (the nest file's time) for the page to reload it."""
-    path = design.out / "nest.json"
-    if design.nesting:
-        return {"state": "running"}
-    if design.nest_failed:
-        return {"state": "failed", "log": _read(design.out / "nest.log")}
+def _nests(design: Design) -> list[dict[str, Any]]:
+    """The nests the design's last layout lists that have parts."""
     try:
-        nest = json.loads(path.read_text())
-        version = str(path.stat().st_mtime_ns)
-    except (OSError, ValueError):
-        return {"state": "none"}
-    return {"state": "ok" if nest.get("layout_hash") == _layout_hash(design.out / "layout.json") else "stale",
-            "version": version}
+        layout = json.loads((design.out / "layout.json").read_text())
+        return [n for m in layout["modules"] for n in m.get("nests", []) if n["parts"]]
+    except (OSError, ValueError, KeyError, TypeError):
+        return []
+
+
+def _folders(design: Design) -> list[tuple[str, str]]:
+    """Each nest's path and its folder under the design's out directory."""
+    from lang.nesting.resolve import nest_folder
+    return [(n["path"], nest_folder(n).as_posix()) for n in _nests(design)]  # pyright: ignore[reportArgumentType]
+
+
+def nest_state(design: Design) -> list[dict[str, Any]]:
+    """The design's nests as the page shows them, each by its path and its
+    folder (`dir`, under the design's url) with its state: `none`,
+    `running`, `failed` (the log), `ok` or `stale` (its layout is not the
+    one built last), and its version (the nest file's time) for the page
+    to reload it."""
+    out: list[dict[str, Any]] = []
+    for path, folder in _folders(design):
+        entry: dict[str, Any] = {"path": path, "dir": folder + "/"}
+        file = design.out / folder / "nest.json"
+        if path in design.nesting:
+            entry["state"] = "running"
+        elif path in design.nest_failed:
+            entry |= {"state": "failed", "log": _read(design.out / folder / "nest.log")}
+        else:
+            try:
+                nest = json.loads(file.read_text())
+                entry["version"] = str(file.stat().st_mtime_ns)
+                fresh = nest.get("layout_hash") == _layout_hash(design.out / "layout.json")
+                entry["state"] = "ok" if fresh else "stale"
+            except (OSError, ValueError):
+                entry["state"] = "none"
+        out.append(entry)
+    return out
 
 
 _hashes: dict[Path, tuple[int, str | None]] = {}
@@ -256,18 +290,18 @@ def _read(path: Path) -> str:
         return ""
 
 
-def renest(build_file: Path, out_dir: Path) -> bool:
-    """Nests the design into `out_dir` (`python -m lang.nesting`), its output
-    in nest.log there."""
-    command = [sys.executable, "-m", "lang.nesting", str(build_file), "--out", str(out_dir)]
+def renest(build_file: Path, out_dir: Path, nest: str, folder: str) -> bool:
+    """Nests one of the design's nests into `out_dir` (`python -m
+    lang.nesting`), its output in nest.log in the nest's `folder` there."""
+    command = [sys.executable, "-m", "lang.nesting", str(build_file), nest, "--out", str(out_dir)]
     try:
         result = subprocess.run(command, capture_output=True, text=True, cwd=str(REPO), timeout=NEST_TIMEOUT)
         log, ok = (result.stdout + result.stderr).strip(), result.returncode == 0
     except subprocess.TimeoutExpired:
         log, ok = f"error: the nest took longer than {NEST_TIMEOUT:g} s and was stopped.", False
-    out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / "nest.log").write_text(log + "\n")
-    print(f"{build_file.stem}: nest {'ok' if ok else 'FAILED'}", flush=True)
+    (out_dir / folder).mkdir(parents=True, exist_ok=True)
+    (out_dir / folder / "nest.log").write_text(log + "\n")
+    print(f"{build_file.stem}: nest {nest} {'ok' if ok else 'FAILED'}", flush=True)
     return ok
 
 
@@ -294,7 +328,8 @@ class _Handler(http.server.SimpleHTTPRequestHandler):
         if url.path != "/nest":
             self.send_error(404)
             return
-        ok = self.designs.ask_nest(parse_qs(url.query).get("design", [""])[0])
+        query = parse_qs(url.query)
+        ok = self.designs.ask_nest(query.get("design", [""])[0], query.get("nest", [""])[0])
         self.send_response(200 if ok else 404)
         self.send_header("Content-Length", "0")
         self.end_headers()

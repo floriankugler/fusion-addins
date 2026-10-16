@@ -2,7 +2,7 @@
 // the promises of preview.loaded() and preview.open().
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { LAYOUT_VERSION, layoutVersionProblem, setHidden, toggleHides, isolate, LoadTracker, nestStatusText, settingsText } from '../state.js';
+import { LAYOUT_VERSION, layoutVersionProblem, setHidden, toggleHides, isolate, LoadTracker, nestStatusText, chosenNest, settingsText } from '../state.js';
 
 // Whether a promise settled, without waiting for it: 'pending', or
 // ['resolved', value] / ['rejected', message].
@@ -44,8 +44,17 @@ test('the nest state as the side panel says it', () => {
   assert.match(nestStatusText({ state: 'stale' }), /older layout/);
   assert.match(nestStatusText({ state: 'running' }), /nesting/);
   assert.equal(nestStatusText({ state: 'failed', log: 'error: no bed\n' }), 'the nest failed:\nerror: no bed');
-  assert.match(nestStatusText({ state: 'none' }), /no nest/);
-  assert.match(nestStatusText(undefined), /no nest/);
+  assert.match(nestStatusText({ state: 'none' }), /not nested yet/);
+  assert.match(nestStatusText(undefined), /lists no nest/);
+});
+
+test('the nest shown is the one wanted, else the first', () => {
+  const nests = [{ path: 'kitchen.carcass' }, { path: 'kitchen.birch_9' }];
+  assert.equal(chosenNest(nests, 'kitchen.birch_9').path, 'kitchen.birch_9');
+  assert.equal(chosenNest(nests, 'gone.birch_15').path, 'kitchen.carcass');
+  assert.equal(chosenNest(nests, undefined).path, 'kitchen.carcass');
+  assert.equal(chosenNest([], 'kitchen.carcass'), null);
+  assert.equal(chosenNest(undefined, null), null);
 });
 
 test('setHidden hides and shows paths', () => {

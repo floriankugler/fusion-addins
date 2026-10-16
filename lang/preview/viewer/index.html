@@ -74,6 +74,7 @@
   <div id="selected">click a part for its path</div>
 
   <h2>Nest</h2>
+  <div class="row"><label for="nestPick">nest</label><select id="nestPick" style="flex:1;min-width:0" disabled></select></div>
   <div id="nestInfo" class="keys">no nest</div>
   <div class="row"><button id="nestShow" disabled>show nest</button><button id="nestRun">nest again</button></div>
 
@@ -152,7 +153,7 @@ import { LineGeometry } from 'three/addons/lines/LineGeometry.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { attachSpaceMouse } from './spacemouse.js';
 import { AXIS, ISO, UP, share, disposeTree, clearGroup } from './scene-utils.js';
-import { layoutVersionProblem, setHidden as markHidden, toggleHides, isolate as isolatePaths, LoadTracker, nestStatusText, settingsText } from './state.js';
+import { layoutVersionProblem, setHidden as markHidden, toggleHides, isolate as isolatePaths, LoadTracker, nestStatusText, chosenNest, settingsText } from './state.js';
 
 const $ = (id) => document.getElementById(id);
 const view = $('view');
@@ -1292,6 +1293,16 @@ function pathsOf(names) {
 window.preview = {
   /** The nest view on or off (`k`); true when a nest is shown. */
   nest: (on = true) => { if ($('nestShow').disabled) on = false; showNest(on); return nestShown; },
+  /** The design's nests by path (module.nest), the one shown first. */
+  nests: () => { const v = $('nestPick').value; return v ? [v, ...nestsListed.filter((p) => p !== v)] : []; },
+  /** Shows the nest named (module.nest) in the nest view; resolves once it is on screen, or with false when the
+   * design has no such nest or it is not nested yet. */
+  showNest: async (path) => {
+    if (!nestsListed.includes(path)) return false;
+    nestWanted.set(design, path);
+    await poll();
+    return preview.nest(true);
+  },
   /** The camera: {eye, target, fov}. */
   camera: cameraState,
   /** Sets the camera: eye and target as [x, y, z] mm, fov in degrees; each optional. */
@@ -1394,6 +1405,7 @@ function openDesign(name) {
   wanted = null;
   version = designUrl = shownBuild = null;
   nestVersion = null;
+  nestsListed = [];
   $('nestView').replaceChildren();
   showNest(false);
   const view = views.get(name);
@@ -1440,31 +1452,46 @@ async function update(d) {
     version = d.version;
     await load();
   }
-  if (design === d.name) await updateNest(d.nest ?? { state: 'none' });
+  if (design === d.name) await updateNest(d.nests ?? []);
   if (design === d.name) tracker.reported({ builds: d.builds, state: d.state, version: d.version, log: buildLog });
 }
 
 // -- the nest view ---------------------------------------------------------------
 //
-// The design's nest (python -m lang.nesting, or the Nest button) drawn by the
-// nest step as nest.svg; a part clicked in it is selected in the model.
+// The design's nests, as its layout lists them (module.nest); the one chosen
+// (python -m lang.nesting, or "nest again") drawn by the nest step as
+// nest.svg in its folder; a part clicked in it is selected in the model.
 
 let nestShown = false;
-let nestVersion = null;         // the nest file's version on screen
+let nestVersion = null;         // the chosen nest and its file's version on screen
+let nestsListed = [];           // the nests' paths in the list
+const nestWanted = new Map();   // per design, the nest chosen
 
-async function updateNest(n) {
+async function updateNest(nests) {
+  const paths = nests.map((n) => n.path);
+  if (paths.join('\n') !== nestsListed.join('\n')) {
+    nestsListed = paths;
+    $('nestPick').replaceChildren(...paths.map((p) => new Option(p, p)));
+  }
+  const n = chosenNest(nests, nestWanted.get(design));
+  $('nestPick').disabled = !n;
+  if (n) $('nestPick').value = n.path;
   const info = $('nestInfo');
   info.textContent = nestStatusText(n);
-  info.className = 'keys' + (n.state === 'stale' || n.state === 'failed' ? ' stale' : '');
-  const has = n.state === 'ok' || n.state === 'stale';
+  info.className = 'keys' + (n?.state === 'stale' || n?.state === 'failed' ? ' stale' : '');
+  const has = n?.state === 'ok' || n?.state === 'stale';
   $('nestShow').disabled = !has;
-  $('nestRun').disabled = n.state === 'running';
-  if (!has && nestShown) showNest(false);
-  if (has && n.version !== nestVersion) {
+  $('nestRun').disabled = !n || n.state === 'running';
+  if (!has) {
+    if (nestShown) showNest(false);
+    nestVersion = null;
+    $('nestView').replaceChildren();
+  }
+  if (has && `${n.path} ${n.version}` !== nestVersion) {
     const url = designUrl;
-    const text = await (await fetch(url + 'nest.svg', { cache: 'no-store' })).text();
+    const text = await (await fetch(url + n.dir + 'nest.svg', { cache: 'no-store' })).text();
     if (url !== designUrl) return;
-    nestVersion = n.version;
+    nestVersion = `${n.path} ${n.version}`;
     const view = $('nestView');
     view.innerHTML = text;
     for (const g of view.querySelectorAll('g.part')) {
@@ -1486,10 +1513,13 @@ function showNest(on) {
 }
 
 $('nestShow').onclick = () => showNest(!nestShown);
+$('nestPick').onchange = (e) => { nestWanted.set(design, e.target.value); poll(); };
 $('nestRun').onclick = async () => {
+  const nest = $('nestPick').value;
+  if (!nest) return;
   $('nestRun').disabled = true;
   $('nestInfo').textContent = nestStatusText({ state: 'running' });
-  await fetch('nest?design=' + encodeURIComponent(design), { method: 'POST' });
+  await fetch(`nest?design=${encodeURIComponent(design)}&nest=${encodeURIComponent(nest)}`, { method: 'POST' });
 };
 
 // -- reload loop ---------------------------------------------------------------
