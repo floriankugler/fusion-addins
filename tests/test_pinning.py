@@ -120,15 +120,62 @@ def test_a_ledger_written_from_nothing_says_what_it_is(tmp_path: Path):
 @pytest.mark.parametrize("text, message", [
     ("[[stock]\nmaterial = 1", "Expected"),
     ('[[stock]]\nmaterial = "birch 15"\nsize = [1, 2]\ncolour = "red"\n', "unknown key colour"),
-    ('stock = [{material = "birch 15", size = [600, 400]}]\n', "not written as \\[\\[stock\\]\\] tables"),
-    ('[[stock]]\nmaterial = "birch 15"\nsize = [600, 400]\ncount = 0x2\n', "count is not on a line of its own"),
+    ('[stock]\nmaterial = "birch 15"\nsize = [600, 400]\n', "as a \\[\\[stock\\]\\] table"),
+    ('stock = "birch 15"\n', "as a \\[\\[stock\\]\\] table"),
 ])
-def test_a_ledger_it_cannot_read_or_rewrite_is_refused_and_left_as_it_was(tmp_path: Path, text: str, message: str):
+def test_a_ledger_it_cannot_read_is_refused_and_left_as_it_was(tmp_path: Path, text: str, message: str):
     path = tmp_path / "inventory.toml"
     path.write_text(text)
     with pytest.raises(LangError, match=message):
         write_back(path, Change(taken=(Piece("birch 15", 600, 400),), added=((Piece("birch 15", 300, 300), ""),)))
     assert path.read_text() == text
+
+
+TAKE = Change(taken=(Piece("birch 15", 600, 400),), added=((Piece("birch 15", 300, 300), "kept from m.a"),))
+
+
+@pytest.mark.parametrize("text, written", [
+    # The stock as an inline array: the piece out, the rest appended (its comment where the array spans lines).
+    ('stock = [{material = "birch 15", size = [600, 400]}, {material = "birch 9", size = [1, 2]}]\n',
+     'stock = [{material = "birch 9", size = [1, 2]}, {material = "birch 15", size = [300, 300]}]\n'),
+    ('stock = [\n    {material = "birch 9", size = [1, 2]},  # thin\n'
+     '    {material = "birch 15", size = [600, 400], count = 2},\n]\n',
+     'stock = [\n    {material = "birch 9", size = [1, 2]},  # thin\n'
+     '    {material = "birch 15", size = [600, 400], count = 1},\n'
+     '    {material = "birch 15", size = [300, 300]}, # kept from m.a\n]\n'),
+    # Quoted keys, a count in hex, a header's own comment, no newline at the end.
+    ('[[stock]]  # by the door\n"material" = "birch 15"\n"size" = [600, 400]\n"count" = 0x3',
+     '[[stock]]  # by the door\n"material" = "birch 15"\n"size" = [600, 400]\n"count" = 2\n\n# kept from m.a\n'
+     '[[stock]]\nmaterial = "birch 15"\nsize = [300, 300]\n'),
+])
+def test_other_spellings_tomlkit_rewrites_are_taken(text: str, written: str):
+    """The line-based rewrite before tomlkit refused these (an inline array,
+    a count not written in decimal)."""
+    new, _notes = rewrite(text, TAKE)
+    assert new == written
+
+
+def test_a_ledger_left_as_it_is_reads_back_the_same():
+    assert rewrite(LEDGER, Change())[0] == LEDGER
+    assert rewrite(LEDGER.replace("[[stock]]", "[[stock]]   # a piece"), Change())[0] == \
+        LEDGER.replace("[[stock]]", "[[stock]]   # a piece")
+
+
+def test_the_only_entry_used_up_keeps_the_loose_comment_after_it():
+    """Taken out, the only entry left the document with no stock key, which
+    the rewrite then removed a second time (fuzzing found it)."""
+    text = '# Mine.\n\n# above\n[[stock]]\nmaterial = "birch 15"\n# inside\nsize = [1250, 600]\n\n# loose\n\n'
+    new, _notes = rewrite(text, Change(taken=(Piece("birch 15", 1250, 600),)))
+    assert new == "# Mine.\n\n# loose\n\n"
+
+
+def test_the_first_entry_used_up_leaves_what_follows_it_before_the_next():
+    text = "# Mine.\n\n# above the first\n[[stock]]\nmaterial = \"birch 15\"\nsize = [600, 400]\n\n# loose\n\n" \
+           "# above the second\n[[stock]]\nmaterial = \"birch 9\"\nsize = [800, 400]\n"
+    new, _notes = rewrite(text, Change(taken=(Piece("birch 15", 600, 400),)))
+    assert new == "# Mine.\n\n# loose\n\n# above the second\n[[stock]]\nmaterial = \"birch 9\"\nsize = [800, 400]\n"
+    new, _notes = rewrite(new, Change(taken=(Piece("birch 9", 800, 400),)))
+    assert new == "# Mine.\n\n# loose\n"
 
 
 # -- marks and the state file -----------------------------------------------------------------------
