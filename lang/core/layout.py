@@ -17,11 +17,13 @@ from .scope import registry
 
 
 def build_layout() -> Layout:
-    """Resolves all registered modules and parts into one layout dict.
-    Each module lists its own problems (its checks' and the notes its parts
+    """Resolves all registered modules and parts into one layout dict,
+    after running the lazy modules' bodies (`registry.run_bodies`). Each
+    module lists its own problems (its checks' and the notes its parts
     left); the layout's `problems` are all of them, once each, and the
     snapshots' notes."""
     f = directions.frame
+    registry.run_bodies()
     modules: list[ModuleLayout] = []
     problems: list[str] = []
     for root in registry.roots:

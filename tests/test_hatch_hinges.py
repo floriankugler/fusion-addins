@@ -39,7 +39,7 @@ def _cabinet(hinge: HatchHinge | None = None, *, frame: str = "cabinet", hatch_t
     if frame == "van":
         cab = module("cab", box)
     else:
-        cab = cabinet("cab", box, front=box.front, mirrored=frame == "mirrored")
+        cab = module("cab", box, front=box.front, mirrored=frame == "mirrored")
     with cab:
         carcass = cab.front.into(hatch_t + gap)
         left = board("left", ply18).on(cab.left).between(carcass, cab.back)
@@ -249,7 +249,7 @@ def test_rotated_cabinet():
     panel at x 582..600 carries the left hinge: carcass holes 37 behind the
     front at y 265, pilot holes 25 in from x 582."""
     box = Box.from_size(width=320, depth=600, height=350)
-    with cabinet("cab", box, front=box.right) as cab:
+    with module("cab", box, front=box.right) as cab:
         left = board("left", ply18).on(cab.left).between(cab.front.into(18), cab.back)
         right = board("right", ply18).on(cab.right).between(cab.front.into(18), cab.back)
         top = board("top", ply18).on(cab.top).between(left, right, cab.front.into(18), cab.back)
@@ -492,7 +492,7 @@ def test_two_hatches_in_one_cabinet():
     items are named by the hatches (a second hatch in one scope was
     refused before)."""
     box = Box.from_size(width=1000, depth=320, height=350)
-    with cabinet("cab", box, front=box.front) as cab:
+    with module("cab", box, front=box.front) as cab:
         carcass = cab.front.into(18)
         left = board("left", ply18).on(cab.left).between(carcass, cab.back)
         right = board("right", ply18).on(cab.right).between(carcass, cab.back)
@@ -517,7 +517,7 @@ def test_two_hinges_whose_plates_meet_on_a_narrow_hatch_are_refused():
     for width, inner in ((85, 49), (36 + 69, 69)):
         registry.reset()
         box = Box.from_size(width=width, depth=320, height=350)
-        with cabinet("cab", box, front=box.front) as cab:
+        with module("cab", box, front=box.front) as cab:
             carcass = cab.front.into(18)
             left = board("left", ply18).on(cab.left).between(carcass, cab.back)
             right = board("right", ply18).on(cab.right).between(carcass, cab.back)

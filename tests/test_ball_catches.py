@@ -49,7 +49,7 @@ def _floor(catch: BallCatch | None = None, edge: str | None = "left", front: boo
     module in the van's terms or in a cabinet opening the same way
     (front=box.front), whose left is the van's right."""
     catch = catch or BallCatch()
-    with (cabinet("floor", BOX, front=BOX.front) if front else module("floor", BOX)) as f:
+    with (module("floor", BOX, front=BOX.front) if front else module("floor", BOX)) as f:
         panel = board("panel", ply15).on(f.bottom).show(f.top)
         panel.cut(shape or rect(width=400, depth=300).rounded(20), at=panel.top.center, name="opening")
         hatch = catch.hatch("hatch", panel.opening)
@@ -327,7 +327,7 @@ def test_a_hatch_in_an_upright_panel():
     lies at y 0 to 15, its inner face (+y) is the hidden one, so the
     catches go there and stand into the cabinet."""
     box = Box.from_size(width=500, depth=600, height=700)
-    with cabinet("cab", box, front=box.right) as cab:
+    with module("cab", box, front=box.right) as cab:
         back = board("back", ply15).on(cab.back)
         back.cut(rect(width=300, height=400).rounded(15), at=back.outer.center, name="opening")
         catch = BallCatch()
@@ -516,7 +516,7 @@ def test_catches_on_a_level_edge_are_numbered_from_the_panels_left():
         registry.reset()
         wide = front in ("front", "back")                   # the cabinet 800 wide whichever way it faces
         box = Box.from_size(width=800 if wide else 400, depth=400 if wide else 800, height=600)
-        with cabinet("cab", box, front=getattr(box, front)) as cab:
+        with module("cab", box, front=getattr(box, front)) as cab:
             panel = board("panel", ply15).on(cab.back).show(cab.front)
             panel.cut(rect(width=400, height=300).rounded(20), at=panel.inner.center, name="opening")
             catch = BallCatch()

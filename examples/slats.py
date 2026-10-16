@@ -19,7 +19,7 @@ from stock import oak, pine, ply9, ply18
 
 
 box = Box.from_size(width=620, depth=320, height=800)
-with cabinet("unit", box, front=box.front) as unit:
+with module("unit", box, front=box.front) as unit:
     top = board("top", ply18).on(unit.top)
     left = board("left", ply18).on(unit.left.into(10)).between(unit.bottom, top, unit.front.into(10), unit.back)
     right = board("right", ply18).on(unit.right.into(10)).between(unit.bottom, top, unit.front.into(10), unit.back)

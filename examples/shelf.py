@@ -10,7 +10,7 @@ from stock import ply18
 
 
 box = Box.from_size(width=600, depth=250, height=900)
-with cabinet("shelf", box, front=box.front) as unit:
+with module("shelf", box, front=box.front) as unit:
     left = board("left", ply18).on(unit.left)
     right = board("right", ply18).on(unit.right)
     bottom = board("bottom", ply18).on(unit.bottom.into(60)).between(left, right)

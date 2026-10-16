@@ -18,7 +18,7 @@ from hypothesis import strategies as st
 
 from fuzzing import fresh, sizes
 from hardware import FRONTS, _box, _origin, _thickness  # pyright: ignore[reportPrivateUsage]
-from lang import Board, LangError, Scope, board, cabinet, cabineo, check, domino, inside_box, sheet_material
+from lang import Board, LangError, Scope, board, cabineo, check, domino, inside_box, module, sheet_material
 from lang.core.layout import build_layout
 from lang.std import carcass
 
@@ -62,7 +62,7 @@ def _build(case: CarcassCase, front: int, origin: tuple[float, float, float]) ->
     ply = sheet_material("birch", t=case.t)
     problems: list[str] = []
     with fresh():
-        with cabinet("cab", box, front=getattr(box, FRONTS[front])) as cab:
+        with module("cab", box, front=getattr(box, FRONTS[front])) as cab:
             check(inside_box)
             door: Board | None = None
             limit = None

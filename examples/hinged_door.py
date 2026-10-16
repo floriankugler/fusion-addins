@@ -20,7 +20,7 @@ GAP = 3  # around the door
 def hinged_cabinet(name: str, box: Box, hinge: ConcealedHinge, *, front: Side) -> Scope:
     """A cabinet in its own frame with one overlay door hinged on its left
     side, the hinges `hinge`. `front=` places it (see `cabinet`)."""
-    with cabinet(name, box, front=front) as cab:
+    with module(name, box, front=front) as cab:
         # the carcass stands behind the door
         left, right, bottom, top, back = carcass(cab, ply15, back=ply9, front=cab.front.into(ply12.thickness))
 

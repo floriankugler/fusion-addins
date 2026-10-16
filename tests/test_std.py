@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from lang import (Board, Box, LangError, board, box_joint, cabineo, cabinet, domino, drawer_slide, groove, module,
+from lang import (Board, Box, LangError, board, box_joint, cabineo, domino, drawer_slide, groove, module,
                   rect, scope, sheet_material)
 from lang.core.layout import build_layout
 from lang.std import Carcass, OpenCarcass, carcass, drawer_box
@@ -57,7 +57,7 @@ def test_carcass_writes_the_drawer_cabinet_s_lines():
     carcass of `examples/drawer_cabinet.py` as it was written by hand,
     board for board and operation for operation."""
     box = Box.from_size(width=500, depth=600, height=720)
-    with cabinet("hand", box, front=box.right) as cab:
+    with module("hand", box, front=box.right) as cab:
         left = board("left", ply15).on(cab.left)
         right = board("right", ply15).on(cab.right)
         for side in (left, right):
@@ -68,7 +68,7 @@ def test_carcass_writes_the_drawer_cabinet_s_lines():
         bottom.join(left, right, using=cabineo(count=3))
         top.join(left, right, using=cabineo(count=3))
         back.join(left, right, bottom, top, using=domino("4x20", count=2))
-    with cabinet("std", box, front=box.right) as cab:
+    with module("std", box, front=box.right) as cab:
         c = carcass(cab, ply15, back=ply9, toekick=(60, 100), joins=cabineo(count=3))
     assert isinstance(c, Carcass) and [p.name for p in c] == ["left", "right", "bottom", "top", "back"]
     assert c.bottom.bottom.value == pytest.approx(cab.bottom.value + 100)
@@ -81,7 +81,7 @@ def test_carcass_defaults_and_front_limit():
     sides, the bottom and the top back from the front, as a position or as
     a board standing there."""
     box = Box.from_size(width=350, depth=450, height=600)
-    with cabinet("hand", box, front=box.right) as cab:
+    with module("hand", box, front=box.right) as cab:
         behind = cab.front.into(ply12.thickness)
         left = board("left", ply15).on(cab.left).between(behind)
         right = board("right", ply15).on(cab.right).between(behind)
@@ -91,11 +91,11 @@ def test_carcass_defaults_and_front_limit():
         bottom.join(left, right, using=cabineo(count=2))
         top.join(left, right, using=cabineo(count=2))
         back.join(left, right, bottom, top, using=domino("4x20", count=2))
-    with cabinet("std", box, front=box.right) as cab:
+    with module("std", box, front=box.right) as cab:
         c = carcass(cab, ply15, back=ply9, front=cab.front.into(ply12.thickness))
     assert _module_layout("std") == _module_layout("hand")
     assert c.left.front.value == pytest.approx(cab.front.into(ply12.thickness).value)
-    with cabinet("door", box, front=box.right) as cab:
+    with module("door", box, front=box.right) as cab:
         door = board("door", ply12).on(cab.front)
         d = carcass(cab, ply15, back=ply9, front=door)
     assert d.left.front.value == pytest.approx(door.back.value)
@@ -107,7 +107,7 @@ def test_carcass_without_a_back():
     """`back=None` makes four boards, joined bottom and top to the sides;
     `back_joins=` is then an error, since there is nothing to join."""
     box = Box.from_size(width=800, depth=400, height=450)
-    with cabinet("open", box, front=box.back) as cab:
+    with module("open", box, front=box.back) as cab:
         c = carcass(cab, ply15)
         assert isinstance(c, OpenCarcass) and [p.name for p in c] == ["left", "right", "bottom", "top"]
         assert sorted(cab.parts) == ["bottom", "left", "right", "top"]
@@ -140,7 +140,7 @@ def test_drawer_box_writes_the_drawer_cabinet_s_drawer():
     box = Box.from_size(width=500, depth=600, height=720)
 
     def cabinet_with(name: str, by_hand: bool) -> None:
-        with cabinet(name, box, front=box.right) as cab:
+        with module(name, box, front=box.right) as cab:
             left, right, bottom, _, _ = carcass(cab, ply15, back=ply9, joins=cabineo(count=3))
             bay = cab.interior.with_sides(bottom=bottom.top)
             with scope("drawer", bay) as d:
@@ -178,7 +178,7 @@ def test_drawer_box_without_corners_and_floor_joint():
     the runners are still made."""
     slide = drawer_slide("Movento 760H", nl=450)
     box = Box.from_size(width=500, depth=600, height=400)
-    with cabinet("c", box, front=box.right) as cab:
+    with module("c", box, front=box.right) as cab:
         left, right, _, _ = carcass(cab, ply15)
         with scope("drawer", cab.interior) as d:
             face = board("face", ply15).on(cab.interior.front)

@@ -78,7 +78,7 @@ from shapely.geometry.base import BaseGeometry
 
 from boards import _pipeline_problems  # pyright: ignore[reportPrivateUsage]
 from fuzzing import floats, fresh, sizes
-from lang import Box, Frame, LangError, Pos, Side, board, cabinet, check, inside_box, sheet_material, module, \
+from lang import Box, Frame, LangError, Pos, Side, board, check, inside_box, sheet_material, module, \
     no_interference, rect, scope, set_frame, spread, through, to
 from lang.core.directions import AXES, Axis, as_axis, world_frame
 from lang.core.faces import Face
@@ -774,7 +774,7 @@ def build(case: PlacementCase, how: How, name: str = "m") -> Built:
         m = module(name, box, mirrored=mirrored)
     else:
         facing = box.side(FRONTS[how.front])
-        m = cabinet(name, box, front=[facing, facing.outward][b.pick(2)], mirrored=mirrored)
+        m = module(name, box, front=[facing, facing.outward][b.pick(2)], mirrored=mirrored)
     b.module = m
     b.boxes[0] = m.box
     with m:
@@ -901,7 +901,7 @@ def _make_bay(b: Built, bay: BaySpec) -> None:
         up = m.frame.direction("top")
         own = Frame.derived(facing.outward, up)
         mirrored = own.direction("left") != m.frame.direction(bay.left)
-        s = cabinet("bay", space, front=facing, mirrored=mirrored)
+        s = module("bay", space, front=facing, mirrored=mirrored)
     b.bay = s
     b.boxes[1] = s.box
     f, k, lft, rgt, tp, bt = bay.shrink

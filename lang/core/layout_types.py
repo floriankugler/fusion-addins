@@ -1,11 +1,13 @@
-"""The layout file's shape, version 6.
+"""The layout file's shape, version 7.
 
 This is the contract between the language and its consumers (the preview
 mesher, the Fusion emitter, the viewer page, the nest). Bump LAYOUT_VERSION
 on incompatible changes; `lang.emit.plan` and the viewer repeat it and
 refuse other versions.
 
-Version 6 (2026-10-15): a part carries `nest`, whether it goes into the
+Version 7 (2026-10-16): a part carries `settings`, the settings set along
+its chain with the node that set each, and `op_settings`, its named
+operations' own. Version 6 (2026-10-15): a part carries `nest`, whether it goes into the
 nest. Version 5 (2026-10-14): parts are boards or slats (`kind`), and a slat
 carries its `section`. Version 4 (2026-10-14): a pocket carries `slot`, its centre line when it
 is a slot. Version 3 (2026-10-12): every key below is written; the top-level
@@ -18,13 +20,25 @@ from __future__ import annotations
 
 from typing import Literal, NotRequired, TypedDict
 
-LAYOUT_VERSION = 6
+LAYOUT_VERSION = 7
 
 #: One or more polygons as rings of [u, v] points, one polygon after the
 #: other: its exterior ring, counter-clockwise, then its holes, clockwise.
 #: A pocket or cut with several pieces (a cutout's openings) has several
 #: counter-clockwise rings.
 Rings = list[list[list[float]]]
+
+#: What a setting's value is in the layout: JSON data.
+type JsonValue = None | bool | int | float | str | list[JsonValue] | dict[str, JsonValue]
+
+
+class SettingLayout(TypedDict):
+    """A setting's value for a part (`lang.core.settings`), and where it
+    came from: the node that set it (a scope's or part's path, an
+    operation's, "root" outside every module), or "default", or the master
+    parameter that gave the default ("master: Spalt")."""
+    value: JsonValue
+    source: str
 
 
 class BoxDict(TypedDict):
@@ -147,6 +161,14 @@ class PartLayout(TypedDict):
     #: `inner` or `outer` for a big face when they resolve. For the preview's
     #: labels.
     faces: dict[str, list[str]]
+    #: The settings set along the part's chain (the part, its scopes, the
+    #: root), by key name, as they hold for the part, and the keys it read
+    #: from their defaults; a key whose value the layout does not take
+    #: (one that is not JSON data) is left out.
+    settings: dict[str, SettingLayout]
+    #: The named operations' own settings (`left.toekick.use(...)`), by
+    #: operation name; an operation that uses none is not listed.
+    op_settings: dict[str, dict[str, SettingLayout]]
 
 
 class ExportValue(TypedDict):

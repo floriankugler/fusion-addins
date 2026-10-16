@@ -16,19 +16,21 @@ are positions (`left.toekick.top`).
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 from . import directions
 from .directions import Axis, Direction
 from .errors import LangError
 from .ops import Chamfer, Cut, EdgeOp, Hole, Op, VGroove
 from .refs import DirectedArithmetic, HasPosition, Number, Pos, PosLike, Side, as_pos
+from .settings import Binding, Setting
 from .shapes import Anchor as ShapeAnchor
 
 if TYPE_CHECKING:
     from .part import Board
 
 Point2 = tuple[float, float]
+T = TypeVar("T")
 
 
 class Face(DirectedArithmetic):
@@ -416,6 +418,18 @@ class Operation:
 
     def __repr__(self) -> str:
         return f"Operation({self.part.path}.{self.name})"
+
+    def use(self, *bindings: Binding[Any]) -> Operation:
+        """Uses settings on this operation, a node of the settings' chain
+        below its board, for what reads them from it (the CAM plan, later):
+        `left.toekick.use(...)`. Each key once."""
+        self.part.op_settings(self.name).use(*bindings)
+        return self
+
+    def value(self, key: Setting[T]) -> T:
+        """The value of a setting as this operation sees it: its own, else
+        its board's, the board's scopes', the root's, the key's default."""
+        return self.part.op_settings(self.name).read(key, f"{self.part.path}.{self.name}")[0]
 
     def extents(self) -> dict[Axis, tuple[float, float]]:
         """The region the operation occupies, per world axis."""

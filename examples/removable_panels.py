@@ -24,7 +24,7 @@ def seat_base(name: str, box: Box, *, front: Side) -> Scope:
     """A seat base in its own frame: two sides, a top and a bottom, a
     removable cover over the front and a removable panel set in at the
     back."""
-    with cabinet(name, box, front=front) as cab:
+    with module(name, box, front=front) as cab:
         # the sides' front edges stand back by the cover; no back, the rear
         # panel is set in instead
         left, right, bottom, top = carcass(cab, ply18, front=cab.front.into(ply12.thickness))

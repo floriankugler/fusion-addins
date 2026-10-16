@@ -34,7 +34,7 @@ from hypothesis import strategies as st
 
 from boards import _pipeline_problems  # pyright: ignore[reportPrivateUsage]
 from fuzzing import floats, fresh, sizes
-from lang import (Box, Frame, LangError, Pos, board, cabinet, module, no_interference, set_frame, sheet_material, slat,
+from lang import (Box, Frame, LangError, Pos, board, module, no_interference, set_frame, sheet_material, slat,
                   slat_material, uncheck)
 from lang.core.geometry import NARROWEST
 from lang.core.scope import Scope
@@ -234,7 +234,7 @@ def build(case: SlatCase, other: bool) -> tuple[Scope, list[tuple[str, Any]]]:
     origin = case.origin if other else (0.0, 0.0, 0.0)
     facing = case.front if other else 0
     box = _world_box(case, origin, facing)
-    m = module("m", box) if case.kind == "module" else cabinet("m", box, front=box.side(FRONTS[facing]))
+    m = module("m", box) if case.kind == "module" else module("m", box, front=box.side(FRONTS[facing]))
     results: list[tuple[str, Any]] = []
     with m:
         uncheck(no_interference)         # (slats placed at random overlap; their placement is what is checked)

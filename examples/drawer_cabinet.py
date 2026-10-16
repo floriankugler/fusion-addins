@@ -21,7 +21,7 @@ def drawer_cabinet(name: str, box: Box, n: int, slide: DrawerSlide, *, front: Si
     wherever the cabinet stands. `front=` places it (see `cabinet`). With
     `bottom_drawer=` the lowest bay gets that height and the others share
     the rest; otherwise all bays are equal."""
-    with cabinet(name, box, front=front) as cab:
+    with module(name, box, front=front) as cab:
         # The carcass, from the standard library: sides with a toe kick notch
         # (named, so its edges can be referred to), the bottom on the notch
         # rather than on the floor, a top and a 9 mm back. Cabineos into the

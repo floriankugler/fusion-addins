@@ -22,7 +22,7 @@ def latched_cabinet(name: str, box: Box, slide: DrawerSlide, model: LatchModel =
     """A cabinet in its own frame: from the bottom up a drawer bay
     `drawer_height` high, a rail, a second bay, a shelf and the door's
     compartment above it. A `model` latch holds every front."""
-    with cabinet(name, box, front=front) as cab:
+    with module(name, box, front=front) as cab:
         left, right, _bottom, top, back = carcass(cab, ply15, back=ply9, joins=cabineo(count=3))
 
         # the rest, above the shelf, is the door's compartment

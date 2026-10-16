@@ -5,7 +5,7 @@ toward the vehicle's front; left is -y, the driver's side; top is +z. A
 build replaces it with `set_frame(Frame(...))`.
 
 A cabinet is written in its own frame, derived from where it faces when it
-is placed (`cabinet(name, box, front=box.right)`): front is where it opens,
+is placed (`module(name, box, front=box.right)`): front is where it opens,
 top stays up, and left and right are a cabinetmaker's, standing in front
 of it. `mirrored=True` swaps left and right. Names resolve against the
 frame of the scope they are used in (`current_frame()`); the layout file

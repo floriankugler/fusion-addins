@@ -7,6 +7,16 @@ order-free modifiers (`on`, `between`, `center`, `inset`, `grain`, `show`,
 resolved lazily the first time a face, the box or the layout is asked for;
 from then on the placement modifiers are frozen.
 
+A board is a node of the settings' chain (`settings.py`), and so is each
+named operation. The core's keys are defined here, next to what reads
+them: `material` (no default; `board(name, ply15)` uses it on the board,
+and a board without one takes its scope's), `grain` and `nest` (`grain()`
+and `nest()` on a board use them there; the layout reads them, so they
+are never frozen) and `chamfer_size` (no default; `chamfer(what)` reads it,
+`chamfer(what, size)` gives its own). A keyword or modifier is the one
+spelling of a key on the node a call makes, so `Board.use()` refuses
+these three [decided 2026-10-16].
+
 A fillet (`panel.fillet(panel.front.left, 20)`, see `corners.py`) rounds
 corners of the outline through the board, and a chamfer on an edge through
 the board cuts one off; like a cut, each changes the outline at once.
@@ -42,7 +52,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, replace
 from collections.abc import Sequence
-from typing import Literal, Protocol, Self, Union, cast, overload
+from typing import Any, Literal, Protocol, Self, TypeVar, Union, cast, overload
 
 import shapely
 from shapely import affinity
@@ -58,6 +68,7 @@ from . import corners as corner_geometry
 from . import cutouts as cutout_geometry
 from . import directions
 from . import dogbones as dogbone_geometry
+from . import keys
 from . import scope as scopes
 from .box import Box
 from ..emit.arcs import Arc2, fit
@@ -68,10 +79,11 @@ from .errors import LangError, one_of
 from .faces import Anchor, Edge, Face, Operation, Outline
 from .geometry import NARROWEST, clean, parts_of, polygons_of
 from .layout_types import (ChamferLayout, CutLayout, EdgeOpLayout, HoleLayout, OpLayout,
-                           PartLayout, PocketLayout, Rings, SlotLayout, VGrooveLayout)
+                           PartLayout, PocketLayout, Rings, SettingLayout, SlotLayout, VGrooveLayout)
 from .material import Material, SheetMaterial, SlatMaterial
 from .ops import MIN_CHAMFER, Chamfer, Cut, EdgeOp, Hole, Op, Pocket, SlotLine, VGroove
 from .refs import Affine, DepthSpec, HasPosition, Pos, PosLike, Side, Through, ToFace, as_pos, through
+from .settings import Binding, Node, Setting, build_line
 from .shapes import Shape, box_shape, slot_shape
 
 Point2 = tuple[float, float]
@@ -93,6 +105,7 @@ DogBoneTarget = Union["Operation", "Face", "Outline"]
 CornerTarget = Union["Edge", "Operation", "Outline"]
 #: What `chamfer()` takes: an edge, a face's outline, a named operation.
 ChamferTarget = Union["Edge", "Outline", "Operation", Op]
+T = TypeVar("T")
 
 
 class Joint(Protocol):
@@ -107,25 +120,37 @@ class Board:
     #: What the layout calls the part; a slat says "slat".
     kind: Literal["board", "slat"] = "board"
 
-    def __init__(self, name: str, material: Material, shape: Shape | None = None):
+    def __init__(self, name: str, material: Material | None = None, shape: Shape | None = None):
         if not name or "." in name:
             raise LangError(f"Part name {name!r} must be non-empty and contain no dots.")
-        if self.kind == "board" and not isinstance(material, SheetMaterial):
+        if self.kind == "board" and isinstance(material, SlatMaterial):
             raise LangError(f"board({name!r}): {material.label} is a slat material, solid wood without a "
                             f"thickness; a board takes a sheet_material(), and solid wood makes a slat: "
                             f"slat({name!r}, {material.name}, section=(w, h)).")
         self.name = name
-        self.material: Material = material
+        #: The material, once known: the board's own, or its scope's read on
+        #: first use (`material`).
+        self._material: Material | None = material
         self._shape = shape
         self.scope = scopes.current()
         if shape is not None:
             self._check_area(shape, "board()")
         self.scope.register(self)
+        scope = self.scope
+        #: This board's node of the settings' chain, under its scope's.
+        self.settings = Node(lambda: self.path, lambda: scope.settings, lambda: scope.frame)
+        #: The named operations' own nodes, by name (`Operation.use`).
+        self._op_settings: dict[str, Node] = {}
+        if self.kind == "board" and material is not None:
+            # the argument is the board's own binding of the key [decided 2026-10-16]
+            self.settings.use(Binding(keys.material, keys.sheet_material(material, f"board({name!r})"),
+                                      build_line()))
         # placement, set once each
         self._on: Side | None = None
         self._limits: list[Limit] = []
         self._center: Pos | None = None
         self._inset: float = 0.0
+        #: The grain `grain()` gave, as a world axis.
         self._grain: Axis | None = None
         self._show: str | Direction | None = None
         #: Whether the show face was read; from then on `show()` is frozen.
@@ -133,8 +158,6 @@ class Board:
         #: The face `machine()` named, if any.
         self._machine: str | Direction | None = None
         self.manual_part: bool = False
-        #: Whether the board goes into the nest (`nest()`).
-        self.nested: bool = True
         self._set: set[str] = set()
         # resolved
         self._box: Box | None = None
@@ -163,10 +186,50 @@ class Board:
         return f"{prefix}.{self.name}" if prefix else self.name
 
     @property
+    def material(self) -> Material:
+        """What the board is made of: its own (`board(name, ply15)`), else
+        the `material` its scopes use, read the first time it is needed (the
+        thickness when the placement resolves, the layout), which freezes
+        the key for them."""
+        if self._material is None:
+            self._material = self.settings.read(keys.material, self.path)[0]
+        return self._material
+
+    @property
     def thickness(self) -> float:
         material = self.material
         assert isinstance(material, SheetMaterial)
         return material.thickness
+
+    # -- settings ---------------------------------------------------------------------------
+
+    def use(self, *bindings: Binding[Any]) -> Self:
+        """Uses settings on this board, for what reads them from it (its
+        operations, the layout, the nest): `front.use(drawer_gap(2))`. Each
+        key once; `material`, `grain` and `nest` are the board's own call
+        and modifiers instead (`board(name, ply15)`, `grain()`, `nest()`),
+        their one spelling here [decided 2026-10-16]."""
+        for binding in bindings:
+            own = next((spelling for key, spelling in keys.OWN_SPELLING.items()
+                        if getattr(binding, "key", None) is key), None)
+            if own is not None:
+                raise LangError(f"use({binding!r}) on a board: a board says {binding.key.name} with {own}.",
+                                self.path)
+        self.settings.use(*bindings)
+        return self
+
+    def value(self, key: Setting[T]) -> T:
+        """The value of a setting as this board sees it: its own, else the
+        nearest scope's above it, the root's, the key's default. Reading
+        it freezes the key for the board and its scopes."""
+        return self.settings.read(key, self.path)[0]
+
+    def op_settings(self, name: str) -> Node:
+        """The node of a named operation (`Operation.use`), made on first use."""
+        if name not in self._op_settings:
+            self._op_settings[name] = Node(lambda: f"{self.path}.{name}", lambda: self.settings,
+                                           lambda: self.scope.frame)
+        return self._op_settings[name]
 
     @property
     def limit_axes(self) -> tuple[Axis, ...]:
@@ -256,12 +319,21 @@ class Board:
 
     def grain(self, along: ExtentName | Side | Direction | Face) -> Self:
         """The grain direction: an extent (`grain("height")`), a box side or
-        a direction (`grain(cab.top)`), or a face of a part."""
-        self._placement("grain")
-        if isinstance(along, str):
-            self._grain = self.scope.frame.axis_of_extent(one_of(along, ExtentName, "grain()", self.path))
-        else:
-            self._grain = along.axis
+        a direction (`grain(cab.top)`), or a face of a part; the board's own
+        `grain` setting. It changes nothing about the board's shape and is
+        read only by the layout, so it may come at any time, once."""
+        if "grain" in self._set:
+            raise LangError("grain() given twice.", self.path)
+        try:
+            spec = keys.grain_spec(along, "grain()")
+        except LangError as error:
+            raise LangError(str(error), self.path) from None
+        axis = keys.grain_axis(spec, self.scope.frame)
+        if self._box is not None and axis == self.t_axis:
+            raise LangError(f"grain {axis} is the thickness axis.", self.path)
+        self.settings.use(Binding(keys.grain, spec, build_line()))
+        self._set.add("grain")
+        self._grain = axis
         return self
 
     def show(self, face: Face | Side | Direction | InnerOuter) -> Self:
@@ -325,16 +397,41 @@ class Board:
         """Whether the board goes into the nest (`lang.nest`): `nest(False)`
         for one sawn or cut by hand (a strip ripped on the saw, a panel
         larger than the machine's bed), which goes on the cut list by size
-        instead. Boards are nested unless they say otherwise; a manual part
-        never is, nor a slat (slats go on the cut list by length). It changes nothing about the board's shape, so it may come
-        at any time, once."""
+        instead; the board's own `nest` setting, which `use(nest(False))`
+        gives every board in a scope. Boards are nested unless they or their
+        scopes say otherwise; a manual part never is, nor a slat (slats go
+        on the cut list by length). It changes nothing about the board's
+        shape, so it may come at any time, once."""
         if "nest" in self._set:
             raise LangError("nest() given twice.", self.path)
         if not isinstance(nested, bool):    # pyright: ignore[reportUnnecessaryIsInstance] - build files are not checked
             raise LangError(f"nest() takes True or False, not {nested!r}.", self.path)
+        self.settings.use(Binding(keys.nest, nested, build_line()))
         self._set.add("nest")
-        self.nested = nested
         return self
+
+    @property
+    def nested(self) -> bool:
+        """The `nest` setting as it holds for this board (`nest()`), looked
+        up without reading it: the key is the layout's, never frozen."""
+        return self.settings.lookup(keys.nest)[0]
+
+    def grain_axis(self) -> Axis | None:
+        """The grain as a world axis: what `grain()` gave, else, for a
+        grained material, the `grain` its scopes use, in the frame of the
+        scope that uses it, looked up without reading it (the key is the
+        layout's, never frozen); None when nothing gives one. An inherited
+        grain along the thickness is an error naming where it came from."""
+        if self._grain is not None or not self.material.grain:
+            return self._grain
+        spec, source = self.settings.lookup(keys.grain)
+        if spec is None or source is None:
+            return None
+        axis = keys.grain_axis(spec, source.frame)
+        if axis == self.t_axis:
+            raise LangError(f"grain {axis} from {source.label} is the thickness axis of this board; give it a "
+                            "grain() of its own.", self.path)
+        return axis
 
     # -- resolution ------------------------------------------------------------------------
 
@@ -427,8 +524,6 @@ class Board:
             ob = self._outline.bounds
             lo[u_axis], lo[v_axis], hi[u_axis], hi[v_axis] = ob
         self._box = Box(lo, hi)
-        if self._grain is None and self.material.grain:
-            self._grain = self.scope.default_grain
         if self._grain is not None and self._grain == t_axis:
             raise LangError(f"grain {self._grain} is the thickness axis.", self.path)
 
@@ -1304,10 +1399,13 @@ class Board:
                             float(chamfer), line), name)
         return self
 
-    def chamfer(self, what: ChamferTarget | Sequence[ChamferTarget], size: float) -> Self:
+    def chamfer(self, what: ChamferTarget | Sequence[ChamferTarget], size: float | None = None) -> Self:
         """A chamfer along an edge (`side.front.inner`), along a face's
         outline (`side.outer.outline`), or along a named operation of this
-        board (`side.toekick`); or along each of a list of them.
+        board (`side.toekick`); or along each of a list of them. `size` is
+        the chamfer's own (a binding of `chamfer_size` on the operation);
+        without it the `chamfer_size` setting is read here, from the board's
+        point of view, and an error where nothing above uses one.
 
         An edge through the board, where two narrow faces meet
         (`panel.front.left` on a board lying flat, `side.front.bottom` on
@@ -1319,6 +1417,8 @@ class Board:
         board as it was [found by fuzzing, 2026-10-13: the items before it
         stayed chamfered]."""
         self._operable("chamfer()")
+        if size is None:
+            size = self.settings.read(keys.chamfer_size, f"the chamfer of {self.path}")[0]
         items: list[object] = list(what) if isinstance(what, (list, tuple)) else [what]
         saved = self._state()
         try:
@@ -2245,15 +2345,31 @@ class Board:
             "box": b.as_dict(),
             "origin": [b.lo[a] for a in AXES],
             "outline": _rings(self.outline),
-            "grain": self._grain,
+            "grain": self.grain_axis(),
             "show": self.show_face.world_name,
             "machine": self.machine_face.world_name,
             "grained": self.material.grain,
             "manual": self.manual_part,
-            "nest": self.nested and not self.manual_part and self.kind == "board",
+            "nest": self.kind == "board" and not self.manual_part and self.nested,
             "ops": [_op_to_layout(op) for op in self.ops],
             "faces": self._face_names(),
+            "settings": self._settings_layout(),
+            "op_settings": {name: node.own_layout() for name, node in self._op_settings.items()
+                            if node.own_layout()},
         }
+
+    def _settings_layout(self) -> dict[str, SettingLayout]:
+        """The settings set along the board's chain, as the layout carries
+        them; a grain the board does not take (a material without grain)
+        is left out."""
+        out = self.settings.to_layout(skip=self._ignores)
+        if "grain" in out and self._grain is None and not self.material.grain:
+            del out["grain"]
+        return out
+
+    def _ignores(self, key: Setting[Any]) -> bool:
+        """Whether this part takes no notice of `key`: none for a board."""
+        return False
 
     def _face_names(self) -> dict[str, list[str]]:
         """Each face's names in the build file, by world name: the
@@ -2354,6 +2470,24 @@ class Slat(Board):
 
     def grain(self, along: ExtentName | Side | Direction | Face) -> Self:
         raise LangError("grain(): a slat's grain runs along its length.", self.path)
+
+    def use(self, *bindings: Binding[Any]) -> Self:
+        for binding in bindings:
+            if getattr(binding, "key", None) in keys.OWN_SPELLING:
+                raise LangError(f"use({binding!r}) on a slat: a slat's material is its own, its grain runs along its "
+                                "length, and it is not nested.", self.path)
+        return super().use(*bindings)
+
+    @property
+    def nested(self) -> bool:
+        return False
+
+    def grain_axis(self) -> Axis | None:
+        return self._grain
+
+    def _ignores(self, key: Setting[Any]) -> bool:
+        """A slat takes no notice of the boards' material, grain and nest."""
+        return key in keys.OWN_SPELLING
 
     def machine(self, face: Face | Side | Direction | InnerOuter) -> Self:
         raise LangError("machine(): a slat is not machined; it is made by hand.", self.path)
@@ -2529,7 +2663,9 @@ class _BoardState:
     joined: list[Op]
 
 
-def board(name: str, material: SheetMaterial, shape: Shape | None = None) -> Board:
+def board(name: str, material: SheetMaterial | None = None, shape: Shape | None = None) -> Board:
+    """A board named `name`, of `material` (its own binding of the
+    `material` setting) or, without one, of the material its scopes use."""
     return Board(name, material, shape)
 
 

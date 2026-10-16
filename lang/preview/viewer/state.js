@@ -6,7 +6,7 @@
 // The layout file version this page draws (lang/core/layout_types.py
 // LAYOUT_VERSION). A layout of another version is not drawn; the status
 // line says so.
-export const LAYOUT_VERSION = 6;
+export const LAYOUT_VERSION = 7;
 
 /** Why the page cannot draw `layout`, or null when it can. */
 export function layoutVersionProblem(layout) {
