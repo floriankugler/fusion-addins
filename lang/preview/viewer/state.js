@@ -8,6 +8,16 @@
 // line says so.
 export const LAYOUT_VERSION = 7;
 
+/**
+ * A part's settings (the layout's `settings`, lang/core/settings.py) as the
+ * selection's info shows them, one line each with where it came from:
+ * `chamfer_size 0.5: kitchen`, `material birch 15: kitchen.left`.
+ */
+export function settingsText(settings) {
+  return Object.entries(settings ?? {}).map(([name, { value, source }]) =>
+    `${name} ${typeof value === 'string' ? value : JSON.stringify(value)}: ${source}`).join('\n');
+}
+
 /** Why the page cannot draw `layout`, or null when it can. */
 export function layoutVersionProblem(layout) {
   const version = layout?.version;

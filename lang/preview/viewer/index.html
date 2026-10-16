@@ -152,7 +152,7 @@ import { LineGeometry } from 'three/addons/lines/LineGeometry.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { attachSpaceMouse } from './spacemouse.js';
 import { AXIS, ISO, UP, share, disposeTree, clearGroup } from './scene-utils.js';
-import { layoutVersionProblem, setHidden as markHidden, toggleHides, isolate as isolatePaths, LoadTracker, nestStatusText } from './state.js';
+import { layoutVersionProblem, setHidden as markHidden, toggleHides, isolate as isolatePaths, LoadTracker, nestStatusText, settingsText } from './state.js';
 
 const $ = (id) => document.getElementById(id);
 const view = $('view');
@@ -869,7 +869,8 @@ function showSelected() {
   sel.textContent = selectedPath + '\n' + part.material + ', ' +
     `${(b.max[0]-b.min[0]).toFixed(0)} x ${(b.max[1]-b.min[1]).toFixed(0)} x ${(b.max[2]-b.min[2]).toFixed(0)} mm\n` +
     part.ops.length + ' ops' + (part.grain ? ', grain ' + part.grain : '') +
-    (hidden.has(selectedPath) ? ', hidden' : '');
+    (hidden.has(selectedPath) ? ', hidden' : '') +
+    (Object.keys(part.settings ?? {}).length ? '\n' + settingsText(part.settings) : '');
 }
 
 // -- the parts list: a tree by path (module, scope, part) -----------------------

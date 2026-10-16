@@ -2,7 +2,7 @@
 // the promises of preview.loaded() and preview.open().
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { LAYOUT_VERSION, layoutVersionProblem, setHidden, toggleHides, isolate, LoadTracker, nestStatusText } from '../state.js';
+import { LAYOUT_VERSION, layoutVersionProblem, setHidden, toggleHides, isolate, LoadTracker, nestStatusText, settingsText } from '../state.js';
 
 // Whether a promise settled, without waiting for it: 'pending', or
 // ['resolved', value] / ['rejected', message].
@@ -18,6 +18,17 @@ async function stateOf(promise) {
 const ok = (builds, version) => ({ builds, state: 'ok', version, log: 'ok' });
 const failed = (builds, version, log = 'Traceback: boom') => ({ builds, state: 'failed', version, log });
 const building = (builds, version) => ({ builds, state: 'building', version, log: '' });
+
+test('a part\'s settings, one line each with where it came from', () => {
+  assert.equal(settingsText({
+    chamfer_size: { value: 0.5, source: 'kitchen' },
+    material: { value: 'birch 15', source: 'kitchen.left' },
+    nest: { value: false, source: 'root' },
+    tabs: { value: [1, 2], source: 'master: Tabs' },
+  }), 'chamfer_size 0.5: kitchen\nmaterial birch 15: kitchen.left\nnest false: root\ntabs [1,2]: master: Tabs');
+  assert.equal(settingsText({}), '');
+  assert.equal(settingsText(undefined), '');
+});
 
 test('the layout version the page reads', () => {
   assert.equal(LAYOUT_VERSION, 7);
