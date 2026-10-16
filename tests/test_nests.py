@@ -108,8 +108,14 @@ def test_a_nest_takes_a_material_or_boards_once_each():
         with pytest.raises(LangError, match="is not a board"):
             m.nest("a", [m])  # pyright: ignore[reportArgumentType]
         m.nest("a", [left])
-        with pytest.raises(LangError, match="m has a nest of that name already"):
+        with pytest.raises(LangError, match="m has a nest of that name already, m.a"):
             m.nest("a", material=ply15)
+        with scope("inner") as inner:
+            with pytest.raises(LangError, match="m has a nest of that name already, m.a"):
+                inner.nest("a", material=ply15)               # unique in the module, not only the scope
+            inner.nest("b", material=ply15)
+        with module("sub", Box.from_size(width=100, depth=100, height=100)) as sub:
+            sub.nest("a", material=ply15)                     # a module inside has names of its own
     with module("n", BOX) as n:
         with pytest.raises(LangError, match="m.left is not in n"):
             n.nest("b", [left])

@@ -277,8 +277,8 @@ to come (the CAM keys, pinning) in `design/proposals/settings.md`.
   sawn to size, and a slat or a manual board is refused. It is a method
   only, so the name `nest` stays the boards' key [decided by Florian
   2026-10-16]. Code: `lang/core/nests.py`.
-- The name is unique on its scope and holds no dot, slash or space at its
-  ends; the nest's path is its scope's and its name (`kitchen.carcass`),
+- The name is unique in its module (a module inside it has names of its
+  own) and holds no dot, slash or space at its ends; the nest's path is its scope's and its name (`kitchen.carcass`),
   its files go to `out/<build>/<module>/<name>/`. A board is in one nest
   of its module at most (a nest around it, a remake, may name it again).
 - What returns is the nest, a node of the settings' chain under its scope:

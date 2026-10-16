@@ -9,7 +9,7 @@ sub-scopes' too but not those of a module inside it, which has nests of
 its own; `cab.nest("fronts", [front1, front2])` the boards named, anywhere
 inside it, so a root module's nest may name boards of several modules (a
 remake), and a `nest(False)` board named is its own blank, sawn to size.
-Its name is unique on its scope and holds no dot or path separator; its
+Its name is unique in its module and holds no dot or path separator; its
 path is the scope's and its name (`kitchen.carcass`). A board is in one
 nest of its module at most.
 
@@ -106,8 +106,10 @@ def declare(scope: Scope, name: object, parts: object, material: object) -> Nest
         raise LangError(f"{what}: give either its material (nest({name!r}, material=ply15)) or its boards "
                         f"(nest({name!r}, [front1, front2])), {'not both' if parts is not None else 'one of them'}.",
                         scope.path)
-    if name in scope.nests_declared:
-        raise LangError(f"{what}: {scope.path} has a nest of that name already.", scope.path)
+    module = home(scope)
+    other = next((s.nests_declared[name] for s in _own_scopes(module) if name in s.nests_declared), None)
+    if other is not None:
+        raise LangError(f"{what}: {module.path} has a nest of that name already, {other.path}.", scope.path)
     if material is not None:
         nest = Nest(scope, name, keys.sheet_material(material, what), None)
     else:
@@ -154,6 +156,11 @@ def own_boards(scope: Scope) -> list[Board]:
         if not child.is_module:
             out += own_boards(child)
     return out
+
+
+def _own_scopes(scope: Scope) -> list[Scope]:
+    """A scope and its sub-scopes, not a module inside it or its scopes."""
+    return [scope] + [s for child in scope.children.values() if not child.is_module for s in _own_scopes(child)]
 
 
 def home(scope: Scope) -> Scope:

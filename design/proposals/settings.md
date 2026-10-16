@@ -38,7 +38,7 @@ blank; the preview listing a design's nests. Described in
 `design/api.md` (Settings, Nests) and `design/nesting.md`. Built otherwise
 or beyond what is written here: a nest by material takes its scope's
 boards and its sub-scopes', not a module's inside it (which has nests of
-its own), and a declared nest's name is unique on its scope; "what no
+its own); "what no
 declared nest names" is any declared nest, so a board a remake names
 leaves its module's default nest (with pinning the first nest is frozen
 anyway); the nests of one run of the command share the stock on hand in

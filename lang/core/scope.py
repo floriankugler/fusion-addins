@@ -446,7 +446,7 @@ class Scope:
         material (its sub-scopes' too, not a module's inside it), or
         `cab.nest("fronts", [front1, front2])` for boards named anywhere in
         it, a `nest(False)` board among them its own blank. The name is
-        unique on the scope, the nest's path `cab.carcass`; a board is in
+        unique in the module, the nest's path `cab.carcass`; a board is in
         one nest of its module. The nest takes settings of its own:
         `cab.nest(...).use(nesting.margin(15))`. What no nest names, the
         nested boards of a material, makes a nest of its own per module."""
