@@ -48,6 +48,27 @@ asks for more than the nest's least by the difference, so between two
 parts the larger holds; the `lang.nesting` module `refill` became
 `refilling`, so the key keeps its name.
 
+Built 2026-10-16, stage 3: fingerprints and pinning. Each part in the
+nest file carries its fingerprint (nest file version 3), a hash of itself
+as machined, so the command and the preview say which parts changed since
+a nest and a change to another module leaves it good; a nest is marked as
+made, whole or by sheets, in `made.json` beside the nests (`--made`, or a
+click in the nest view), frozen, and running it nests what is not made of
+it (changed, new, on sheets not made) into a second nest beside it,
+`kitchen.carcass-2`, reporting the parts made that are gone; a part
+changed since it was made can be marked as fixed; and a mark writes the
+inventory back, its pieces on hand out and its kept rests in, keeping
+Florian's comments and order, once per sheet. Described in
+`design/nesting.md` (The nest file, Pinning) and `design/preview.md`. Built
+otherwise or beyond what is written here: a nest marked by sheets is frozen
+whole too, so what its sheets not made held goes into the second nest
+like a changed part, and its file never changes (the blanks' names hold);
+being made is per nest and its second nests, so a remake makes a part made
+elsewhere again; the latest mark or fix of a part wins; tomlkit is not in
+the venv, so the ledger is rewritten line by line, read back and checked;
+the fingerprint is taken in the four quarter turns of the part's plane,
+rounded to 1/1024 mm.
+
 The syntax review's item 16 (`syntax.md`, 2026-10-15) decided against a
 defaults object for the modeling calls. Florian reopened it the next day:
 the values a build standardizes across its modules (drawer gaps, finger
@@ -304,7 +325,7 @@ provenance [proposed].
   is settings (`nesting.bed`, `nesting.kerf`, `nesting.max_cuts`), used at
   the root and by a nest that goes elsewhere [Florian].
 - The inventory ledger (`inventory.toml` [decided; built 2026-10-16, read
-  only]): one kind of entry, a piece of stock on hand by material and size
+  in stage 2, written back in stage 3]): one kind of entry, a piece of stock on hand by material and size
   with a count, full sheets and offcuts alike [Florian: no distinction],
   one per project. The nest
   reads it and uses what is on hand before it buys; the kept rests of a
@@ -431,9 +452,9 @@ built [Florian]. Each stage is a session of its own [proposed].
    the `van:` prefixes go); the nest's name and time in the nest file; a
    `nest(False)` board named in a nest as its own blank; the command taking
    a build file and nest names.
-3. **Fingerprints and pinning**: the parts' hashes in the nest file (its
-   version 3), the state file marking nests as made, re-nesting changed
-   parts beside a frozen nest, rests into the ledger.
+3. **Fingerprints and pinning** [built 2026-10-16]: the parts' hashes in
+   the nest file (its version 3), the state file marking nests as made,
+   re-nesting changed parts beside a frozen nest, rests into the ledger.
 4. **The CAM plan** (`cam.md`) with its keys, including `smallest_cutter`
    and a group's shared gaps.
 

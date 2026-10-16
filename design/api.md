@@ -301,6 +301,12 @@ to come (the CAM keys, pinning) in `design/proposals/settings.md`.
   of one label being an error. The stock on hand is not a setting: it is
   the inventory, `inventory.toml` beside the build file
   (`design/nesting.md`, Running it).
+- Which nests are made is not in the build either: a nest is marked as
+  made, whole or by sheets, by the command or the preview, in `made.json`
+  beside the nests, and then frozen; what is not made of it is nested
+  beside it as `kitchen.carcass-2` (`design/nesting.md`, Pinning). A nest
+  declared under such a name beside a nest marked is an error when it is
+  run.
 
 ## Names and paths
 

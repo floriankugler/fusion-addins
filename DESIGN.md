@@ -16,7 +16,7 @@ Fusion documents. This file is the overview; the details are in `design/`:
 | `design/checks.md` | `no_interference`, `inside_box`, `inside()`, `fits_sheet` |
 | `design/geometry.md` | Polygons and arcs, cleaning, tolerances, offsets |
 | `design/emitter.md` | The Fusion backend, compile speed, Fusion findings |
-| `design/nesting.md` | Nesting: the build's nests, their parts on blanks the bed takes, sawn out of the stock on hand and the sheets bought; the inventory and the nest file |
+| `design/nesting.md` | Nesting: the build's nests, their parts on blanks the bed takes, sawn out of the stock on hand and the sheets bought; the inventory, the nest file with the parts' fingerprints, and nests marked as made (pinning) |
 | `design/preview.md` | The browser preview |
 | `design/proposals/` | Features worked out but not built, one file each (listed below) |
 | `design/todo.md` | A loose list of things to do |
@@ -87,7 +87,10 @@ Not goals:
   module), its parts on blanks the machine's bed takes, sawn out of the
   stock on hand (the inventory) and the material's sheets, with the
   machine's values as settings; written to a nest file per nest that the
-  preview shows and the emitter draws, a document per material.
+  preview shows and the emitter draws, a document per material. Each part
+  carries its fingerprint there, so a nest says which parts changed since;
+  a nest marked as made is frozen, what is not made of it is nested beside
+  it, and the mark writes the inventory back (pinning).
 
 ```
 Master document --(snapshot, in Fusion, rarely)--> snapshot.json
@@ -226,7 +229,9 @@ latches, sliding brackets, slats and lips (cosmetic slats for now), the checks,
 the folder preview, nesting (sheets and offcuts sawn into blanks for the
 bed, the preview's nest view, nested documents in Fusion), the nests
 declared in the build with the nesting keys, the inventory and own blanks
-for `nest(False)` boards (the settings' second stage), the standard
+for `nest(False)` boards (the settings' second stage), the parts'
+fingerprints and nests marked as made with the inventory written back
+(the third; the nest documents of version 3 not yet drawn in Fusion), the standard
 library's carcass and drawer box, which give the examples' layouts unchanged,
 and the settings' first stage (keys, the chain, freezing, provenance in the
 layout and the preview, `material`, `grain`, `nest` and `chamfer_size`,
@@ -249,7 +254,7 @@ is implemented. [Florian]
 | `miters.md` | Mitered corners as a joint |
 | `standard-library.md` | What is left of the standard library (built: `design/std.md`): cabinet types per build repo, further blocks |
 | `cam.md` | A CAM plan from the layout, built by an add-in |
-| `settings.md` | Settings that flow down the build and are overridden at any level (Florian's idea, 2026-10-15/16). Built: stage 1, the mechanism, the core's keys, lazy modules, the master's parameters (`design/api.md`); stage 2, nests in the build with the nesting keys and the inventory (`design/nesting.md`); to come: fingerprints and pinning, the CAM's keys |
+| `settings.md` | Settings that flow down the build and are overridden at any level (Florian's idea, 2026-10-15/16). Built: stage 1, the mechanism, the core's keys, lazy modules, the master's parameters (`design/api.md`); stage 2, nests in the build with the nesting keys and the inventory (`design/nesting.md`); stage 3, fingerprints and pinning with the inventory written back (`design/nesting.md`, Pinning); to come: the CAM's keys |
 | `runs.md` | Hoses, cables, ducts and keep-outs: one run primitive that plans and is checked, routed through the boards' own openings, at the van level or in a module |
 | `detail-levels.md` | Rough and full previews |
 | `hand-made-geometry.md` | Escape hatches for what the language cannot say |

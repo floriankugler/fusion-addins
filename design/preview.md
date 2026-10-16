@@ -80,11 +80,29 @@ for a check, too slow for the loop. [decided as a need]
   lists the design's nests as its layout gives them (`module.nest`,
   declared or one per material per module; `preview.nests()` from code)
   and shows the one chosen (`await preview.showNest('kitchen.carcass')`);
-  it says whether that nest is of the layout on screen (its layout hash),
-  of an older one, or not nested yet, and Nest again runs `python -m
-  lang.nesting <build> <nest>` for it, with the inventory beside the build
-  file, one nest at a time and never on a save (a nest takes seconds to
-  minutes); a failed nest shows its log.
+  it says whether the nest's parts are as nested, by their fingerprints
+  (so a change to another module leaves it good), which changed, which are
+  new and which are gone, or that it is not nested yet, and Nest again
+  runs `python -m lang.nesting <build> <nest>` for it, with the inventory
+  beside the build file, one nest at a time and never on a save (a nest
+  takes seconds to minutes); a failed nest shows its log.
+- Pinning (`design/nesting.md`, Pinning) in the nest view: a nest marked
+  as made says so (every sheet, or which, and frozen), what of it changed
+  since it was made, what is not made and new (what its second nest takes)
+  and what made is gone; its second nests follow it in the list, indented,
+  and Nest again on either nests what is not made. On the drawing the
+  sheets made are tinted and outlined, the parts changed since red, the
+  parts gone grey. Mark made marks the nest whole, a sheet's button that
+  sheet, and with a part selected (in the drawing or the model) that is
+  made and changed since, Fixed by hand marks it; each asks first, posts
+  to the server (`POST /made?design=&nest=[&sheet=birch 15:2]`, `POST
+  /fixed?design=&nest=&part=`, which run `python -m lang.nesting --made` or
+  `--fixed` and answer with what it printed, shown under the buttons) and
+  writes the inventory back as the command does. From code:
+  `preview.nestStates()` (the nests as the server gives them),
+  `await preview.markMade(nest, [[material, sheet]])` and
+  `await preview.markFixed(nest, part)` (they ask too; `window.confirm` can
+  be replaced to script them).
 
 ## Serving a folder
 

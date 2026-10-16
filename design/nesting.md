@@ -6,12 +6,14 @@ the emitter. Part of the modeling language's design; the overview is
 `DESIGN.md`. Code: the nests declared in the build in `lang/core/nests.py`
 (`Scope.nest`, `design/api.md`, Nests), the rest in `lang/nesting/` (`keys`,
 `resolve`, `inventory`, `workshop`, `items`, `packing`, `sawing`,
-`refilling`, `nest`, `verify`, `draw`, `nest_types`), `lang/emit/nested.py`
-and `NestEmitter` in `lang/emit/fusion.py`. Florian added it as a proposal
-on 2026-10-14 and it was built the same evening; the nests moved into the
-build on 2026-10-16 (stage 2 of `proposals/settings.md`); what is still
-open is under "Still open", the experiments behind it are at the end and in
-`experiments/nesting/`.
+`refilling`, `nest`, `verify`, `draw`, `nest_types`, `fingerprint`,
+`pinning`, `ledger`), `lang/emit/nested.py` and `NestEmitter` in
+`lang/emit/fusion.py`. Florian added it as a proposal on 2026-10-14 and it
+was built the same evening; the nests moved into the build on 2026-10-16
+(stage 2 of `proposals/settings.md`), and the parts' fingerprints, nests
+marked as made and the inventory written back followed the same day
+(stage 3, Pinning); what is still open is under "Still open", the
+experiments behind it are at the end and in `experiments/nesting/`.
 
 ## Nests in the build
 
@@ -31,6 +33,10 @@ on the scope, so the three do not share a name [decided by Florian
 python -m lang.nesting examples/van.py                        # every nest of the build
 python -m lang.nesting examples/van.py kitchen.birch_15 floor.birch_15
 python -m lang.nesting out/van/layout.json --inventory stock.toml
+python -m lang.nesting examples/van.py --status               # what changed, nesting nothing
+python -m lang.nesting examples/van.py --made kitchen.birch_15        # made, every sheet (Pinning)
+python -m lang.nesting examples/van.py --made kitchen.birch_15 1 2    # sheets 1 and 2
+python -m lang.nesting examples/van.py --fixed kitchen.birch_15 kitchen.left
 ```
 
 - The command takes one build file (or a layout file) and the nests to
@@ -74,18 +80,29 @@ python -m lang.nesting out/van/layout.json --inventory stock.toml
   The nest uses what is on hand before it buys; a material with no size and
   nothing on hand is refused by name. The nests of one run share the
   stock on hand, in their order (a piece one uses is not there for the
-  next); the file itself is only read for now: the rests of a nest made go
-  into it, and the pieces used out, with pinning (Still open).
+  next). A run only reads the file; marking a nest as made writes it back:
+  the rests of the sheets made go in, the pieces on hand they used come out
+  (Pinning).
 - `--no-refill` leaves refill out whatever the nest's `refill`, `--mode
   deterministic` runs the solver's one fixed search instead of the best it
   finds in its time (see Measured).
 - It writes each nest into `--out` (by default `out/<build>`, beside the
   preview's build) under its module and name, `out/van/kitchen/birch_15/`:
-  `nest.json` (`nest_types.py`, version 2), `nest.layout.json` (the
+  `nest.json` (`nest_types.py`, version 3), `nest.layout.json` (the
   layout, for the emitter) and `nest.svg`. Problems are printed and kept in
   the nest file; a nest whose part fits no blank at all, or whose parts
   give two values of a key it needs one of, is an error, and the others
   are nested still. The parts no nest takes are listed at the end.
+- Before it nests one, it says which of the nest's parts changed since its
+  file was written, which are new to it and which are gone, by the parts'
+  fingerprints (The nest file): a nest stays good when only another module
+  changed. `--status` says so for each nest, and for a nest marked as made
+  what is made of it and what a run would nest, and writes nothing.
+- A nest marked as made (`--made`, Pinning) is never nested again: a run
+  of it nests what is not made of it into a second nest beside it
+  (`kitchen.birch_15-2`) and reports the parts made that the build no
+  longer has. `--made` and `--fixed` change the marks only; `--made` runs
+  no build.
 
 ## What is nested
 
@@ -198,15 +215,17 @@ whatever the limit [decided 2026-10-16: five cuts is a target].
 
 ## The nest file
 
-`nest.json`, millimetres, version 2 (`nest_types.py`): the nest's name
-(`kitchen.carcass`) and when it was written, then per material: each piece
+`nest.json`, millimetres, version 3 (`nest_types.py`): the nest's name
+(`kitchen.carcass`) and when it was written, for a second nest (Pinning)
+the nest it follows and why each part is in it (`changed`, `not made`,
+`new`), then per material: each piece
 of stock used (`sheet`, the material's size, or `offcut`; `bought` or on
 hand; its size, x along its length and grain), its saw cuts in the
 order they are made (a cut's middle line, edge to edge of the piece it
 splits; a piece's cuts, then each of its pieces' in turn), its blanks
 (named `<sheet>.<blank>`, their place on it, `own_blank` for a
 `nest(False)` board's) with their parts, and its rests, marked kept or
-waste. A part on a blank: its path, its machining
+waste. A part on a blank: its path, its fingerprint (below), its machining
 face, its turn and where its frame's origin lies, and `transform`, world
 millimetres to the blank's frame with the part flat and its machining face
 up at z = its thickness. Per material too: the sheets bought by size
@@ -217,11 +236,35 @@ times). Then the boards of its kind it leaves out and why, the problems,
 the settings it ran with (each value, the parts that asked for a larger
 spacing, where each value came from, the sheet size to buy per material,
 the stock on hand given; `seconds` is the limit), and the hash of the
-layout nested (`lang.core.layout.layout_hash`), which tells whether a nest
-is the layout's at hand. Version 2 kept what the emitter reads as it was.
+layout nested (`lang.core.layout.layout_hash`), which says only that
+something in the build changed since; whether the nest still holds is told
+by its parts' fingerprints. Versions 2 and 3 kept what the emitter reads as
+it was.
 
-The leftovers of the sheets cut go into the inventory once a nest is
-marked as made (pinning, Still open, below).
+A part's **fingerprint** (`fingerprint.py`) is a hash of itself as
+machined, not of where it sits in the build [decided 2026-10-16]: its
+material and thickness, its grain where it is set, its outline and every
+operation (pockets, holes, V-grooves, chamfers, a cut with a chamfer, a
+narrow face's operations) with its sizes and its face, all as its nest
+frame sees them: from its machining face, which is `top` (the opposite face
+`bottom`, the narrow faces `+X`, `-X`, `+Y`, `-Y`), from the outline's
+lower corner. So machined from its other face a part is another part, and
+so is its mirror image. Left out: its place and the way it faces in the
+build, its name and its operations' names (a chamfer along a named
+operation takes that operation's geometry), the order of its operations,
+how a depth was written, a cut without a chamfer (the outline has it),
+and its settings. The description is taken in the four quarter turns of
+its plane and the least hash kept, so a part turned in its plane is the
+same part as long as its grain turns with it; coordinates and sizes are
+rounded to 1/1024 mm, a binary step on which no value written with up to
+four decimals of a millimetre lies halfway, so the noise of another
+position cannot tip it [found by fuzzing, 2026-10-16: a length of 410.4875
+rounded to micrometres came out two ways]; rings start at their least
+point and run the way that comes first; SHA-256, 16 hex digits. The fuzz
+tests build random designs moved, facing another side and in another world
+frame (where a frame of the other hand makes the mirror image), and random
+boards an operation at a time, and require the fingerprints to hold, and
+to change with each operation kept.
 
 ## Checked
 
@@ -242,12 +285,15 @@ its piece.
 ## The preview and Fusion
 
 - The preview lists a design's nests in its nest view (`design/preview.md`),
-  shows the one chosen (its `nest.svg`), and nests that one again on
-  request.
+  each nest marked as made followed by its second nests, shows the one
+  chosen (its `nest.svg`) with the sheets made and the parts changed since
+  marked on it, says what changed and what is made, nests that one again
+  on request, and marks nests, sheets and parts there (Pinning).
 - The compiler's Compile Layout takes a `nest.json` too and draws a
   document per material (no button of its own [decided 2026-10-16]; its
   dialog not yet clicked through with a nest file, `design/todo.md`, nor
-  with version 2, which changed nothing it reads;
+  with versions 2 and 3, which changed nothing it reads (3 is not run in
+  Fusion yet either);
   `lang/emit/nested.py` plans it, Fusion-free): per
   piece of stock a component, the pieces one above the other along y, per
   blank a component at its place holding the blank as a see-through stock
@@ -259,6 +305,89 @@ its piece.
   profile") [found 2026-10-14]. Verified on the van's nest: 36 parts, each
   one solid within 0.01 mm of its place, machining face up.
 
+## Pinning
+
+A van is built over weeks; Florian machines a module's sheets in one go,
+and now and then a change in between means making parts again [decided
+2026-10-16: pinning, after the nest definitions]. Built 2026-10-16
+(`pinning.py`, `ledger.py`, stage 3 of `proposals/settings.md`).
+
+- **Marks.** A nest is marked as made, whole or by sheets, with `python -m
+  lang.nesting build.py --made kitchen.carcass [SHEET ...]` (a sheet by its
+  number, `2`, or `birch 15:2` where two materials of the nest have a sheet
+  2) or a click in the preview's nest view, never in the build file. A
+  mark reads the nest file, not the build, so it works while the build is
+  broken. A sheet marked twice is marked once; marking a nest whole after
+  some of its sheets marks the others.
+- **The state file**, `made.json` in the build's out folder
+  (`out/<build>/`), data the tools write:
+
+  ```json
+  {"version": 1,
+   "nests": {"kitchen.carcass": {"follows": "", "written": "2026-10-16T09:30:00+02:00",
+                                 "sheets": {"birch 15": ["1", "2"]}}},
+   "made": {"kitchen.carcass": {"kitchen.left": {"fingerprint": "3f2a9c...",
+                                                 "by": "kitchen.carcass birch 15 sheet 1",
+                                                 "when": "2026-10-16T17:02:11+02:00"}}}}
+  ```
+
+  `nests`: each nest marked, by path: the nest of the build it follows (a
+  second nest's, below; "" for the build's own), when its file was written
+  (the marks belong to that file, and a file written after its mark is
+  refused), and its sheets marked made per material, in the order marked.
+  `made`: per nest of the build, each part made, as its fingerprint was,
+  what made it (a sheet of the nest or of a second nest, or `fixed`) and
+  when. The latest mark or fix of a part wins. To undo a mark, edit this
+  file (and the inventory) by hand.
+- **Frozen.** A nest with a sheet marked is never nested again and its file
+  never written again. Running it (the command, or the preview's button)
+  compares its parts' fingerprints with what is made: parts made and
+  unchanged are left out; parts changed since they were made, parts of it
+  on a sheet not made (or left over), and parts new to it are nested anew
+  into its **second nest**, `kitchen.carcass-2`, in the folder
+  `kitchen/carcass-2/` beside the first, whose file names the nest it
+  follows and why each part is in it. Once that one is marked too, the next
+  run writes `kitchen.carcass-3`, and so on: the nest and its second nests
+  are its chain, and being made is per chain, so a remake
+  (`van.nest("remake", [k["left"]])`) makes a part made in its module's nest
+  again. Parts made that the build's nest no longer has are reported as
+  gone. A second nest not marked is nested again on every run like any
+  nest, and removed when nothing is left for it. A nest of the build
+  declared with a second nest's name (`carcass-2` beside `carcass` marked)
+  is an error. A nest marked by sheets whose next nest is marked too
+  (what it left went there) takes no more marks.
+- **Fixed.** A part made and changed since can be marked as fixed by hand
+  (a hole added on the bench): `--fixed kitchen.carcass kitchen.left`, or
+  the preview's button with the part selected. It counts as made as the
+  build has it now, until it changes again. A part not made, gone or
+  unchanged is refused.
+- **The inventory written back** [Florian, decided in the nesting review]:
+  marking sheets as made, and only that (never a plain run), takes the
+  pieces on hand they were sawn from out of the ledger and puts their kept
+  rests in. A piece comes out of the first entry of its material and size:
+  its `count` lowered on its own line, or the entry removed with the
+  comment lines right above its `[[stock]]` and a blank line after it; a
+  piece the ledger no longer has (used elsewhere) is noted, not an error.
+  A rest goes in at the end as a `[[stock]]` entry (several of one size on
+  one sheet as one with a count) under a comment saying which nest and
+  sheet kept it and when. Everything else stays as Florian wrote it, his
+  comments and the order of his entries among them, since the ledger is
+  rewritten line by line (tomlkit is not in the venv). A ledger that is not
+  TOML, not the ledger's keys, or written otherwise than as `[[stock]]`
+  tables is refused and left as it was, and the text written is read back
+  and must give exactly the stock meant. Where there is none and a rest is
+  kept, it is made beside the build file. A sheet marked again changes
+  nothing.
+- Not taken as a change: the nest's own values (another margin, another
+  bed) and the stock; a nest compares its parts. A part moved to another
+  nest of the build is gone from one and new to the other. Two nests not
+  yet made may still plan on one offcut (`design/todo.md`): the ledger
+  loses a piece only when a nest using it is marked.
+- The fuzz tests run random builds edited at random (parts changed, moved,
+  added, removed) through random runs, marks and fixes against a plain
+  model of what a second nest takes, what is made and what the ledger
+  holds, its comments included (`tests/fuzz/pinning.py`).
+
 ## Still open
 
 Gone through with Florian on 2026-10-16. Built since, with the nests in
@@ -267,8 +396,9 @@ nest, the nest file's `bought` (the sheets bought only) and
 `settings.seconds` (the limit), a `nest(False)` board named in a nest as
 its own blank (but for rips first), the nest's name and time, and the
 values a nest reads as settings with the stock on hand in the inventory
-(Running it, What is nested). The build order of what remains is in that
-proposal.
+(Running it, What is nested); and in stage 3 the parts' fingerprints (The
+nest file) and pinning with the inventory written back (Pinning). The
+build order of what remains is in that proposal.
 
 ### Decided, to build
 
@@ -293,13 +423,6 @@ proposal.
   nest names them (What is nested); rips first comes with the item above.
   A `nest(False)` board no nest names is still only listed as not nested
   (the cut list, below).
-- **Fingerprints.** Each part in the nest file carries a hash of itself as
-  machined: its machine outline in its nest frame, its operations, thickness,
-  material, grain and machining face, not where it sits in the build. The
-  command and the preview then say which parts changed since a nest, and a
-  nest stays good when only another module changed (the layout's hash says
-  only that something did) [decided 2026-10-16]. The nest file's version 3,
-  with `lang.emit.nested`. The first step of pinning.
 - **The cut list**, written by the build as CSV beside `layout.json`, by
   module [decided 2026-10-16]: slats and lips by species, section and
   length, a plain list (not fitted onto stock lengths); `nest(False)` boards
@@ -343,26 +466,9 @@ nesting a selection (a material, parts, a module, as when parts are made
 again) is declaring such a nest; `use(nest(False))` marks a whole module's
 boards as sawn by hand (in the saw plan and on the cut list), not "not in
 this nest"; a `nest(False)` board named in a nest is its own blank, which
-the CAM plan will machine without its outline. Still to come:
-
-- **Pinning** [decided 2026-10-16: yes, after the nest definitions]. A van
-  is built over weeks; Florian machines a module's sheets in one go, and
-  now and then a change in between means making parts again.
-  - A nest is marked as made, whole or by sheets (a click in the preview's
-    nest view, or a command), in a state file beside the nests, not in the
-    build file. A nest marked so is frozen: its result is read from its
-    file, never nested again.
-  - Running the same nest again compares its parts' fingerprints with the
-    build: parts made and unchanged are left out; changed and new parts are
-    nested anew, in a second nest beside the first; parts gone from the
-    build are reported. A changed part can be marked as fixed (a hole added
-    by hand), so it is not nested again.
-  - The stock: the inventory ledger (`inventory.toml`, one kind of entry
-    for sheets and rests alike, `proposals/settings.md`), one per project,
-    as there is one project at a time. The kept rests of a nest marked as
-    made go into it and the pieces it used come out; Florian adds the sheets
-    he buys and deletes by hand what is used for something else, so the nest
-    rewrites it keeping what he wrote.
+the CAM plan will machine without its outline; and pinning, built
+2026-10-16 as decided (Pinning, above), with the inventory one ledger per
+project, as there is one project at a time.
 
 ### Dropped [decided 2026-10-16]
 
