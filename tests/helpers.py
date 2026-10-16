@@ -2,6 +2,7 @@
 helpers that look at outlines, meshes and hardware bodies."""
 from __future__ import annotations
 
+import copy
 import runpy
 import sys
 import warnings
@@ -13,7 +14,7 @@ from shapely.geometry import Point
 
 from lang import Board, Box, Scope, board, check, sheet_material, module, no_interference, rect
 from lang.core.layout import build_layout
-from lang.core.layout_types import HardwareBodyLayout
+from lang.core.layout_types import HardwareBodyLayout, Layout
 from lang.core.scope import registry
 from lang.preview.mesh import mesh_part
 
@@ -95,3 +96,31 @@ def run_example(path: Path, run_name: str = "__build__") -> None:
             file = getattr(sys.modules[name], "__file__", None)
             if file and any(Path(file).resolve().is_relative_to(f) for f in folders):
                 del sys.modules[name]
+
+
+def merged_layouts(build_files: list[Path]) -> Layout:
+    """The layouts of several build files as one, each part's and nest's
+    path after its file's name (`shelf:shelf.left`): for nesting the
+    examples' parts together, which the nest command does not (one source
+    per nest [decided 2026-10-16]). The files must share their world frame."""
+    from lang.build import layout_of
+    layouts = [(path.stem, layout_of(path)) for path in build_files]
+    first = layouts[0][1]
+    out: Layout = {"version": first["version"], "units": first["units"], "frame": first["frame"], "modules": [],
+                   "problems": [], "snapshots": [], "sheet_materials": {}}
+    for name, layout in layouts:
+        assert layout["frame"] == first["frame"], f"{name} is written in another world frame"
+        for module_ in copy.deepcopy(layout["modules"]):
+            module_["path"] = f"{name}:{module_['path']}"
+            for part in module_["parts"]:
+                part["path"] = f"{name}:{part['path']}"
+            for nest in module_["nests"]:
+                nest["path"], nest["module"] = f"{name}:{nest['path']}", f"{name}:{nest['module']}"
+                nest["parts"] = [f"{name}:{p}" for p in nest["parts"]]
+                nest["left_out"] = [f"{name}:{p}" for p in nest["left_out"]]
+            out["modules"].append(module_)
+        out["problems"] += [f"{name}: {p}" for p in layout["problems"]]
+        out["snapshots"] += layout["snapshots"]
+        for label, material in layout["sheet_materials"].items():
+            assert out["sheet_materials"].setdefault(label, material) == material, f"two materials {label}"
+    return out

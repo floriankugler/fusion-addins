@@ -37,7 +37,7 @@ from lang.nesting.sawing import Node, PartOn, cut_list, cuts, leaves, simplify
 from lang.nesting.verify import verify
 from lang.nesting.workshop import OnHand, Sheet, Workshop
 
-from helpers import EXAMPLES, ply12, ply15
+from helpers import EXAMPLES, merged_layouts, ply12, ply15
 
 FAST = Options(seconds=0.5, saw_seconds=0.1, refill_seconds=0.3)
 oak = sheet_material("oak", t=20)
@@ -929,3 +929,14 @@ def test_the_command_line_takes_a_layout_file(tmp_path: Path):
     nest = json.loads((out / "shelf" / "birch_18" / "nest.json").read_text())
     assert nest["name"] == "shelf.birch_18" and nest["problems"] == []
     assert nest["materials"][0]["bought"] == {"2500x1250": 1}
+
+
+def test_the_examples_parts_nest_together_through_a_merged_layout():
+    """One source per nest: nesting several build files together is a test
+    helper's work, `merged_layouts` (the measurements over the examples)."""
+    layout = merged_layouts([EXAMPLES / "shelf.py", EXAMPLES / "hatch.py"])
+    workshop = Workshop(bed=(2000, 1000), sheets=(Sheet("birch 18", 2500, 1250),))
+    nest, _parts = nest_parts(layout, None, workshop, material="birch 18", options=FAST)
+    paths = set(placements(nest))
+    assert any(p.startswith("shelf:") for p in paths) and any(p.startswith("hatch:") for p in paths)
+    assert [m["material"] for m in nest["materials"]] == ["birch 18"] and nest["problems"] == []
