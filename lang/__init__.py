@@ -12,6 +12,7 @@ from .core.contours import Contour
 from .core.cutouts import cross, triangles
 from .core.directions import Direction, Frame, set_frame, world_frame
 from .core.errors import LangError
+from .core.nests import Nest
 from .core.material import SheetMaterial, SlatMaterial, sheet_material, slat_material
 from .core.faces import Anchor, Edge, Face, Operation, Outline
 from .core.keys import chamfer_size, grain, material, nest
@@ -25,6 +26,7 @@ from .hardware import (BallCatch, BracketModel, CatchModel, ConcealedHinge, Door
                        hatch_hinge, hinge, latch, sliding_bracket)
 from .joints import box_joint, cabineo, clamex, domino, groove, half_lap, screws, tenons
 from .master import Master, Plane, master
+from . import nesting
 
 __all__ = [
     "Direction", "Frame", "set_frame", "world_frame",
@@ -33,7 +35,7 @@ __all__ = [
     "SheetMaterial", "SlatMaterial", "sheet_material", "slat_material",
     "Board", "Slat", "Face", "Edge", "Anchor", "Outline", "Operation", "Joint", "board", "slat",
     "Scope", "ModuleBody", "module", "scope", "check", "uncheck",
-    "Setting", "Binding", "setting", "use", "value", "material", "grain", "nest", "chamfer_size",
+    "Setting", "Binding", "setting", "use", "value", "material", "grain", "nest", "chamfer_size", "Nest", "nesting",
     "no_interference", "fits_sheet", "inside", "inside_box", "LangError",
     "master", "Master", "Plane", "Contour", "half_lap", "domino", "clamex", "cabineo", "tenons", "screws",
     "box_joint", "groove",

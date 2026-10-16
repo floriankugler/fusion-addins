@@ -53,7 +53,7 @@ def merged(layouts: list[tuple[str, Layout]]) -> Layout:
         return layouts[0][1]
     first = layouts[0][1]
     out: Layout = {"version": first["version"], "units": first["units"], "frame": first["frame"], "modules": [],
-                   "problems": [], "snapshots": []}
+                   "problems": [], "snapshots": [], "sheet_materials": first["sheet_materials"]}
     for name, layout in layouts:
         if layout["frame"] != first["frame"]:
             raise LangError(f"{name} is written in another world frame than {layouts[0][0]}; nest them apart.")

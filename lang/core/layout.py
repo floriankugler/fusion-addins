@@ -11,7 +11,10 @@ from pathlib import Path
 
 from . import directions
 from .errors import LangError
-from .layout_types import LAYOUT_VERSION, ExportValue, Layout, ModuleLayout, SnapshotLayout
+from .layout_types import (LAYOUT_VERSION, ExportValue, Layout, MaterialLayout, ModuleLayout, NestLayout,
+                           SnapshotLayout)
+from .material import SheetMaterial
+from .nests import layout_nests
 from .refs import as_pos
 from .scope import registry
 
@@ -26,6 +29,7 @@ def build_layout() -> Layout:
     registry.run_bodies()
     modules: list[ModuleLayout] = []
     problems: list[str] = []
+    nests = layout_nests(registry.roots, registry.root_parts)
     for root in registry.roots:
         all_parts = root.all_parts()
         parts = [part.to_layout() for part in all_parts]
@@ -38,13 +42,15 @@ def build_layout() -> Layout:
             "parts": parts,
             "hardware": root.all_hardware(),
             "exports": {k: _export_value(v) for k, v in root.exports.items()},
-            "problems": checks + notes,
+            "problems": checks + notes + _empty(nests[root.path]),
+            "nests": nests[root.path],
         })
-        problems += checks + notes
+        problems += checks + notes + _empty(nests[root.path])
     loose = [part.to_layout() for part in registry.root_parts]
     if loose:
         notes = [note for part in registry.root_parts for note in part.notes]
-        modules.append({"path": "", "box": None, "parts": loose, "hardware": [], "exports": {}, "problems": notes})
+        modules.append({"path": "", "box": None, "parts": loose, "hardware": [], "exports": {}, "problems": notes,
+                        "nests": nests.get("", [])})
         problems += notes
     # One entry per snapshot file and hash, however often it was read.
     snapshots: dict[tuple[str, str], SnapshotLayout] = {}
@@ -58,7 +64,32 @@ def build_layout() -> Layout:
         "modules": modules,
         "problems": list(dict.fromkeys(problems)),
         "snapshots": list(snapshots.values()),
+        "sheet_materials": _materials(),
     }
+
+
+def _empty(nests: list[NestLayout]) -> list[str]:
+    """A problem for each declared nest that takes no board."""
+    return [f"{n['path']}: no board to nest" for n in nests if not n["parts"]]
+
+
+def _materials() -> dict[str, MaterialLayout]:
+    """The boards' sheet materials by label; two of one label must be the
+    same material, else the nest could not tell which sheets to buy."""
+    out: dict[str, MaterialLayout] = {}
+    seen: dict[str, SheetMaterial] = {}
+    parts = [p for root in registry.roots for p in root.all_parts()] + list(registry.root_parts)
+    for part in parts:
+        material = part.material
+        if not isinstance(material, SheetMaterial):
+            continue
+        first = seen.setdefault(material.label, material)
+        if first != material:
+            raise LangError(f"two materials are called {material.label}: {first} and {material}; give them names "
+                            "of their own.", part.path)
+        out[material.label] = {"thickness": material.thickness, "grain": material.grain,
+                               "size": list(material.size) if material.size is not None else None}
+    return dict(sorted(out.items()))
 
 
 def _export_value(value: object) -> ExportValue | float | str:

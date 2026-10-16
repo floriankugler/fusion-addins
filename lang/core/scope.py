@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import functools
 import inspect
-from collections.abc import Generator
+from collections.abc import Generator, Sequence
 from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
@@ -44,6 +44,8 @@ from .refs import Pos, Side
 from .settings import Binding, Node, Setting
 
 if TYPE_CHECKING:
+    from .material import SheetMaterial
+    from .nests import Nest
     from .part import Board
 
 Check = Callable[["Scope"], list[str]]
@@ -173,6 +175,7 @@ class Scope:
         self._children: dict[str, Scope] = {}
         self._hardware: list[HardwareLayout] = []
         self._exports: dict[str, Any] = {}
+        self._nests: dict[str, Nest] = {}
         #: The checks run on this scope: a module's start with
         #: `no_interference`, which `uncheck()` turns off [decided by
         #: Florian, 2026-10-15, syntax.md item 4].
@@ -220,6 +223,12 @@ class Scope:
     def exports(self) -> dict[str, Any]:
         self._run_body()
         return self._exports
+
+    @property
+    def nests_declared(self) -> dict[str, Nest]:
+        """The nests declared on this scope (`nest()`), by name."""
+        self._run_body()
+        return self._nests
 
     # -- identity --------------------------------------------------------------------
 
@@ -423,6 +432,26 @@ class Scope:
         """The value of a setting as this scope sees it: its own, else the
         nearest scope's above it, else the root's, else the key's default."""
         return self.settings.read(key, self.path)[0]
+
+    @overload
+    def nest(self, name: str, /, *, material: SheetMaterial) -> Nest: ...
+
+    @overload
+    def nest(self, name: str, parts: Sequence[Board], /) -> Nest: ...
+
+    def nest(self, name: str, parts: Sequence[Board] | None = None, /, *,
+             material: SheetMaterial | None = None) -> Nest:
+        """Declares a nest of this module or scope (`lang.core.nests`):
+        `cab.nest("carcass", material=ply15)` for its nested boards of a
+        material (its sub-scopes' too, not a module's inside it), or
+        `cab.nest("fronts", [front1, front2])` for boards named anywhere in
+        it, a `nest(False)` board among them its own blank. The name is
+        unique on the scope, the nest's path `cab.carcass`; a board is in
+        one nest of its module. The nest takes settings of its own:
+        `cab.nest(...).use(nesting.margin(15))`. What no nest names, the
+        nested boards of a material, makes a nest of its own per module."""
+        from .nests import declare
+        return declare(self, name, parts, material)
 
     def check(self, *checks: Check) -> Scope:
         """Adds checks to run on this scope, each once: a module runs

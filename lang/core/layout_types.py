@@ -1,11 +1,13 @@
-"""The layout file's shape, version 7.
+"""The layout file's shape, version 8.
 
 This is the contract between the language and its consumers (the preview
 mesher, the Fusion emitter, the viewer page, the nest). Bump LAYOUT_VERSION
 on incompatible changes; `lang.emit.plan` and the viewer repeat it and
 refuse other versions.
 
-Version 7 (2026-10-16): a part carries `settings`, the settings set along
+Version 8 (2026-10-16): each module lists its `nests`, declared and
+default, with their parts and own settings, and the layout its sheet
+`sheet_materials` with their sizes. Version 7 (2026-10-16): a part carries `settings`, the settings set along
 its chain with the node that set each, and `op_settings`, its named
 operations' own. Version 6 (2026-10-15): a part carries `nest`, whether it goes into the
 nest. Version 5 (2026-10-14): parts are boards or slats (`kind`), and a slat
@@ -20,7 +22,7 @@ from __future__ import annotations
 
 from typing import Literal, NotRequired, TypedDict
 
-LAYOUT_VERSION = 7
+LAYOUT_VERSION = 8
 
 #: One or more polygons as rings of [u, v] points, one polygon after the
 #: other: its exterior ring, counter-clockwise, then its holes, clockwise.
@@ -193,6 +195,40 @@ class HardwareLayout(TypedDict):
     bodies: list[HardwareBodyLayout]
 
 
+class NestLayout(TypedDict):
+    """A nest of the build (`lang.core.nests`): declared on a scope, or the
+    default nest of a module's nested boards of a material that no declared
+    nest names."""
+    #: Its scope's path and its name (`kitchen.carcass`); a default nest's
+    #: name is its material's label made file-safe (`kitchen.birch_15`, at
+    #: the root `birch_15`).
+    path: str
+    #: The module it belongs to ("" at the root).
+    module: str
+    #: How its parts were chosen: the nested boards of a material in its
+    #: scope, boards named, or what no declared nest names.
+    by: Literal["material", "parts", "default"]
+    #: Its material's label (`birch 15`), None for one of boards named.
+    material: str | None
+    #: Its parts' paths, in the build's order; a `nest(False)` board named
+    #: is its own blank.
+    parts: list[str]
+    #: The boards of its material in its scope that no nest takes
+    #: (`nest(False)`, manual), for a nest by material or by default.
+    left_out: list[str]
+    #: The settings the nest itself uses, with their source.
+    settings: dict[str, SettingLayout]
+
+
+class MaterialLayout(TypedDict):
+    """A sheet material the boards are made of, by its label."""
+    thickness: float
+    grain: bool
+    #: Its sheet's size (mm, along the grain first), the sheets bought;
+    #: None when the build gives none.
+    size: list[float] | None
+
+
 class ModuleLayout(TypedDict):
     path: str
     box: BoxDict | None
@@ -202,6 +238,8 @@ class ModuleLayout(TypedDict):
     #: This module's problems: its checks' and the notes its parts left.
     #: The layout's `problems` repeat them.
     problems: list[str]
+    #: The nests of the module and the modules in it.
+    nests: list[NestLayout]
 
 
 class SnapshotBoxLayout(TypedDict):
@@ -237,3 +275,6 @@ class Layout(TypedDict):
     problems: list[str]
     #: Snapshots of the master the build read.
     snapshots: list[SnapshotLayout]
+    #: The sheet materials of the boards, by label. (Not `materials`: the
+    #: compiler add-in tells a nest file by that key.)
+    sheet_materials: dict[str, MaterialLayout]

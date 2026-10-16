@@ -60,7 +60,8 @@ from lang.core.layout import build_layout
 from lang.core.layout_types import Layout, PartLayout
 from lang.emit.nested import apply as apply_matrix
 from lang.emit.nested import plan_nest
-from lang.nesting import Options, Sheet, Workshop, nest_layout
+from lang.nesting.nest import Options, nest_layout
+from lang.nesting.workshop import Sheet, Workshop
 from lang.nesting import sawing
 from lang.nesting.draw import draw_nest
 from lang.nesting.items import MITRE, OUTSIDE, TOLERANCE, Item, parts_of_layout, turned

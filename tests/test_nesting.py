@@ -20,7 +20,8 @@ from lang import (Board, Box, LangError, Shape, SheetMaterial, board, circle, mo
 from lang.core.layout import build_layout, layout_hash
 from lang.core.layout_types import Layout
 from lang.emit.nested import NEST_VERSION as EMIT_NEST_VERSION, apply, plan_nest
-from lang.nesting import Options, Sheet, Workshop, nest_layout, read_workshop
+from lang.nesting.nest import Options, nest_layout
+from lang.nesting.workshop import Sheet, Workshop, read_workshop
 from lang.nesting import sawing
 from lang.nesting.__main__ import main as nest_main
 from lang.nesting.draw import draw_nest
