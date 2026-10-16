@@ -65,6 +65,15 @@ done.
   thickness, is found when the layout resolves it and `lang.build` prints
   no line of the build file. A board could remember where `board()` made
   it and name that line.
+- **The inventory between runs of the nest**: the nests of one run of
+  `python -m lang.nesting` share the stock on hand in their order, but a
+  nest run alone (the preview's "nest again", or naming one nest) sees the
+  whole inventory again, so two nests made one after the other may both
+  plan on one offcut. Pinning (stage 3 of `proposals/settings.md`) takes
+  what a nest made used out of the ledger; until then the ledger is only
+  read (found 2026-10-16, stage 2).
+- **`nest(False)` boards no nest names** are still only listed as not
+  nested; the cut list (`design/nesting.md`, Still open) is where they go.
 - **Corners named by a point** (`panel.top.front(60).left(40)`) for
   `fillet()` and `chamfer()`, once a build needs it.
 - **Try the language on real modules**: write two modules from the van in

@@ -16,7 +16,7 @@ Fusion documents. This file is the overview; the details are in `design/`:
 | `design/checks.md` | `no_interference`, `inside_box`, `inside()`, `fits_sheet` |
 | `design/geometry.md` | Polygons and arcs, cleaning, tolerances, offsets |
 | `design/emitter.md` | The Fusion backend, compile speed, Fusion findings |
-| `design/nesting.md` | Nesting: parts on blanks the bed takes, sawn out of the stock on hand; the workshop and nest files |
+| `design/nesting.md` | Nesting: the build's nests, their parts on blanks the bed takes, sawn out of the stock on hand and the sheets bought; the inventory and the nest file |
 | `design/preview.md` | The browser preview |
 | `design/proposals/` | Features worked out but not built, one file each (listed below) |
 | `design/todo.md` | A loose list of things to do |
@@ -83,9 +83,11 @@ Not goals:
   features. The only code that imports `adsk`, with the snapshot writer.
 - **Preview**: a second consumer of the layout file that meshes the parts and
   shows them in a browser, without Fusion.
-- **Nest**: the parts of a build per material on blanks the machine's bed
-  takes, sawn out of the stock on hand (a workshop file), written to a nest
-  file the preview shows and the emitter draws, a document per material.
+- **Nest**: each nest the build declares (else one per material per
+  module), its parts on blanks the machine's bed takes, sawn out of the
+  stock on hand (the inventory) and the material's sheets, with the
+  machine's values as settings; written to a nest file per nest that the
+  preview shows and the emitter draws, a document per material.
 
 ```
 Master document --(snapshot, in Fusion, rarely)--> snapshot.json
@@ -96,8 +98,8 @@ Python source ---------------------------------------> layout step (plain Python
                                   +--------------------+--------------------+
                                   v                    v                    v
                         preview (browser,     nest (plain Python,    emit (in Fusion, seconds,
-                        instant)              seconds a material,    one direct document per
-                                  ^           workshop file)         module)
+                        instant)              per nest, seconds a    one direct document per
+                                  ^           material, inventory)   module)
                                   |                    |                    ^
                                   +---- nest view -----+---- nest.json -----+
                                                              (a document per material)
@@ -194,14 +196,15 @@ the inspection hatch and removable panels.
 ```
 lang/
   core/        no Fusion: refs, box, directions, faces, shapes, geometry, part,
-               scope, settings and keys, ops, corners, cutouts, dogbones,
+               scope, settings and keys, nests, ops, corners, cutouts, dogbones,
                contact, crossing, contours, checks, material, layout and
                layout_types, errors
   joints/      half laps, connectors, tenons, screws, box joints, grooves
   hardware/    slides, hinges, hatch hinges, ball catches, latches, sliding brackets
   std/         the standard library: carcass, drawer box, written on the public API only
   emit/        plan, loops, arcs, nested (Fusion-free); fusion (draws); the snapshot writer
-  nest/        nesting: workshop file, parts, PackingSolver, saw plans, refill, verify, drawing
+  nesting/     the nest's keys, a nest's values and stock, the inventory, parts, PackingSolver,
+               saw plans, refill, verify, drawing
   preview/     mesher, server, three.js viewer
   master.py    reading the snapshot
   build.py     `python -m lang.build`; `python -m lang.nesting` nests
@@ -221,7 +224,9 @@ dog bones), half laps, Dominos, Clamex, Cabineos, tenons, screws, box joints,
 grooves, drawer slides, concealed hinges, hatch hinges, ball catches, door
 latches, sliding brackets, slats and lips (cosmetic slats for now), the checks,
 the folder preview, nesting (sheets and offcuts sawn into blanks for the
-bed, the preview's nest view, nested documents in Fusion), the standard
+bed, the preview's nest view, nested documents in Fusion), the nests
+declared in the build with the nesting keys, the inventory and own blanks
+for `nest(False)` boards (the settings' second stage), the standard
 library's carcass and drawer box, which give the examples' layouts unchanged,
 and the settings' first stage (keys, the chain, freezing, provenance in the
 layout and the preview, `material`, `grain`, `nest` and `chamfer_size`,
@@ -244,7 +249,7 @@ is implemented. [Florian]
 | `miters.md` | Mitered corners as a joint |
 | `standard-library.md` | What is left of the standard library (built: `design/std.md`): cabinet types per build repo, further blocks |
 | `cam.md` | A CAM plan from the layout, built by an add-in |
-| `settings.md` | Settings that flow down the build and are overridden at any level (Florian's idea, 2026-10-15/16). Built: stage 1, the mechanism, the core's keys, lazy modules, the master's parameters (`design/api.md`); to come: nests per module with the nesting keys, fingerprints and pinning, the CAM's keys |
+| `settings.md` | Settings that flow down the build and are overridden at any level (Florian's idea, 2026-10-15/16). Built: stage 1, the mechanism, the core's keys, lazy modules, the master's parameters (`design/api.md`); stage 2, nests in the build with the nesting keys and the inventory (`design/nesting.md`); to come: fingerprints and pinning, the CAM's keys |
 | `runs.md` | Hoses, cables, ducts and keep-outs: one run primitive that plans and is checked, routed through the boards' own openings, at the van level or in a module |
 | `detail-levels.md` | Rough and full previews |
 | `hand-made-geometry.md` | Escape hatches for what the language cannot say |

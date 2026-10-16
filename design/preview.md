@@ -71,15 +71,20 @@ for a check, too slow for the loop. [decided as a need]
   `tests/test_viewer_js.py`), and a rebuild frees the old scene's GPU
   resources.
 - Click-to-path in the viewer is the Copy Path helper outside Fusion.
-- The nest view (button or key `k`, `preview.nest(on)` from code) shows the
-  design's nest as the nest step drew it (`nest.svg` beside the build, see
-  `design/nesting.md`): the sheets with their numbered saw cuts, blanks,
-  kept rests and waste, the parts labelled with their grain; a part
-  clicked there is selected in the model. The side panel says whether the
-  nest is of the layout on screen (its layout hash) or an older one, and
-  Nest again runs `python -m lang.nesting` with the workshop file beside the
-  build file, one nest at a time and never on a save (a nest takes seconds
-  to minutes); a failed nest shows its log.
+- The nest view (button or key `k`, `preview.nest(on)` from code) shows a
+  nest of the design as the nest step drew it (`nest.svg` in the nest's
+  folder beside the build, `<module>/<nest>/`, see `design/nesting.md`):
+  its name and time, the sheets with their numbered saw cuts, blanks (an
+  own blank hatched), kept rests and waste, the parts labelled with their
+  grain; a part clicked there is selected in the model. The side panel
+  lists the design's nests as its layout gives them (`module.nest`,
+  declared or one per material per module; `preview.nests()` from code)
+  and shows the one chosen (`await preview.showNest('kitchen.carcass')`);
+  it says whether that nest is of the layout on screen (its layout hash),
+  of an older one, or not nested yet, and Nest again runs `python -m
+  lang.nesting <build> <nest>` for it, with the inventory beside the build
+  file, one nest at a time and never on a save (a nest takes seconds to
+  minutes); a failed nest shows its log.
 
 ## Serving a folder
 

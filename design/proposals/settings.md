@@ -13,13 +13,39 @@ provenance in the layout, version 7), the core's keys `material`, `grain`,
 `nest` and `chamfer_size`, `@module` with lazy bodies, `module(front=)`
 in place of `cabinet()`, and `van.setting()`. They are described in
 `design/api.md` (Settings, Modules, Frames) and `design/master.md`; this
-file keeps the design and what is still to come, stages 2 to 4. Built
-otherwise than written here: the freezing error fires only where the use
+file keeps the design and what is still to come. Built otherwise than
+written here: the freezing error fires only where the use
 would change what was read (a use above the node a read found its value
 at is shadowed for that reader and allowed); a key read from its default
 is listed in the layout only when the default came from somewhere ("master:
 Spalt"); and the root, outside every module, is a node that `use()` there
 sets.
+
+Built 2026-10-16, stage 2: nests in the build. `cab.nest(name,
+material=...)` and `cab.nest(name, [boards])`, a method on the scope with
+`.use()` and `.value()` (the naming decision below), a board in one nest of
+its module, a root module's nest naming boards of its modules, and a nest
+per material per module for what no declared nest names; the nesting keys
+in `lang.nesting` (`bed` without a default, `kerf`, `max_cuts`, `spacing`,
+`margin`, `keep_across`, `keep_area`, `seconds`, `rate`, `least_seconds`,
+`refill`) read by the nest step from the layout (version 8), the nest's own
+value, else its parts', else the default, `agree` or `max` as below; the
+inventory, `inventory.toml`, read only; the material's `size=` the sheets
+bought; the command taking one build file and nest names, writing
+`out/<build>/<module>/<nest>/`; the nest file's name, time, `bought` and
+`seconds` (version 2); a `nest(False)` board named in a nest as its own
+blank; the preview listing a design's nests. Described in
+`design/api.md` (Settings, Nests) and `design/nesting.md`. Built otherwise
+or beyond what is written here: a nest by material takes its scope's
+boards and its sub-scopes', not a module's inside it (which has nests of
+its own), and a declared nest's name is unique on its scope; "what no
+declared nest names" is any declared nest, so a board a remake names
+leaves its module's default nest (with pinning the first nest is frozen
+anyway); the nests of one run of the command share the stock on hand in
+their order; the `spacing` join grows the solver's polygon of a part that
+asks for more than the nest's least by the difference, so between two
+parts the larger holds; the `lang.nesting` module `refill` became
+`refilling`, so the key keeps its name.
 
 The syntax review's item 16 (`syntax.md`, 2026-10-15) decided against a
 defaults object for the modeling calls. Florian reopened it the next day:
@@ -59,6 +85,12 @@ settings are for what flows.
 - **A module body takes its scope** [Florian: good], and a module is called
   like a constructor and configured with `.use()` on what it returns
   (below).
+- **`lang.nesting`, `nest`, and `cab.nest()`** [decided by Florian
+  2026-10-16]: the nesting package is `lang.nesting` (`python -m
+  lang.nesting`, the keys' namespace, `nesting.margin(15)`), the boards'
+  key stays `nest`, and a nest is declared by a method on the scope,
+  `cab.nest(name, material=ply15)` or `cab.nest(name, [part, ...])`, so
+  there is no top-level `nest()` function to collide with the key.
 - **Cut-sheet pinning comes after the nests defined in the build**
   [decided in the nesting review the same day, `design/nesting.md`, Still
   open]: nothing here depends on it; the parts' fingerprints in the nest
@@ -191,12 +223,12 @@ def kitchen(cab: Scope, *, drawers: int = 3) -> None:
         use(material(ply12))
         for i in range(drawers):
             drawer_box(f"drawer{i}", ..., gap=value(drawer_gap))
-    nest("carcass", material=ply15)                      # this module's nests
-    nest("drawers", material=ply12).use(cam.tabs("auto"))
-    nest("fronts", [front1, front2, front3]).use(nesting.margin(15))
+    cab.nest("carcass", material=ply15)                  # this module's nests
+    cab.nest("drawers", material=ply12).use(cam.tabs("auto"))
+    cab.nest("fronts", [front1, front2, front3]).use(nesting.margin(15))
 
 # build.py
-with module("van", van.box("Innenraum")):                # the root module, written in place
+with module("van", van.box("Innenraum")) as root:        # the root module, written in place
     use(
         material(ply15),
         chamfer_size(1.0),
@@ -210,7 +242,7 @@ with module("van", van.box("Innenraum")):                # the root module, writ
     )
     k = kitchen(van.box("Küche"), front=kitchen_front, drawers=4).use(chamfer_size(0.5))
     b = bed(van.box("Bett"), front=bed_front).use(material(ply18), spalt(2.0))
-    nest("remake", [k.left, b.front])                    # across modules
+    root.nest("remake", [k["left"], b["front"]])         # across modules
     check(fits_sheet)
 ```
 
@@ -240,16 +272,17 @@ with module("van", van.box("Innenraum")):                # the root module, writ
 
 ## Nests in modules
 
-`nest(name, material=...)` or `nest(name, parts)` inside a body registers a
-nest on the module, like `check()`; it selects this module's parts of a
-material, or the parts named, and takes `.use()` for nest-level values,
-another bed among them for a nest cut on another machine.
-What no declared nest names falls into one nest per material, so a module
-that declares none behaves as today. A nest at the root may name parts of
-several modules (remakes). Nests are named by module and nest
-(`kitchen.carcass`), their files written under `out/<module>/<nest>/`
-[proposed]. The nest command then takes a build file and, optionally, nest
-names; `--set` and `--material` go.
+`cab.nest(name, material=...)` or `cab.nest(name, parts)` registers a nest
+on the module or scope, like `cab.check()`; it selects this module's
+boards of a material, or the boards named, and takes `.use()` for
+nest-level values, another bed among them for a nest cut on another
+machine. What no declared nest names falls into one nest per material per
+module, so a module that declares none behaves as before, by module. A
+root module's nest may name parts of several modules (remakes). Nests are
+named by module and nest (`kitchen.carcass`), their files written under
+`out/<build>/<module>/<nest>/`. The nest command takes a build file and,
+optionally, nest names; `--material` and the workshop's options went.
+Built so (stage 2, above).
 
 ## The master's parameters
 
@@ -269,9 +302,10 @@ provenance [proposed].
 - Python: the build, its modules and standards, `master.py`. The machine
   is settings (`nesting.bed`, `nesting.kerf`, `nesting.max_cuts`), used at
   the root and by a nest that goes elsewhere [Florian].
-- The inventory ledger (`inventory.toml` [proposed]): one kind of entry, a
-  piece of stock on hand by material and size with a count, full sheets
-  and offcuts alike [Florian: no distinction], one per project. The nest
+- The inventory ledger (`inventory.toml` [decided; built 2026-10-16, read
+  only]): one kind of entry, a piece of stock on hand by material and size
+  with a count, full sheets and offcuts alike [Florian: no distinction],
+  one per project. The nest
   reads it and uses what is on hand before it buys; the kept rests of a
   nest marked as made go into it and the pieces it used come out (pinning,
   `design/nesting.md`); Florian adds the sheets he buys and deletes by hand
@@ -389,22 +423,22 @@ built [Florian]. Each stage is a session of its own [proposed].
    (a layout version); `material`, `nest`, `grain` and `chamfer_size`;
    `@module` with lazy modules and `.use()`, `module(front=)` taking over
    from `cabinet()`; `van.setting()` in the master index.
-2. **Nests in the build**: `nest()` in a module with `.use()`; the nesting
-   keys (bed, kerf, cuts per sheet, spacing, margin, keep, time) replacing
-   the workshop file; the inventory ledger replacing its stock; one source
-   per nest (the merge of build files and the `van:` prefixes go); the
-   nest's name and time in the nest file; a `nest(False)` board named in a
-   nest as its own blank; the command taking a build file and nest names.
+2. **Nests in the build** [built 2026-10-16]: `cab.nest()` in a module
+   with `.use()`; the nesting keys (bed, kerf, cuts per sheet, spacing,
+   margin, keep, time) replacing the workshop file; the inventory ledger
+   replacing its stock; one source per nest (the merge of build files and
+   the `van:` prefixes go); the nest's name and time in the nest file; a
+   `nest(False)` board named in a nest as its own blank; the command taking
+   a build file and nest names.
 3. **Fingerprints and pinning**: the parts' hashes in the nest file (its
-   version 2), the state file marking nests as made, re-nesting changed
+   version 3), the state file marking nests as made, re-nesting changed
    parts beside a frozen nest, rests into the ledger.
 4. **The CAM plan** (`cam.md`) with its keys, including `smallest_cutter`
    and a group's shared gaps.
 
 Independent of the settings, from the nesting review, in their own
 sessions whenever Florian wants them: the layout refusing a cut through a
-through pocket; the nest file's `bought` and `seconds`; rips first in the
-saw plan; refill past the cut limit; `nest(False)` boards in the saw plan;
+through pocket; rips first in the saw plan; refill past the cut limit;
 the cut list as CSV with the hardware's product data (a layout version,
 best taken together with stage 1's); manufacturing groups (with that same
 version); Compile Layout clicked through with a nest file.
