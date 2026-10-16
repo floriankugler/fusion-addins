@@ -44,7 +44,10 @@ settings are for what flows.
 - **A module body takes its scope** [Florian: good], and a module is called
   like a constructor and configured with `.use()` on what it returns
   (below).
-- **Cut-sheet pinning is parked** [Florian]: nothing here depends on it.
+- **Cut-sheet pinning comes after the nests defined in the build**
+  [decided in the nesting review the same day, `design/nesting.md`, Still
+  open]: nothing here depends on it; the parts' fingerprints in the nest
+  file are its first step.
 
 ## The chain
 
@@ -253,11 +256,16 @@ provenance [proposed].
   the root and by a nest that goes elsewhere [Florian].
 - The inventory ledger (`inventory.toml` [proposed]): one kind of entry, a
   piece of stock on hand by material and size with a count, full sheets
-  and offcuts alike [Florian: no distinction]; the nest reads it, uses what
-  is on hand before it buys, and writes usable rests back. What can be
-  bought is the material's `size=`, and the nest reports what it bought.
-- Outputs: the layout, the nests, the CAM plan, the drawings. None is an
-  input; what pinning would change is parked.
+  and offcuts alike [Florian: no distinction], one per project. The nest
+  reads it and uses what is on hand before it buys; the kept rests of a
+  nest marked as made go into it and the pieces it used come out (pinning,
+  `design/nesting.md`); Florian adds the sheets he buys and deletes by hand
+  what is used elsewhere, so the nest rewrites it keeping what he wrote.
+  What can be bought is the material's `size=`: a material's sheets are
+  always bought in one size, and everything else on hand is an offcut in
+  the ledger [decided 2026-10-16]; the nest reports what it bought.
+- Outputs: the layout, the nests, the CAM plan, the drawings, the cut list.
+  None is an input until a nest is marked as made.
 - The layout carries, per part, the keys set along its source chain,
   resolved, each with the node that set it, and the nests declared with
   their values; the nest and the plan lay the nest, sheet, blank and setup
@@ -299,7 +307,7 @@ module.
 | nesting | `bed`, `kerf`, `max_cuts` | `Workshop.bed`, `.kerf`, `.max_cuts` | required, 4, 5 | nest | agree |
 | nesting | `spacing` | `Workshop.spacing` | 10 | nest | max |
 | nesting | `margin` | `Workshop.margin` | 10 | nest | agree |
-| nesting | `keep_across`, `keep_area`, `seconds`, `refill` | `Workshop`, `Options` | 300, 0.25, 0.6 s a part, on | nest | agree |
+| nesting | `keep_across`, `keep_area`, `seconds`, `rate`, `least_seconds`, `refill` | `Workshop`, `Options`, `nest_seconds` | 300, 0.25, 40, 0.6 s a part, 5, on | nest | agree |
 | nesting | `turns` | none (grain decides) | by grain | nest | per part |
 | cam | `contour_template`, `pocket_template`, `bore_template`, `drill_template`, `dogbone_template`, `chamfer_template`, `groove_template`, `cutter` | Auto Setup's dialog defaults | "Kontur 6mm", "Tasche adaptiv 8mm", ...; dc or udc | plan | agree per operation |
 | cam | `finish_outer`, `finish_inner`, `finish_pockets` | the finishing checkboxes | off | plan | per part |
@@ -309,11 +317,14 @@ module.
 | cam | `bore_clearance`, `tight_cut_depth`, `big_hole_limit`, `tool_clearance`, `prefer_drilling` | `rules.py` constants | 1, 4, 30, 0.1, False | plan | agree |
 | cam | `hold_pressure`, `hold_friction`, `cutting_force`, `hold_safety`, `leak_margin`, `tab_strength` | `holding.HoldingParams`, `TAB_STRENGTH` | 0.5 N/cm², 0.5, 20 N, 1.5, 12 mm, 50 N | plan | agree |
 | cam | `stock_thickness` | none | the material's | plan, emitter | per blank (with pinning) |
+| cam | `smallest_cutter` | none ("a workshop value until the CAM plan's tool data", `design/nesting.md`, groups) | the templates' narrowest | nest (a group's gaps), checks | agree |
 | appearance | `appearance` | the preview's palette by material (`design/todo.md`) | by material | preview, emitter | per part |
 | appearance | `detail` | `proposals/detail-levels.md` | full | preview | per part |
 
 Not settings: `show()` (a rule per board), `machine()` (a face reference,
-meaningless above a part), the checks' tolerances, the inventory.
+meaningless above a part), the checks' tolerances, the inventory, and a
+manufacturing group (`design/nesting.md`), which is a relation between
+boards, said as one call over them.
 
 ## What it buys
 
@@ -346,10 +357,39 @@ The questions the first draft left open, and Florian's answers [decided]:
    argument stay the part-level spelling; `.use()` on a part is for keys
    without a keyword.
 
-To build, in this order [proposed]: the mechanism (`setting`, bindings,
-`use`, `.use`, `value`, the chain within the build, freezing, provenance in
-the layout) with `material`, `nest`, `grain` and `chamfer_size`; `@module`
-with lazy modules and `.use()`, and `module(front=)` taking over from
-`cabinet()`; `van.setting()` in the master index. Nests per module, the
-nesting and CAM keys and the inventory ledger follow with the nest and the
-CAM plan.
+7. From the merge with the nesting review (`design/nesting.md`): the
+   workshop file allowed several `[[sheet]]` sizes per material, as many as
+   needed. Florian buys a material's sheets in one size, the material's
+   `size=`; the rest is offcuts, which the ledger holds [decided
+   2026-10-16].
+
+## Build order
+
+Coordinated with the nesting review's "Still open" (`design/nesting.md`,
+2026-10-16), whose implementation Florian paused until the settings are
+built [Florian]. Each stage is a session of its own [proposed].
+
+1. **Settings, the mechanism**: `setting`, bindings, `use`, `.use`,
+   `value`, the chain within the build, freezing, provenance in the layout
+   (a layout version); `material`, `nest`, `grain` and `chamfer_size`;
+   `@module` with lazy modules and `.use()`, `module(front=)` taking over
+   from `cabinet()`; `van.setting()` in the master index.
+2. **Nests in the build**: `nest()` in a module with `.use()`; the nesting
+   keys (bed, kerf, cuts per sheet, spacing, margin, keep, time) replacing
+   the workshop file; the inventory ledger replacing its stock; one source
+   per nest (the merge of build files and the `van:` prefixes go); the
+   nest's name and time in the nest file; a `nest(False)` board named in a
+   nest as its own blank; the command taking a build file and nest names.
+3. **Fingerprints and pinning**: the parts' hashes in the nest file (its
+   version 2), the state file marking nests as made, re-nesting changed
+   parts beside a frozen nest, rests into the ledger.
+4. **The CAM plan** (`cam.md`) with its keys, including `smallest_cutter`
+   and a group's shared gaps.
+
+Independent of the settings, from the nesting review, in their own
+sessions whenever Florian wants them: the layout refusing a cut through a
+through pocket; the nest file's `bought` and `seconds`; rips first in the
+saw plan; refill past the cut limit; `nest(False)` boards in the saw plan;
+the cut list as CSV with the hardware's product data (a layout version,
+best taken together with stage 1's); manufacturing groups (with that same
+version); Compile Layout clicked through with a nest file.

@@ -86,16 +86,25 @@ Proposed:
   selection (`design/nesting.md`, Still open): a material on its own, or a
   part or group of parts, as when parts have to be made again; a
   `nest(False)` board the bed takes is nested alone and gets its blank and
-  setup through the same path [decided 2026-10-15]. One larger than the bed
-  waits for the two-setup answer there.
+  setup through the same path [decided 2026-10-15]: named in a nest, it is
+  its own blank, sawn to size with no margin, and the plan machines its
+  operations and no outline [proposed in the nesting review]. One larger
+  than the bed is sawn by hand and its operations are hand work [decided
+  2026-10-16, nesting review: two setups dropped for now].
+- **Manufacturing groups** (`design/nesting.md`, decided 2026-10-16 for
+  grain matching): a group's members lie in the nest as designed, with
+  gaps the smallest cutter passes, so one contour pass cuts both edges of
+  such a gap; the plan has to know a group's internal gaps as shared cuts,
+  and the smallest cutter is a setting (`cam.smallest_cutter`) until the
+  plan has the tool data [to do].
 - **Where the preferences live** [decided 2026-10-16, superseding the
   `[cam]` table of the 15th]: they are settings set in the build, in
   Python, flowing down from the root module to modules, parts, nests and
   setups (`proposals/settings.md`): the templates per kind, dc or udc,
   finishing per kind, the tabs' policy, width, height and least count, the
   breakthrough depth, the finishing stepdown, the holding calibration. The
-  workshop file keeps the machine (bed, saw); the stock on hand is the
-  inventory ledger.
+  machine's values are settings too, and the stock on hand is the inventory
+  ledger (`proposals/settings.md`).
 - **The plan file** [decided 2026-10-15: names from the nest, a timestamp]:
   `cam.json` beside the nest file, with a version, the hash of the nest it
   was planned from (as the nest records the layout's), so the compiler
@@ -204,9 +213,11 @@ and 12 parts are given up as unholdable. Three faults:
    fault. The same position rules go into Auto Setup's length-based mode
    (`lib/auto_setup/tabs.py`), which is what Florian uses today and is
    unhappy with.
-5. **Nest feedback.** A part still weak gets a wider web by growing its
-   solver polygon (shops keep 13 to 19 mm around tiny parts), through the
-   `spacing` setting; what fails even with tabs is reported.
+5. **No wider web.** A wider web around weak parts was dropped in the
+   nesting review [decided 2026-10-16, `design/nesting.md`]: 13 to 19 mm of
+   web holds nothing either. A small part is anchored to larger ones by
+   tabs, which is what the order in 1 and the anchor rule in 4 are for;
+   what fails even with tabs is reported.
 6. **Loose waste.** The waste inside a through cutout is a piece too; the
    examples have five of 3 to 36 cm², which the cutter can throw. Tabs
    where it fails, as for a part, since the plan has the same model for it
