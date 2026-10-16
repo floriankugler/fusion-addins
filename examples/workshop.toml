@@ -1,6 +1,6 @@
-# The workshop the examples are nested for (python -m lang.nest examples/van.py):
+# The workshop the examples are nested for (python -m lang.nesting examples/van.py):
 # the machine's bed, the saw, and the stock on hand. Sizes in mm, a piece of
-# stock's along its grain first; areas in m2. See lang/nest/workshop.py.
+# stock's along its grain first; areas in m2. See lang/nesting/workshop.py.
 
 bed = [2000, 1000]      # the CNC's bed; a blank goes on it either way round
 spacing = 10            # between two parts

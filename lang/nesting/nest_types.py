@@ -1,4 +1,4 @@
-"""The nest file's shape, version 1: what `python -m lang.nest` writes
+"""The nest file's shape, version 1: what `python -m lang.nesting` writes
 (`nest.json`), read by the preview and the Fusion emitter
 (`lang.emit.nested`, which repeats `NEST_VERSION` and refuses others).
 
@@ -20,7 +20,7 @@ class PlacedPart(TypedDict):
     up: str
     #: The turn (degrees, counter-clockwise) of the part's outline as seen
     #: from its machining face, and where its frame's origin lies on the
-    #: blank (`lang.nest.items`).
+    #: blank (`lang.nesting.items`).
     turn: float
     at: list[float]
     #: World mm to the blank's frame: a 3 x 4 matrix, rows x, y, z.
@@ -106,7 +106,7 @@ class NestSettings(TypedDict):
 class Nest(TypedDict):
     version: int
     #: The layout nested: its build file (or layout file) and the hash of
-    #: its content (`lang.nest.layout_hash`), which tells a reader whether
+    #: its content (`lang.nesting.layout_hash`), which tells a reader whether
     #: the nest is the layout's it shows.
     source: str
     layout_hash: str

@@ -74,7 +74,7 @@ def _export_value(value: object) -> ExportValue | float | str:
 
 def layout_hash(layout: Layout) -> str:
     """The hash of a layout's content, whatever its formatting: a nest
-    records the layout it nested by it (`lang.nest`)."""
+    records the layout it nested by it (`lang.nesting`)."""
     text = json.dumps(layout, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(text.encode()).hexdigest()[:16]
 

@@ -1,4 +1,4 @@
-"""Random cases for fuzzing the nest (`lang.nest`), each with what it must
+"""Random cases for fuzzing the nest (`lang.nesting`), each with what it must
 promise, checked from the outside. A case is plain data (frozen
 dataclasses), so a failing example prints as something to build again.
 
@@ -60,14 +60,14 @@ from lang.core.layout import build_layout
 from lang.core.layout_types import Layout, PartLayout
 from lang.emit.nested import apply as apply_matrix
 from lang.emit.nested import plan_nest
-from lang.nest import Options, Sheet, Workshop, nest_layout
-from lang.nest import sawing
-from lang.nest.draw import draw_nest
-from lang.nest.items import MITRE, OUTSIDE, TOLERANCE, Item, parts_of_layout, turned
-from lang.nest.nest_types import BlankOut, RestOut, SheetOut
-from lang.nest.sawing import Node, cut_list, cuts, leaves, simplify, trim_to_bed
-from lang.nest.verify import _check_sheet  # pyright: ignore[reportPrivateUsage]
-from lang.nest.workshop import Offcut, fits
+from lang.nesting import Options, Sheet, Workshop, nest_layout
+from lang.nesting import sawing
+from lang.nesting.draw import draw_nest
+from lang.nesting.items import MITRE, OUTSIDE, TOLERANCE, Item, parts_of_layout, turned
+from lang.nesting.nest_types import BlankOut, RestOut, SheetOut
+from lang.nesting.sawing import Node, cut_list, cuts, leaves, simplify, trim_to_bed
+from lang.nesting.verify import _check_sheet  # pyright: ignore[reportPrivateUsage]
+from lang.nesting.workshop import Offcut, fits
 from placement import ALIASES, WORLD_FRAMES
 
 Side = Literal["bottom", "top", "left", "right", "front", "back"]

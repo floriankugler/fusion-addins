@@ -1,7 +1,7 @@
 """Nesting: a layout's parts on the stock on hand, for the machine's bed
 (`design/nesting.md`).
 
-    python -m lang.nest examples/van.py --workshop examples/workshop.toml
+    python -m lang.nesting examples/van.py --workshop examples/workshop.toml
 
 Plain Python after the layout step, like the preview: `items` reads the
 parts from the layout, `packing` nests them with PackingSolver, `sawing`

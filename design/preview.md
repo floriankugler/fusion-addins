@@ -77,7 +77,7 @@ for a check, too slow for the loop. [decided as a need]
   kept rests and waste, the parts labelled with their grain; a part
   clicked there is selected in the model. The side panel says whether the
   nest is of the layout on screen (its layout hash) or an older one, and
-  Nest again runs `python -m lang.nest` with the workshop file beside the
+  Nest again runs `python -m lang.nesting` with the workshop file beside the
   build file, one nest at a time and never on a save (a nest takes seconds
   to minutes); a failed nest shows its log.
 

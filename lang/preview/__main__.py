@@ -25,7 +25,7 @@ camera, or shows the build's error.
 Given a single build file, it builds into --out itself, on every save,
 whether a page shows it or not.
 
-The nest view: a design's nest (`python -m lang.nest`, written into its
+The nest view: a design's nest (`python -m lang.nesting`, written into its
 out directory as `nest.json` and `nest.svg`) is shown when there is one,
 marked stale when its layout is not the one built last; the page's Nest
 button (POST /nest?design=...) nests the design again, with the workshop
@@ -257,9 +257,9 @@ def _read(path: Path) -> str:
 
 
 def renest(build_file: Path, out_dir: Path) -> bool:
-    """Nests the design into `out_dir` (`python -m lang.nest`), its output
+    """Nests the design into `out_dir` (`python -m lang.nesting`), its output
     in nest.log there."""
-    command = [sys.executable, "-m", "lang.nest", str(build_file), "--out", str(out_dir)]
+    command = [sys.executable, "-m", "lang.nesting", str(build_file), "--out", str(out_dir)]
     try:
         result = subprocess.run(command, capture_output=True, text=True, cwd=str(REPO), timeout=NEST_TIMEOUT)
         log, ok = (result.stdout + result.stderr).strip(), result.returncode == 0

@@ -18,11 +18,8 @@ otherwise than written here: the freezing error fires only where the use
 would change what was read (a use above the node a read found its value
 at is shadowed for that reader and allowed); a key read from its default
 is listed in the layout only when the default came from somewhere ("master:
-Spalt"); the root, outside every module, is a node that `use()` there sets;
-and the `lang.nest` subpackage keeps out of the `lang.nest` key's way (the
-package's module class ignores Python putting the subpackage there), which
-stage 2's `nest("carcass", ...)` declaration will have to share the name
-with.
+Spalt"); and the root, outside every module, is a node that `use()` there
+sets.
 
 The syntax review's item 16 (`syntax.md`, 2026-10-15) decided against a
 defaults object for the modeling calls. Florian reopened it the next day:

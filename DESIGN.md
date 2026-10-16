@@ -204,7 +204,7 @@ lang/
   nest/        nesting: workshop file, parts, PackingSolver, saw plans, refill, verify, drawing
   preview/     mesher, server, three.js viewer
   master.py    reading the snapshot
-  build.py     `python -m lang.build`; `python -m lang.nest` nests
+  build.py     `python -m lang.build`; `python -m lang.nesting` nests
 addins-src/compiler/   Snapshot Master and Compile Layout (layouts and nests) buttons
 lib/           data shared with the add-ins (connector_data, stations, drawer_slides, ...)
 examples/      build files; van_snapshot.json is the sample master's snapshot

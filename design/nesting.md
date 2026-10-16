@@ -3,7 +3,7 @@
 How a build's parts get onto the stock on hand and the machine's bed: plain
 Python after the layout step, like the preview, and drawn into Fusion by
 the emitter. Part of the modeling language's design; the overview is
-`DESIGN.md`. Code: `lang/nest/` (`workshop`, `items`, `packing`, `sawing`,
+`DESIGN.md`. Code: `lang/nesting/` (`workshop`, `items`, `packing`, `sawing`,
 `refill`, `nest`, `verify`, `draw`, `nest_types`), `lang/emit/nested.py`
 and `NestEmitter` in `lang/emit/fusion.py`. Florian added it as a proposal
 on 2026-10-14 and it was built the same evening; what is still open is under
@@ -13,9 +13,9 @@ on 2026-10-14 and it was built the same evening; what is still open is under
 ## Running it
 
 ```
-python -m lang.nest examples/van.py                        # workshop.toml beside it
-python -m lang.nest examples/van.py examples/shelf.py --out out/nest
-python -m lang.nest out/van/layout.json --bed 2000x1000 --sheet 2470x1240 \
+python -m lang.nesting examples/van.py                        # workshop.toml beside it
+python -m lang.nesting examples/van.py examples/shelf.py --out out/nest
+python -m lang.nesting out/van/layout.json --bed 2000x1000 --sheet 2470x1240 \
     --sheet "birch 15:1525x1525*2" --offcut "birch 15:1250x600"
 ```
 
@@ -203,7 +203,7 @@ first [Florian, 2026-10-16]; the build order is in that proposal.
 
 - **One source per nest.** Nesting several build files together is not
   needed: a nest is of a module or of a build [decided 2026-10-16]. Remove
-  the merge and its `van:` path prefixes from `lang.nest`; the
+  the merge and its `van:` path prefixes from `lang.nesting`; the
   measurements over all the examples merge their layouts in a test helper.
 - **A cut through a through pocket.** The layout step refuses a cut that
   splits a board together with the through pockets and holes made before

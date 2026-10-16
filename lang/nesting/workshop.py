@@ -2,7 +2,7 @@
 spacing, and the stock on hand.
 
 It is read from a workshop file (TOML, `examples/workshop.toml`), and the
-command line may give any of it instead (`python -m lang.nest --bed
+command line may give any of it instead (`python -m lang.nesting --bed
 2000x1000 --sheet 2470x1240`). Sizes are millimetres, a piece of stock's
 along its grain first (`2470x1240`: the grain runs along the 2470); areas
 are square metres.

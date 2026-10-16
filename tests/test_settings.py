@@ -354,16 +354,16 @@ def test_the_masters_parameters_are_settings():
         van.setting("Kuechenhohe")
 
 
-def test_the_nest_key_survives_importing_the_nesting_package():
-    """`lang.nest` is the setting; importing the subpackage lang.nest must
-    not put the package in its place."""
+def test_the_nest_key_and_the_nesting_package_have_names_of_their_own():
+    """`lang.nest` is the setting and `lang.nesting` the package [decided
+    by Florian 2026-10-16]: importing the package leaves the key alone."""
     import importlib
 
     import lang
-    importlib.import_module("lang.nest.sawing")
+    importlib.import_module("lang.nesting.sawing")
     from lang import nest as key
     assert key is nest and lang.nest is nest
-    from lang.nest import nest_layout
+    from lang.nesting.nest import nest_layout
     assert callable(nest_layout)
 
 

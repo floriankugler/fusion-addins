@@ -34,7 +34,7 @@ export function nestStatusText(nest) {
     case 'stale': return 'nest of an older layout: nest again';
     case 'running': return 'nesting… (seconds to minutes)';
     case 'failed': return 'the nest failed:\n' + (nest.log ?? '').trim();
-    default: return 'no nest: python -m lang.nest, or nest again';
+    default: return 'no nest: python -m lang.nesting, or nest again';
   }
 }
 

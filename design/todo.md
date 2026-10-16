@@ -65,12 +65,6 @@ done.
   thickness, is found when the layout resolves it and `lang.build` prints
   no line of the build file. A board could remember where `board()` made
   it and name that line.
-- **`nest` names two things in stage 2 of the settings**: the core's key
-  (`use(nest(False))`) and the declaration of a nest in a module
-  (`nest("carcass", material=ply15)`, `proposals/settings.md`), besides the
-  `lang.nest` package, which `lang/__init__.py` keeps from replacing the
-  key. One callable can tell them by their arguments, or the key's name
-  changes.
 - **Corners named by a point** (`panel.top.front(60).left(40)`) for
   `fillet()` and `chamfer()`, once a build needs it.
 - **Try the language on real modules**: write two modules from the van in

@@ -1,4 +1,4 @@
-"""Nesting (`lang.nest`): the workshop file, the parts as the nest sees
+"""Nesting (`lang.nesting`): the workshop file, the parts as the nest sees
 them (from the machining face, their turns and openings), the solvers'
 results as `verify` checks them, the saw plans, refill, the nest file and
 its drawing, the command line, and the Fusion emitter's reading of a nest.
@@ -20,17 +20,17 @@ from lang import (Board, Box, LangError, Shape, SheetMaterial, board, circle, mo
 from lang.core.layout import build_layout, layout_hash
 from lang.core.layout_types import Layout
 from lang.emit.nested import NEST_VERSION as EMIT_NEST_VERSION, apply, plan_nest
-from lang.nest import Options, Sheet, Workshop, nest_layout, read_workshop
-from lang.nest import sawing
-from lang.nest.__main__ import main as nest_main
-from lang.nest.draw import draw_nest
-from lang.nest.items import OUTSIDE, Item, Parts, check_sizes, parts_of_layout, turned
-from lang.nest.nest_types import NEST_VERSION, Nest
-from lang.nest.packing import KNAPSACK, VARIABLE, Bin, pack
-from lang.nest.refill import SheetState, refill
-from lang.nest.sawing import Node, PartOn, cut_list, cuts, leaves, simplify
-from lang.nest.verify import verify
-from lang.nest.workshop import Offcut, parse_offcut, parse_sheet, with_overrides, workshop_from
+from lang.nesting import Options, Sheet, Workshop, nest_layout, read_workshop
+from lang.nesting import sawing
+from lang.nesting.__main__ import main as nest_main
+from lang.nesting.draw import draw_nest
+from lang.nesting.items import OUTSIDE, Item, Parts, check_sizes, parts_of_layout, turned
+from lang.nesting.nest_types import NEST_VERSION, Nest
+from lang.nesting.packing import KNAPSACK, VARIABLE, Bin, pack
+from lang.nesting.refill import SheetState, refill
+from lang.nesting.sawing import Node, PartOn, cut_list, cuts, leaves, simplify
+from lang.nesting.verify import verify
+from lang.nesting.workshop import Offcut, parse_offcut, parse_sheet, with_overrides, workshop_from
 
 from helpers import EXAMPLES, ply12, ply15
 
@@ -280,7 +280,7 @@ def test_a_grained_part_needs_stock_along_its_grain():
 # -- packing -------------------------------------------------------------------------------------------
 
 def _rect_item(i: int, w: float, h: float, turns: tuple[float, ...] = (0.0, 90.0, 180.0, 270.0)) -> Item:
-    from lang.nest.items import PartFrame
+    from lang.nesting.items import PartFrame
     shape = Polygon([(0, 0), (w, 0), (w, h), (0, h)])
     return Item(f"p{i}", "birch 15", 15.0, shape, shape, turns, False,
                 PartFrame("z", "x", "y", False, 1, 0.0, 15.0, 0.0, 0.0), "top")
@@ -495,7 +495,7 @@ def test_a_blank_as_long_as_a_bed_of_fractions_is_sawn_within_it():
     workshop = Workshop(bed=(2250.12, 846.352), margin=12.3, kerf=6, sheets=(Sheet(2602.8, 996.98),))
     _layout, nest, _parts = nested(workshop)
     assert nest["problems"] == []
-    from lang.nest.nest import _blank_types, _stock_of  # pyright: ignore[reportPrivateUsage]
+    from lang.nesting.nest import _blank_types, _stock_of  # pyright: ignore[reportPrivateUsage]
     bins, _kinds = _blank_types(_stock_of("birch 15", workshop), workshop)
     assert all(b.width * 10 == round(b.width * 10) and b.height * 10 == round(b.height * 10) for b in bins)
     assert max(b.height for b in bins if b.width > 1000) == 846.3      # as wide as the bed, in tenths

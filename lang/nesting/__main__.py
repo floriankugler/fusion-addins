@@ -1,8 +1,8 @@
 """Nests the parts of build files (or layout files) for the workshop.
 
-    python -m lang.nest examples/van.py
-    python -m lang.nest examples/van.py examples/shelf.py --out out/nest
-    python -m lang.nest out/van/layout.json --bed 2000x1000 --sheet 2470x1240 \\
+    python -m lang.nesting examples/van.py
+    python -m lang.nesting examples/van.py examples/shelf.py --out out/nest
+    python -m lang.nesting out/van/layout.json --bed 2000x1000 --sheet 2470x1240 \\
         --sheet "birch 15:1525x1525*2" --offcut "birch 15:1250x600"
 
 The workshop (bed, spacing, saw, stock on hand) comes from `--workshop`,
@@ -12,7 +12,7 @@ all its offcuts). Several sources are nested together; their parts' paths
 then start with the source's name (`van:floor.batten0`).
 
 Writes into `--out` (default `out/<name>`, beside the preview's build):
-`nest.json` (the nest, `lang/nest/nest_types.py`), `nest.layout.json` (the
+`nest.json` (the nest, `lang/nesting/nest_types.py`), `nest.layout.json` (the
 layout nested, for the Fusion emitter) and `nest.svg` (the drawing the
 preview shows). Problems are printed and kept in the nest file; a part the
 nest cannot take at all is an error, as in the layout step.
@@ -68,7 +68,7 @@ def merged(layouts: list[tuple[str, Layout]]) -> Layout:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="python -m lang.nest", description=__doc__,
+    parser = argparse.ArgumentParser(prog="python -m lang.nesting", description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("sources", nargs="+", type=Path, help="build files (.py) or layout files (.json)")
     parser.add_argument("--workshop", type=Path, help="the workshop file (default: workshop.toml beside the first "

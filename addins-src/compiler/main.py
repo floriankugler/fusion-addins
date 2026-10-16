@@ -4,7 +4,7 @@ Two commands so far:
 
 - Compile: pick a layout file written by `lang.build` and draw it into a
   new direct-modeling document with `lang.emit`; or a nest file written by
-  `lang.nest` (`nest.json`) and draw each material's nest into a document
+  `lang.nesting` (`nest.json`) and draw each material's nest into a document
   of its own (`lang.emit.nested`).
 - Snapshot: read the active document, the master, into a snapshot file
   for build files (`lang.emit.snapshot`).

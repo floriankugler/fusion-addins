@@ -1,4 +1,4 @@
-"""A nest (`lang.nest`, `nest.json`) as the emitter draws it: one document
+"""A nest (`lang.nesting`, `nest.json`) as the emitter draws it: one document
 per material, each piece of stock with its blanks, each blank a stock body
 with its parts flat on it, machining face up, named by path. Fusion-free
 and unit tested, like `plan`; `fusion.emit_nest` draws it.
@@ -22,7 +22,7 @@ from .plan import PartFacts, PartPlan, Vec, plan_layout
 if TYPE_CHECKING:
     from ..core.layout_types import Layout
 
-#: The nest file version this reads (`lang.nest.nest_types.NEST_VERSION`);
+#: The nest file version this reads (`lang.nesting.nest_types.NEST_VERSION`);
 #: a test keeps the two equal.
 NEST_VERSION = 1
 #: mm between two pieces of stock in the document.
