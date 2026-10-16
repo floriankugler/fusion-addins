@@ -202,9 +202,10 @@ its piece.
   and NC programs after the nest's blanks (`1.2`), so the nest itself needs
   a name, from its sources and the time it was written, and the nest file a
   timestamp [decided 2026-10-15].
-- **`nest(False)` for a whole module or scope** at once, through the
-  environment (`proposals/environment.md`) [proposed]; a rule by kind of
-  part was decided against (`proposals/syntax.md`, item 16).
+- **`nest(False)` for a whole module or scope** at once, as a setting
+  (`proposals/settings.md`) [proposed]; a rule by kind of part was decided
+  against (`proposals/syntax.md`, item 16). Nests declared per module, with
+  settings of their own, are in that proposal too [Florian, 2026-10-16].
 - **The cut list**: slats by length, `nest(False)` boards by size
   (`design/proposals/build-repo.md`).
 - **The saw plan**: reordering its cuts (the simplifying keeps the solver's

@@ -68,8 +68,8 @@ done.
   2026-10-12).
 - **`default_grain`** in `lang/core/scope.py` is set by nothing (placement.md
   promises a scope-level grain default): drop it, give `module()` and
-  `cabinet()` a `grain=`, or make it an environment key
-  (`proposals/environment.md`). The loose end of the syntax review's item 16
+  `cabinet()` a `grain=`, or make it a setting
+  (`proposals/settings.md`). The loose end of the syntax review's item 16
   (`proposals/syntax.md`, 2026-10-15).
 - **Corners named by a point** (`panel.top.front(60).left(40)`) for
   `fillet()` and `chamfer()`, once a build needs it.

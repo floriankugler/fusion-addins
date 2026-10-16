@@ -4,8 +4,8 @@ Status: added by Florian 2026-10-14, worked out by Claude the same day;
 reviewed with Florian on 2026-10-15 (the gaps found, holding and tabs), his
 decisions written in; nothing built. Points marked [Florian] are his,
 [decided] his decisions, [proposed] Claude's. Builds on the nest
-(`design/nesting.md`); the values a plan reads flow down the tree as
-`proposals/environment.md` describes.
+(`design/nesting.md`); the values a plan reads are settings that flow
+down the build (`proposals/settings.md`).
 
 Florian's points: since the Fusion geometry is generated again on every
 compile, the CAM setups have to be made again too; Auto Setup helps, but it
@@ -88,13 +88,14 @@ Proposed:
   `nest(False)` board the bed takes is nested alone and gets its blank and
   setup through the same path [decided 2026-10-15]. One larger than the bed
   waits for the two-setup answer there.
-- **Where the preferences live** [decided 2026-10-15]: a `[cam]` table in
-  the workshop file: the templates folder, the default variants (dc or udc,
-  finishing per kind), the tabs' width, height and least count, the
-  breakthrough depth, the finishing stepdown, the holding calibration. Any
-  of them may be said otherwise further down the tree, by a module, a part,
-  a material, a nest, a blank or a setup [Florian]: that is the environment
-  of `proposals/environment.md`.
+- **Where the preferences live** [decided 2026-10-16, superseding the
+  `[cam]` table of the 15th]: they are settings set in the build, in
+  Python, flowing down from the root module to modules, parts, nests and
+  setups (`proposals/settings.md`): the templates per kind, dc or udc,
+  finishing per kind, the tabs' policy, width, height and least count, the
+  breakthrough depth, the finishing stepdown, the holding calibration. The
+  workshop file keeps the machine (bed, saw); the stock on hand is the
+  inventory ledger.
 - **The plan file** [decided 2026-10-15: names from the nest, a timestamp]:
   `cam.json` beside the nest file, with a version, the hash of the nest it
   was planned from (as the nest records the layout's), so the compiler
@@ -103,8 +104,8 @@ Proposed:
   itself needs a name, from its sources and the time it was written, which
   it has not got yet (`design/nesting.md`, Still open).
 - **Z zero is the stock top, always** [decided 2026-10-15]. Through cuts go
-  the breakthrough deeper than the stock bottom (0.2 mm today, an
-  environment value). The layout's thickness is nominal and birch ply
+  the breakthrough deeper than the stock bottom (0.2 mm today, a
+  setting). The layout's thickness is nominal and birch ply
   varies by half a millimetre, so each blank's thickness is a user
   parameter in the nested document, the stock built on it and through
   depths bound to the stock bottom, so one measured value corrects every
@@ -205,7 +206,7 @@ and 12 parts are given up as unholdable. Three faults:
    unhappy with.
 5. **Nest feedback.** A part still weak gets a wider web by growing its
    solver polygon (shops keep 13 to 19 mm around tiny parts), through the
-   environment's `spacing`; what fails even with tabs is reported.
+   `spacing` setting; what fails even with tabs is reported.
 6. **Loose waste.** The waste inside a through cutout is a piece too; the
    examples have five of 3 to 36 cm², which the cutter can throw. Tabs
    where it fails, as for a part, since the plan has the same model for it
