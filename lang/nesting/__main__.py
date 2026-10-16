@@ -60,8 +60,8 @@ from .inventory import NAME, read_inventory
 from .ledger import write_back
 from .nest import Options, nest_layout
 from .nest_types import NestFile
-from .pinning import (Standing, State, chain, changes, chosen_sheets, fix, mark, nest_files, now, open_name,
-                      read_nest, read_state, second_folder, sheet_label, standing, write_state)
+from .pinning import (Standing, State, chain, changes, chosen_sheets, fix, mark, nest_files, now, plan_run,
+                      read_nest, read_state, second_folder, sheet_label, write_state)
 from .resolve import nest_folder, nests_of
 from .workshop import OnHand
 
@@ -151,22 +151,21 @@ def _run(args: argparse.Namespace) -> int:
         current = {p: prints[p] for p in nest["parts"] if p in prints}
         second: tuple[str, dict[str, str]] | None = None
         target = folder
-        if path in state["nests"]:
-            k = len(chain(state, path)) + 1
-            target_name, target = open_name(state, path), second_folder(folder, k)
-            if target_name in by_path:
-                raise LangError(f"{target_name} is the name of {path}'s next nest, as it is marked as made, and of "
+        run = plan_run(state, path, current, _chain_files(state, path, folder))
+        if run.standing is not None:
+            target = second_folder(folder, run.k)
+            if run.name in by_path:
+                raise LangError(f"{run.name} is the name of {path}'s next nest, as it is marked as made, and of "
                                 "a nest of the build; give that nest another name.")
-            st = _standing(state, path, current, folder)
-            _say_standing(path, st)
-            if not st.reasons:
+            _say_standing(path, run.standing)
+            if not run.standing.reasons:
                 print(f"{path}: everything made, nothing to nest")
                 if target.exists() and not args.status:
                     shutil.rmtree(target)
-                    print(f"{path}: {target_name} removed, as nothing is left for it")
+                    print(f"{path}: {run.name} removed, as nothing is left for it")
                 continue
-            second = (target_name, st.reasons)
-            print(f"{path}: {len(st.reasons)} part(s) to nest anew into {target_name}")
+            second = (run.name, run.standing.reasons)
+            print(f"{path}: {len(run.standing.reasons)} part(s) to nest anew into {run.name}")
         else:
             _say_changes(path, folder, current)
         if args.status:
@@ -223,13 +222,14 @@ def _base(name: str, by_path: dict[str, NestLayout], state: State) -> str | None
     return head if k.isdigit() and head in by_path else None
 
 
-def _standing(state: State, base: str, current: dict[str, str], folder: Path) -> Standing:
+def _chain_files(state: State, base: str, folder: Path) -> dict[str, NestFile]:
+    """The nest files of a build nest's chain marked as made, by path."""
     files: dict[str, NestFile] = {}
     for k, name in enumerate(chain(state, base), 1):
         file = (folder if k == 1 else second_folder(folder, k)) / "nest.json"
         if file.exists():
             files[name] = read_nest(file)
-    return standing(state, base, current, files)
+    return files
 
 
 def _say_standing(path: str, st: Standing) -> None:

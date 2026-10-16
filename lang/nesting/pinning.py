@@ -304,6 +304,33 @@ def standing(state: State, base: str, now: Mapping[str, str], files: Mapping[str
     return out
 
 
+@dataclass(frozen=True)
+class Run:
+    """What a run of a build nest does: the nest it writes, its place in
+    the chain (`k`, 1 for the nest itself, else its second nest's counter),
+    and, for a nest marked as made, how it stands against the build and
+    the parts to nest anew with why (none: nothing is left to nest)."""
+    name: str
+    k: int
+    standing: Standing | None = None
+
+    @property
+    def parts(self) -> dict[str, str] | None:
+        """The parts the run nests and why; None: the nest whole, as
+        usual."""
+        return None if self.standing is None else self.standing.reasons
+
+
+def plan_run(state: State, base: str, now: Mapping[str, str], files: Mapping[str, NestFile]) -> Run:
+    """What a run of the build nest `base` does (see the module's doc):
+    `now` its parts in the build, path to fingerprint, `files` the nest
+    files of its chain marked as made."""
+    marked = chain(state, base)
+    if not marked:
+        return Run(base, 1)
+    return Run(open_name(state, base), len(marked) + 1, standing(state, base, now, files))
+
+
 def _held(nest: NestFile) -> list[str]:
     return list(placed(nest)) + [path for m in nest["materials"] for path in m["unplaced"]]
 
@@ -396,4 +423,4 @@ def fix(state: State, base: str, parts: Sequence[str], now: Mapping[str, str], w
 __all__ = ["STATE", "STATE_VERSION", "FIXED", "MarkedNest", "MadePart", "State", "empty", "read_state",
            "write_state", "now", "second_name", "second_folder", "chain", "open_name", "base_of", "nest_files",
            "read_nest", "Placed", "placed", "sheets_of", "sheet_label", "chosen_sheets", "Changes", "changes",
-           "Standing", "standing", "Marked", "mark", "fix"]
+           "Standing", "standing", "Run", "plan_run", "Marked", "mark", "fix"]

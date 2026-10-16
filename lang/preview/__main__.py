@@ -293,8 +293,7 @@ def nest_state(design: Design) -> list[dict[str, Any]]:
       was made; `next`, for a nest marked whose next nest is marked too,
       that one (its sheets cannot be marked any more)."""
     from lang.core.errors import LangError
-    from lang.nesting.pinning import (chain, changes, empty, open_name, read_state, second_folder, sheets_of,
-                                      standing)
+    from lang.nesting.pinning import chain, changes, empty, plan_run, read_state, second_folder, sheets_of
     from lang.nesting.resolve import nest_folder
     out: list[dict[str, Any]] = []
     try:
@@ -334,12 +333,12 @@ def nest_state(design: Design) -> list[dict[str, Any]]:
             if k < len(marked):
                 entry["next"] = marked[k]       # what it left was nested anew there, and that is marked
             out.append(entry)
-        st = standing(state, base, current, files)
+        run = plan_run(state, base, current, files)
+        st = run.standing
+        assert st is not None
         out[-len(marked)] |= {"changed": st.changed, "new": st.new, "not_made": st.not_made, "gone": st.gone,
                               "made_parts": st.made}
-        name = open_name(state, base)
-        k = len(marked) + 1
-        entry = _nest_entry(design, name, second_folder(folder, k), base)
+        entry = _nest_entry(design, run.name, second_folder(folder, run.k), base)
         file = entry.pop("file", None)
         if busy:
             entry["state"] = busy
