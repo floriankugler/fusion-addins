@@ -192,6 +192,31 @@ and 12 parts are given up as unholdable. Three faults:
   one pass, `preserveOrder` on. Not one operation with a finishing
   stepdown: with order by depth Fusion would do the roughing in the
   preserved order too, and travel would suffer.
+- **How the two are configured** [proposed, from the 6 mm template's
+  parameters]. Both come from the cutter's existing contour template
+  (`contour_Kontur 6mm`, the `.dc` and `.udc` variants); the plan sets the
+  parameters that differ, as Auto Setup sets a through hole's bottom today,
+  so Florian's templates need no change. Roughing: `topHeight_mode` 'from
+  stock top' as the template has it, `bottomHeight_mode` 'from stock
+  bottom' with `bottomHeight_offset` 0.4 mm (the template says 'from
+  contour', −0.2), `doMultipleDepths` as the template (6.4 mm steps),
+  `tabsPerContour` 0, Fusion's own order. Release: `topHeight_mode` 'from
+  stock bottom' with offset 0.4 mm, `bottomHeight_mode` 'from stock bottom'
+  with offset −0.2 mm (the breakthrough setting), `doMultipleDepths` off,
+  `preserveOrder` on with the chains handed over in the release order, no
+  tabs, the same compensation. Stock bottom rather than the contour's
+  edge, so the measured thickness entered per blank moves both heights and
+  the skin stays 0.4 mm whatever the ply measures. A release template of
+  its own (a tag like `.finish`, say `contour.release_Kontur 6mm`) only if
+  the thin pass should run at another feed or with the downcut cutter; the
+  template's finishing stepdown stays unused.
+- **Inner contours without an island.** An inner contour whose waste the
+  cutter mills away entirely, a region narrower than two cutter diameters
+  (a slot, a narrow notch), leaves nothing to hold or to release: it is cut
+  through in one operation like a pocket, with no release pass and no tabs
+  (Auto Setup tabs such slots today, below). Waste that would survive but
+  is smaller than worth keeping [threshold open] is pocketed away rather
+  than released, so no loose piece flies [proposed].
 - **The order of operations**: by tool, widest first, 8 mm, 6 mm, 1/8",
   2 mm and the V-bit, as Auto Setup orders them today, then the release
   passes at the very end: the 6 mm cutter's and, where a contour is cut
@@ -245,10 +270,11 @@ and 12 parts are given up as unholdable. Three faults:
    nesting review [decided 2026-10-16, `design/nesting.md`]: 13 to 19 mm of
    web holds nothing either. Skin and release holds a small part by its own
    vacuum; what fails even with tabs is reported.
-4. **Loose waste.** The waste inside a through cutout is a piece too; the
-   examples have five of 3 to 36 cm², which the cutter can throw. It is
-   released like a part, in the release order; tabs where it fails, as for
-   a part, since the plan has the same model for it [proposed].
+4. **Loose waste.** The waste inside a through cutout that survives the
+   cut is a piece too; the examples have five of 3 to 36 cm², which the
+   cutter can throw. Above the threshold it is released like a part, in the
+   release order, tabs where it fails, since the plan has the same model for
+   it; below it, pocketed away (above) [proposed].
 
 ### Prior art
 
@@ -321,3 +347,9 @@ must do better [Florian]; the causes and the ways out are Claude's
   marked as such in the layout too, with the tool `dogbones(tool=)` drew
   them for: today a `dogbones()` relief is a cut or pocket named
   `<operation>_dogbones` and a joint's reliefs are part of its cuts.
+- **Tabs on a slot.** With tabs on inner contours, Auto Setup tabs a slot
+  or a narrow cutout too, though the cutter mills its waste away entirely
+  and nothing is left to hold; the tabs are ridges at the slot's bottom to
+  clean off [Florian, 2026-10-17]. The plan tabs or releases an inner
+  contour only when its waste survives the cut: the region inside it shrunk
+  by the cutter's diameter is not empty (Holding, above).
