@@ -202,6 +202,20 @@ class _Relief:
 
 
 @dataclass
+class _Pending:
+    """A piece of a blind pocket on the machining face, or a round pocket
+    (a wide blind hole), before those of one floor are merged."""
+    k: int
+    op: HoleLayout | PocketLayout
+    piece: int
+    region: BaseGeometry
+    depth: float
+    name: str | None
+    reliefs: list[_Relief]
+    slot: Any
+
+
+@dataclass
 class _Ring:
     """A contour of a part's outline to cut: its index, the ring (the
     part on its left), the waste side, the operations it shares."""
@@ -251,6 +265,11 @@ class _Setup:
         self.tabbed: dict[str, tuple[Template, list[Point2], float, float]] = {}
         #: Each part's outer contour's cutter.
         self.outer_tool: dict[str, float] = {}
+        #: The part's blind pockets, gathered (`pockets`), and each operation's count of pieces.
+        self.pending: list[_Pending] = []
+        self.pieces: dict[int, int] = {}
+        #: Where each part's blind pockets may reach (`pocket_base`).
+        self.bases: dict[str, BaseGeometry] = {}
 
     # -- helpers ---------------------------------------------------------------------------------
 
@@ -320,6 +339,7 @@ class _Setup:
                 self.chamfer_op(pp, k, op, named)
             elif op["kind"] == "cut" and op["chamfer"] > 0:
                 self.cut_chamfer(pp, k, op)
+        self.pockets(pp)
         # the outline's rings
         self.rings(pp, own, [r for r in reliefs if r.op["kind"] == "cut" or pp.is_through(r.op["depth"])])
         # holding
@@ -369,9 +389,9 @@ class _Setup:
         drills = rules.by_diameter(self.registry.of("drill", cutter, self.value(keys.drill_template, path, name)))
         center = pp.point(op["u"], op["v"])
         if not through and bores and op["d"] > 2 * max(bores):
-            circle = Point(center).buffer(op["d"] / 2, quad_segs=90).intersection(pp.outline())
-            if not self.pocket_region(pp, [ref(k, op, "op")], circle, op["depth"], name, [], None):
-                self.leave(path, ref(k, op, "op"), "nothing fits", "no pocket cutter gets into it")
+            circle = Point(center).buffer(op["d"] / 2, quad_segs=90).intersection(self.pocket_base(pp))
+            self.pending.append(_Pending(k, op, 0, circle, op["depth"], name, [], None))
+            self.pieces[k] = 1
             return
         choice = rules.hole_choice(op["d"], op["depth"], through, self.breakthrough, bores, drills)
         if choice is None:
@@ -416,9 +436,7 @@ class _Setup:
             return
         if op["chamfer"] > 0:
             self.op_chamfer(pp, k, op, face, op["chamfer"])
-        # (the outline, not the footprint: a through slot under a counterbore is material yet when the
-        # counterbore is cut, the blind pockets first)
-        region = pp.region(op["shape"]).intersection(pp.outline())
+        region = pp.region(op["shape"]).intersection(self.pocket_base(pp))
         pieces = [p for p in polygons_of(region) if p.area > CLEAN * CLEAN]
         if not pieces:
             self.leave(path, ref(k, op, "op"), "gone", "nothing of it is left on the board")
@@ -434,13 +452,60 @@ class _Setup:
         for r in reliefs:
             best = max(range(len(pieces)), key=lambda i: pieces[i].intersection(r.disc).area)
             own[best].append(r)
-        missed = [i for i, piece in enumerate(pieces)
-                  if not self.pocket_region(pp, [ref(k, op, "op")], piece, op["depth"], op["name"], own[i], slot)]
-        for i in missed:
-            # a piece no cutter gets into: the pocket, where it is all of it, else that piece
-            aspect = "op" if len(missed) == len(pieces) and i == missed[0] else f"piece {i}"
-            if aspect == "op" or len(missed) < len(pieces):
-                self.leave(path, ref(k, op, aspect), "nothing fits", "no pocket cutter gets into it")
+        for i, piece in enumerate(pieces):
+            self.pending.append(_Pending(k, op, i, piece, op["depth"], op["name"], own[i], slot))
+        self.pieces[k] = len(pieces)
+
+    def pocket_base(self, pp: Placed) -> BaseGeometry:
+        """Where the part's blind pockets may reach: its outline within its
+        outer loop, the openings under them included, as they are material
+        yet when the blind pockets run (a counterbore over a through slot is
+        one pocket), but an opening another part lies in [found by fuzzing,
+        2026-10-17: clipped by the outline alone, a pocket reached past an
+        opening at the board's edge, off the blank]."""
+        base = self.bases.get(pp.path)
+        if base is None:
+            outline = pp.outline()
+            loop = pp.machine_outline(rules.BIG_HOLE_LIMIT)
+            base = outline.intersection(Polygon(loop.exterior)) if not loop.is_empty else outline
+            others = unary_union([fp for path, fp in self.footprints.items() if path != pp.path])
+            for _k, opening in pp.openings(0.0):
+                if not others.is_empty and opening.intersects(others):
+                    base = base.difference(opening)
+            self.bases[pp.path] = base
+        return base
+
+    def pockets(self, pp: Placed) -> None:
+        """The part's blind pockets on its machining face, those of one depth
+        that overlap or touch as one region, as their floor is one face (a
+        Cabineo's three access holes)."""
+        path = pp.path
+        groups: list[list[_Pending]] = []
+        for entry in self.pending:
+            near = [g for g in groups if abs(g[0].depth - entry.depth) < 1e-6 and
+                    any(e.region.distance(entry.region) < 1e-6 for e in g)]
+            merged = [entry] + [e for g in near for e in g]
+            groups = [g for g in groups if not any(g is n for n in near)] + [merged]
+        missed: dict[int, list[int]] = {}
+        for group in groups:
+            group.sort(key=lambda e: (e.k, e.piece))
+            refs = list({e.k: ref(e.k, e.op, "op") for e in group}.values())
+            region = unary_union([e.region for e in group]) if len(group) > 1 else group[0].region
+            slot = group[0].slot if len(group) == 1 else None
+            reliefs = [r for e in group for r in e.reliefs]
+            if not self.pocket_region(pp, refs, region, group[0].depth, group[0].name, reliefs, slot):
+                for e in group:
+                    missed.setdefault(e.k, []).append(e.piece)
+        for k, gone in missed.items():
+            op = pp.part["ops"][k]
+            if len(gone) == self.pieces[k]:
+                self.leave(path, ref(k, op, "op"), "nothing fits", "no pocket cutter gets into it")
+            else:
+                # a piece no cutter gets into, beside others planned
+                for i in gone:
+                    self.leave(path, ref(k, op, f"piece {i}"), "nothing fits", "no pocket cutter gets into it")
+        self.pending = []
+        self.pieces = {}
 
     def pocket_region(self, pp: Placed, refs: list[OpRef], region: BaseGeometry, depth: float | None,
                       name: str | None, reliefs: list[_Relief], slot: Any) -> bool:

@@ -36,7 +36,7 @@ from shapely import affinity, make_valid, normalize
 from shapely.geometry import LineString, MultiLineString, Point, Polygon
 from shapely.geometry.base import BaseGeometry
 from shapely.geometry.polygon import orient
-from shapely.ops import unary_union
+from shapely.ops import nearest_points, unary_union
 
 from ..core.geometry import polygons_of
 from ..core.layout_types import PartLayout, Rings
@@ -285,9 +285,10 @@ def unreached(region: BaseGeometry, radius: float, excused: BaseGeometry | None 
     if residue.is_empty:
         return []
     corners = sharp_corners(region) if not opening.is_empty else []
+    rings = _boundary(region)
 
     def fillet(piece: Polygon) -> bool:
-        return any(_is_fillet(piece, corner, angle, r, wider) for corner, angle in corners)
+        return any(_is_fillet(piece, corner, angle, rings, inner, r, wider) for corner, angle in corners)
 
     # (the fillets first, then the dog bones: a dog bone over a corner cuts
     # its fillet into pieces that are no fillet each [found by fuzzing,
@@ -306,16 +307,94 @@ def _cleaned(g: BaseGeometry, clean: float = CLEAN) -> BaseGeometry:
     return g.buffer(-clean, join_style="mitre").buffer(clean, join_style="mitre")
 
 
-def _is_fillet(piece: Polygon, corner: Point2, angle: float, r: float, wider: float = 0.0) -> bool:
-    """Whether a piece a cutter left is its fillet in the corner: at the
-    corner, within the tangent points of its circle there (`wider`, and
-    a tenth more)."""
-    p = Point(corner)
-    if piece.distance(p) > 10 * CLEAN + wider:
+def _boundary(region: BaseGeometry) -> list[LineString]:
+    """The region's rings as closed lines, the region on their left."""
+    out: list[LineString] = []
+    for poly in polygons_of(region):
+        poly = orient(poly, 1.0)
+        out += [LineString(ring.coords) for ring in [poly.exterior, *poly.interiors]]
+    return out
+
+
+def _is_fillet(piece: Polygon, corner: Point2, angle: float, rings: Sequence[LineString], inner: BaseGeometry,
+               r: float, wider: float = 0.0) -> bool:
+    """Whether a piece a cutter left is its fillet in the sharp corner: it
+    touches the corner and lies within the tangent points of the cutter's
+    circle between two straight sides of the corner's angle,
+    `r / tan(angle / 2)` from it (a step lower than the cutter's radius
+    too); or within the cutter's reach of it, from where the cutter that
+    comes nearest the corner touches the boundary on either side of it, the
+    boundary turning only toward the region between those two contacts (a
+    line or an arc bulging away, a corner cut off by short edges), so that
+    a passage too narrow for the cutter, whose mouth turns away from the
+    region, is no fillet. An arc side puts the contact farther out than two
+    lines do [found 2026-10-17: a Cabineo's access hole over the board's
+    edge, a line meeting an arc, left a fillet 3.06 out where two lines
+    leave one 1.81 out, and the plan sent the 2 mm cutter for it]. `wider`
+    for the check."""
+    v = Point(corner)
+    if piece.distance(v) > 10 * CLEAN + wider or inner.is_empty:
         return False
     # (a corner of next to no angle reaches far: capped [found by fuzzing, 2026-10-17])
-    reach = min(r / math.tan(max(angle, 1e-9) / 2), 1e4) * (1.1 if wider else 1.0) + 2 * CLEAN + wider
-    return piece.difference(p.buffer(reach, quad_segs=QUAD)).area < CLEAN * CLEAN
+    lines = min(r / math.tan(max(angle, 1e-9) / 2), 1e4) * (1.1 if wider else 1.0) + 2 * CLEAN + wider
+    if piece.difference(v.buffer(lines, quad_segs=QUAD)).area < CLEAN * CLEAN:
+        return True
+    ring = min(rings, key=lambda line: line.distance(v))
+    if ring.distance(v) > 1e-3:
+        return False
+    v = ring.interpolate(ring.project(v))      # (`arcs.fit` puts a corner on its circle, a hair off the polygon)
+    c = nearest_points(inner, v)[0]
+    touch = c.buffer(r + 10 * CLEAN + wider, quad_segs=QUAD)
+    length = ring.length
+    s_v = ring.project(v)
+    hits: list[tuple[float, float, Point]] = []        # forward and backward distance from the corner, contact
+    met = ring.intersection(touch)
+    for g in getattr(met, "geoms", [met]):
+        if g.is_empty:
+            continue
+        if g.distance(v) < 1e-9:
+            # the corner lies within the cutter's reach: the contacts are that stretch's ends
+            ends = [Point(q) for q in (g.coords[0], g.coords[-1])] if hasattr(g, "coords") and len(g.coords) else [v]
+            far = max(v.distance(q) for q in ends)
+            return piece.difference(v.buffer(far + 2 * CLEAN + wider, quad_segs=QUAD)).area < CLEAN * CLEAN
+        at = g.interpolate(g.project(c)) if isinstance(g, LineString) else Point(g.coords[0])
+        pos = ring.project(at)
+        hits.append(((pos - s_v) % length, (s_v - pos) % length, at))
+    if not hits:
+        return False
+    fwd = min(hits, key=lambda h: h[0])
+    back = min(hits, key=lambda h: h[1])
+    if fwd[0] + back[1] >= length - 1e-9:
+        return False
+    # the boundary from one contact through the corner to the other turns only toward the region, at
+    # the contacts too (a passage's mouth corner)
+    step = min(1.0, r / 2)
+    path = [ring.interpolate((s_v - back[1] - step) % length)] + \
+        _between(ring, s_v - back[1] - step, s_v + fwd[0] + step) + [ring.interpolate((s_v + fwd[0] + step) % length)]
+    for a, b, d in zip(path, path[1:], path[2:]):
+        ux, uy, wx, wy = b.x - a.x, b.y - a.y, d.x - b.x, d.y - b.y
+        n = math.hypot(ux, uy) * math.hypot(wx, wy)
+        if n > 1e-18 and (ux * wy - uy * wx) < -1e-6 * n:
+            return False
+    reach = max(v.distance(back[2]), v.distance(fwd[2])) * (1.1 if wider else 1.0) + 2 * CLEAN + wider
+    return piece.difference(v.buffer(reach, quad_segs=QUAD)).area < CLEAN * CLEAN
+
+
+def _between(ring: LineString, start: float, end: float) -> list[Point]:
+    """The ring's vertices strictly between two distances along it (`start`
+    may be negative, `end` past its length: it wraps)."""
+    coords = list(ring.coords)[:-1]
+    length = ring.length
+    positions: list[tuple[float, Point]] = []
+    s = 0.0
+    for k, q in enumerate(coords):
+        positions.append((s, Point(q)))
+        nxt = coords[(k + 1) % len(coords)]
+        s += math.dist(q, nxt)
+    out: list[tuple[float, Point]] = []
+    for shift in (-length, 0.0, length):
+        out += [(pos + shift, q) for pos, q in positions if start + 1e-12 < pos + shift < end - 1e-12]
+    return [q for _pos, q in sorted(out, key=lambda e: e[0])]
 
 
 def gets_in(region: BaseGeometry, radius: float, clearance: float = TOOL_CLEARANCE) -> bool:

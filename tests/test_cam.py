@@ -27,7 +27,7 @@ from lang.core.shapes import slot_shape
 from lang.nesting.nest import Options, nest_parts
 from lang.nesting.nest_types import NestFile
 from lang.nesting.workshop import Sheet, Workshop
-from helpers import EXAMPLES, ply9, ply15
+from helpers import EXAMPLES, carcass, ply9, ply15
 
 TEMPLATES = REPO / "addins-src" / "auto_setup" / "templates"
 REGISTRY = scan(TEMPLATES)
@@ -625,9 +625,44 @@ def test_two_tabbed_parts_keep_their_own_tabs_on_both_operations():
 
 def test_a_corner_of_next_to_no_angle_is_judged_without_failing():
     """A corner of next to no angle reached infinitely far: shapely refused
-    the buffer [found by fuzzing, 2026-10-17]."""
-    from lang.cam.regions import _is_fillet  # pyright: ignore[reportPrivateUsage]
-    assert _is_fillet(shapely_box(0, 0, 1, 1), (0.0, 0.0), 0.0, 3.0)
+    the buffer [found by fuzzing, 2026-10-17]; a fillet's reach is now
+    where the cutter touches the sides."""
+    needle = Polygon([(0, 0), (100, 0), (100, 1e-6)])
+    assert unreached(shapely_box(0, -50, 50, 50).union(needle.buffer(0)), 3.0) == []
+
+
+def test_a_fillet_between_a_line_and_an_arc_is_no_rest():
+    """A Cabineo's access hole over the board's edge, a round pocket the
+    edge cuts, met it at a corner between a line and an arc; the fillet the
+    6 mm cutter leaves there reaches 3.06 from it, beyond the tangent points
+    of two lines (1.81), and was sent to the 2 mm cutter as a rest
+    [found by the coordinating session's review, 2026-10-17]."""
+    cab, p = carcass(back=False)
+    with cab:
+        p["top"].join(p["left"], p["right"], using=cabineo(count=2))
+    nest, layout = _nested()
+    plan = _plan(nest, layout)
+    rests = [f for s in plan["setups"] for op in s["operations"] for f in op["features"] if f["what"] == "rest"]
+    holes = [f for s in plan["setups"] for op in _ops(s, "pocket") for f in op["features"]
+             if any((r["name"] or "").startswith("cabineo") for r in f["ops"])]
+    assert holes and rests == []
+    assert all(op["template"] == "pocket.dc_Tasche 6mm" for s in plan["setups"] for op in _ops(s, "pocket"))
+    # its three overlapping access holes are one pocket, as their floor is one face
+    assert len(holes) == 4 and all(sorted((r["name"] or "")[-1] for r in f["ops"]) == ["a", "b", "c"] for f in holes)
+
+
+def test_what_any_cutter_leaves_in_a_corner_is_excused_but_a_passage_is_not():
+    from lang.core.dogbones import corner_bone
+    line_arc = Point(0, 3.6).buffer(7.5, quad_segs=90).intersection(shapely_box(-10, 0, 10, 20))   # a Cabineo hole
+    assert unreached(line_arc, 3.0) == []
+    chamfered = Polygon([(1, 0), (50, 0), (50, 50), (0, 50), (0, 1)])                            # a corner cut off
+    assert unreached(chamfered, 4) == []
+    channel = shapely_box(0, 0, 50, 50).union(shapely_box(50, 20, 90, 25))
+    notch = shapely_box(0, 0, 50, 50).union(shapely_box(50, 20, 54, 25))
+    assert len(unreached(channel, 4)) == 1 and len(unreached(notch, 4)) == 1
+    assert len(unreached(rect(depth=40, width=40).rounded(3).geometry, 3)) == 4                   # tighter than it
+    relieved = shapely_box(0, 0, 50, 50).union(corner_bone((0.0, 0.0), (1.0, 0.0), (0.0, 1.0), 6.0, 0.1).shape.geometry)
+    assert len(unreached(relieved, 4)) == 1                                                        # a dog bone's own
 
 
 def test_a_dog_bone_over_a_corner_leaves_its_fillet_a_fillet():
@@ -680,3 +715,21 @@ def test_the_opening_test_answers_alike_however_a_ring_is_written():
         [round(p.area, 3) for p in unreached(orient(region, -1.0), 3.0)]
     turned = ring[50:] + ring[:50]
     assert [round(p.area, 3) for p in unreached(Polygon(turned), 3.0)] == left
+
+
+def test_a_pocket_over_an_opening_at_the_edge_stays_within_the_parts_outer_loop():
+    """Clipped by the outline alone, a pocket over a through pocket that
+    opens the board's edge reached where the nest may have put another part,
+    off the blank [found by fuzzing, 2026-10-17]."""
+    from lang.cam.regions import Placed, polygons
+    with module("m", Box.from_size(width=600, depth=400, height=100)) as m:
+        p = board("panel", ply15).on(m.bottom)
+        p.pocket(rect(depth=80, width=60), at=p.top.front.left(100), depth=through, name="bite")
+        p.pocket(rect(depth=40, width=140), at=p.top.front(60).left(60), depth=5, name="over")
+    nest, layout = _nested()
+    (setup,) = _plan(nest, layout)["setups"]
+    (feature,) = [f for op in _ops(setup, "pocket") for f in op["features"]
+                  if f["what"] == "pocket" and f["ops"][0]["name"] == "over"]
+    placed = nest["materials"][0]["sheets"][0]["blanks"][0]["parts"][0]
+    loop = Placed.of(layout["modules"][0]["parts"][0], placed["transform"], layout["frame"]).machine_outline(30.0)
+    assert polygons(feature["rings"])[0].difference(Polygon(loop.exterior).buffer(1e-6)).area < 1e-6
