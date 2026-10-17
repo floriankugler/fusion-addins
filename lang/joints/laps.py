@@ -33,8 +33,9 @@ from shapely.geometry import Point
 from ..core.box import Box
 from ..core.crossing import Crossing, crossing
 from ..core.directions import AXES, Axis, Direction
-from ..core.dogbones import DogBones, corner_relief, hidden_relief
+from ..core.dogbones import DogBones, corner_bone, hidden_bone
 from ..core.errors import LangError, one_of
+from ..core.ops import DogBone
 from ..core.part import Board
 from ..core.refs import PosLike, Side, as_pos
 from ..core.shapes import Shape, box_shape
@@ -73,7 +74,7 @@ class HalfLap:
                 _reaching_through(part, other)
                 laps.append((other, c, self._split(c)))
         outlines: dict[int, Shape] = {}
-        notches: list[tuple[Board, Board, Shape, Board]] = []
+        notches: list[tuple[Board, Board, Shape, list[DogBone], Board]] = []
         for other, c, split in laps:
             d = self.toward
             pb, ob = part.box(), other.box()
@@ -85,13 +86,13 @@ class HalfLap:
             for board, across, span, opens in ((part, other, mine, d.sign), (other, part, theirs, -d.sign)):
                 outline = outlines.get(id(board), board.outline)
                 with reported(self.label, part, other):
-                    shape = self._notch(board, across, c.axis, span, split, opens, outline)
+                    shape, bones = self._notch(board, across, c.axis, span, split, opens, outline)
                 outlines[id(board)] = outline.difference(shape)
-                notches.append((other, board, shape, across))
+                notches.append((other, board, shape, bones, across))
         names = Names(self.label)
-        for other, board, shape, across in notches:
+        for other, board, shape, bones, across in notches:
             with reported(self.label, part, other):
-                board.add_cut(shape, name=names(board, f"lap_{across.name}", across))
+                board.add_cut(shape, name=names(board, f"lap_{across.name}", across), dogbones=bones)
         names.commit()
 
     def _split(self, c: Crossing) -> float:
@@ -115,16 +116,17 @@ class HalfLap:
         return Box({a: lo[a] for a in AXES}, {a: hi[a] for a in AXES})
 
     def _notch(self, part: Board, other: Board, axis: Axis, span: tuple[float, float], split: float,
-               opens: int, outline: Shape) -> Shape:
+               opens: int, outline: Shape) -> tuple[Shape, list[DogBone]]:
         """The notch for `other` in `part`'s outline frame, with a dog bone
-        in each corner at its floor, `split` on `axis`; it opens toward
-        `opens` (+1 or -1) along `axis`. `outline` is the board's material
-        before it."""
+        in each corner at its floor, `split` on `axis`, and the dog bones;
+        it opens toward `opens` (+1 or -1) along `axis`. `outline` is the
+        board's material before it."""
         box = self._region(part, other, axis, span)
         u, v, w = part.u_axis, part.v_axis, other.t_axis
         notch = box_shape(box.lo[u], box.lo[v], box.hi[u], box.hi[v])
+        bones: list[DogBone] = []
         if self.dogbones is None:
-            return notch
+            return notch, bones
 
         def at(across: float, along: float) -> Point2:
             coords: dict[Axis, float] = {w: across, axis: along}
@@ -145,16 +147,18 @@ class HalfLap:
                 continue                                 # not an inside corner of the material
             floor = at(inward, 0.0)                      # along the floor, into the notch
             if self.dogbones == "corner":
-                notch = notch.union(corner_relief(corner, floor, up, self.tool, self.relief))
+                bones.append(corner_bone(corner, floor, up, self.tool, self.relief))
+                notch = notch.union(bones[-1].shape)
                 continue
-            relief = hidden_relief(corner, floor, self.tool, self.relief)
+            bone = hidden_bone(corner, floor, self.tool, self.relief)
             # centred on the floor, bulging below it
             far = hidden_far_side((edge, split), (inward, 0.0), (0.0, float(-opens)), self.tool, self.relief)
             if not material.contains(Point(at(*far))):
                 raise LangError(f"hidden dog bones would break out of {part.path} below its notch; use corner dog "
                                 "bones or a smaller tool.")
-            notch = notch.union(relief)
-        return notch
+            bones.append(bone)
+            notch = notch.union(bone.shape)
+        return notch, bones
 
 
 def _reaching_through(a: Board, b: Board) -> None:

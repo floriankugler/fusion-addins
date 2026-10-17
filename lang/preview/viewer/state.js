@@ -6,7 +6,7 @@
 // The layout file version this page draws (lang/core/layout_types.py
 // LAYOUT_VERSION). A layout of another version is not drawn; the status
 // line says so.
-export const LAYOUT_VERSION = 8;
+export const LAYOUT_VERSION = 9;
 
 /**
  * A part's settings (the layout's `settings`, lang/core/settings.py) as the

@@ -31,12 +31,12 @@ test('a part\'s settings, one line each with where it came from', () => {
 });
 
 test('the layout version the page reads', () => {
-  assert.equal(LAYOUT_VERSION, 8);
+  assert.equal(LAYOUT_VERSION, 9);
   assert.equal(layoutVersionProblem({ version: LAYOUT_VERSION }), null);
-  assert.equal(layoutVersionProblem({ version: 2 }), 'layout version 2, this viewer reads 8');
-  assert.equal(layoutVersionProblem({ version: 9 }), 'layout version 9, this viewer reads 8');
-  assert.equal(layoutVersionProblem({}), 'layout version missing, this viewer reads 8');
-  assert.equal(layoutVersionProblem(null), 'layout version missing, this viewer reads 8');
+  assert.equal(layoutVersionProblem({ version: 2 }), 'layout version 2, this viewer reads 9');
+  assert.equal(layoutVersionProblem({ version: 10 }), 'layout version 10, this viewer reads 9');
+  assert.equal(layoutVersionProblem({}), 'layout version missing, this viewer reads 9');
+  assert.equal(layoutVersionProblem(null), 'layout version missing, this viewer reads 9');
 });
 
 test('the nest state as the side panel says it', () => {

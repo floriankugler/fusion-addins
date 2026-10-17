@@ -79,10 +79,10 @@ from .directions import AXES, Axis, Direction, ExtentName, InnerOuter
 from .errors import LangError, one_of
 from .faces import Anchor, Edge, Face, Operation, Outline
 from .geometry import NARROWEST, clean, parts_of, polygons_of
-from .layout_types import (ChamferLayout, CutLayout, EdgeOpLayout, HoleLayout, OpLayout,
+from .layout_types import (ChamferLayout, CutLayout, DogBoneLayout, EdgeOpLayout, HoleLayout, OpLayout,
                            PartLayout, PocketLayout, Rings, SettingLayout, SlotLayout, VGrooveLayout)
 from .material import Material, SheetMaterial, SlatMaterial
-from .ops import MIN_CHAMFER, Chamfer, Cut, EdgeOp, Hole, Op, Pocket, SlotLine, VGroove
+from .ops import MIN_CHAMFER, Chamfer, Cut, DogBone, EdgeOp, Hole, Op, Pocket, SlotLine, VGroove
 from .refs import Affine, DepthSpec, HasPosition, Pos, PosLike, Side, Through, ToFace, as_pos, through
 from .settings import Binding, Node, Setting, build_line
 from .shapes import Shape, box_shape, slot_shape
@@ -1184,7 +1184,8 @@ class Board:
         self._cut_through(placed, name, chamfer)
         return self
 
-    def _cut_through(self, placed: Shape, name: str | None, chamfer: float) -> None:
+    def _cut_through(self, placed: Shape, name: str | None, chamfer: float,
+                     dogbones: tuple[DogBone, ...] = ()) -> None:
         cut = self.outline.difference(placed)
         if cut.is_empty():
             raise LangError("the cut removes the whole board.", self.path)
@@ -1207,7 +1208,7 @@ class Board:
                 raise LangError(f"the cut{f' {name}' if name else ''} takes the board away from "
                                 f"{self._label(op, inner.name)} made before, which then {missing}", self.path)
         self._check_lips(cut.geometry, f"the cut{f' {name}' if name else ''}")
-        self._record(Cut(placed, name, chamfer), name)       # may refuse it; then the outline stays
+        self._record(Cut(placed, name, chamfer, dogbones), name)       # may refuse it; then the outline stays
         self.outline = cut
 
     def _cut_region(self, region: Board | Box, name: str | None, chamfer: float) -> Self:
@@ -1929,10 +1930,11 @@ class Board:
                 continue
             name = self.unique_op_name(relief.name)
             if relief.face is None:
-                self.add_cut(shape, name=name)
+                self.add_cut(shape, name=name, dogbones=relief.bones)
             else:
                 face = next(f for f in self.big_faces() if f.world_name == relief.face)
-                self.add_pocket(face, shape, through if relief.depth is None else relief.depth, name=name)
+                self.add_pocket(face, shape, through if relief.depth is None else relief.depth, name=name,
+                                dogbones=relief.bones)
 
     def _dogbone_target(self, item: object) -> dogbone_geometry.Target:
         if isinstance(item, str):
@@ -2142,16 +2144,18 @@ class Board:
         if not face.is_big:
             raise LangError(f"{what}: {face!r} is a narrow face; this takes a big face.", self.path)
 
-    def add_pocket(self, face: Face, shape: Shape, depth: DepthSpec, name: str | None = None) -> Self:
+    def add_pocket(self, face: Face, shape: Shape, depth: DepthSpec, name: str | None = None,
+                   dogbones: Sequence[DogBone] = ()) -> Self:
         """A pocket from a big face with `shape` already placed in the face's
         frame (world coordinates on the outline's two axes, see `face_axes`).
         For joints and hardware, which compute positions themselves; build
-        files use `pocket()`."""
+        files use `pocket()`. `dogbones` are the dog bones the shape holds
+        (`lang.core.dogbones`), for the CAM plan."""
         self._operable("add_pocket()")
         self._big_face_of_mine(face, "add_pocket()")
         self._check_area(shape, "add_pocket()")
         d, spec, _ = self._depth(face, depth)
-        self._record(Pocket(shape, face.world_name, d, spec, name), name)
+        self._record(Pocket(shape, face.world_name, d, spec, name, dogbones=tuple(dogbones)), name)
         return self
 
     def add_slot(self, face: Face, start: Point2, end: Point2, width: float, depth: DepthSpec,
@@ -2164,12 +2168,12 @@ class Board:
         self._big_face_of_mine(face, "add_slot()")
         return self._add_slot(face, start, end, width, depth, name, 0.0)
 
-    def add_cut(self, shape: Shape, name: str | None = None) -> Self:
+    def add_cut(self, shape: Shape, name: str | None = None, dogbones: Sequence[DogBone] = ()) -> Self:
         """A through cut with `shape` already in the outline's frame (world
         coordinates on its two axes); see `add_pocket`."""
         self._operable("add_cut()")
         self._check_area(shape, "add_cut()")
-        self._cut_through(shape, name, 0.0)
+        self._cut_through(shape, name, 0.0, tuple(dogbones))
         return self
 
     def add_edge_pocket(self, face: Face, shape: Shape, depth: float, name: str | None = None,
@@ -2607,7 +2611,8 @@ def _rings(shape: Shape) -> Rings:
 
 def _op_to_layout(op: Op) -> OpLayout:
     if isinstance(op, Cut):
-        cut: CutLayout = {"kind": "cut", "name": op.name, "chamfer": op.chamfer, "shape": _rings(op.shape)}
+        cut: CutLayout = {"kind": "cut", "name": op.name, "chamfer": op.chamfer, "shape": _rings(op.shape),
+                          "dogbones": _dogbones_to_layout(op.dogbones)}
         return cut
     if isinstance(op, Pocket):
         return _pocket_to_layout(op)
@@ -2632,7 +2637,12 @@ def _pocket_to_layout(op: Pocket) -> PocketLayout:
     if op.slot is not None:
         slot = {"start": list(op.slot.start), "end": list(op.slot.end), "width": op.slot.width}
     return {"kind": "pocket", "name": op.name, "face": op.face, "depth": op.depth, "depth_spec": op.depth_spec,
-            "chamfer": op.chamfer, "shape": _rings(op.shape), "slot": slot}
+            "chamfer": op.chamfer, "shape": _rings(op.shape), "slot": slot,
+            "dogbones": _dogbones_to_layout(op.dogbones)}
+
+
+def _dogbones_to_layout(bones: tuple[DogBone, ...]) -> list[DogBoneLayout]:
+    return [{"center": [b.center[0], b.center[1]], "d": b.d, "tool": b.tool} for b in bones]
 
 
 def _hole_to_layout(op: Hole) -> HoleLayout:
