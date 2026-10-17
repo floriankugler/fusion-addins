@@ -6,7 +6,17 @@
 // The layout file version this page draws (lang/core/layout_types.py
 // LAYOUT_VERSION). A layout of another version is not drawn; the status
 // line says so.
-export const LAYOUT_VERSION = 6;
+export const LAYOUT_VERSION = 8;
+
+/**
+ * A part's settings (the layout's `settings`, lang/core/settings.py) as the
+ * selection's info shows them, one line each with where it came from:
+ * `chamfer_size 0.5: kitchen`, `material birch 15: kitchen.left`.
+ */
+export function settingsText(settings) {
+  return Object.entries(settings ?? {}).map(([name, { value, source }]) =>
+    `${name} ${typeof value === 'string' ? value : JSON.stringify(value)}: ${source}`).join('\n');
+}
 
 /** Why the page cannot draw `layout`, or null when it can. */
 export function layoutVersionProblem(layout) {
@@ -17,15 +27,59 @@ export function layoutVersionProblem(layout) {
 
 // -- the nest ---------------------------------------------------------------
 
-/** The nest's state as the side panel says it (`nest` in status.json). */
+/** A nest's state as the side panel says it (an entry of `nests` in
+ * status.json): what it is, then what changed since it was nested or made. */
 export function nestStatusText(nest) {
+  const lines = [];
+  if (nest?.follows) lines.push(`second nest of ${nest.follows}: what is not made of it`);
+  const marked = nest?.state === 'made' || nest?.state === 'sheets';
   switch (nest?.state) {
-    case 'ok': return 'nest of this layout';
-    case 'stale': return 'nest of an older layout: nest again';
-    case 'running': return 'nesting… (seconds to minutes)';
-    case 'failed': return 'the nest failed:\n' + (nest.log ?? '').trim();
-    default: return 'no nest: python -m lang.nest, or nest again';
+    case 'ok': lines.push('its parts are as nested'); break;
+    case 'changed': lines.push('parts changed since it was nested: nest again'); break;
+    case 'made': lines.push('made, every sheet: frozen'); break;
+    case 'sheets':
+      lines.push(`made by sheets (${sheetNames(nest.made, nest.sheets)} of ${nest.sheets.length}): frozen`);
+      break;
+    case 'running': lines.push('nesting… (seconds to minutes)'); break;
+    case 'failed': lines.push('the nest failed:\n' + (nest.log ?? '').trim()); break;
+    default: lines.push(nest ? 'not nested yet: nest again, or python -m lang.nesting' : 'the layout lists no nest');
   }
+  const listed = marked
+    ? [['changed since made', nest.changed], ['not made', nest.not_made], ['new', nest.new], ['made, gone', nest.gone]]
+    : [['changed', nest?.changed], ['new', nest?.new], ['gone', nest?.gone]];
+  if (nest?.next) lines.push(`what it left was nested anew in ${nest.next}, made too`);
+  for (const [label, paths] of listed) if (paths?.length) lines.push(`${label}: ${paths.join(', ')}`);
+  if (marked && (nest.changed?.length || nest.not_made?.length || nest.new?.length)) {
+    lines.push('nest again: they go into the next nest beside it');
+  } else if (marked && nest.made_parts) {
+    lines.push('every part of it is made');
+  }
+  return lines.join('\n');
+}
+
+/** Sheets ([material, name]) as the panel names them: by name, with the
+ * material where the nest has several. */
+export function sheetNames(sheets, all = sheets) {
+  const several = new Set((all ?? []).map(([m]) => m)).size > 1;
+  return (sheets ?? []).map(([m, s]) => (several ? `${m}:${s}` : s)).join(', ');
+}
+
+/** Whether a sheet ([material, name]) is among those marked made. */
+export function sheetMade(nest, sheet) {
+  return (nest?.made ?? []).some(([m, s]) => m === sheet[0] && s === sheet[1]);
+}
+
+/** Whether a part may be marked as fixed in a nest: made in it (it is
+ * marked) and changed since. */
+export function fixable(nest, path) {
+  return (nest?.state === 'made' || nest?.state === 'sheets') && !nest.follows && (nest.changed ?? []).includes(path);
+}
+
+/** The nest the panel shows of a design's `nests` (status.json): the one
+ * wanted (by path) if it is listed, else the first; null for none. */
+export function chosenNest(nests, wanted) {
+  if (!nests?.length) return null;
+  return nests.find((n) => n.path === wanted) ?? nests[0];
 }
 
 // -- hidden parts ----------------------------------------------------------

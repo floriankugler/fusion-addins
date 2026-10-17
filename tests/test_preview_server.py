@@ -2,7 +2,6 @@
 of a folder are build files, which designs a change makes stale, which
 ones it builds, a build that fails or runs too long keeping the last good
 one, and the files it serves."""
-import json
 import os
 from pathlib import Path
 
@@ -106,7 +105,7 @@ def test_only_the_designs_pages_show_are_built(tmp_path: Path):
     state = designs.status("van", page="a")
     assert state["designs"] == ["cabinet", "shelf", "van"]
     assert state["design"] == {"name": "van", "url": "out/van/", "version": None, "builds": 0, "state": "building",
-                               "nest": {"state": "none"}}
+                               "nests": []}
     assert designs.next_build() is designs.designs["van"]
     designs.status("cabinet", page="a")                  # the page switched
     assert designs.next_build() is designs.designs["cabinet"]
@@ -150,35 +149,88 @@ def test_a_build_that_runs_too_long_is_stopped_and_keeps_the_last_good_one(tmp_p
     assert "took longer than 1 s and was stopped" in (out / "build.log").read_text()
 
 
-def test_the_nest_state_says_whether_the_nest_is_the_built_layout_s(tmp_path: Path):
-    path = write(tmp_path, "cabinet.py", CABINET)
+NESTED = """from lang import *
+ply = sheet_material('birch', t=15, size=(2470, 1240))
+use(nesting.bed((2000, 1000)), nesting.seconds(0.3), nesting.refill(False))
+with module('cabinet', Box.from_size(width=300, depth=200, height=400)) as m:
+    board('left', ply).on(m.left)
+    board('right', ply).on(m.right)
+    m.nest('sides', [m['left']])
+"""
+
+
+def _entry(path: str, folder: str, state: str = "none") -> dict[str, object]:
+    return {"path": path, "dir": folder, "follows": "", "state": state, "sheets": [], "made": [], "changed": [],
+            "new": [], "gone": []}
+
+
+def test_the_nests_listed_say_what_changed_since_by_their_parts(tmp_path: Path):
+    path = write(tmp_path, "cabinet.py", NESTED)
     designs = Designs(path, tmp_path / "out")
     design = designs.designs["cabinet"]
-    assert nest_state(design) == {"state": "none"}
+    assert nest_state(design) == []                                # not built yet
     assert rebuild(path, design.out)
-    write(tmp_path, "workshop.toml", "bed = [2000, 1000]\nseconds = 0.3\n[[sheet]]\nsize = [2470, 1240]\n")
-    assert designs.ask_nest("cabinet") and not designs.ask_nest("gone")
-    assert nest_state(design) == {"state": "running"}
-    assert renest(path, design.out)
-    design.nesting = False
-    state = nest_state(design)
-    assert state["state"] == "ok" and state["version"]
-    assert {"nest.json", "nest.svg", "nest.layout.json", "nest.log"} <= {p.name for p in design.out.iterdir()}
-    layout = json.loads((design.out / "layout.json").read_text())
-    layout["modules"][0]["parts"][0]["thickness"] = 18.0          # built again since
-    (design.out / "layout.json").write_text(json.dumps(layout))
-    assert nest_state(design)["state"] == "stale"
+    assert nest_state(design) == [_entry("cabinet.sides", "cabinet/sides/"),
+                                  _entry("cabinet.birch_15", "cabinet/birch_15/")]
+    assert designs.ask_nest("cabinet", "cabinet.sides")
+    assert not designs.ask_nest("gone", "cabinet.sides") and not designs.ask_nest("cabinet", "cabinet.oak")
+    assert nest_state(design)[0]["state"] == "running" and nest_state(design)[1]["state"] == "none"
+    assert renest(path, design.out, "cabinet.sides", "cabinet/sides")
+    design.nesting.clear()
+    state = nest_state(design)[0]
+    assert state["state"] == "ok" and state["version"] and state["sheets"] == [["birch 15", "1"]]
+    folder = design.out / "cabinet" / "sides"
+    assert {"nest.json", "nest.svg", "nest.layout.json", "nest.log"} <= {p.name for p in folder.iterdir()}
+    assert not (design.out / "cabinet" / "birch_15").exists()           # only the nest asked for
+    # Another part changed: the nest still holds, by its parts' fingerprints.
+    write(tmp_path, "cabinet.py", NESTED.replace("board('right', ply).on(m.right)",
+                                                 "board('right', ply).on(m.right).hole(8, depth=5)"))
+    assert rebuild(path, design.out)
+    assert nest_state(design)[0]["state"] == "ok"
+    write(tmp_path, "cabinet.py", NESTED.replace("board('left', ply).on(m.left)",
+                                                 "board('left', ply).on(m.left).hole(8, depth=5)"))
+    assert rebuild(path, design.out)
+    state = nest_state(design)[0]
+    assert state["state"] == "changed" and state["changed"] == ["cabinet.left"]
+
+
+def test_marks_go_through_the_server_and_the_nests_say_what_is_made(tmp_path: Path):
+    path = write(tmp_path, "cabinet.py", NESTED)
+    designs = Designs(path, tmp_path / "out")
+    design = designs.designs["cabinet"]
+    assert rebuild(path, design.out) and renest(path, design.out, "cabinet.sides", "cabinet/sides")
+    assert designs.pin("cabinet", ["--made", "cabinet.oak"])[0] == 400
+    status, text = designs.pin("cabinet", ["--made", "cabinet.sides"])
+    assert status == 200 and "marked as made: birch 15 sheet 1" in text
+    (sides, _default) = nest_state(design)
+    assert sides["state"] == "made" and sides["made"] == [["birch 15", "1"]]
+    assert sides["changed"] == [] and sides["not_made"] == [] and sides["made_parts"] == {
+        "cabinet.left": "cabinet.sides birch 15 sheet 1"}
+    write(tmp_path, "cabinet.py", NESTED.replace("board('left', ply).on(m.left)",
+                                                 "board('left', ply).on(m.left).hole(8, depth=5)"))
+    assert rebuild(path, design.out)
+    sides, second, _default = nest_state(design)
+    assert sides["state"] == "made" and sides["changed"] == ["cabinet.left"]
+    assert second == {**_entry("cabinet.sides-2", "cabinet/sides-2/"), "follows": "cabinet.sides"}
+    assert designs.ask_nest("cabinet", "cabinet.sides-2") and design.nesting == ["cabinet.sides"]
+    assert designs.pin("cabinet", ["--made", "cabinet.sides"])[0] == 409          # while it nests
+    design.nesting.clear()
+    status, text = designs.pin("cabinet", ["--fixed", "cabinet.sides", "cabinet.left"])
+    assert status == 200 and "fixed by hand" in text
+    sides, _default = nest_state(design)
+    assert sides["changed"] == [] and sides["made_parts"] == {"cabinet.left": "fixed"}
 
 
 def test_a_failed_nest_says_why(tmp_path: Path):
     path = write(tmp_path, "cabinet.py", CABINET)
     out = tmp_path / "out"
-    assert not renest(path, out)                                   # no workshop: no bed
     designs = Designs(path, out)
     design = designs.designs["cabinet"]
-    design.nest_failed = True
-    state = nest_state(design)
-    assert state["state"] == "failed" and "No bed given" in state["log"]
+    assert rebuild(path, out)
+    assert not renest(path, out, "cabinet.birch_15", "cabinet/birch_15")       # no bed set anywhere
+    design.nest_failed.add("cabinet.birch_15")
+    (state,) = nest_state(design)
+    assert state["state"] == "failed" and "no nesting.bed is used for it" in state["log"]
 
 
 def _handler(out: Path) -> _Handler:

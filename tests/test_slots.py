@@ -137,7 +137,7 @@ def test_a_slot_runs_along_the_extent_its_cabinet_names():
     """In a cabinet opening toward the box's right, its width runs along
     the world's depth (x); the back's slot follows the cabinet's terms."""
     box = Box.from_size(width=600, depth=500, height=700)
-    with cabinet("cab", box, front=box.right) as cab:
+    with module("cab", box, front=box.right) as cab:
         back = board("back", ply15).on(cab.back)
         back.slot(6, at=back.inner.center, centers=100, along="width", depth=through, name="vent")
     line = _slot(back, "vent").slot

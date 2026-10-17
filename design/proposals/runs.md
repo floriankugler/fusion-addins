@@ -521,7 +521,7 @@ cab.export("underside", bottom.bottom)                    # the toe kick's ceili
 
 # van.py, after the modules
 ground = floor("floor", van.box("Boden"))
-kitchen = drawer_cabinet("kitchen", kitchen_box, 3, slide, front=kitchen_box.right, bottom_drawer=230)
+kitchen = drawer_cabinet(kitchen_box, front=kitchen_box.right, name="kitchen", n=3, slide=slide, bottom_drawer=230)
 run("cable_rear", cable10).path(
     kitchen.cable,            # down through the hole behind the drawers
     kitchen.underside,        # just under the bottom, in the toe kick

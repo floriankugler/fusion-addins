@@ -52,7 +52,9 @@ for a check, too slow for the loop. [decided as a need]
   the build file writes them (a cabinet's own front and left, inner and outer
   where they resolve; the layout carries them per part as `faces`). Colors by
   material from a fixed palette. The layout's problems are listed as text; a
-  selected part's info gives its grain. Proposed and not built: the grain as
+  selected part's info gives its grain and its settings, one line each with
+  the node that set it (`material birch 15: kitchen`; the layout's
+  `settings`, `design/api.md`, Settings). Proposed and not built: the grain as
   a stripe on each board, and check results drawn in the scene (interference
   pairs, sheet fit).
 - Camera and visibility from code: the page exposes `window.preview`
@@ -69,15 +71,39 @@ for a check, too slow for the loop. [decided as a need]
   `tests/test_viewer_js.py`), and a rebuild frees the old scene's GPU
   resources.
 - Click-to-path in the viewer is the Copy Path helper outside Fusion.
-- The nest view (button or key `k`, `preview.nest(on)` from code) shows the
-  design's nest as the nest step drew it (`nest.svg` beside the build, see
-  `design/nesting.md`): the sheets with their numbered saw cuts, blanks,
-  kept rests and waste, the parts labelled with their grain; a part
-  clicked there is selected in the model. The side panel says whether the
-  nest is of the layout on screen (its layout hash) or an older one, and
-  Nest again runs `python -m lang.nest` with the workshop file beside the
-  build file, one nest at a time and never on a save (a nest takes seconds
-  to minutes); a failed nest shows its log.
+- The nest view (button or key `k`, `preview.nest(on)` from code) shows a
+  nest of the design as the nest step drew it (`nest.svg` in the nest's
+  folder beside the build, `<module>/<nest>/`, see `design/nesting.md`):
+  its name and time, the sheets with their numbered saw cuts, blanks (an
+  own blank hatched), kept rests and waste, the parts labelled with their
+  grain; a part clicked there is selected in the model. The side panel
+  lists the design's nests as its layout gives them (`module.nest`,
+  declared or one per material per module; `preview.nests()` from code)
+  and shows the one chosen (`await preview.showNest('kitchen.carcass')`);
+  it says whether the nest's parts are as nested, by their fingerprints
+  (so a change to another module leaves it good), which changed, which are
+  new and which are gone, or that it is not nested yet (also where its
+  file is of an older version, without fingerprints), and Nest again
+  runs `python -m lang.nesting <build> <nest>` for it, with the inventory
+  beside the build file, one nest at a time and never on a save (a nest
+  takes seconds to minutes); a failed nest shows its log.
+- Pinning (`design/nesting.md`, Pinning) in the nest view: a nest marked
+  as made says so (every sheet, or which, and frozen), what of it changed
+  since it was made, what is not made and new (what its second nest takes)
+  and what made is gone; its second nests follow it in the list, indented,
+  and Nest again on either nests what is not made. On the drawing the
+  sheets made are tinted and outlined, the parts changed since red, the
+  parts gone grey. Mark made marks the nest whole, a sheet's button that
+  sheet, and with a part selected (in the drawing or the model) that is
+  made and changed since, Fixed by hand marks it; each asks first, posts
+  to the server (`POST /made?design=&nest=[&sheet=birch 15:2]`, `POST
+  /fixed?design=&nest=&part=`, which run `python -m lang.nesting --made` or
+  `--fixed` and answer with what it printed, shown under the buttons) and
+  writes the inventory back as the command does. From code:
+  `preview.nestStates()` (the nests as the server gives them),
+  `await preview.markMade(nest, [[material, sheet]])` and
+  `await preview.markFixed(nest, part)` (they ask too; `window.confirm` can
+  be replaced to script them).
 
 ## Serving a folder
 

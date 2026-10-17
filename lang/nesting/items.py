@@ -19,24 +19,34 @@ experiments: true arcs nested no better than polygons simplified to
 polygons, never as circles (PackingSolver puts nothing into a circular
 hole). Everything is moved so that the solver's polygon starts at (0, 0).
 
+A part that asks for a larger spacing than the nest's least (its own
+`nesting.spacing`) has its solver polygon grown by the difference, so that
+between two parts the larger of their spacings holds.
+
 Turns [Florian, 2026-10-14]: a part with grain keeps it along the sheet's
 length (x): turned by 0 or 180 degrees when its grain runs along its u,
 by 90 or 270 along its v. A part of a material without grain, or one whose
 grain the build left unset, turns by any 90 degree step. No part is ever
 mirrored: its machining face stays up.
+
+A `nest(False)` board a nest names is its own blank [decided 2026-10-16]:
+sawn to size out of the stock, with no margin, its outline whole (cut by
+hand), and it may be larger than the bed (`Item.own`).
 """
 from __future__ import annotations
 
 import math
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass, field
 
-from shapely import Point, Polygon, affinity, union_all
+from shapely import Point, Polygon, affinity, box, union_all
 from shapely.geometry.base import BaseGeometry
 from shapely.geometry.polygon import orient
 
 from ..core.errors import LangError
 from ..core.geometry import parts_of
 from ..core.layout_types import Layout, PartLayout, Rings
+from .fingerprint import fingerprint as part_fingerprint
 from .workshop import Workshop, fits
 
 #: How far (mm) the solver's polygon may be simplified (see the module's doc).
@@ -112,6 +122,14 @@ class Item:
     frame: PartFrame
     #: The machining face (world name), which faces up.
     up: str
+    #: The least gap to another part (mm): between two parts the larger of
+    #: theirs holds.
+    spacing: float = 10.0
+    #: A `nest(False)` board named in the nest: its own blank, sawn to size,
+    #: its solver polygon its bounding rectangle.
+    own: bool = False
+    #: Its hash as machined (`fingerprint`), "" where not taken.
+    fingerprint: str = ""
     area: float = field(init=False)
 
     def __post_init__(self) -> None:
@@ -150,60 +168,87 @@ class Parts:
     left_out: list[LeftOut]
 
 
-def parts_of_layout(layout: Layout, spacing: float, material: str | None = None) -> Parts:
-    """The layout's parts to nest, by material (all, or the one named), and
-    those left out (`nest(False)`, manual, slats)."""
+def parts_of_layout(layout: Layout, spacing: float, material: str | None = None, *,
+                    paths: Collection[str] | None = None, spacing_of: Mapping[str, float] | None = None) -> Parts:
+    """The layout's parts to nest, by material: all, or those of the
+    material named, or the `paths` of a nest, whose `nest(False)` boards
+    are their own blanks; and, of all, those left out (`nest(False)`,
+    manual, slats). `spacing` is the nest's least, `spacing_of` a part's own
+    where it asks for more."""
     frame = {name: (value[1], 1 if value[0] == "+" else -1) for name, value in layout["frame"].items()}
+    wanted = None if paths is None else set(paths)
     raw: dict[str, list[tuple[PartLayout, Polygon, PartFrame]]] = {}
+    own: dict[str, list[Item]] = {}
     left_out: list[LeftOut] = []
     for module in layout["modules"]:
         for part in module["parts"]:
-            if material is not None and part["material"] != material:
+            if (wanted is not None and part["path"] not in wanted) or \
+                    (material is not None and part["material"] != material):
                 continue
             if not part["nest"]:
                 why = "slat" if part["kind"] == "slat" else "manual" if part["manual"] else "nest(False)"
-                left_out.append(LeftOut(part["path"], part["material"], why))
+                if wanted is None:
+                    left_out.append(LeftOut(part["path"], part["material"], why))
+                elif why != "nest(False)":
+                    raise LangError(f"{part['path']} is a {why} part, which is never nested.")
+                else:
+                    item = _own_item(part, frame)
+                    item.fingerprint = part_fingerprint(part, layout["frame"])
+                    own.setdefault(part["material"], []).append(item)
                 continue
             shape, pf = _machine_outline(part, frame)
             raw.setdefault(part["material"], []).append((part, shape, pf))
     by_material: dict[str, list[Item]] = {}
-    for name, entries in raw.items():
-        smallest = min(shape.area for _p, shape, _f in entries)
-        by_material[name] = [_item(part, shape, pf, spacing, smallest) for part, shape, pf in entries]
+    for name in sorted(set(raw) | set(own)):
+        entries = raw.get(name, [])
+        smallest = min((shape.area for _p, shape, _f in entries), default=0.0)
+        by_material[name] = [_item(part, shape, pf, max(spacing, (spacing_of or {}).get(part["path"], spacing)),
+                                   spacing, smallest, part_fingerprint(part, layout["frame"]))
+                             for part, shape, pf in entries] + own.get(name, [])
     return Parts(by_material, left_out)
 
 
 def check_sizes(parts: Parts, workshop: Workshop) -> None:
     """Refuses parts that no blank takes: larger than the bed with its
-    margins, or than every piece of stock on hand for their material. The
-    message names each and how to leave it out."""
+    margins, or than every piece of stock for their material (a sheet to
+    buy, the pieces on hand); an own blank, larger than every piece of
+    stock. The message names each and how to leave it out."""
     assert workshop.bed is not None
     bed = workshop.bed
     problems: list[str] = []
     for name, items in parts.by_material.items():
-        stock = [(s.length, s.width) for s in workshop.sheets_for(name)] + \
-                [(o.length, o.width) for o in workshop.offcuts_for(name)]
+        sheet = workshop.sheet_for(name)
+        stock = ([(sheet.length, sheet.width)] if sheet is not None else []) + \
+                [(o.length, o.width) for o in workshop.on_hand_for(name)]
         if not stock:
-            raise LangError(f"No stock on hand for {name}: give a sheet for it (the workshop file's [[sheet]], "
-                            f"or --sheet '{name}:2470x1240').")
+            raise LangError(f"No stock for {name}: no sheet size to buy (sheet_material(..., size=(2500, 1250))) "
+                            "and none on hand in the inventory (inventory.toml).")
         for item in items:
-            blanks = [(w + 2 * workshop.margin, h + 2 * workshop.margin) for w, h in map(item.size, item.turns)]
             x0, y0, x1, y1 = item.shape.bounds
             size = f"{item.path} ({x1 - x0:.0f} x {y1 - y0:.0f})"
+            grain = " with its grain along the stock's" if item.grained else ""
+            if item.own:
+                if not any(bw <= sl + 1e-6 and bh <= sw + 1e-6 for bw, bh in map(item.size, item.turns)
+                           for sl, sw in stock):
+                    problems.append(f"{size}, its own blank, fits no stock for {name}{grain}")
+                continue
+            blanks = [(w + 2 * workshop.margin, h + 2 * workshop.margin) for w, h in map(item.size, item.turns)]
             if not any(fits(bw, bh, bed) for bw, bh in blanks):
                 problems.append(f"{size} does not fit the bed {bed[0]:g} x {bed[1]:g} with its margins; "
                                 "nest(False) saws it by hand")
             elif not any(bw <= sl + 1e-6 and bh <= sw + 1e-6 for bw, bh in blanks if fits(bw, bh, bed)
                          for sl, sw in stock):
-                problems.append(f"{size} fits no stock on hand for {name}" +
-                                (" with its grain along the stock's" if item.grained else ""))
+                problems.append(f"{size} fits no stock for {name}{grain}")
     if problems:
         raise LangError("These parts cannot be nested:\n  " + "\n  ".join(problems))
 
 
 # -- one part ------------------------------------------------------------------------------
 
-def _machine_outline(part: PartLayout, frame: dict[str, tuple[str, int]]) -> tuple[Polygon, PartFrame]:
+def _machine_outline(part: PartLayout, frame: dict[str, tuple[str, int]],
+                     openings: bool = True) -> tuple[Polygon, PartFrame]:
+    """The part's outline seen from its machining face, less its through
+    pockets and holes unless `openings` is False, and its frame."""
     axes = part["axes"]
     t, u, v = axes["t"], axes["u"], axes["v"]
     machine_axis, up = frame[part["machine"]]
@@ -212,15 +257,15 @@ def _machine_outline(part: PartLayout, frame: dict[str, tuple[str, int]]) -> tup
     handed = 1 if (u, v, t) in _RIGHT_HANDED else -1
     mirror = handed * up < 0
     outline = _polygons(part["outline"])
-    openings: list[BaseGeometry] = []
-    for op in part["ops"]:
+    through: list[BaseGeometry] = []
+    for op in part["ops"] if openings else []:
         if op["kind"] == "pocket" and frame[op["face"]][0] == t and op["depth"] >= part["thickness"] - 1e-6:
-            openings += _polygons(op["shape"])
+            through += _polygons(op["shape"])
         elif op["kind"] == "hole" and op["through"] and frame[op["face"]][0] == t:
-            openings.append(Point(op["u"], op["v"]).buffer(op["d"] / 2, quad_segs=16))
+            through.append(Point(op["u"], op["v"]).buffer(op["d"] / 2, quad_segs=16))
     shape = union_all(outline)
-    if openings:
-        shape = shape.difference(union_all(openings))
+    if through:
+        shape = shape.difference(union_all(through))
     pieces = [p for p in parts_of(shape) if p.area > 1e-6]
     if len(pieces) != 1:
         raise LangError(f"{part['path']}: its machine outline is in {len(pieces)} pieces; the nest takes a part "
@@ -235,34 +280,55 @@ def _machine_outline(part: PartLayout, frame: dict[str, tuple[str, int]]) -> tup
     return shape, pf
 
 
-def _item(part: PartLayout, shape: Polygon, pf: PartFrame, spacing: float, smallest: float) -> Item:
+def _item(part: PartLayout, shape: Polygon, pf: PartFrame, spacing: float, least: float, smallest: float,
+          fingerprint: str = "") -> Item:
+    """The part as the nest takes it; `spacing` its own, `least` the
+    nest's, the solver's spacing: the solver's polygon is grown by the
+    difference besides its own growth."""
     # Openings that cannot take the smallest part are filled.
     kept = [ring for ring in shape.interiors if _takes_a_part(ring, spacing, smallest)]
     solid = Polygon(shape.exterior, kept)
-    grown = solid.buffer(1.5 * TOLERANCE, join_style="mitre", mitre_limit=MITRE)
+    extra = spacing - least
+    grown = solid.buffer(1.5 * TOLERANCE + extra, join_style="mitre", mitre_limit=MITRE)
     simple = grown.simplify(TOLERANCE, preserve_topology=True)
     if not isinstance(simple, Polygon) or simple.is_empty:
         raise LangError(f"{part['path']}: its outline could not be simplified for the nest.")
     # Growing can close a notch's narrow mouth into a hole: the same rule
     # for the solver's holes [found by fuzzing, 2026-10-14].
-    simple = orient(Polygon(simple.exterior, [r for r in simple.interiors if _takes_a_part(r, spacing, smallest)]))
+    simple = orient(Polygon(simple.exterior, [r for r in simple.interiors if _takes_a_part(r, least, smallest)]))
     if not simple.buffer(1e-6).contains(solid):
         raise LangError(f"{part['path']}: the nest's outline would cut into the part.")
     x0, y0, _x1, _y1 = simple.bounds
     simple = affinity.translate(simple, -x0, -y0)
     shape = affinity.translate(shape, -x0, -y0)
     pf = PartFrame(pf.t, pf.u, pf.v, pf.mirror, pf.up, pf.t_lo, pf.t_hi, x0, y0)
+    grained, turns = _turns(part, pf)
+    return Item(part["path"], part["material"], part["thickness"], shape, simple, turns, grained, pf,
+                part["machine"], spacing, fingerprint=fingerprint)
+
+
+def _own_item(part: PartLayout, frame: dict[str, tuple[str, int]]) -> Item:
+    """A `nest(False)` board named in a nest: its whole outline from its
+    machining face, its blank the rectangle around it."""
+    shape, pf = _machine_outline(part, frame, openings=False)
+    x0, y0, x1, y1 = shape.bounds
+    shape = affinity.translate(shape, -x0, -y0)
+    pf = PartFrame(pf.t, pf.u, pf.v, pf.mirror, pf.up, pf.t_lo, pf.t_hi, x0, y0)
+    grained, turns = _turns(part, pf)
+    return Item(part["path"], part["material"], part["thickness"], shape, box(0.0, 0.0, x1 - x0, y1 - y0), turns,
+                grained, pf, part["machine"], 0.0, own=True)
+
+
+def _turns(part: PartLayout, pf: PartFrame) -> tuple[bool, tuple[float, ...]]:
+    """Whether the part's grain is set, and the turns it may take."""
     grained = part["grained"] and part["grain"] is not None
     if not grained:
-        turns: tuple[float, ...] = (0.0, 90.0, 180.0, 270.0)
-    elif part["grain"] == pf.u:
-        turns = (0.0, 180.0)
-    elif part["grain"] == pf.v:
-        turns = (90.0, 270.0)
-    else:
-        raise LangError(f"{part['path']}: its grain {part['grain']} is not in its plane.")
-    return Item(part["path"], part["material"], part["thickness"], shape, simple, turns, grained, pf,
-                part["machine"])
+        return False, (0.0, 90.0, 180.0, 270.0)
+    if part["grain"] == pf.u:
+        return True, (0.0, 180.0)
+    if part["grain"] == pf.v:
+        return True, (90.0, 270.0)
+    raise LangError(f"{part['path']}: its grain {part['grain']} is not in its plane.")
 
 
 def _takes_a_part(ring: object, spacing: float, smallest: float) -> bool:

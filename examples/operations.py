@@ -10,7 +10,9 @@ No two chamfers share an edge: Fusion cannot chamfer an edge twice, and
 an edge that one chamfer consumed no longer exists for the next."""
 from lang import *
 
-from stock import ply15
+from stock import ply15, workshop
+
+use(*workshop)   # the machine the nests are made for
 
 
 with module("ops", Box.from_size(width=400, depth=300, height=100)) as m:

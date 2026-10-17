@@ -12,7 +12,7 @@ opens toward the aisle, like the drawer cabinet."""
 from lang import *
 from lang.std import carcass, drawer_box
 
-from stock import ply9, ply12, ply15
+from stock import ply9, ply12, ply15, workshop
 
 REVEAL = 2.0  # around each inset front
 
@@ -22,7 +22,7 @@ def latched_cabinet(name: str, box: Box, slide: DrawerSlide, model: LatchModel =
     """A cabinet in its own frame: from the bottom up a drawer bay
     `drawer_height` high, a rail, a second bay, a shelf and the door's
     compartment above it. A `model` latch holds every front."""
-    with cabinet(name, box, front=front) as cab:
+    with module(name, box, front=front) as cab:
         left, right, _bottom, top, back = carcass(cab, ply15, back=ply9, joins=cabineo(count=3))
 
         # the rest, above the shelf, is the door's compartment
@@ -65,6 +65,7 @@ def drawer(name: str, bay: Box, slide: DrawerSlide, latch: DoorLatch, catch: Boa
 
 
 if __name__ == "__build__":   # run as the build file, not imported
+    use(*workshop)   # the machine the nests are made for
     # Against the driver's wall (left, -y), opening toward the aisle: in
     # world terms 500 across the vehicle and 600 along it; inside the
     # module the cabinet is 600 wide and 500 deep.

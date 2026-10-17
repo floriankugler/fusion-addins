@@ -8,11 +8,13 @@ inner face, which carries the chamfer."""
 from lang import *
 from lang.std import carcass
 
-from stock import ply15
+from stock import ply15, workshop
+
+use(*workshop)   # the machine the nests are made for
 
 
 box = Box.from_size(width=600, depth=400, height=700)
-with cabinet("cutouts", box, front=box.front) as unit:
+with module("cutouts", box, front=box.front) as unit:
     left, right, bottom, top, back = carcass(unit, ply15, back=ply15)
     shelf = board("shelf", ply15).center(unit.center("height")).between(left, right, back)
 

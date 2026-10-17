@@ -12,7 +12,7 @@ hangs on the driver's wall and opens toward the aisle."""
 from lang import *
 from lang.std import carcass
 
-from stock import ply9, ply12, ply15
+from stock import ply9, ply12, ply15, workshop
 
 GAP = 3  # around the door
 
@@ -20,7 +20,7 @@ GAP = 3  # around the door
 def hinged_cabinet(name: str, box: Box, hinge: ConcealedHinge, *, front: Side) -> Scope:
     """A cabinet in its own frame with one overlay door hinged on its left
     side, the hinges `hinge`. `front=` places it (see `cabinet`)."""
-    with cabinet(name, box, front=front) as cab:
+    with module(name, box, front=front) as cab:
         # the carcass stands behind the door
         left, right, bottom, top, back = carcass(cab, ply15, back=ply9, front=cab.front.into(ply12.thickness))
 
@@ -40,6 +40,7 @@ def hinged_cabinet(name: str, box: Box, hinge: ConcealedHinge, *, front: Side) -
 
 
 if __name__ == "__build__":   # run as the build file, not imported
+    use(*workshop)   # the machine the nests are made for
     # On the driver's wall (left, -y), opening toward the aisle: its 450 mm
     # front runs along the vehicle, so in world terms the box is 350 wide
     # (across the vehicle) and 450 deep (along it).

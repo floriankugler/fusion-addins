@@ -308,11 +308,11 @@ def _overlapping(m: Scope) -> None:
 
 def test_every_module_runs_no_interference_without_asking():
     """Decided by Florian, 2026-10-15 (syntax.md item 4): `module()` and
-    `cabinet()` run `no_interference` unless it is turned off."""
+    `module()` run `no_interference` unless it is turned off."""
     with module("m", Box.from_size(width=300, depth=300, height=100)) as m:
         _overlapping(m)
     box = Box.from_size(width=300, depth=300, height=100, origin=(0, 500, 0))
-    with cabinet("cab", box, front=box.front) as cab:
+    with module("cab", box, front=box.front) as cab:
         board("a", ply18).on(cab.bottom)
         board("b", ply18).on(Pos("z", 5), toward=cab.top)
     layout = build_layout()

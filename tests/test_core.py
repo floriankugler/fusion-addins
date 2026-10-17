@@ -86,7 +86,7 @@ def test_a_side_or_a_face_plus_a_length_is_refused():
     two ways."""
     van = Box.from_size(width=600, depth=500, height=700)
     for facing in ("front", "right"):
-        with cabinet(f"cab_{facing}", van, front=van.side(facing)) as cab:
+        with module(f"cab_{facing}", van, front=van.side(facing)) as cab:
             left = board("left", ply15).on(cab.left)
             refused: dict[str, Any] = {
                 f"cab_{facing}.front": cab.front,
@@ -176,7 +176,7 @@ def test_box_sides_and_extents():
 
 def test_split_runs_from_the_frames_own_side():
     box = Box.from_size(width=500, depth=600, height=720)
-    with cabinet("cab", box, front=box.right) as cab:
+    with module("cab", box, front=box.right) as cab:
         first, rest = cab.interior.split("width", [100])
         assert first.left.value == cab.left.value and first.width == 100
         assert rest.right.value == cab.right.value
@@ -209,7 +209,7 @@ def test_a_side_moved_into_or_out_of_its_box_is_a_side():
     its thickness inward without toward= (`on(cab.bottom.into(60))`); they
     were bare positions."""
     van = Box.from_size(width=600, depth=500, height=700)
-    with cabinet("cab", van, front=van.right) as cab:
+    with module("cab", van, front=van.right) as cab:
         raised = board("raised", ply15).on(cab.bottom.into(60))
         partition = board("partition", ply15).on(cab.left.into(100))
         lid = board("lid", ply15).on(cab.top.gap(5))
@@ -236,7 +236,7 @@ def test_a_face_moved_by_gap_or_into_keeps_its_side():
     van = Box.from_size(width=600, depth=500, height=700)
     for facing in (None, "front", "right", "back", "left"):
         name = f"cab_{facing}"
-        with (module(name, van) if facing is None else cabinet(name, van, front=van.side(facing))) as cab:
+        with (module(name, van) if facing is None else module(name, van, front=van.side(facing))) as cab:
             left = board("left", ply15).on(cab.left)
             bottom = board("bottom", ply15).on(cab.bottom).between(left, cab.right)
             back = board("back", ply9).on(cab.back).between(left, cab.right, bottom, cab.top)
@@ -283,7 +283,7 @@ def test_a_face_moved_again_keeps_the_face_s_in_and_out():
     van = Box.from_size(width=600, depth=500, height=700)
     for facing in (None, "front", "right", "back", "left"):
         name = f"cab_{facing}"
-        with (module(name, van) if facing is None else cabinet(name, van, front=van.side(facing))) as cab:
+        with (module(name, van) if facing is None else module(name, van, front=van.side(facing))) as cab:
             left = board("left", ply15).on(cab.left)
             bottom = board("bottom", ply15).on(cab.bottom).between(left, cab.right)
             back = board("back", ply9).on(cab.back).between(left, cab.right, bottom, cab.top)
@@ -317,7 +317,7 @@ def test_box_sides_moved_again_move_as_before():
     van = Box.from_size(width=600, depth=500, height=700)
     for facing in (None, "right"):
         name = f"cab_{facing}"
-        with (module(name, van) if facing is None else cabinet(name, van, front=van.side(facing))) as cab:
+        with (module(name, van) if facing is None else module(name, van, front=van.side(facing))) as cab:
             raised = board("raised", ply15).on(cab.bottom.into(60).into(10))
             lid = board("lid", ply15).on(cab.top.gap(5).gap(5))
         r = cab.frame.direction("right").sign
@@ -441,7 +441,7 @@ def test_a_board_across_its_scope_s_middle_shows_its_top_back_or_right_face():
     right in one facing its front.)"""
     van = Box.from_size(width=600, depth=600, height=700)
     for front in ("front", "right", "back", "left"):
-        with cabinet(f"cab_{front}", van, front=van.side(front)) as cab:
+        with module(f"cab_{front}", van, front=van.side(front)) as cab:
             shelf = board("shelf", ply15).center(cab.center("height"))
             divider = board("divider", ply15).center(cab.center("width"))
             panel = board("panel", ply15).center(cab.center("depth"))
@@ -733,7 +733,7 @@ def test_a_shaped_board_fills_its_limits_or_sits_against_one_or_in_the_corner(fa
     the limits' lowest corner in world terms, its box the limits', so in a
     cabinet facing elsewhere it lay elsewhere and its box missed it."""
     van = Box.from_size(width=600, depth=500, height=300)
-    with cabinet("cab", van, front=van.side(facing)) as cab:
+    with module("cab", van, front=van.side(facing)) as cab:
         shape = rect(width=100, depth=50)
         filled = board("filled", ply15, shape).on(cab.bottom).between(
             cab.left.into(10), cab.left.into(110), cab.front, cab.front.into(50))
@@ -831,7 +831,7 @@ def test_layout_json_roundtrip(tmp_path: Path) -> None:
     cab.export("worktop", cab.top)
     cab.check(no_interference)
     layout = write_layout(tmp_path / "layout.json")
-    assert layout["version"] == 6
+    assert layout["version"] == 8
     module_layout = layout["modules"][0]
     assert module_layout["exports"] == {"worktop": {"axis": "z", "value": 720.0}}
     assert [p["path"] for p in module_layout["parts"]] == ["cab.left", "cab.right", "cab.bottom", "cab.back"]
@@ -947,7 +947,7 @@ def test_a_cut_by_a_board_or_its_box_reaching_a_hundredth_in_makes_one_pocket():
 def test_module_frame_follows_placement():
     # a cabinet against the driver's wall (left, -y) that opens toward the aisle
     box = Box.from_size(width=500, depth=600, height=720)
-    with cabinet("cab", box, front=box.right) as cab:
+    with module("cab", box, front=box.right) as cab:
         assert cab.front.value == 500 and cab.front.axis == "y"
         assert cab.back.value == 0
         # a cabinetmaker's left, standing in front of it: toward the vehicle's rear (+x)
@@ -982,29 +982,35 @@ def test_face_names_leave_out_inner_and_outer_when_ambiguous():
 
 def test_module_frame_mirrored_and_default():
     box = Box.from_size(width=500, depth=600, height=720)
-    with cabinet("cab", box, front=box.right, mirrored=True) as cab:
+    with module("cab", box, front=box.right, mirrored=True) as cab:
         assert cab.left.value == 0 and cab.right.value == 600 and cab.front.value == 500
         assert cab.frame.is_mirrored
     with module("plain", box) as plain:
         assert plain.left.value == 0 and plain.left.axis == "y"   # the world frame
     with pytest.raises(LangError, match="front= must face sideways; top is up or down"):
-        cabinet("up", box, front=box.top)
+        module("up", box, front=box.top)
 
 
-def test_a_module_that_opens_toward_a_side_is_a_cabinet():
-    """Florian 2026-10-12: cabinet(name, box, front=) for anything that
-    opens toward a side, module(name, box) for van-level parts in the
-    enclosing frame; module(front=) points to cabinet()."""
+def test_a_module_that_opens_toward_a_side_is_written_in_its_own_frame():
+    """Florian 2026-10-12: a module that opens toward a side is written in
+    its own frame, a van-level one in the enclosing frame; one constructor
+    for both since 2026-10-16, module(name, box, front=), which took over
+    from cabinet() and derives the frame as it did."""
     van = Box.from_size(width=2000, depth=1000, height=1000)
-    with cabinet("cab", van, front=van.right) as cab:
+    with module("cab", van, front=van.right) as cab:
         assert cab.is_module and cab.frame.direction("front").code == "+y"
         assert cab.frame.direction("left").code == "+x"          # a cabinetmaker's, facing it: front x up
     with module("floor", van) as floor:
         assert floor.frame.direction("left").code == "-y"        # the van's: the driver's side
-    with pytest.raises(LangError, match=r"write cabinet\('kitchen', box, front=\.\.\.\)"):
-        module("kitchen", van, front=van.right)  # type: ignore[arg-type]
-    with pytest.raises(TypeError, match="front"):
-        cabinet("cab2", van)  # type: ignore[call-arg]
+    up = world_frame().direction("top")
+    for facing in ("front", "back", "left", "right"):
+        for mirrored in (False, True):
+            m = module(f"m_{facing}_{mirrored}", van, front=van.side(facing), mirrored=mirrored)
+            assert repr(m.frame) == repr(Frame.derived(van.side(facing).outward, up, mirrored))
+            d = module(f"d_{facing}_{mirrored}", van, front=world_frame().direction(facing), mirrored=mirrored)
+            assert repr(d.frame) == repr(m.frame)                    # a side or a direction alike
+    with pytest.raises(LangError, match=r"module\('down'\): front= must face sideways; bottom is up or down"):
+        module("down", van, front=van.bottom)
 
 
 def test_interference_ignores_overlap_inside_a_pocket():
@@ -1236,7 +1242,7 @@ def test_a_limit_that_limits_neither_in_plane_axis_is_an_error():
 
 def test_directions_are_equal_when_they_point_the_same_way():
     van = Box.from_size(width=2000, depth=1000, height=1000)
-    with cabinet("cab", van, front=van.right) as cab:
+    with module("cab", van, front=van.right) as cab:
         assert cab.frame.direction("front") == world_frame().direction("right")
         assert cab.frame.direction("front").name == "front"
         assert cab.frame.cross(cab.frame.direction("back"), cab.frame.direction("top")).name == "right"
@@ -1247,7 +1253,7 @@ def test_show_takes_a_side_of_an_enclosing_box_in_its_own_terms():
     (`show(van.right)`) shows its front face; machined from the other one,
     which carries the holes, and cut out from it by default."""
     van = Box.from_size(width=2000, depth=1000, height=1000)
-    with cabinet("cab", van, front=van.right) as cab:
+    with module("cab", van, front=van.right) as cab:
         back = board("back", ply15).on(cab.back).show(van.right)
         rear = back.back
         back.hole(d=5, at=rear.top(20), depth=5).hole(d=5, at=rear.top(60), depth=5)

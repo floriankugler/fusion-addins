@@ -4,8 +4,8 @@ Design checks that run on the layout, before any geometry exists in Fusion.
 Part of the modeling language's design; the overview is `DESIGN.md`. Code:
 `lang/core/checks.py`.
 
-- Every module, `module()` and `cabinet()` alike, runs `no_interference`
-  without asking; `uncheck(no_interference)` inside it or
+- Every module, with `front=` or without, in place or a module type, runs
+  `no_interference` without asking; `uncheck(no_interference)` inside it or
   `module.uncheck(no_interference)` after turns it off, for parts that
   overlap on purpose [decided by Florian, 2026-10-15, syntax.md item 4].
   The other checks are asked for with `check(...)` inside a module or

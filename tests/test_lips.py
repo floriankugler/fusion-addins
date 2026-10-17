@@ -126,7 +126,7 @@ def test_strips_go_into_the_boards_scope_wherever_lip_is_called():
 
 def test_strips_are_named_in_a_cabinets_own_terms():
     box = Box.from_size(width=600, depth=400, height=700)
-    with cabinet("cab", box, front=box.right) as cab:
+    with module("cab", box, front=box.right) as cab:
         door = board("door", ply15).on(cab.front)
         door.lip([door.left, door.top], 8, oak)
     assert {"door_lip_left", "door_lip_top"} <= set(cab.parts)

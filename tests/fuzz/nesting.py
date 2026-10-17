@@ -1,4 +1,4 @@
-"""Random cases for fuzzing the nest (`lang.nest`), each with what it must
+"""Random cases for fuzzing the nest (`lang.nesting`), each with what it must
 promise, checked from the outside. A case is plain data (frozen
 dataclasses), so a failing example prints as something to build again.
 
@@ -15,26 +15,31 @@ dataclasses), so a failing example prints as something to build again.
   the outline and lies at most `items.OUTSIDE` outside it; an opening stays open
   exactly when the smallest part could go in; the turns follow the grain.
 - `trees`: random saw plans (sheets cut into strips into pieces, the kerf
-  between, pieces holding a blank in their corner or rests). `simplify`
+  between, pieces holding a blank in their corner or rests, some blanks a
+  board's own, which must end alone in a piece of exactly their size). `simplify`
   and `trim_to_bed` must leave pieces and cuts that cover the sheet, every
   blank in one piece that contains it, no more cuts than before, no piece
   holding blanks larger than the bed unless it was before (or, trimmed,
   unless its blank is), and rests marked kept as the workshop keeps them.
-- `saws`: blanks and stock (sheets with counts or as many as needed,
-  offcuts) for `sawing.best_plan`: every blank sawn once or listed unsawn,
-  unsawn only when no stock to be had in any number takes it, each in a
-  piece the bed takes, the pieces and cuts covering each sheet, no stock
-  used more often than there is.
-- `nests`: a few parts of one or two materials and a random workshop
-  (bed, sheet sizes with and without counts, offcuts smaller and larger
-  than the bed, spacing, margin, kerf, cuts, the keep threshold), nested
-  with short times. Refused only when a part truly fits no blank (its
-  outline with the margins against the bed and the stock, either way round
-  unless its grain says, give or take the solver polygon's growth), or a
-  material has no stock; else `verify` finds nothing, parts are left over
-  only where every sheet for their material has a count, every transform
-  puts its part where the nest says, and the emitter's plan, the drawing
-  and the file's JSON follow.
+- `saws`: blanks, some a board's own and larger than the bed, and stock
+  (as many as needed, or a count) for `sawing.best_plan`: every blank sawn
+  once or listed unsawn, unsawn only when no stock to be had in any number
+  takes it, each in a piece the bed takes (an own blank alone in a piece of
+  its size), the pieces and cuts covering each sheet, no stock used more
+  often than there is.
+- `nests`: a few parts of one or two materials, some asking for a larger
+  spacing, the `nest(False)` ones now and then named so they are their own
+  blanks, and a random workshop (bed, a sheet size to buy per material or
+  none, pieces on hand smaller and larger than the bed with counts,
+  spacing, margin, kerf, cuts, the keep threshold), nested with short
+  times. Refused only when a part truly fits no blank (its outline with
+  the margins against the bed and the stock, either way round unless its
+  grain says, give or take the solver polygon's growth; an own blank its
+  outline against the stock), or a material has no stock; else `verify`
+  finds nothing, parts are left over only where nothing is to be bought,
+  the sheets bought are the material's size and counted as bought, an own
+  blank is its board's size, every transform puts its part where the nest
+  says, and the emitter's plan, the drawing and the file's JSON follow.
 """
 from __future__ import annotations
 
@@ -60,14 +65,15 @@ from lang.core.layout import build_layout
 from lang.core.layout_types import Layout, PartLayout
 from lang.emit.nested import apply as apply_matrix
 from lang.emit.nested import plan_nest
-from lang.nest import Options, Sheet, Workshop, nest_layout
-from lang.nest import sawing
-from lang.nest.draw import draw_nest
-from lang.nest.items import MITRE, OUTSIDE, TOLERANCE, Item, parts_of_layout, turned
-from lang.nest.nest_types import BlankOut, RestOut, SheetOut
-from lang.nest.sawing import Node, cut_list, cuts, leaves, simplify, trim_to_bed
-from lang.nest.verify import _check_sheet  # pyright: ignore[reportPrivateUsage]
-from lang.nest.workshop import Offcut, fits
+from lang.nesting.nest import Options, nest_parts
+from lang.nesting.workshop import OnHand, Sheet, Workshop
+from lang.nesting import sawing
+from lang.nesting.draw import draw_nest
+from lang.nesting.items import MITRE, OUTSIDE, TOLERANCE, Item, parts_of_layout, turned
+from lang.nesting.nest_types import BlankOut, RestOut, SheetOut
+from lang.nesting.sawing import Node, cut_list, cuts, leaves, simplify, trim_to_bed
+from lang.nesting.verify import _check_sheet  # pyright: ignore[reportPrivateUsage]
+from lang.nesting.workshop import fits
 from placement import ALIASES, WORLD_FRAMES
 
 Side = Literal["bottom", "top", "left", "right", "front", "back"]
@@ -258,13 +264,14 @@ def _one_item(part: PartLayout, item: Item, layout: Layout, spacing: float, smal
     return problems
 
 
-def _seen(part: PartLayout, matrix: list[list[float]], sign: int, frame: dict[str, str]) -> Polygon | None:
+def _seen(part: PartLayout, matrix: list[list[float]], sign: int, frame: dict[str, str],
+          openings: bool = True) -> Polygon | None:
     """The part's machine outline (`_machine_outline`) at its machining
     face, mapped by `matrix`; None unless it lies at the thickness."""
     t, u, v = part["axes"]["t"], part["axes"]["u"], part["axes"]["v"]
     i = "xyz".index(t)
     face_t = part["box"]["max"][i] if sign > 0 else part["box"]["min"][i]
-    outline = _machine_outline(part, frame)
+    outline = _machine_outline(part, frame, openings)
     if not isinstance(outline, Polygon):
         return None
     points: list[tuple[float, float]] = []
@@ -291,6 +298,11 @@ class TreeCase:
     kerf: float
     keep: tuple[float, float]
     first_axis: int
+    #: Which blanks are a board's own: blank k where bit k is set.
+    own: int = 0
+
+    def own_blanks(self, n: int) -> set[int]:
+        return {k for k in range(n) if self.own >> k & 1}
 
 
 @st.composite
@@ -309,7 +321,8 @@ def tree_cases(draw: st.DrawFn) -> TreeCase:
     sheet = (draw(sizes(800, 3000)), draw(sizes(500, 1600)))
     bed = (draw(sizes(500, 2600)), draw(sizes(400, 1400)))
     return TreeCase(sheet, draw(_plan(0)), bed, draw(st.sampled_from([0.0, 3.0, 4.0, 4.5])),
-                    (draw(sizes(0, 400)), draw(floats(0, 0.4))), draw(st.integers(0, 1)))
+                    (draw(sizes(0, 400)), draw(floats(0, 0.4))), draw(st.integers(0, 1)),
+                    draw(st.one_of(st.just(0), st.integers(0, 255))))
 
 
 def build_tree(case: TreeCase) -> tuple[Node, list[tuple[float, float]], dict[int, tuple[float, float]]]:
@@ -360,23 +373,46 @@ def run_tree(case: TreeCase) -> list[str]:
     if problems:
         return ["the harness made a bad plan: " + p for p in problems]
     before = cuts(tree)
+    own = case.own_blanks(len(sizes_))
     oversize = {bi for leaf in leaves(tree) if leaf.used and not fits_bed(leaf.rect[2], leaf.rect[3])
                 for bi in leaf.blanks}
-    simple = simplify(tree, fits_bed, keeps)
+    simple = simplify(tree, fits_bed, keeps, own=own)
     problems += _tree_problems(simple, case, sizes_, origins, "simplified")
     if cuts(simple) > before:
         problems.append(f"simplified: {cuts(simple)} cuts, more than the {before} before")
     for leaf in leaves(simple):
         if leaf.used and not fits_bed(leaf.rect[2], leaf.rect[3]) and not set(leaf.blanks) & oversize:
             problems.append(f"simplified: a piece {leaf.rect} holding blanks grew larger than the bed")
-    trimmed = trim_to_bed(simple, sizes_, origins, case.kerf, fits_bed)
+        if set(leaf.blanks) & own and len(leaf.blanks) > 1:
+            problems.append(f"simplified: an own blank was joined with another, {leaf.blanks}")
+    trimmed = trim_to_bed(simple, sizes_, origins, case.kerf, fits_bed, own=own)
     problems += _tree_problems(trimmed, case, sizes_, origins, "trimmed")
+    problems += _own_problems(trimmed, own, sizes_, origins, "trimmed")
     for leaf in leaves(trimmed):
+        if set(leaf.blanks) & own:
+            continue
         if leaf.used and not fits_bed(leaf.rect[2], leaf.rect[3]) and len(leaf.blanks) == 1:
             (bx, by), (bw, bh) = origins[leaf.blanks[0]], sizes_[leaf.blanks[0]]
             if fits_bed(bw, bh):
                 problems.append(f"trimmed: a piece {leaf.rect} is larger than the bed, its blank "
                                 f"{(bx, by, bw, bh)} is not")
+    return problems
+
+
+def _own_problems(tree: Node, own: set[int], sizes_: list[tuple[float, float]],
+                  origins: dict[int, tuple[float, float]], what: str) -> list[str]:
+    """Each own blank alone in a piece of exactly its size and place."""
+    problems: list[str] = []
+    for leaf in leaves(tree):
+        held = set(leaf.blanks) & own
+        if not held:
+            continue
+        if len(leaf.blanks) > 1:
+            problems.append(f"{what}: an own blank shares its piece, {leaf.blanks}")
+            continue
+        (bx, by), (bw, bh) = origins[leaf.blanks[0]], sizes_[leaf.blanks[0]]
+        if any(abs(a - b) > 1e-6 for a, b in zip(leaf.rect, (bx, by, bw, bh))):
+            problems.append(f"{what}: own blank {leaf.blanks[0]} {(bx, by, bw, bh)} sawn as {leaf.rect}")
     return problems
 
 
@@ -389,7 +425,7 @@ def _tree_problems(tree: Node, case: TreeCase, sizes_: list[tuple[float, float]]
     rests: list[RestOut] = []
     for leaf in leaves(tree):
         if leaf.used:
-            blanks.append({"name": str(len(blanks)), "rect": list(leaf.rect), "parts": []})
+            blanks.append({"name": str(len(blanks)), "rect": list(leaf.rect), "parts": [], "own_blank": False})
             for bi in leaf.blanks:
                 holders[bi] = holders.get(bi, 0) + 1
                 (bx, by), (bw, bh) = origins[bi], sizes_[bi]
@@ -400,7 +436,7 @@ def _tree_problems(tree: Node, case: TreeCase, sizes_: list[tuple[float, float]]
             rests.append({"rect": list(leaf.rect), "keep": keeps(leaf.rect[2], leaf.rect[3])})
     if sorted(holders) != list(range(len(sizes_))) or any(n != 1 for n in holders.values()):
         problems.append(f"{what}: the blanks are held {holders}, not each once")
-    sheet: SheetOut = {"name": "1", "stock": "sheet", "size": list(case.sheet),
+    sheet: SheetOut = {"name": "1", "stock": "sheet", "bought": True, "size": list(case.sheet),
                        "cuts": [{"line": list(c.line), "piece": list(c.piece)} for c in cut_list(tree, case.kerf)],
                        "blanks": blanks, "rests": rests}
     workshop = Workshop(bed=case.bed, kerf=case.kerf, max_cuts=10_000, keep_across=case.keep[0],
@@ -412,12 +448,14 @@ def _tree_problems(tree: Node, case: TreeCase, sizes_: list[tuple[float, float]]
 @dataclass(frozen=True)
 class SawCase:
     blanks: tuple[tuple[float, float], ...]
-    #: Length, width, copies (-1: as many as needed), kind.
+    #: Length, width, copies (-1: as many as needed), "bought" or "on_hand".
     stock: tuple[tuple[float, float, int, str], ...]
     bed: tuple[float, float]
     kerf: float
     max_cuts: int
     keep: tuple[float, float]
+    #: The blanks that are boards' own, sawn to size, maybe larger than the bed.
+    own: tuple[int, ...] = ()
 
 
 @st.composite
@@ -427,19 +465,25 @@ def saw_cases(draw: st.DrawFn) -> SawCase:
     blank = st.tuples(sizes(30, bed[0]), sizes(30, bed[1])).map(
         lambda b: (math.ceil(b[0]), math.ceil(b[1])) if math.ceil(b[0]) <= bed[0] and math.ceil(b[1]) <= bed[1]
         else b)
-    blanks = tuple(draw(st.lists(blank.map(lambda b: (float(b[0]), float(b[1]))), min_size=1, max_size=8)))
+    blanks = list(draw(st.lists(blank.map(lambda b: (float(b[0]), float(b[1]))), min_size=1, max_size=8)))
     stock = tuple(draw(st.lists(st.tuples(sizes(300, 3000), sizes(200, 1600),
                                           st.one_of(st.just(-1), st.integers(1, 3)),
-                                          st.sampled_from(["sheet", "offcut"])), min_size=1, max_size=3)))
-    return SawCase(blanks, stock, bed, draw(st.sampled_from([0.0, 3.0, 4.0])), draw(st.integers(1, 8)),
-                   (draw(sizes(0, 400)), draw(floats(0, 0.4))))
+                                          st.sampled_from(["bought", "on_hand"])), min_size=1, max_size=3)))
+    own: list[int] = []
+    for _ in range(draw(st.integers(0, 2))):
+        # A board's own blank: any size the stock might take, the bed's or larger.
+        own.append(len(blanks))
+        blanks.append((draw(sizes(30, 3000)), draw(sizes(30, 1600))))
+    return SawCase(tuple(blanks), stock, bed, draw(st.sampled_from([0.0, 3.0, 4.0])), draw(st.integers(1, 8)),
+                   (draw(sizes(0, 400)), draw(floats(0, 0.4))), tuple(own))
 
 
 def run_saw(case: SawCase) -> list[str]:
-    stock = [sawing.Stock(l, w, n, 1.0 if kind == "offcut" else l * w, kind, k)
+    stock = [sawing.Stock(l, w, n, 1.0 if kind == "on_hand" else l * w, kind, k)
              for k, (l, w, n, kind) in enumerate(case.stock)]
     fits_bed, keeps = _fits_of(case.bed), _keeps_of(case.keep)
-    plan = sawing.best_plan(list(case.blanks), stock, case.kerf, case.max_cuts, fits_bed, keeps, 0.05)
+    own = set(case.own)
+    plan = sawing.best_plan(list(case.blanks), stock, case.kerf, case.max_cuts, fits_bed, keeps, 0.05, own=own)
     problems: list[str] = []
     sawn: dict[int, int] = {}
     used: dict[int, int] = {}
@@ -450,10 +494,11 @@ def run_saw(case: SawCase) -> list[str]:
         # A piece holds its blank as given (the solver sawed it rounded up to
         # a tenth, and a trim cuts at the blank's own end).
         problems += _sawn_problems(s.tree, tree_case, list(case.blanks), plan.origins, f"sheet {n + 1}")
+        problems += _own_problems(s.tree, own, list(case.blanks), plan.origins, f"sheet {n + 1}")
         for leaf in leaves(s.tree):
             for bi in leaf.blanks:
                 sawn[bi] = sawn.get(bi, 0) + 1
-            if leaf.used and not fits_bed(leaf.rect[2], leaf.rect[3]):
+            if leaf.used and not fits_bed(leaf.rect[2], leaf.rect[3]) and not set(leaf.blanks) & own:
                 problems.append(f"sheet {n + 1}: a piece {leaf.rect} holding blanks is larger than the bed")
         if cuts(s.tree) != plan.cuts[n]:
             problems.append(f"sheet {n + 1}: {cuts(s.tree)} cuts, the plan says {plan.cuts[n]}")
@@ -493,10 +538,10 @@ def _relabel(node: Node, sub: dict[int, int]) -> Node:
 @dataclass(frozen=True)
 class StockCase:
     bed: tuple[float, float]
-    #: Length, width, count (None: as many as needed), material index (None: every one).
-    sheets: tuple[tuple[float, float, int | None, int | None], ...]
-    #: Material index, length, width.
-    offcuts: tuple[tuple[int, float, float], ...] = ()
+    #: Per material (`MATERIALS`), the size of the sheets to buy, or None: nothing to buy.
+    buy: tuple[tuple[float, float] | None, ...]
+    #: Material index, length, width, count: the pieces on hand.
+    on_hand: tuple[tuple[int, float, float, int], ...] = ()
     spacing: float = 10.0
     margin: float = 10.0
     kerf: float = 4.0
@@ -506,9 +551,9 @@ class StockCase:
     def workshop(self) -> Workshop:
         return Workshop(bed=self.bed, spacing=self.spacing, margin=self.margin, kerf=self.kerf,
                         max_cuts=self.max_cuts, keep_across=self.keep[0], keep_area=self.keep[1],
-                        sheets=tuple(Sheet(l, w, n, None if m is None else MATERIALS[m].label)
-                                     for l, w, n, m in self.sheets),
-                        offcuts=tuple(Offcut(MATERIALS[m].label, l, w) for m, l, w in self.offcuts))
+                        sheets=tuple(Sheet(MATERIALS[m].label, size[0], size[1])
+                                     for m, size in enumerate(self.buy) if size is not None),
+                        on_hand=tuple(OnHand(MATERIALS[m].label, l, w, n) for m, l, w, n in self.on_hand))
 
 
 @dataclass(frozen=True)
@@ -516,6 +561,10 @@ class NestCase:
     parts: tuple[PartCase, ...]
     stock: StockCase
     seconds: float = 0.3
+    #: Whether the nest names its parts, so its `nest(False)` ones are their own blanks.
+    named: bool = False
+    #: Per part, how much more spacing than the nest's least it asks for (0: none).
+    extra: tuple[float, ...] = ()
 
 
 @st.composite
@@ -523,11 +572,11 @@ def stock_cases(draw: st.DrawFn) -> StockCase:
     bed = (draw(sizes(700, 2500)), draw(sizes(500, 1300)))
     if draw(st.booleans()):
         bed = (bed[1], bed[0])
-    sheet = st.tuples(sizes(500, 3000), sizes(400, 1600), st.one_of(st.none(), st.none(), st.integers(1, 3)),
-                      st.one_of(st.none(), st.none(), st.integers(0, len(MATERIALS) - 1)))
-    offcut = st.tuples(st.integers(0, len(MATERIALS) - 1), sizes(150, 2600), sizes(150, 1300))
-    return StockCase(bed, tuple(draw(st.lists(sheet, min_size=1, max_size=3))),
-                     tuple(draw(st.lists(offcut, max_size=3))),
+    sheet = st.tuples(sizes(500, 3000), sizes(400, 1600))
+    every = draw(sheet)
+    buy = tuple(draw(st.one_of(st.just(every), st.just(every), sheet, st.none())) for _ in MATERIALS)
+    on_hand = st.tuples(st.integers(0, len(MATERIALS) - 1), sizes(150, 2600), sizes(150, 1300), st.integers(1, 2))
+    return StockCase(bed, buy, tuple(draw(st.lists(on_hand, max_size=3))),
                      draw(st.one_of(st.just(10.0), sizes(0, 25))), draw(st.one_of(st.just(10.0), sizes(0, 25))),
                      draw(st.sampled_from([0.0, 3.2, 4.0, 6.0])), draw(st.integers(1, 8)),
                      (draw(st.one_of(st.just(300.0), sizes(0, 600))), draw(st.one_of(st.just(0.25), floats(0, 0.6)))))
@@ -538,42 +587,51 @@ def nest_cases(draw: st.DrawFn) -> NestCase:
     stock = draw(stock_cases())
     short = draw(st.integers(0, 3)) == 0
     if short:
-        # One sheet a little larger than the bed: the stock runs short.
+        # Nothing to buy, a piece on hand a little larger than the bed: the stock runs short.
         length, width = max(stock.bed) * draw(floats(1.0, 1.4)), min(stock.bed) * draw(floats(1.0, 1.4))
-        stock = replace(stock, sheets=((length, width, draw(st.integers(1, 2)), None),))
+        n = draw(st.integers(1, 2))
+        stock = replace(stock, buy=(None,) * len(MATERIALS),
+                        on_hand=tuple((m, length, width, n) for m in range(len(MATERIALS))))
     longest, widest = max(stock.bed) * 0.95, min(stock.bed) * 0.95
     frame = draw(st.one_of(st.just(0), st.integers(0, len(WORLD_FRAMES) - 1)))
     small, large = part_cases(longest * 0.4, widest * 0.4), part_cases(longest, widest)
     parts = draw(st.lists(st.one_of(small, small, large), min_size=6 if short else 1, max_size=12 if short else 8))
     one = draw(st.one_of(st.none(), st.integers(0, len(MATERIALS) - 1)))
+    extra = tuple(draw(st.sampled_from([0.0, 0.0, 0.0, 5.0, 20.0])) for _ in parts)
     return NestCase(tuple(PartCase(p.material if one is None else one, p.side, p.size, p.origin, frame, p.features,
                                    p.opening, p.grain, p.machined, p.nested, p.machine) for p in parts),
-                    stock, draw(st.sampled_from([0.2, 0.4])))
+                    stock, draw(st.sampled_from([0.2, 0.4])), draw(st.booleans()), extra)
 
 
 def run_nest(case: NestCase) -> list[str]:
     with fresh():
         try:
             _in_frame(case.parts[0].frame)
-            for k, part in enumerate(case.parts):
-                build_part(part, f"p{k}")
+            boards = [build_part(part, f"p{k}") for k, part in enumerate(case.parts)]
             layout = build_layout()
         except LangError:
             return []
         workshop = case.stock.workshop()
         options = Options(seconds=case.seconds, saw_seconds=0.05, refill_seconds=0.1)
-        must, may = _misfits(layout, workshop)
+        extra = dict(zip((b.path for b in boards), case.extra))
+        spacing_of = {path: workshop.spacing + e for path, e in extra.items() if e > 0}
+        paths = [b.path for b in boards] if case.named else None
+        must, may = _misfits(layout, workshop, extra, case.named)
         try:
-            nest, parts = nest_layout(layout, workshop, options=options)
+            nest, parts = nest_parts(layout, paths, workshop, spacing_of=spacing_of, options=options)
         except LangError as error:
             text = str(error)
             if "machine outline is in" in text:
                 return _refused_in_pieces(layout, text)
-            if "cannot be nested" in text or "No stock on hand" in text:
+            if text.startswith("No stock for "):
+                label = text[len("No stock for "):].split(":")[0]
+                if workshop.sheet_for(label) is not None or workshop.on_hand_for(label):
+                    return [f"refused for no stock, though {label} has some"]
+                return []
+            if "cannot be nested" in text:
                 refused = {line.split(" (")[0].strip() for line in text.splitlines()[1:]}
                 problems = [f"refused, though it fits a blank ({path})" for path in refused - may]
-                if "No stock on hand" not in text:
-                    problems += [f"not refused, though it fits no blank ({path})" for path in must - refused]
+                problems += [f"not refused, though it fits no blank ({path})" for path in must - refused]
                 return problems
             return [f"refused: {text}"]
         if must:
@@ -588,14 +646,27 @@ def run_nest(case: NestCase) -> list[str]:
         items = {i.path: i for items_ in parts.by_material.values() for i in items_}
         by_path = {p["path"]: p for m in layout["modules"] for p in m["parts"]}
         for m in nest["materials"]:
-            if m["unplaced"] and any(s.count is None for s in workshop.sheets_for(m["material"])):
+            sheet = workshop.sheet_for(m["material"])
+            if m["unplaced"] and sheet is not None:
                 problems.append(f"{m['material']}: {len(m['unplaced'])} parts left over, though sheets are to be had")
+            if any(size != sheet.label() for size in m["bought"]) if sheet else m["bought"]:
+                problems.append(f"{m['material']}: bought {m['bought']}, not its size")
+            if sum(m["bought"].values()) != sum(1 for s in m["sheets"] if s["bought"]):
+                problems.append(f"{m['material']}: bought {m['bought']} counts other than the sheets bought")
             for s in m["sheets"]:
                 for b in s["blanks"]:
+                    if b["own_blank"]:
+                        (p,) = b["parts"]
+                        x0, y0, x1, y1 = items[p["path"]].placed(p["turn"], (0.0, 0.0)).bounds
+                        if abs(b["rect"][2] - (x1 - x0)) > 1e-6 or abs(b["rect"][3] - (y1 - y0)) > 1e-6:
+                            problems.append(f"an own blank {b['rect'][2:]} is not its board's size "
+                                            f"{[x1 - x0, y1 - y0]} ({p['path']})")
                     for p in b["parts"]:
                         part, item = by_path[p["path"]], items[p["path"]]
+                        if item.own != (not part["nest"]) or item.own != b["own_blank"]:
+                            problems.append(f"a part is its own blank exactly when it is nest(False) ({p['path']})")
                         sign = 1 if layout["frame"][part["machine"]][0] == "+" else -1
-                        seen = _seen(part, p["transform"], sign, layout["frame"])
+                        seen = _seen(part, p["transform"], sign, layout["frame"], openings=not item.own)
                         want = Polygon(item.placed(p["turn"], (p["at"][0], p["at"][1])).exterior)
                         if seen is None or seen.symmetric_difference(want).area > 1e-4 * max(1.0, want.length):
                             problems.append(f"a transform does not put its part where the nest says ({p['path']})")
@@ -609,11 +680,11 @@ def run_nest(case: NestCase) -> list[str]:
         return problems
 
 
-def _machine_outline(part: PartLayout, frame: dict[str, str]) -> BaseGeometry:
+def _machine_outline(part: PartLayout, frame: dict[str, str], openings: bool = True) -> BaseGeometry:
     """The outline less the through pockets and holes, worked out here."""
     shape: BaseGeometry = Polygon(part["outline"][0], part["outline"][1:])
     t = part["axes"]["t"]
-    for op in part["ops"]:
+    for op in part["ops"] if openings else []:
         if op["kind"] == "pocket" and frame[op["face"]][1] == t and op["depth"] >= part["thickness"] - 1e-6:
             shape = shape.difference(unary_union([Polygon(r) for r in op["shape"]]))
         elif op["kind"] == "hole" and op["through"] and frame[op["face"]][1] == t:
@@ -625,10 +696,11 @@ def _over_cuts(problem: str, workshop: Workshop) -> bool:
     return f"cuts, more than {workshop.max_cuts}" in problem
 
 
-def _misfits(layout: Layout, workshop: Workshop) -> tuple[set[str], set[str]]:
+def _misfits(layout: Layout, workshop: Workshop, extra: dict[str, float], named: bool) -> tuple[set[str], set[str]]:
     """The parts that fit no blank for sure, and those that may not (the
     solver's polygon is up to 2 x 1.5 x TOLERANCE x MITRE larger than the
-    outline)."""
+    outline, and a part's extra spacing on both sides); an own blank (a
+    `nest(False)` part a nest names) against the stock alone."""
     assert workshop.bed is not None
     bed = workshop.bed
     frame = layout["frame"]
@@ -636,24 +708,28 @@ def _misfits(layout: Layout, workshop: Workshop) -> tuple[set[str], set[str]]:
     may: set[str] = set()
     for module_ in layout["modules"]:
         for part in module_["parts"]:
-            if not part["nest"]:
+            own = not part["nest"]
+            if own and not (named and part["kind"] == "board" and not part["manual"]):
                 continue
             material_ = part["material"]
-            stock = [(s.length, s.width) for s in workshop.sheets_for(material_)] + \
-                    [(o.length, o.width) for o in workshop.offcuts_for(material_)]
-            u0, v0, u1, v1 = _machine_outline(part, frame).bounds
+            sheet = workshop.sheet_for(material_)
+            stock = ([(sheet.length, sheet.width)] if sheet else []) + \
+                [(o.length, o.width) for o in workshop.on_hand_for(material_)]
+            u0, v0, u1, v1 = _machine_outline(part, frame, openings=not own).bounds
             w, h = u1 - u0, v1 - v0
             grain = part["grain"] if part["grained"] else None
             ways = [(w, h)] if grain == part["axes"]["u"] else [(h, w)] if grain == part["axes"]["v"] else \
                 [(w, h), (h, w)]
 
-            def fit(extra: float) -> bool:
-                m2 = 2 * workshop.margin + extra
-                return any(fits(a + m2, b + m2, bed) and any(a + m2 <= sl + 1e-6 and b + m2 <= sw + 1e-6 for sl, sw in stock)
-                           for a, b in ways)
+            def fit(more: float) -> bool:
+                if own:
+                    return any(a <= sl + 1e-6 and b <= sw + 1e-6 for a, b in ways for sl, sw in stock)
+                m2 = 2 * workshop.margin + more
+                return any(fits(a + m2, b + m2, bed) and any(a + m2 <= sl + 1e-6 and b + m2 <= sw + 1e-6
+                                                             for sl, sw in stock) for a, b in ways)
             if not fit(0.0):
                 must.add(part["path"])
-            if not fit(2 * 1.5 * TOLERANCE * MITRE + 1e-6):
+            if not fit(2 * 1.5 * TOLERANCE * MITRE + 2 * extra.get(part["path"], 0.0) + 1e-6):
                 may.add(part["path"])
     return must, may
 

@@ -178,10 +178,59 @@ def hardware_factories() -> None:
 
 def modules() -> None:
     van = Box.from_size(width=2000, depth=1000, height=1000)
-    cabinet("kitchen", van, front=van.right)
-    module("floor", van)
-    module("kitchen", van, front=van.right)                                  # type: ignore  # a cabinet
-    cabinet("kitchen", van)                                                  # type: ignore  # no front
+    module("kitchen", van, front=van.right)                                  # its own frame: fine
+    module("floor", van)                                                     # the enclosing frame: fine
+    module("kitchen", van, front="right")                                    # type: ignore  # a side or direction
+    module("kitchen")                                                        # type: ignore  # no box
+
+    @module
+    def kitchen(cab: Scope, *, drawers: int = 3) -> None:
+        board("left").on(cab.left)
+
+    k: Scope = kitchen(van, front=van.right, drawers=4)                      # a constructor: fine
+    kitchen(van, name="k2", mirrored=True).use(chamfer_size(0.5))            # fine
+    kitchen(van, drawrs=4)                                                   # type: ignore  # a misspelt keyword
+    kitchen(van, drawers="4")                                                # type: ignore  # the body's own type
+    kitchen(van, front=3)                                                    # type: ignore  # front= is a side
+    kitchen(front=van.right)                                                 # type: ignore  # no box
+    del k
+
+
+def settings() -> None:
+    """Keys are typed by their default or their annotation."""
+    gap = setting(3.0, "gap")
+    reveal: Setting[float] = setting(..., "reveal")
+    oak = slat_material("oak")
+    use(gap(1.0), reveal(2.0), material(ply15), nest(False), grain("height"), chamfer_size(1))   # fine
+    g: float = value(gap)                                                    # fine
+    use(gap("1"))                                                            # type: ignore  # the key's type
+    use(gap)                                                                 # type: ignore  # a key, not a binding
+    use(nest(1))                                                             # type: ignore  # True or False
+    use(grain("length"))                                                     # type: ignore  # not an extent
+    use(material(oak))                                                       # type: ignore  # a slat material
+    s: str = value(gap)                                                      # type: ignore  # value has its type
+    with module("m", Box.from_size(width=600, depth=400, height=700)) as m:
+        side = board("side").on(m.left).use(gap(2.0))                       # no material: fine
+        side.chamfer(side.outer.front)                                       # no size: fine
+        side.chamfer(side.outer.front, "1")                                  # type: ignore  # a size
+        _ = side.toekick.use(gap(1.0)).value(reveal) + 1                     # an operation: fine
+        _ = m.use(gap(1.0)).value(gap) + 1                                   # a scope: fine
+    del g, s
+
+
+def nests() -> None:
+    """A nest is declared by material or by boards; the nesting keys are typed."""
+    with module("m", Box.from_size(width=600, depth=400, height=700)) as m:
+        left = board("left", ply15).on(m.left)
+        carcass: Nest = m.nest("carcass", material=ply15).use(nesting.margin(15), nesting.bed((2000, 1000)))
+        m.nest("fronts", [left]).use(nesting.spacing(20), nesting.refill(False))           # fine
+        m.nest("both", [left], material=ply15)                                   # type: ignore  # one or the other
+        m.nest("none")                                                           # type: ignore  # a material or boards
+        m.nest("one", left)                                                      # type: ignore  # a list of boards
+        m.nest("oak", material=slat_material("oak"))                             # type: ignore  # a sheet material
+        carcass.use(nesting.bed(2000))                                           # type: ignore  # a size, two numbers
+        carcass.use(nesting.max_cuts(2.5))                                       # type: ignore  # a whole number
+        _ = carcass.value(nesting.margin) + 1                                    # fine
 
 
 def std() -> None:
@@ -189,7 +238,7 @@ def std() -> None:
     oak = slat_material("oak")
     ply9 = sheet_material("birch", t=9)
     box = Box.from_size(width=600, depth=400, height=700)
-    with cabinet("c", box, front=box.right) as cab:
+    with module("c", box, front=box.right) as cab:
         left, right, bottom, top, back = carcass(cab, ply15, back=ply9, toekick=(60, 100))   # fine
         back.join(left, right, using=domino("4x20", count=2))                               # the back is a Board
         _ = carcass(cab, ply15).back                                                        # type: ignore  # no back without back=

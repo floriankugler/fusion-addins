@@ -78,12 +78,13 @@ from shapely.geometry.base import BaseGeometry
 
 from boards import _pipeline_problems  # pyright: ignore[reportPrivateUsage]
 from fuzzing import floats, fresh, sizes
-from lang import Box, Frame, LangError, Pos, Side, board, cabinet, check, inside_box, sheet_material, module, \
+from lang import Box, Frame, LangError, Pos, Side, board, check, inside_box, sheet_material, module, \
     no_interference, rect, scope, set_frame, spread, through, to
 from lang.core.directions import AXES, Axis, as_axis, world_frame
 from lang.core.faces import Face
 from lang.core.geometry import clean
 from lang.core.layout import build_layout
+from lang.nesting.fingerprint import fingerprint
 from lang.core.ops import Chamfer, Cut, EdgeOp, Hole, Op, Pocket
 from lang.core.part import Board, PartLimit
 from lang.core.refs import as_pos
@@ -774,7 +775,7 @@ def build(case: PlacementCase, how: How, name: str = "m") -> Built:
         m = module(name, box, mirrored=mirrored)
     else:
         facing = box.side(FRONTS[how.front])
-        m = cabinet(name, box, front=[facing, facing.outward][b.pick(2)], mirrored=mirrored)
+        m = module(name, box, front=[facing, facing.outward][b.pick(2)], mirrored=mirrored)
     b.module = m
     b.boxes[0] = m.box
     with m:
@@ -901,7 +902,7 @@ def _make_bay(b: Built, bay: BaySpec) -> None:
         up = m.frame.direction("top")
         own = Frame.derived(facing.outward, up)
         mirrored = own.direction("left") != m.frame.direction(bay.left)
-        s = cabinet("bay", space, front=facing, mirrored=mirrored)
+        s = module("bay", space, front=facing, mirrored=mirrored)
     b.bay = s
     b.boxes[1] = s.box
     f, k, lft, rgt, tp, bt = bay.shrink
@@ -1807,6 +1808,8 @@ class Attempt:
     paths: dict[str, str]           # op key -> the path of its board
     #: The preview's volume of each board (mm3), where the pipeline ran.
     volumes: dict[str, float] = field(default_factory=dict[str, float])
+    #: Each board's fingerprint (`lang.nesting.fingerprint`), and its mirror image's.
+    prints: dict[str, tuple[str, str]] = field(default_factory=dict[str, tuple[str, str]])
 
 
 def _attempt(case: PlacementCase, how: How, first: bool, pipeline: bool) -> Attempt:
@@ -1825,7 +1828,10 @@ def _attempt(case: PlacementCase, how: How, first: bool, pipeline: bool) -> Atte
             problems += [p for p in _pipeline_problems(meshes) if p not in layout]
         paths = {f"op {k}": x.path for k in b.made if (x := b.made_boards[_spec_of(case, k).board]) is not None}
         volumes = {path: float(mesh.volume) for path, mesh in meshes.items() if mesh is not None}
-        return Attempt(summary, problems, paths, volumes)
+        layout = build_layout()
+        prints = {p["path"]: (fingerprint(p, layout["frame"]), fingerprint(p, layout["frame"], mirror=True))
+                  for m in layout["modules"] for p in m["parts"] if p["kind"] == "board"}
+        return Attempt(summary, problems, paths, volumes, prints)
 
 
 def ways(case: PlacementCase) -> list[How]:
@@ -1857,6 +1863,13 @@ def run_case(case: PlacementCase) -> list[str]:
             found = _difference(a, c)
             if found is not None:
                 return [f"{way}, {key} comes out otherwise: {found}"]
+        # Moved, a part keeps its fingerprint; in another world frame it is the part or its mirror image
+        # (a frame of the other hand, a module mirrored the other way).
+        for path in sorted(set(first.prints) | set(other.prints)):
+            a, c = first.prints.get(path), other.prints.get(path)
+            if a is None or c is None or (c[0] != a[0] and (k == 1 or c[0] != a[1])):
+                return [f"{way}, {path} has another fingerprint: {c and c[0]}, not {a and a[0]}"
+                        + ("" if k == 1 else f" or its mirror image's {a and a[1]}")]
     for path, volume in first.volumes.items():
         # (the meshes' booleans round more far from the origin, in the same frame too: 0.4 mm3 of a 16 mm
         # hole's cut from a strip 0.33 mm wide 3.4 m out, 0.5 mm3 from one 1.8 mm wide 4 m out, 1.5 mm3 of

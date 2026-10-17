@@ -40,14 +40,16 @@ def layout_of(build_file: str | Path) -> Layout:
 
 
 def run(build_file: str | Path) -> None:
-    """Runs the build file in a fresh registry; its modules are then in
-    `registry`."""
+    """Runs the build file in a fresh registry, and then the bodies of the
+    lazy modules nothing needed yet (`registry.run_bodies`); its modules
+    are then in `registry`."""
     registry.reset()
     build_path = Path(build_file).resolve()
     before = set(sys.modules)
     sys.path.insert(0, str(build_path.parent))
     try:
         runpy.run_path(str(build_path), run_name="__build__")
+        registry.run_bodies()
     finally:
         sys.path.pop(0)
         _forget_modules_in(build_path.parent, before)

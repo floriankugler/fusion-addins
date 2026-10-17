@@ -35,7 +35,10 @@ import hardware  # noqa: E402
 import joints  # noqa: E402
 import lips  # noqa: E402
 import nesting  # noqa: E402
+import nests  # noqa: E402
+import pinning  # noqa: E402
 import placement  # noqa: E402
+import settings  # noqa: E402
 import slats  # noqa: E402
 import snapshots  # noqa: E402
 from lang.core.errors import LangError  # noqa: E402
@@ -110,6 +113,11 @@ CHECKS: dict[str, Check] = {
     "saw_trees": (nesting.tree_cases(), nesting.run_tree),
     "saws": (nesting.saw_cases(), nesting.run_saw),
     "nests": (nesting.nest_cases(), nesting.run_nest),
+    "nest_choices": (nests.nests_cases(), nests.nests_problems),
+    "ledgers": (nests.ledger_cases(), nests.ledger_problems),
+    "pinning": (pinning.pin_cases(), pinning.pinning_problems),
+    "settings": (settings.chain_cases(), settings.chain_problems),
+    "setting_orders": (settings.order_cases(), settings.order_problems),
 }
 
 

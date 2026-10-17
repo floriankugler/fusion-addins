@@ -61,3 +61,20 @@ def test_syntax_error(tmp_path: Path, capsys: pytest.CaptureFixture[str]):
     assert lines[0] == "SyntaxError: '(' was never closed"
     assert lines[1].endswith("bad.py:5: x = (")
     assert len(lines) == 2
+
+
+def test_an_error_in_a_lazy_body_names_the_bodys_line(tmp_path: Path, capsys: pytest.CaptureFixture[str]):
+    """A module type's body runs when its parts are first needed, at the
+    latest after the build file ran; its error names its own lines."""
+    (tmp_path / "lazy.py").write_text(
+        "from lang import *\n"
+        "@module\n"
+        "def shelf(cab: Scope) -> None:\n"
+        "    panel = board(\"panel\", sheet_material(\"birch\", t=15)).on(cab.bottom)\n"
+        "    panel.chamfer(panel.top.front)\n"
+        "shelf(Box.from_size(width=400, depth=300, height=100))\n")
+    assert main([str(tmp_path / "lazy.py"), "--out", str(tmp_path / "out"), "--no-scene"]) == 1
+    lines = capsys.readouterr().err.splitlines()
+    assert lines[0].startswith("error: the chamfer of shelf.panel reads chamfer_size, which has no default")
+    assert lines[1].endswith("lazy.py:5: panel.chamfer(panel.top.front)")
+    assert len(lines) == 2

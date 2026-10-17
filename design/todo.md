@@ -60,10 +60,29 @@ done.
 - **Latched drawer box detail**: a cut-out in the drawer box for the latch
   versus keeping the box clear by `latch.reach` (deferred by Florian,
   2026-10-12).
-- **`default_grain`** in `lang/core/scope.py` is set by nothing (placement.md
-  promises a scope-level grain default): drop it, or give `module()` and
-  `cabinet()` a `grain=`. The loose end of the syntax review's item 16
-  (`proposals/syntax.md`, 2026-10-15).
+- **Errors at the layout step name no line**: a board resolves lazily, so a
+  missing placement or material, or an inherited grain along its
+  thickness, is found when the layout resolves it and `lang.build` prints
+  no line of the build file. A board could remember where `board()` made
+  it and name that line.
+- **The inventory between runs of the nest**: the nests of one run of
+  `python -m lang.nesting` share the stock on hand in their order, but a
+  nest run alone (the preview's "nest again", or naming one nest) sees the
+  whole inventory again, so two nests not yet made may both plan on one
+  offcut (found 2026-10-16, stage 2). Marking a nest as made takes the
+  pieces it used out of the ledger (pinning, stage 3), so the conflict
+  lasts only until the first of them is made; the second, marked later,
+  notes that the piece is gone. A nest could be re-run when the ledger lost
+  a piece it plans on, or reserve its pieces.
+- **Unmarking a nest made**: a mark is undone by editing `made.json` and the
+  inventory by hand (`design/nesting.md`, Pinning); a command for it when
+  a wrong click calls for one.
+- **A nest's values changed since it was made or nested** (another margin,
+  another bed) do not count as a change: a nest compares its parts'
+  fingerprints only. The preview could say when the values a nest would
+  run with differ from those in its file.
+- **`nest(False)` boards no nest names** are still only listed as not
+  nested; the cut list (`design/nesting.md`, Still open) is where they go.
 - **Corners named by a point** (`panel.top.front(60).left(40)`) for
   `fillet()` and `chamfer()`, once a build needs it.
 - **Try the language on real modules**: write two modules from the van in

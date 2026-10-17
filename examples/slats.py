@@ -15,11 +15,13 @@ Slats stand in for the real ones, made by hand: they take no operations,
 joins or hardware for now."""
 from lang import *
 
-from stock import oak, pine, ply9, ply18
+from stock import oak, pine, ply9, ply18, workshop
+
+use(*workshop)   # the machine the nests are made for
 
 
 box = Box.from_size(width=620, depth=320, height=800)
-with cabinet("unit", box, front=box.front) as unit:
+with module("unit", box, front=box.front) as unit:
     top = board("top", ply18).on(unit.top)
     left = board("left", ply18).on(unit.left.into(10)).between(unit.bottom, top, unit.front.into(10), unit.back)
     right = board("right", ply18).on(unit.right.into(10)).between(unit.bottom, top, unit.front.into(10), unit.back)

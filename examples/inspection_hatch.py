@@ -10,7 +10,9 @@ under the floor as boxes, between the battens. Both rims are chamfered on
 top, and the hatch has a finger hole to lift it by."""
 from lang import *
 
-from stock import ply15
+from stock import ply15, workshop
+
+use(*workshop)   # the machine the nests are made for
 
 
 catch = ball_catch()    # GN 450: 4 catches 40 mm from the ends of the straight edges, pilot holes 2 x 4

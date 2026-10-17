@@ -9,11 +9,17 @@ Fusion:
   position, usable wherever one is expected (`on`, `between`, `spread`,
   arithmetic); a tilted one is an error when it is used as a position.
 - `van.box(name)`: a placeholder body as a `Box`, for a module to stand
-  in (`cabinet("kitchen", van.box("Kueche"), front=...)`). A body that is
+  in (`module("kitchen", van.box("Kueche"), front=...)`). A body that is
   not an axis-aligned cuboid gives its bounding box and a note in the
   layout's problems.
 - `van.param(name)`: a user parameter as a number (mm for lengths,
   degrees for angles).
+- `van.setting(name)`: a user parameter as a setting (`lang.core.settings`)
+  whose default is its value, as `param()` gives it: the build's standards
+  come from Change Parameters in Fusion, and a module that needs another
+  value uses one (`use(spalt(2.0))`); provenance names the default
+  "master: <name>". Bound by name in the build's index of the master, so
+  pyright knows it.
 - `van.contour(name)`: a sketch as a `Contour`, a limit for `between()`.
 
 A missing name, a name the master uses twice and a sketch that is not one
@@ -37,6 +43,7 @@ from .core.errors import LangError
 from .core.layout_types import SnapshotLayout
 from .core.refs import Pos, PositionArithmetic
 from .core.scope import registry
+from .core.settings import Setting
 from .core.snapshot_types import SNAPSHOT_VERSION, SnapshotDict
 
 _KIND_WORDS = {"planes": "plane", "contours": "contour", "boxes": "box", "parameters": "parameter"}
@@ -95,6 +102,8 @@ class Master:
         self._problems = {(p["kind"], p["name"]): p["message"] for p in data["problems"]}
         #: Remarks for the layout's problems, e.g. a box that is only a bounding box.
         self.notes: list[str] = []
+        #: The parameters given as settings so far, one key each (`setting`).
+        self._settings: dict[str, Setting[float]] = {}
 
     def __repr__(self) -> str:
         return f"Master({self.path.name}, {self.source!r})"
@@ -137,6 +146,15 @@ class Master:
         self._lookup("parameters", name)
         return float(self.data["parameters"][name]["value"])
 
+    def setting(self, name: str) -> Setting[float]:
+        """A user parameter as a setting, `spalt = van.setting("Spalt")`:
+        its default is the parameter's value in its unit (mm for lengths,
+        degrees for angles, a plain number else), and provenance names it
+        "master: <name>". The same name gives the same key."""
+        if name not in self._settings:
+            self._settings[name] = Setting(self.param(name), name, check=_number, source=f"master: {name}")
+        return self._settings[name]
+
     def contour(self, name: str) -> Contour:
         self._lookup("contours", name)
         data = self.data["contours"][name]
@@ -156,6 +174,12 @@ class Master:
             "contours": {name: {"points": c["points"], "closed": c["closed"]}
                          for name, c in self.data["contours"].items()},
         }
+
+
+def _number(value: object, what: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise LangError(f"{what} takes a number, not {value!r}.")
+    return float(value)
 
 
 def master(path: str | Path, relative_to: str | Path | None = None) -> Master:

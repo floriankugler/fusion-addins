@@ -2,7 +2,7 @@
 // the promises of preview.loaded() and preview.open().
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { LAYOUT_VERSION, layoutVersionProblem, setHidden, toggleHides, isolate, LoadTracker, nestStatusText } from '../state.js';
+import { LAYOUT_VERSION, layoutVersionProblem, setHidden, toggleHides, isolate, LoadTracker, nestStatusText, chosenNest, settingsText, sheetNames, sheetMade, fixable } from '../state.js';
 
 // Whether a promise settled, without waiting for it: 'pending', or
 // ['resolved', value] / ['rejected', message].
@@ -19,22 +19,68 @@ const ok = (builds, version) => ({ builds, state: 'ok', version, log: 'ok' });
 const failed = (builds, version, log = 'Traceback: boom') => ({ builds, state: 'failed', version, log });
 const building = (builds, version) => ({ builds, state: 'building', version, log: '' });
 
+test('a part\'s settings, one line each with where it came from', () => {
+  assert.equal(settingsText({
+    chamfer_size: { value: 0.5, source: 'kitchen' },
+    material: { value: 'birch 15', source: 'kitchen.left' },
+    nest: { value: false, source: 'root' },
+    tabs: { value: [1, 2], source: 'master: Tabs' },
+  }), 'chamfer_size 0.5: kitchen\nmaterial birch 15: kitchen.left\nnest false: root\ntabs [1,2]: master: Tabs');
+  assert.equal(settingsText({}), '');
+  assert.equal(settingsText(undefined), '');
+});
+
 test('the layout version the page reads', () => {
-  assert.equal(LAYOUT_VERSION, 6);
+  assert.equal(LAYOUT_VERSION, 8);
   assert.equal(layoutVersionProblem({ version: LAYOUT_VERSION }), null);
-  assert.equal(layoutVersionProblem({ version: 2 }), 'layout version 2, this viewer reads 6');
-  assert.equal(layoutVersionProblem({ version: 7 }), 'layout version 7, this viewer reads 6');
-  assert.equal(layoutVersionProblem({}), 'layout version missing, this viewer reads 6');
-  assert.equal(layoutVersionProblem(null), 'layout version missing, this viewer reads 6');
+  assert.equal(layoutVersionProblem({ version: 2 }), 'layout version 2, this viewer reads 8');
+  assert.equal(layoutVersionProblem({ version: 9 }), 'layout version 9, this viewer reads 8');
+  assert.equal(layoutVersionProblem({}), 'layout version missing, this viewer reads 8');
+  assert.equal(layoutVersionProblem(null), 'layout version missing, this viewer reads 8');
 });
 
 test('the nest state as the side panel says it', () => {
-  assert.equal(nestStatusText({ state: 'ok' }), 'nest of this layout');
-  assert.match(nestStatusText({ state: 'stale' }), /older layout/);
+  assert.equal(nestStatusText({ state: 'ok' }), 'its parts are as nested');
+  assert.equal(nestStatusText({ state: 'changed', changed: ['m.left'], new: ['m.shelf'], gone: [] }),
+    'parts changed since it was nested: nest again\nchanged: m.left\nnew: m.shelf');
   assert.match(nestStatusText({ state: 'running' }), /nesting/);
   assert.equal(nestStatusText({ state: 'failed', log: 'error: no bed\n' }), 'the nest failed:\nerror: no bed');
-  assert.match(nestStatusText({ state: 'none' }), /no nest/);
-  assert.match(nestStatusText(undefined), /no nest/);
+  assert.match(nestStatusText({ state: 'none' }), /not nested yet/);
+  assert.match(nestStatusText(undefined), /lists no nest/);
+});
+
+test('a nest marked as made says what is made and what is not', () => {
+  const sheets = [['birch 15', '1'], ['birch 15', '2'], ['birch 15', '3']];
+  assert.equal(nestStatusText({ state: 'made', sheets, made: sheets, changed: [], not_made: [], new: [], gone: [] }),
+    'made, every sheet: frozen');
+  assert.equal(nestStatusText({ state: 'sheets', sheets, made: [['birch 15', '1'], ['birch 15', '3']],
+    changed: ['m.left'], not_made: ['m.top'], new: [], gone: ['m.old'] }),
+  'made by sheets (1, 3 of 3): frozen\nchanged since made: m.left\nnot made: m.top\nmade, gone: m.old\n'
+    + 'nest again: they go into the next nest beside it');
+  assert.equal(nestStatusText({ state: 'sheets', sheets, made: [['birch 15', '1']], next: 'm.carcass-2', changed: [],
+    not_made: [], new: [], gone: [], made_parts: { 'm.left': 'fixed' } }),
+  'made by sheets (1 of 3): frozen\nwhat it left was nested anew in m.carcass-2, made too\nevery part of it is made');
+  assert.equal(nestStatusText({ state: 'ok', follows: 'm.carcass' }),
+    'second nest of m.carcass: what is not made of it\nits parts are as nested');
+});
+
+test('sheets are named with their material where a nest has several', () => {
+  assert.equal(sheetNames([['birch 15', '1'], ['birch 15', '2']]), '1, 2');
+  assert.equal(sheetNames([['birch 9', '1']], [['birch 15', '1'], ['birch 9', '1']]), 'birch 9:1');
+  const nest = { state: 'sheets', made: [['birch 15', '2']], changed: ['m.left'] };
+  assert.ok(sheetMade(nest, ['birch 15', '2']) && !sheetMade(nest, ['birch 15', '1']));
+  assert.ok(fixable(nest, 'm.left') && !fixable(nest, 'm.top'));
+  assert.ok(!fixable({ state: 'changed', changed: ['m.left'] }, 'm.left'));
+  assert.ok(!fixable({ state: 'made', follows: 'm.carcass', changed: ['m.left'] }, 'm.left'));
+});
+
+test('the nest shown is the one wanted, else the first', () => {
+  const nests = [{ path: 'kitchen.carcass' }, { path: 'kitchen.birch_9' }];
+  assert.equal(chosenNest(nests, 'kitchen.birch_9').path, 'kitchen.birch_9');
+  assert.equal(chosenNest(nests, 'gone.birch_15').path, 'kitchen.carcass');
+  assert.equal(chosenNest(nests, undefined).path, 'kitchen.carcass');
+  assert.equal(chosenNest([], 'kitchen.carcass'), null);
+  assert.equal(chosenNest(undefined, null), null);
 });
 
 test('setHidden hides and shows paths', () => {

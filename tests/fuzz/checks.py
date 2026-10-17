@@ -60,7 +60,7 @@ from shapely.ops import unary_union
 
 from boards import KNOWN
 from fuzzing import floats, fresh, sizes
-from lang import (Box, LangError, Pos, Shape, board, cabinet, fits_sheet, inside, inside_box, sheet_material, module,
+from lang import (Box, LangError, Pos, Shape, board, fits_sheet, inside, inside_box, sheet_material, module,
                   no_interference, scope, through)
 from lang.core import directions
 from lang.core.contours import Contour
@@ -567,7 +567,7 @@ def build(scene: Scene, pl: Placement, name: str = "m") -> Built:
     box = Box(lo, hi, frame)
     if pl.cabinet is not None:
         sideways = [d for d in frame.directions() if d.axis != frame.direction("top").axis]
-        outer = cabinet(name, box, front=sideways[pl.cabinet % len(sideways)])
+        outer = module(name, box, front=sideways[pl.cabinet % len(sideways)])
     else:
         outer = module(name, box)
     built = Built(outer, {}, {})

@@ -123,7 +123,7 @@ def test_slats_in_a_cabinet_read_its_own_terms():
     side, 20 off it, under the shelf, from its front to its back, whatever
     the world calls those."""
     box = Box.from_size(width=600, depth=400, height=700)
-    with cabinet("cab", box, front=box.right) as cab:
+    with module("cab", box, front=box.right) as cab:
         left = board("left", ply15).on(cab.left)
         shelf = board("shelf", ply15).on(Pos("z", 300), toward=cab.top).between(left, cab.right)
         cleat = slat("cleat", oak, section=(20, 40)).on(left.inner).edge_on(shelf.bottom).between(cab.front, cab.back)
@@ -219,7 +219,7 @@ def test_a_slat_takes_no_operations():
 
 def test_hardware_goes_on_boards_not_slats():
     box = Box.from_size(width=600, depth=400, height=700)
-    with cabinet("cab", box, front=box.front) as cab:
+    with module("cab", box, front=box.front) as cab:
         left = board("left", ply15).on(cab.left)
         door = slat("door", oak, section=(20, 400)).on(cab.front).edge_on(left.inner).between(cab.bottom, cab.top)
         with pytest.raises(LangError, match="is a slat; hardware goes on boards"):

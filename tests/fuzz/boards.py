@@ -36,12 +36,14 @@ from shapely.ops import unary_union
 
 from fuzzing import floats, fresh, fit_problems, rings_of, sizes
 from lang import Board, Box, LangError, Pos, Shape, board, circle, cross, sheet_material, module, through, to, triangles
+from lang.core import directions
 from lang.core.directions import AXES
 from lang.core.refs import as_pos
 from lang.core.geometry import polygons_of
 from lang.core.layout import build_layout
 from lang.core.ops import MIN_CHAMFER, Cut, Pocket
 from lang.core.part import ON_FACE_TOLERANCE
+from lang.nesting.fingerprint import fingerprint
 from lang.core.shapes import slot_shape
 from lang.emit.plan import plan_layout
 from lang.master import Plane
@@ -290,6 +292,12 @@ def _edge_hole(b: Board, f: Feature, name: str) -> BaseGeometry:
     return shapely_box(across[0], reach[0], across[1], reach[1])
 
 
+def _fingerprint(b: Board) -> str:
+    """The board's fingerprint (`lang.nesting.fingerprint`) as it stands."""
+    frame = {d.name: f"{'+' if d.sign > 0 else '-'}{d.axis}" for d in directions.frame.directions()}
+    return fingerprint(b.to_layout(), frame)
+
+
 def _state(b: Board) -> tuple[str, list[object], int]:
     return (b.outline.geometry.wkt, list(b.ops), len(b.notes))
 
@@ -338,6 +346,7 @@ def _run_cutout(case: BoardCase, name: str = "m", pipeline: bool = True) -> list
             name = f"{f.kind}_{i}"
             before = _state(b)
             outline = b.outline.geometry
+            printed = _fingerprint(b)
             u0, v0, _, _ = b.outline.bounds
             try:
                 g = apply(b, f, name)
@@ -353,6 +362,12 @@ def _run_cutout(case: BoardCase, name: str = "m", pipeline: bool = True) -> list
                 problems.append(f"a {f.kind} wholly off the board was accepted")
             if g is not None and f.kind not in ("cut", "notch"):
                 footprints.append((name, g))
+            # The fingerprint changes with every operation kept; with a cut, a notch or a fillet where the
+            # outline changed.
+            if _fingerprint(b) == printed and (f.kind not in ("cut", "notch", "fillet")
+                                               or abs(b.outline.geometry.area - outline.area) > 1e-3
+                                               or b.outline.geometry.symmetric_difference(outline).area > 1e-3):
+                problems.append(f"a {f.kind} kept left the fingerprint as it was")
         outline = b.outline.geometry
         exterior = unary_union([Polygon(p.exterior) for p in polygons_of(outline)])
         footprints += [("a hole of the outline", Polygon(h)) for p in polygons_of(outline) for h in p.interiors]

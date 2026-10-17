@@ -5,7 +5,7 @@ built with the language's own calls, and checked from the outside.
 Each case is a cabinet in the shape of the examples (`hinged_door.py`,
 `door_latch.py`, ...), its sizes, thicknesses, gaps and the hardware's
 settings drawn from their ranges and a little beyond. It is built twice,
-facing two different sides of its box (`cabinet(front=)`) at two places:
+facing two different sides of its box (`module(front=)`) at two places:
 what the hardware drills and places, measured from the cabinet's own
 front, left and bottom, must come out the same, and a refusal must be one
 both ways.
@@ -36,7 +36,7 @@ from shapely.geometry.base import BaseGeometry
 from boards import _pipeline_problems  # pyright: ignore[reportPrivateUsage]
 from fuzzing import floats, fresh, sizes
 from lang import (BallCatch, Box, ConcealedHinge, DoorLatch, DrawerSlide, HatchHinge, LangError, SlidingBracket, board,
-                  cabinet, check, sheet_material, no_interference, rect, scope)
+                  check, module, sheet_material, no_interference, rect, scope)
 from lang.core.cutouts import circle_geometry
 from lang.core.directions import AXES, Axis, Direction, world_frame
 from lang.core.layout import build_layout
@@ -149,7 +149,7 @@ def build_door(case: DoorCase, front: int, origin: tuple[float, float, float], n
     ply = sheet_material("birch", t=case.side_t)
     settings = dict(case.params)
     model = settings.pop("model")
-    with cabinet(name, box, front=getattr(box, FRONTS[front])) as cab:
+    with module(name, box, front=getattr(box, FRONTS[front])) as cab:
         behind = [] if case.inset else [cab.front.into(case.door_t + case.gap)]
         left = board("left", ply).on(cab.left).between(*behind) if behind else board("left", ply).on(cab.left)
         right = board("right", ply).on(cab.right).between(*behind) if behind else board("right", ply).on(cab.right)
@@ -226,7 +226,7 @@ def build_panel(case: PanelCase, front: int, origin: tuple[float, float, float],
     ply = sheet_material("birch", t=case.frame_t)
     settings = dict(case.params)
     model = settings.pop("model")
-    with cabinet(name, box, front=getattr(box, FRONTS[front])) as cab:
+    with module(name, box, front=getattr(box, FRONTS[front])) as cab:
         behind = [] if case.set_in else [cab.front.into(case.panel_t + case.gap)]
         left = board("left", ply).on(cab.left).between(*behind) if behind else board("left", ply).on(cab.left)
         right = board("right", ply).on(cab.right).between(*behind) if behind else board("right", ply).on(cab.right)
@@ -295,7 +295,7 @@ def hatch_cases(draw: st.DrawFn) -> HatchCase:
 def build_hatch(case: HatchCase, front: int, origin: tuple[float, float, float], name: str = "cab") -> Built:
     box = _box(case.size, front, origin)
     ply = sheet_material("birch", t=case.t)
-    with cabinet(name, box, front=getattr(box, FRONTS[front])) as cab:
+    with module(name, box, front=getattr(box, FRONTS[front])) as cab:
         hatch = board("hatch", sheet_material("birch", t=case.hatch_t)).on(cab.front).between(
             cab.left.into(case.side_gap), cab.right.into(case.side_gap), cab.bottom, cab.top.into(case.drop))
         behind = cab.front.into(case.hatch_t + case.gap)
@@ -352,7 +352,7 @@ def build_catch(case: CatchCase, front: int, origin: tuple[float, float, float],
     box = _box(case.size, front, origin)
     w, d, h = case.size
     fu, fv, r = case.opening
-    with cabinet(name, box, front=getattr(box, FRONTS[front])) as cab:
+    with module(name, box, front=getattr(box, FRONTS[front])) as cab:
         panel = board("panel", sheet_material("birch", t=case.panel_t))
         if case.on == "bottom":
             panel.on(cab.bottom).show(cab.top)
@@ -426,7 +426,7 @@ def build_drawer(case: DrawerCase, front: int, origin: tuple[float, float, float
     box = _box(case.size, front, origin)
     ply = sheet_material("birch", t=case.side_t)
     slide = DrawerSlide(case.model, case.nl, **dict(case.params))  # pyright: ignore[reportArgumentType]
-    with cabinet(name, box, front=getattr(box, FRONTS[front])) as cab:
+    with module(name, box, front=getattr(box, FRONTS[front])) as cab:
         left = board("left", ply).on(cab.left)
         right = board("right", ply).on(cab.right)
         bottom = board("bottom", ply).on(cab.bottom).between(left, right)

@@ -5,9 +5,10 @@ the room the others have left: the pieces holding blanks, around their
 parts (the parts kept the spacing off, almost free), and each sheet's
 largest rest, cut down to what it takes (priced by its area, offered only
 while the sheet has two cuts to spare under `max_cuts`). When all fit, that
-sheet is not needed; again while it works. An offcut on hand is never
-emptied, only a sheet bought [the experiments, 2026-10-14: it took a sheet
-back now and then, 11 to 10].
+sheet is not needed; again while it works. A piece on hand is never
+emptied, only a sheet bought, nor one holding a `nest(False)` board's own
+blank, which nothing else goes onto [the experiments, 2026-10-14: it took
+a sheet back now and then, 11 to 10].
 """
 from __future__ import annotations
 
@@ -28,10 +29,14 @@ class SheetState:
     """A piece of stock as it is being sawn: its plan, size and kind."""
     tree: Node
     size: tuple[float, float]
-    #: "sheet" (bought) or "offcut" (on hand).
+    #: "bought" or "on_hand" (the inventory's).
     kind: str
-    #: Its label (`2470x1240`), for the bought count.
+    #: Its label (`2500x1250`), for the bought count.
     label: str
+
+
+def _holds_own(sheet: SheetState, items: list[Item]) -> bool:
+    return any(items[p.item].own for leaf in leaves(sheet.tree) for p in leaf.parts)
 
 
 def area_on(sheet: SheetState, items: list[Item]) -> float:
@@ -45,7 +50,7 @@ def refill(items: list[Item], sheets: list[SheetState], workshop: Workshop, seco
     sheets = list(sheets)
     margin = workshop.margin
     while len(sheets) > 1:
-        bought = [k for k, s in enumerate(sheets) if s.kind == "sheet"]
+        bought = [k for k, s in enumerate(sheets) if s.kind == "bought" and not _holds_own(s, items)]
         if not bought:
             break
         k = min(bought, key=lambda k: area_on(sheets[k], items))
@@ -59,7 +64,7 @@ def refill(items: list[Item], sheets: list[SheetState], workshop: Workshop, seco
             if si == k:
                 continue
             for leaf in leaves(s.tree):
-                if leaf.parts:
+                if leaf.parts and not any(items[p.item].own for p in leaf.parts):
                     x, y, w, h = leaf.rect
                     defects = [items[p.item].placed(p.turn, (p.at[0] - x, p.at[1] - y), solver=True)
                                for p in leaf.parts]

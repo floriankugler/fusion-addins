@@ -6,7 +6,8 @@ the same day (commits f6e25342 to the merge of the three worker branches
 and the standard library). The items decided for are built and have left
 this file for the table below, which says where each is described now;
 the two decided against stay here in full with the reason, so they are not
-proposed again; item 16's loose end is in `design/todo.md`.
+proposed again; item 16's loose end was settled by the settings
+(`settings.md`, built 2026-10-16).
 
 The core reads well: relations instead of numbers, operations reachable as
 attributes, typed anchors, `front=` for cabinets. The items are at the
@@ -75,3 +76,14 @@ rules. `ease` becomes a keyword on `bend()` with a package default
 board, or in a helper the build writes. Loose end [open]: `default_grain`
 in `lang/core/scope.py` is set by nothing; either drop it or give
 `module()` and `cabinet()` a `grain=`.
+
+Later [Florian, 2026-10-16]: reopened for the values that flow, design
+standards (a chamfer size, a drawer gap), the nest's and the CAM's
+preferences and the master's parameters, which are now settings
+(`settings.md`, `design/api.md`, Settings; built 2026-10-16), set once at
+the top and overridden where a module or a part needs otherwise. A
+keyword stays the call's own spelling, as a binding on the node it makes,
+so nothing here changed for a call that gives its values. Constants and
+`functools.partial` stay right for one-off values. `default_grain` is gone:
+a scope's grain is `use(grain(...))`, and `nest(False)` for a whole scope
+is `use(nest(False))`; by kind it is still a predicate, not a setting.

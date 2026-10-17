@@ -326,7 +326,7 @@ def _runners(front: bool) -> HardwareLayout:
     registry.reset()
     slide = DrawerSlide(DYNAPRO_40, nl=450)
     box = Box.from_size(width=600, depth=500, height=300)
-    with (cabinet("cab", box, front=box.front) if front else module("cab", box)) as cab:
+    with (module("cab", box, front=box.front) if front else module("cab", box)) as cab:
         left = board("left", ply15).on(cab.left)
         right = board("right", ply15).on(cab.right)
         with scope("drawer1", cab.interior) as d:
@@ -500,7 +500,7 @@ def test_a_partition_between_two_bays_takes_a_drawer_on_either_face():
     its scope."""
     slide = DrawerSlide("Dynapro 40", nl=450)
     box = Box.from_size(width=1000, depth=500, height=300)
-    with cabinet("cab", box, front=box.front) as cab:
+    with module("cab", box, front=box.front) as cab:
         left = board("left", ply15).on(cab.left)
         right = board("right", ply15).on(cab.right)
         wall = board("wall", ply15).center(cab.center("width"))
