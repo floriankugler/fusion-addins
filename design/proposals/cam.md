@@ -237,11 +237,24 @@ and 12 parts are given up as unholdable. Three faults:
   loss. Against it stands only the time a released small part lies loose
   under the passing hood, which the experiments survived; the next
   experiment watches it.
-- **Tabs** only for a part that fails even the release pass, whose force is
-  about a tenth of a full stepdown's, and the hood's pull; where they go,
-  by the rules below [proposed]. The model's job becomes the release order
-  and that exception, and its pressure should fall with the kerf area
-  opened before a part's release [proposed].
+- **Tabs: none by default, with a safety net for very small and very
+  skinny parts** [Florian, 2026-10-17: there should still be one, to be
+  sure]. One measurement covers both: a part's footprint eroded by
+  `cam.tab_margin` (6 mm by default) keeps less than `cam.tab_area`
+  (10 cm² by default), and the part gets tabs; a part narrower than twice
+  the margin keeps nothing and always does. The defaults sit below what
+  held: at 6 mm a 300 by 20 strip keeps 23 cm² and a 60 mm disc 18 cm²; a
+  300 by 15 strip keeps 8.6 cm² and a 44 mm disc 8 cm², and those get
+  tabs. The failing-size experiment tightens both numbers; `cam.tabs
+  ("forced")` or `cam.tabs("none")` on a part overrides them [proposed]. A
+  tabbed part keeps at least three tabs, by the rules below, and its tab
+  positions go on both its roughing and its release operation: the
+  roughing stops 0.2 mm above the stock bottom, a tab stands 2 mm tall, so
+  a roughing without the tabs would mill them down to the skin [proposed].
+  The same threshold decides which surviving waste is pocketed away (above).
+  The holding model's job becomes the release order and, once calibrated,
+  this exception, with its pressure falling with the kerf area opened
+  before a part's release [proposed].
 - **Calibration** [found 2026-10-17]: at a leak margin of 12 mm a 20 mm
   strip has no eroded area left, yet it held, so the margin is under 10 mm,
   or the force scaling carries the difference. Open: the failing size.
