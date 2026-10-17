@@ -12,7 +12,7 @@ from lang.core.ops import Chamfer, Cut, Pocket
 from lang.core.scope import registry
 from lang.emit.arcs import Arc2, Line2, fit
 from lang.emit.plan import Arc, ChamferStep, Line, PocketStep, ShapeContour, pieces, plan_layout
-from lang.preview.mesh import mesh_part
+from lang.preview.mesh import FINE, mesh_part
 from lib import cutout_patterns as data
 from helpers import EXAMPLES, ply12, ply15, run_example
 
@@ -90,7 +90,7 @@ def test_a_pocket_cutout_has_several_pieces_in_the_layout():
     assert isinstance(steps[0], PocketStep) and len(steps[0].shapes) == 4
     assert isinstance(steps[1], ChamferStep) and isinstance(steps[1].contour, ShapeContour)
     assert len(steps[1].contour.loops) == 4
-    mesh = mesh_part(part, build_layout()["frame"])
+    mesh = mesh_part(part, build_layout()["frame"], level=FINE)
     # the preview shows the rims' chamfer too: half a square millimetre
     # for every millimetre of rim
     chamfer = 0.5 * pocket.shape.geometry.boundary.length

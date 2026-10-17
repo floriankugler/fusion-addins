@@ -41,6 +41,27 @@ for a check, too slow for the loop. [decided as a need]
   its object gives.
 - A mesh boolean that fails leaves the board uncut and says so (`preview:
   ...` in the build's output) instead of hiding it.
+- Levels (`lang/preview/levels.py`): the mesher meshes at a level, which
+  changes the triangles and never the layout. `fine` meshes the layout's
+  polygons as they are, a vertex a degree on the language's circles.
+  `normal`, the preview's default, recovers the arcs and circles of
+  outlines, pocket shapes and chamfered regions as the plan does for Fusion
+  (`lang.emit.arcs.fit`) and draws each again with its chords at most
+  0.05 mm inside it, a step at most 30 degrees, and never with more
+  segments than the layout has for it: a relief circle of radius 3 gets 18
+  sides instead of 360, a corner of radius 500 about 220 a full turn. Lines
+  and whatever is not an arc stay as they are, and a shape drawn again that
+  comes out invalid, or holds more or less than its chords allow, is
+  meshed from the layout's polygon. On the van this takes the mesh step
+  from 1.2 s to 0.44 s and the scene from 306 000 triangles to 38 000, the
+  volume within 1e-5. `python -m lang.build --level fine|normal` (default
+  normal) and `build_scene(layout, level=FINE)`; the build writes the level
+  into `level.txt` beside the scene. The tests and the Fusion batch check
+  mesh at `fine`, as they compare volumes; `tests/fuzz/boards.py`
+  (`run_levels`, check `levels`) meshes random boards at both and requires
+  the same closed meshes, the volumes within each shape's length times the
+  tolerance over its height. A level that leaves operations out (rough,
+  `design/proposals/detail-levels.md`) is not built.
 
 ## The viewer
 
@@ -57,10 +78,19 @@ for a check, too slow for the loop. [decided as a need]
   `settings`, `design/api.md`, Settings). Proposed and not built: the grain as
   a stripe on each board, and check results drawn in the scene (interference
   pairs, sheet fit).
+- The level row under Display (fine, normal) picks the level the shown
+  design is meshed at. The page sends it with its next status requests
+  (`status.json?design=van&level=fine`) until the server reports it; the
+  server keeps it per design, for every page, marks the design stale on a
+  change, and builds it at that level from then on (`--level`). The status
+  says the level asked (`level`) and the one the scene on disk was meshed
+  at (`built`, from `level.txt`). From code, `preview.level()` is the level
+  of the scene on screen and `await preview.level('fine')` asks for one and
+  resolves once its scene is on screen.
 - Camera and visibility from code: the page exposes `window.preview`
   (`look`, `view`, `camera`, `fit`, `isolate`, `show`, `hide`, `select`,
-  `section`, `labels`, `hardware`, `parts`, `ops`, `loaded`, `open`,
-  `designs`, `design`, `version`), so a tool driving the browser frames a
+  `section`, `labels`, `hardware`, `level`, `parts`, `ops`, `loaded`,
+  `open`, `designs`, `design`, `version`), so a tool driving the browser frames a
   part, a scope or a named operation from a named direction in one call
   instead of steering the mouse. The camera is kept in the URL hash, so a
   link or a reload shows the same view.

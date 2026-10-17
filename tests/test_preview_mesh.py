@@ -4,15 +4,17 @@ import math
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pytest
 import trimesh
+from shapely.geometry import Polygon
 
 from lang import *
 from lang.build import run_build
 from lang.core import layout_types
 from lang.core.layout import build_layout
 from lang.emit import plan
-from lang.preview.mesh import build_scene, mesh_hardware, mesh_part, write_scene
+from lang.preview.mesh import FINE, NORMAL, build_scene, mesh_hardware, mesh_part, write_scene
 from helpers import ply15
 
 
@@ -126,3 +128,73 @@ def test_a_shape_that_touches_itself_at_a_point_meshes():
     assert pinched.is_valid and not extrude_polygon(pinched, 3).is_volume
     mesh = _extruded_polygon(pinched, 3)
     assert mesh.is_volume and mesh.volume == pytest.approx((16 - 2) * 3, rel=1e-5)
+
+
+def _sides(mesh: Any, center: tuple[float, float], r: float) -> int:
+    """The sides of a round pocket's wall in a mesh: its faces standing
+    upright within `r` of the centre, two triangles a side."""
+    upright = np.abs(mesh.face_normals[:, 2]) < 1e-9
+    near = np.hypot(mesh.triangles_center[:, 0] - center[0], mesh.triangles_center[:, 1] - center[1]) < r + 1e-6
+    return int((upright & near).sum()) // 2
+
+
+def test_a_circle_pocket_at_the_normal_level_has_the_sides_its_tolerance_needs():
+    """At the normal level the mesher draws a circle again with chords at
+    most 0.05 mm inside it: a pocket of radius 3, 360 points in the layout,
+    gets 18 sides and takes that polygon's volume; at the fine level it
+    keeps its 360."""
+    with module("m", Box.from_size(width=300, depth=200, height=100)) as m:
+        p = board("p", ply15).on(m.bottom)
+        p.pocket(circle(6), at=p.top.center, depth=5)
+    layout = build_layout()
+    (part,) = layout["modules"][0]["parts"]
+    (pocket,) = part["ops"]
+    assert pocket["kind"] == "pocket"
+    ring = pocket["shape"][0]
+    assert len(ring) == 360
+    center = (sum(q[0] for q in ring) / 360, sum(q[1] for q in ring) / 360)
+    n = math.ceil(2 * math.pi / (2 * math.acos(1 - 0.05 / 3)))
+    assert n == 18
+    fine, normal = mesh_part(part, layout["frame"], level=FINE), mesh_part(part, layout["frame"], level=NORMAL)
+    assert (_sides(fine, center, 3), _sides(normal, center, 3)) == (360, 18)
+    assert fine.volume == pytest.approx(300 * 200 * 15 - Polygon(ring).area * 5, rel=1e-10)
+    gon = n / 2 * 3 ** 2 * math.sin(2 * math.pi / n)
+    assert normal.volume == pytest.approx(300 * 200 * 15 - gon * 5, rel=1e-10)
+    assert mesh_part(part, layout["frame"]).volume == normal.volume       # the default
+
+
+def test_an_arc_the_layout_draws_coarser_than_the_level_keeps_its_points():
+    """The normal level never draws an arc with more segments than the
+    layout has for it: a corner of radius 100 drawn with eight segments a
+    quarter (11.25 degrees, finer would take 3.6) stays as it is, and a
+    shape with nothing coarser to draw stays the layout's polygon."""
+    from shapely.geometry import box as shapely_box
+    from lang.preview.mesh import _redrawn  # pyright: ignore[reportPrivateUsage]
+    rounded = shapely_box(0, 0, 400, 300).buffer(-100).buffer(100, quad_segs=8)
+    ring = [[x, y] for x, y in list(rounded.exterior.coords)[:-1]]
+    assert _redrawn(ring, 0.05) is ring
+    with module("m", Box.from_size(width=300, depth=400, height=100)) as m:
+        board("p", ply15, Shape(rounded)).on(m.bottom)
+    layout = build_layout()
+    (part,) = layout["modules"][0]["parts"]
+    assert mesh_part(part, layout["frame"], level=NORMAL).volume == mesh_part(part, layout["frame"], level=FINE).volume
+
+
+def test_the_build_meshes_at_the_level_asked_and_says_which(tmp_path: Path):
+    build = tmp_path / "build.py"
+    build.write_text("from lang import *\n"
+                     "with module('m', Box.from_size(width=300, depth=200, height=100)) as m:\n"
+                     "    p = board('p', sheet_material('birch', t=15)).on(m.bottom)\n"
+                     "    p.pocket(circle(6), at=p.top.center, depth=5)\n")
+    from lang.build import main
+    assert main([str(build), "--out", str(tmp_path / "fine"), "--level", "fine"]) == 0
+    run_build(build, tmp_path / "normal")
+    run_build(build, tmp_path / "layout", scene=False)
+    assert (tmp_path / "fine" / "level.txt").read_text() == "fine"
+    assert (tmp_path / "normal" / "level.txt").read_text() == "normal"
+    assert not (tmp_path / "layout" / "level.txt").exists()
+    scenes: list[Any] = [trimesh.load(tmp_path / name / "scene.glb") for name in ("fine", "normal")]
+    faces = [sum(len(g.faces) for g in scene.geometry.values()) for scene in scenes]
+    assert faces[0] > 10 * faces[1]
+    with pytest.raises(SystemExit):
+        main([str(build), "--level", "rough"])

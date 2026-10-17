@@ -22,6 +22,13 @@ snapshot in the folder) every design. A build rewrites the layout and
 scene and bumps version.txt; the page reloads the scene, keeping the
 camera, or shows the build's error.
 
+Each design is meshed at a level (`lang.preview.levels`: fine, normal),
+normal until a page asks for another one with its status request
+(`status.json?design=van&level=fine`); the server keeps it for that
+design, and a change makes the design stale. The status says the level
+asked (`level`) and the one the scene on disk was meshed at (`built`,
+from the build's level.txt).
+
 Given a single build file, it builds into --out itself, on every save,
 whether a page shows it or not.
 
@@ -60,6 +67,8 @@ from typing import Any
 from urllib.parse import parse_qs, quote, unquote, urlsplit
 
 from watchfiles import watch
+
+from lang.preview.levels import LEVELS, NORMAL
 
 VIEWER_DIR = Path(__file__).parent / "viewer"
 REPO = Path(__file__).resolve().parents[2]
@@ -102,6 +111,7 @@ class Design:
     building: bool = False
     ok: bool = False                # whether its last build went through
     builds: int = 0                 # builds finished since the server started
+    level: str = NORMAL.name        # the level its builds mesh at, as the pages last asked
     #: The nests asked for, by path, the first one running.
     nesting: list[str] = field(default_factory=list[str])
     #: The nests whose last run asked for failed.
@@ -112,6 +122,16 @@ class Design:
         """The version of the build in `out`, from now or an earlier run."""
         try:
             return (self.out / "version.txt").read_text()
+        except OSError:
+            return None
+
+    @property
+    def built(self) -> str | None:
+        """The level the scene in `out` was meshed at, None when unknown.
+        Read after `version`: a build moves level.txt into place before
+        version.txt, so a new version never comes with an old level."""
+        try:
+            return (self.out / "level.txt").read_text()
         except OSError:
             return None
 
@@ -163,18 +183,23 @@ class Designs:
                         design.stale = True
             self.cond.notify_all()
 
-    def status(self, name: str, page: str = "") -> dict[str, Any]:
+    def status(self, name: str, page: str = "", level: str = "") -> dict[str, Any]:
         """The designs, and the state of the one named, which the page shows
-        from now on instead of what it showed before; it builds when stale."""
+        from now on instead of what it showed before; it builds when stale.
+        A `level` (a name of `LEVELS`) is the one its builds mesh at from
+        now on; another one than before makes it stale."""
         with self.cond:
             now = time.monotonic()
             self.pages = {p: seen for p, seen in self.pages.items() if now - seen[1] < SHOWN}
             self.pages[page] = (name, now)
             design = self.designs.get(name)
             if design is not None:
+                if level in LEVELS and level != design.level:
+                    design.level, design.stale = level, True
                 self.cond.notify_all()
             state = None if design is None else {
-                "name": name, "url": design.url, "version": design.version, "builds": design.builds,
+                "name": name, "url": design.url, "version": design.version, "built": design.built,
+                "level": design.level, "builds": design.builds,
                 "state": "building" if design.stale or design.building else "ok" if design.ok else "failed",
                 "nests": nest_state(design),
             }
@@ -242,7 +267,8 @@ class Designs:
                 while (design := self.next_build()) is None:
                     self.cond.wait()
                 design.stale, design.building = False, True
-            ok = rebuild(design.file, design.out)
+                level = design.level
+            ok = rebuild(design.file, design.out, level=level)
             with self.cond:
                 design.building, design.ok = False, ok
                 design.builds += 1
@@ -455,7 +481,8 @@ class _Handler(http.server.SimpleHTTPRequestHandler):
             super().do_GET()
             return
         query = parse_qs(url.query)
-        body = json.dumps(self.designs.status(query.get("design", [""])[0], query.get("page", [""])[0])).encode()
+        body = json.dumps(self.designs.status(query.get("design", [""])[0], query.get("page", [""])[0],
+                                              query.get("level", [""])[0])).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
@@ -505,15 +532,15 @@ class _Handler(http.server.SimpleHTTPRequestHandler):
         pass
 
 
-def rebuild(build_file: Path, out_dir: Path, timeout: float = TIMEOUT) -> bool:
-    """Builds into a scratch directory and moves the result into `out_dir`,
-    the version last, so that the page never reads a file half written. A
-    failed build, or one stopped after `timeout` seconds (an endless loop
-    in a build file would otherwise hold up every design), leaves the last
-    good one in place."""
+def rebuild(build_file: Path, out_dir: Path, timeout: float = TIMEOUT, level: str = NORMAL.name) -> bool:
+    """Builds into a scratch directory, its scene meshed at the level
+    named, and moves the result into `out_dir`, the version last, so that
+    the page never reads a file half written. A failed build, or one
+    stopped after `timeout` seconds (an endless loop in a build file would
+    otherwise hold up every design), leaves the last good one in place."""
     scratch = out_dir / ".build"
     shutil.rmtree(scratch, ignore_errors=True)
-    command = [sys.executable, "-m", "lang.build", str(build_file), "--out", str(scratch)]
+    command = [sys.executable, "-m", "lang.build", str(build_file), "--out", str(scratch), "--level", level]
     try:
         result = subprocess.run(command, capture_output=True, text=True, cwd=str(REPO), timeout=timeout)
     except subprocess.TimeoutExpired as expired:

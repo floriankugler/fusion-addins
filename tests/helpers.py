@@ -16,7 +16,7 @@ from lang import Board, Box, Scope, board, check, sheet_material, module, no_int
 from lang.core.layout import build_layout
 from lang.core.layout_types import HardwareBodyLayout, Layout
 from lang.core.scope import registry
-from lang.preview.mesh import mesh_part
+from lang.preview.mesh import FINE, mesh_part
 
 #: The example build files, which import their stock and each other from their folder.
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
@@ -61,7 +61,7 @@ def state(*parts: Board) -> list[tuple[str, list[Any]]]:
 def part_meshes() -> dict[str, Any]:
     """Every part of the build meshed as the preview meshes it, by path."""
     layout = build_layout()
-    return {p["path"]: mesh_part(p, layout["frame"]) for m in layout["modules"] for p in m["parts"]}
+    return {p["path"]: mesh_part(p, layout["frame"], level=FINE) for m in layout["modules"] for p in m["parts"]}
 
 
 def overlap(a: Any, b: Any) -> float:

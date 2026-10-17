@@ -18,7 +18,11 @@ centres on the board, and it is the stadium its centres and width give.
 `run_center` places a cut, pocket or hole by `anchor.center(pos)` on a
 face of such a board, big or narrow, and checks that the shape's bounds
 have their middle on `pos` and their side on the edge the anchor names
-(a hole its centre), within 1e-9 [syntax.md item 6]."""
+(a hole its centre), within 1e-9 [syntax.md item 6].
+
+`run_levels` meshes such a board, its cutout made, at the preview's normal
+level and at the fine one (`lang.preview.levels`): as closed, and as much
+material within what drawing its curves again allows (`level_slack`)."""
 from __future__ import annotations
 
 import math
@@ -45,9 +49,10 @@ from lang.core.ops import MIN_CHAMFER, Cut, Pocket
 from lang.core.part import ON_FACE_TOLERANCE
 from lang.nesting.fingerprint import fingerprint
 from lang.core.shapes import slot_shape
-from lang.emit.plan import plan_layout
+from lang.core.layout_types import PartLayout, Rings
+from lang.emit.plan import LayoutFrame, PartFrame, plan_layout
 from lang.master import Plane
-from lang.preview.mesh import mesh_part
+from lang.preview.mesh import FINE, NORMAL, mesh_part
 
 Place = Literal["bottom", "left", "back"]
 OutlineKind = Literal["rect", "rounded", "taper", "slot"]
@@ -519,7 +524,7 @@ def _pipeline_problems(meshes: dict[str, Any] | None = None) -> list[str]:
                 for ring in rings:
                     problems += [f"loop: {p}" for p in fit_problems([(q[0], q[1]) for q in ring], None)]
             reported: list[str] = []
-            mesh = mesh_part(part, layout["frame"], reported.append)
+            mesh = mesh_part(part, layout["frame"], reported.append, FINE)
             if meshes is not None:
                 meshes[part["path"]] = mesh
             meshing = [f"mesh: {r}" for r in reported]
@@ -547,7 +552,7 @@ def _touching(rings: list[list[list[float]]]) -> bool:
         lines[i].distance(lines[j]) < 1e-6 for i in range(len(lines)) for j in range(i + 1, len(lines)))
 
 
-__all__ = ["BoardCase", "CutoutCall", "Feature", "board_cases", "run_cutout", "rings_of"]
+__all__ = ["BoardCase", "CutoutCall", "Feature", "board_cases", "level_slack", "rings_of", "run_cutout", "run_levels"]
 
 
 # -- a shape centred on a position ---------------------------------------------------------------
@@ -673,3 +678,74 @@ def _run_center(case: CenterCase) -> list[str]:
     if abs(got - target) > 1e-9:
         problems.append(f"the {case.kind} has {what} at {got!r} on {other}, the anchor names {target!r}")
     return problems
+
+
+# -- the preview's levels ------------------------------------------------------------------------
+
+def run_levels(case: BoardCase) -> list[str]:
+    """What is wrong with the case's board (its cutout made) meshed at the
+    normal level, against the fine one: a problem the fine level did not
+    have, a mesh not closed, or more or less material than drawing its
+    curves again allows (`level_slack`). Boards the fine level cannot mesh
+    are the cutout check's to report."""
+    with fresh():
+        try:
+            _run_cutout(case, pipeline=False)
+            layout = build_layout()
+        except LangError:
+            return []
+    problems: list[str] = []
+    for module_layout in layout["modules"]:
+        for part in module_layout["parts"]:
+            fine_problems: list[str] = []
+            normal_problems: list[str] = []
+            try:
+                fine = mesh_part(part, layout["frame"], fine_problems.append, FINE)
+                normal = mesh_part(part, layout["frame"], normal_problems.append, NORMAL)
+            except Exception as e:
+                frame = traceback.extract_tb(e.__traceback__)[-1]
+                problems.append(f"{type(e).__name__} at {Path(frame.filename).name}:{frame.lineno}: {e}")
+                continue
+            if fine is None or fine_problems or not fine.is_watertight:
+                continue
+            if normal_problems:
+                problems.append(f"normal: {normal_problems[0]}")
+            elif not normal.is_watertight:
+                problems.append(f"normal: {part['path']}'s mesh is not watertight")
+            else:
+                diff = float(normal.volume) - float(fine.volume)
+                assert NORMAL.tolerance is not None
+                slack = level_slack(part, layout["frame"], NORMAL.tolerance)
+                if abs(diff) > slack:
+                    problems.append(f"normal holds {diff:+.4g} mm3 against fine, more than the {slack:.4g} its curves allow")
+    return problems
+
+
+def _length(rings: Rings) -> float:
+    return sum(LineString([*ring, ring[0]]).length for ring in rings if len(ring) >= 2)
+
+
+def level_slack(part: PartLayout, frame: dict[str, str], tolerance: float) -> float:
+    """How much two levels' meshes of a part may differ in volume where
+    one draws the curves again with chords at most `tolerance` inside
+    them: each shape's area by its length times the tolerance, over the
+    height it is extruded (the thickness for the outline and the shapes of
+    cuts and big-face pockets, as far as the board reaches for a pocket in
+    a narrow face) and over a chamfer's size along it, twice over."""
+    t = part["thickness"]
+    pf = PartFrame(part, LayoutFrame(frame))
+    shapes = _length(part["outline"])
+    total = shapes * t
+    chamfers = 0.0
+    for op in part["ops"]:
+        if op["kind"] == "pocket" or op["kind"] == "cut":
+            length = _length(op["shape"])
+            shapes += length
+            total += length * (t + op["chamfer"])
+        elif op["kind"] == "edge" and op["op"]["kind"] == "pocket":
+            length = _length(op["op"]["shape"])
+            shapes += length
+            total += length * (pf.extent(pf.edge_face(op)) + op["op"]["chamfer"])
+        elif op["kind"] == "chamfer":
+            chamfers += op["size"]
+    return 2 * tolerance * (total + shapes * chamfers) + 1e-6

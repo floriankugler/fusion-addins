@@ -107,8 +107,8 @@ def test_only_the_designs_pages_show_are_built(tmp_path: Path):
     assert designs.next_build() is None                  # no page open
     state = designs.status("van", page="a")
     assert state["designs"] == ["cabinet", "shelf", "van"]
-    assert state["design"] == {"name": "van", "url": "out/van/", "version": None, "builds": 0, "state": "building",
-                               "nests": []}
+    assert state["design"] == {"name": "van", "url": "out/van/", "version": None, "built": None, "level": "normal",
+                               "builds": 0, "state": "building", "nests": []}
     assert designs.next_build() is designs.designs["van"]
     designs.status("cabinet", page="a")                  # the page switched
     assert designs.next_build() is designs.designs["cabinet"]
@@ -127,12 +127,31 @@ def test_a_single_build_file_builds_without_a_page(tmp_path: Path):
     assert stale(designs) == {"cabinet"}
 
 
+def test_a_level_asked_for_is_kept_per_design_and_builds_it_again(tmp_path: Path):
+    designs = Designs(folder_of_files(tmp_path), tmp_path / "out")
+    fresh(designs)
+    van = designs.designs["van"]
+    assert designs.status("van", page="a")["design"]["level"] == "normal"
+    designs.status("van", page="a", level="rough")       # no such level
+    assert van.level == "normal" and stale(designs) == set()
+    state = designs.status("van", page="a", level="fine")["design"]
+    assert (state["level"], state["state"], state["built"]) == ("fine", "building", None)
+    assert stale(designs) == {"van"} and designs.designs["cabinet"].level == "normal"
+    fresh(designs)
+    designs.status("van", page="b", level="fine")         # the level it has: nothing to build
+    assert stale(designs) == set()
+    assert designs.status("van", page="a")["design"]["level"] == "fine"      # kept, for every page
+    assert rebuild(van.file, van.out, level=van.level)
+    assert designs.status("van", page="a")["design"]["built"] == "fine"
+    assert (van.out / "level.txt").read_text() == "fine"
+
+
 def test_a_failed_build_keeps_the_last_good_one(tmp_path: Path):
     path = write(tmp_path, "cabinet.py", CABINET)
     out = tmp_path / "out"
     assert rebuild(path, out)
     version = (out / "version.txt").read_text()
-    assert {p.name for p in out.iterdir()} == {"build.log", "layout.json", "scene.glb", "version.txt"}
+    assert {p.name for p in out.iterdir()} == {"build.log", "layout.json", "scene.glb", "level.txt", "version.txt"}
     assert "1 parts" in (out / "build.log").read_text()
     path.write_text(CABINET + "    undefined_name()\n")
     assert not rebuild(path, out)

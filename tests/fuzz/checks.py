@@ -71,7 +71,7 @@ from lang.core.part import Board
 from lang.core.scope import Scope
 from lang.core.shapes import slot_shape
 from lang.emit.plan import LayoutFrame, PartFrame, pieces
-from lang.preview.mesh import mesh_part
+from lang.preview.mesh import FINE, mesh_part
 
 #: An overlap at least this deep in every direction (along an axis, in a
 #: board's plane) must be reported: ten times the checks' tolerance of 1e-6.
@@ -910,7 +910,7 @@ class _Meshes:
     def get(self, path: str, around: bool) -> Any:
         key = (path, around)
         if key not in self.made:
-            self.made[key] = mesh_part(_hole_pockets(self.parts[path], around), self.frame, lambda _: None)
+            self.made[key] = mesh_part(_hole_pockets(self.parts[path], around), self.frame, lambda _: None, FINE)
         return self.made[key]
 
 

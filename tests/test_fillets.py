@@ -12,7 +12,7 @@ from lang.core.ops import Chamfer, Cut
 from lang.core.scope import registry
 from lang.emit.arcs import Arc2, Line2, fit
 from lang.emit.plan import Arc, Line, plan_layout
-from lang.preview.mesh import mesh_part
+from lang.preview.mesh import FINE, mesh_part
 from helpers import carcass, ply15
 
 #: What a quarter circle of radius 1 leaves of its square.
@@ -221,7 +221,7 @@ def test_the_preview_mesh_has_the_rounded_corner():
         panel.fillet(panel.front.left, 20).chamfer(panel.back.right, 10)
     layout = build_layout()
     (part,) = layout["modules"][0]["parts"]
-    volume = float(mesh_part(part, layout["frame"]).volume)
+    volume = float(mesh_part(part, layout["frame"], level=FINE).volume)
     assert volume == pytest.approx((300 * 400 - CORNER * 400 - 50) * 15, rel=1e-5)
 
 

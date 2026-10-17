@@ -1,8 +1,9 @@
-// The page's bookkeeping (state.js): the layout version, hidden parts, and
-// the promises of preview.loaded() and preview.open().
+// The page's bookkeeping (state.js): the layout version, hidden parts, the
+// levels asked for, and the promises of preview.loaded(), preview.open()
+// and preview.level().
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { LAYOUT_VERSION, layoutVersionProblem, setHidden, toggleHides, isolate, LoadTracker, nestStatusText, chosenNest, settingsText, sheetNames, sheetMade, fixable } from '../state.js';
+import { LAYOUT_VERSION, layoutVersionProblem, setHidden, toggleHides, isolate, LoadTracker, nestStatusText, chosenNest, settingsText, sheetNames, sheetMade, fixable, LEVELS, LevelChoice, untilLevel } from '../state.js';
 
 // Whether a promise settled, without waiting for it: 'pending', or
 // ['resolved', value] / ['rejected', message].
@@ -229,4 +230,39 @@ test('open() rejects with the log when the latest build failed, also with no sce
   const second = t.opened();
   t.reported(failed(2, 'v1', 'later failure'));
   assert.deepEqual(await stateOf(second), ['rejected', 'later failure']);
+});
+
+test('a level picked goes with the status requests until the server reports it', () => {
+  assert.deepEqual(LEVELS, ['fine', 'normal']);
+  const levels = new LevelChoice();
+  assert.equal(levels.query('van'), '');
+  assert.equal(levels.reported('van', 'normal'), 'normal');         // the server's, nothing picked
+  levels.pick('van', 'fine');
+  assert.equal(levels.query('van'), '&level=fine');
+  assert.equal(levels.query('shelf'), '', 'per design');
+  assert.equal(levels.reported('van', 'normal'), 'fine', 'shown while on its way');
+  assert.equal(levels.query('van'), '&level=fine');
+  assert.equal(levels.reported('van', 'fine'), 'fine');
+  assert.equal(levels.query('van'), '', 'the server keeps it from then on');
+  assert.equal(levels.reported('van', 'normal'), 'normal', 'another page may pick another one');
+  assert.throws(() => levels.pick('van', 'rough'), /no level "rough"; there are fine, normal/);
+});
+
+test('untilLevel waits for a scene of the level asked', async () => {
+  const t = new LoadTracker();
+  let level = null;
+  const shown = (version, built) => { level = built; t.shown(version); };
+  shown('v1', 'normal');
+  t.reported(ok(1, 'v1'));
+  assert.deepEqual(await stateOf(untilLevel(t, () => level, 'normal')), ['resolved', 'v1']);
+  const fine = untilLevel(t, () => level, 'fine');
+  assert.equal(await stateOf(fine), 'pending');
+  shown('v2', 'normal');           // a build started before the level changed
+  assert.equal(await stateOf(fine), 'pending');
+  shown('v3', 'fine');
+  assert.deepEqual(await stateOf(fine), ['resolved', 'v3']);
+  const back = untilLevel(t, () => level, 'normal');
+  assert.equal(await stateOf(back), 'pending');
+  t.reported(failed(4, 'v3'));
+  assert.deepEqual(await stateOf(back), ['rejected', 'Traceback: boom']);
 });
