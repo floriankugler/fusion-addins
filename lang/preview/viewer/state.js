@@ -1,7 +1,7 @@
 // The preview page's bookkeeping that needs no three.js and no DOM, so that
 // `node --test lang/preview/viewer/tests/` can check it: the layout version
-// the page reads, the hidden parts, and the promises of `preview.loaded()`
-// and `preview.open()`.
+// the page reads, the hidden parts, the level each design is meshed at, and
+// the promises of `preview.loaded()`, `preview.open()` and `preview.level()`.
 
 // The layout file version this page draws (lang/core/layout_types.py
 // LAYOUT_VERSION). A layout of another version is not drawn; the status
@@ -80,6 +80,52 @@ export function fixable(nest, path) {
 export function chosenNest(nests, wanted) {
   if (!nests?.length) return null;
   return nests.find((n) => n.path === wanted) ?? nests[0];
+}
+
+// -- the level ---------------------------------------------------------------
+
+/** The levels the preview meshes at (lang/preview/levels.py), finest first. */
+export const LEVELS = ['fine', 'normal'];
+
+/**
+ * The levels the page asks the server to mesh the designs at. A level
+ * picked for a design goes with its status requests (`query`) until the
+ * server reports it as the design's (`reported`); the server keeps it
+ * from then on, for every page.
+ */
+export class LevelChoice {
+  constructor() {
+    this.picked = new Map();    // design -> the level picked, not reported yet
+  }
+
+  pick(design, level) {
+    if (!LEVELS.includes(level)) throw new Error(`no level ${JSON.stringify(level)}; there are ${LEVELS.join(', ')}`);
+    this.picked.set(design, level);
+  }
+
+  /** What a status request for the design adds to its query: `&level=fine`, or nothing. */
+  query(design) {
+    const level = this.picked.get(design);
+    return level ? `&level=${encodeURIComponent(level)}` : '';
+  }
+
+  /** The level the server reports for the design; returns the one the page shows: a level picked
+   *  and not reported yet, else the server's. */
+  reported(design, level) {
+    if (this.picked.get(design) === level) this.picked.delete(design);
+    return this.picked.get(design) ?? level;
+  }
+}
+
+/**
+ * Resolves with the version on screen once its scene is of the level
+ * named: waits for scenes (`tracker.loaded`) until `levelOf()`, the level
+ * of the scene on screen, is that one. Rejects as `loaded()` does.
+ */
+export async function untilLevel(tracker, levelOf, name) {
+  let version = await tracker.loaded();
+  while (levelOf() !== name) version = await tracker.loaded(version);
+  return version;
 }
 
 // -- hidden parts ----------------------------------------------------------

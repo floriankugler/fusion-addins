@@ -139,10 +139,10 @@ lifts a small part whose vacuum is too weak, and the cutter then grabs and
 destroys it, so the hold must beat the extraction's pull as well as the
 cutting force; what he is unhappy with today is where the tabs are put,
 more than how many. Tested 2026-10-17 [Florian]: strips down to 300 by
-20 mm and discs down to 60 mm across, milled to 0.4 mm above the bed and
-then cut free by one release pass, held, in a board that already had a big
-cutout in it and on a spoilboard that had been in use for a while. Skin and
-release is the strategy (below).
+20 mm and discs down to 60 mm across, milled down to a thin skin and then
+cut free by one release pass of 0.4 mm, held, in a board that already had
+a big cutout in it and on a spoilboard that had been in use for a while.
+Skin and release is the strategy (below).
 
 ### The model as it is
 
@@ -184,14 +184,40 @@ and 12 parts are given up as unholdable. Three faults:
 ### Decided 2026-10-17: skin and release
 
 - **Every contour is roughed to a skin and cut free afterwards.** Inner
-  and outer contours alike are milled down to 0.4 mm above the stock
+  and outer contours alike are milled down to 0.2 mm above the stock
   bottom, and release passes at the end of the setup cut them free
   [decided]. Two operations per cutter [proposed]: a roughing contour with
-  0.4 mm of axial stock to leave, in Fusion's own order, and a release
-  contour from 0.4 mm above the stock bottom through to the breakthrough,
+  0.2 mm of axial stock to leave, in Fusion's own order, and a release
+  contour from 0.2 mm above the stock bottom through to the breakthrough,
+  0.4 mm of cut,
   one pass, `preserveOrder` on. Not one operation with a finishing
   stepdown: with order by depth Fusion would do the roughing in the
   preserved order too, and travel would suffer.
+- **How the two are configured** [proposed, from the 6 mm template's
+  parameters]. Both come from the cutter's existing contour template
+  (`contour_Kontur 6mm`, the `.dc` and `.udc` variants); the plan sets the
+  parameters that differ, as Auto Setup sets a through hole's bottom today,
+  so Florian's templates need no change. Roughing: `topHeight_mode` 'from
+  stock top' as the template has it, `bottomHeight_mode` 'from stock
+  bottom' with `bottomHeight_offset` 0.2 mm (the template says 'from
+  contour', −0.2), `doMultipleDepths` as the template (6.4 mm steps),
+  `tabsPerContour` 0, Fusion's own order. Release: `topHeight_mode` 'from
+  stock bottom' with offset 0.2 mm, `bottomHeight_mode` 'from stock bottom'
+  with offset −0.2 mm (the breakthrough setting), `doMultipleDepths` off,
+  `preserveOrder` on with the chains handed over in the release order, no
+  tabs, the same compensation. Stock bottom rather than the contour's
+  edge, so the measured thickness entered per blank moves both heights and
+  the skin stays 0.2 mm whatever the ply measures. A release template of
+  its own (a tag like `.finish`, say `contour.release_Kontur 6mm`) only if
+  the thin pass should run at another feed or with the downcut cutter; the
+  template's finishing stepdown stays unused.
+- **Inner contours without an island.** An inner contour whose waste the
+  cutter mills away entirely, a region narrower than two cutter diameters
+  (a slot, a narrow notch), leaves nothing to hold or to release: it is cut
+  through in one operation like a pocket, with no release pass and no tabs
+  (Auto Setup tabs such slots today, below). Waste that would survive but
+  is smaller than worth keeping [threshold open] is pocketed away rather
+  than released, so no loose piece flies [proposed].
 - **The order of operations**: by tool, widest first, 8 mm, 6 mm, 1/8",
   2 mm and the V-bit, as Auto Setup orders them today, then the release
   passes at the very end: the 6 mm cutter's and, where a contour is cut
@@ -211,11 +237,24 @@ and 12 parts are given up as unholdable. Three faults:
   loss. Against it stands only the time a released small part lies loose
   under the passing hood, which the experiments survived; the next
   experiment watches it.
-- **Tabs** only for a part that fails even the release pass, whose force is
-  about a tenth of a full stepdown's, and the hood's pull; where they go,
-  by the rules below [proposed]. The model's job becomes the release order
-  and that exception, and its pressure should fall with the kerf area
-  opened before a part's release [proposed].
+- **Tabs: none by default, with a safety net for very small and very
+  skinny parts** [Florian, 2026-10-17: there should still be one, to be
+  sure]. One measurement covers both: a part's footprint eroded by
+  `cam.tab_margin` (6 mm by default) keeps less than `cam.tab_area`
+  (10 cm² by default), and the part gets tabs; a part narrower than twice
+  the margin keeps nothing and always does. The defaults sit below what
+  held: at 6 mm a 300 by 20 strip keeps 23 cm² and a 60 mm disc 18 cm²; a
+  300 by 15 strip keeps 8.6 cm² and a 44 mm disc 8 cm², and those get
+  tabs. The failing-size experiment tightens both numbers; `cam.tabs
+  ("forced")` or `cam.tabs("none")` on a part overrides them [proposed]. A
+  tabbed part keeps at least three tabs, by the rules below, and its tab
+  positions go on both its roughing and its release operation: the
+  roughing stops 0.2 mm above the stock bottom, a tab stands 2 mm tall, so
+  a roughing without the tabs would mill them down to the skin [proposed].
+  The same threshold decides which surviving waste is pocketed away (above).
+  The holding model's job becomes the release order and, once calibrated,
+  this exception, with its pressure falling with the kerf area opened
+  before a part's release [proposed].
 - **Calibration** [found 2026-10-17]: at a leak margin of 12 mm a 20 mm
   strip has no eroded area left, yet it held, so the margin is under 10 mm,
   or the force scaling carries the difference. Open: the failing size.
@@ -245,10 +284,11 @@ and 12 parts are given up as unholdable. Three faults:
    nesting review [decided 2026-10-16, `design/nesting.md`]: 13 to 19 mm of
    web holds nothing either. Skin and release holds a small part by its own
    vacuum; what fails even with tabs is reported.
-4. **Loose waste.** The waste inside a through cutout is a piece too; the
-   examples have five of 3 to 36 cm², which the cutter can throw. It is
-   released like a part, in the release order; tabs where it fails, as for
-   a part, since the plan has the same model for it [proposed].
+4. **Loose waste.** The waste inside a through cutout that survives the
+   cut is a piece too; the examples have five of 3 to 36 cm², which the
+   cutter can throw. Above the threshold it is released like a part, in the
+   release order, tabs where it fails, since the plan has the same model for
+   it; below it, pocketed away (above) [proposed].
 
 ### Prior art
 
@@ -321,3 +361,9 @@ must do better [Florian]; the causes and the ways out are Claude's
   marked as such in the layout too, with the tool `dogbones(tool=)` drew
   them for: today a `dogbones()` relief is a cut or pocket named
   `<operation>_dogbones` and a joint's reliefs are part of its cuts.
+- **Tabs on a slot.** With tabs on inner contours, Auto Setup tabs a slot
+  or a narrow cutout too, though the cutter mills its waste away entirely
+  and nothing is left to hold; the tabs are ridges at the slot's bottom to
+  clean off [Florian, 2026-10-17]. The plan tabs or releases an inner
+  contour only when its waste survives the cut: the region inside it shrunk
+  by the cutter's diameter is not empty (Holding, above).

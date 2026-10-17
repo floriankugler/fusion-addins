@@ -111,7 +111,15 @@ def layout_hash(layout: Layout) -> str:
 
 
 def write_layout(path: str | Path) -> Layout:
+    """Builds the layout and writes it as compact JSON (half the size of an
+    indented one, for the page and the server to fetch and parse on every
+    build)."""
     layout = build_layout()
     Path(path).parent.mkdir(parents=True, exist_ok=True)
-    Path(path).write_text(json.dumps(layout, indent=1))
+    Path(path).write_text(layout_json(layout))
     return layout
+
+
+def layout_json(layout: Layout) -> str:
+    """The layout as the files have it: compact JSON."""
+    return json.dumps(layout, separators=(",", ":"))
