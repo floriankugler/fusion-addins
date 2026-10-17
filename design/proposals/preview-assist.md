@@ -3,7 +3,9 @@
 Status: proposed by Claude on 2026-10-17 as a brainstorm and gone through
 with Florian the same day, item by item; every item below was taken, with
 his rules for the clicks, the selection and the glow worked in [Florian,
-2026-10-17]. Built: Lines in the layout (2026-10-17); the rest not yet.
+2026-10-17]. Built: Lines in the layout, The selection panel, Click to
+select, click to copy, and Snippets to copy (2026-10-17, each says what of
+it is left); the rest not yet.
 The preview as it is: `design/preview.md`; how to drive it from code:
 AGENTS.md.
 
@@ -62,6 +64,15 @@ where each thing was written.
 
 ## The selection panel
 
+Built 2026-10-17 (`lang/preview/viewer/refs.js` with node tests, the page's
+panel; `design/preview.md`, The viewer), but for operations, which wait for
+Operations clicked, and the parts tree listing faces and edges under their
+part. Choices made in building it [Claude, unreviewed]: a scope has no box
+in the layout, so its size is its parts' and bought parts' bounds and its
+line its module's; a bought part has no material in the layout, so none is
+shown; sizes are in the frame of the part's scope, read from its `faces`
+(a bought part's and a module's from the module's first part).
+
 What is selected is the panel's subject: one item or several, each with
 what it is, what it belongs to and its numbers, and under them the code one
 might write about them next. A second click, on any line of the panel,
@@ -90,6 +101,17 @@ copies it: select in the scene, copy from the panel [decided by Florian,
   item's world point and line.
 
 ## Click to select, click to copy
+
+Built 2026-10-17 (`pick` in `refs.js`), but for edges made by operations
+and the master's ghosts. Choices made in building it [Claude, unreviewed]:
+the tolerance is 6 px measured as the distance shows on the screen (a
+distance seen at a slant counts shortened), the nearer edge first in a
+corner's spelling; a hit on no face of the part's box (in a notch, a
+pocket, a hole, on a slanted face) selects the part, with its point; the
+spelling with `inner`/`outer` comes first, then the one with directions
+only; a shift-click on what is selected takes it back; `preview.select()`
+reads the spellings back (`'kitchen.left.inner.front(37).bottom(120)'`,
+`'.center'`), a spelling for an anchor with offsets making a point item.
 
 Two clicks [decided by Florian, 2026-10-17, replacing the copy-on-click
 rules of the same morning]: a click in the scene selects what is under the
@@ -133,6 +155,19 @@ click, which today copies the part's path.
   page where the clipboard is out of reach.
 
 ## Snippets to copy
+
+Built 2026-10-17 (`snippets` in `refs.js`), but for operations' snippets.
+Choices made in building it [Claude, unreviewed]: the values to adjust are
+15 (`into(15)`, `gap(15)`, an edge's `front(15)`, a corner's
+`front(15).bottom(15)`) and 100 for a distance from either of two faces,
+which is `gap()` or `into()` as moving the face toward the other needs;
+`between()` is written as the method, `.between(a, b)`; the distance is the
+higher position less the lower; the `center(pos)` form centres on the other
+nearest edge's plane moved in, `left.bottom.position + 120`; a point named
+past its face's edges is taken on them; the point's lines also offer the
+nearest corner; three items or more, and two that relate in none of
+these ways, get each one's names; the distances of two anchors, and of an
+anchor from a face, copy as the number alone.
 
 Under the items, the code one might write about them next: each a line
 copied by a click on it, with variants where a choice is natural, so the text is

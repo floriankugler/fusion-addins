@@ -94,16 +94,17 @@ for a check, too slow for the loop. [decided as a need]
   those above it, so it shows and earlier opens do not pile up; a caret
   click opens or closes a group by hand (with alt the ones below it) until
   the next selection, and a deselection (`esc`) leaves the tree as it is
-  (`TreeOpen` in `state.js`, with node tests); click to select, hide and
-  isolate, display modes, a capped section plane, a floor
+  (`TreeOpen` in `state.js`, with node tests); click to select (below),
+  hide and isolate, display modes, a capped section plane, a floor
   grid, the master's ghost boxes and contour lines (`m`), hardware on or off
   (`w`), labels with the parts' names (`n`) and their faces' names (`d`) as
   the build file writes them (a cabinet's own front and left, inner and outer
   where they resolve; the layout carries them per part as `faces`). Colors by
   material from a fixed palette. The layout's problems are listed as text; a
-  selected part's info gives its grain and its settings, one line each with
-  the node that set it (`material birch 15: kitchen`; the layout's
-  `settings`, `design/api.md`, Settings). Proposed and not built: the grain as
+  selected part's item in the selection panel gives its grain and its
+  settings, one line each with the node that set it (`material birch 15:
+  kitchen`; the layout's `settings`, `design/api.md`, Settings). Proposed
+  and not built: the grain as
   a stripe on each board, and check results drawn in the scene (interference
   pairs, sheet fit); both, with what else the preview could do for writing
   build files, in `design/proposals/preview-assist.md`.
@@ -118,8 +119,9 @@ for a check, too slow for the loop. [decided as a need]
   resolves once its scene is on screen.
 - Camera and visibility from code: the page exposes `window.preview`
   (`look`, `view`, `camera`, `fit`, `isolate`, `show`, `hide`, `select`,
-  `section`, `labels`, `hardware`, `level`, `parts`, `ops`, `openEditor`,
-  `loaded`, `open`, `designs`, `design`, `version`), so a tool driving the browser frames a
+  `selection`, `snippets`, `name`, `copied`, `section`, `labels`,
+  `hardware`, `level`, `parts`, `ops`, `openEditor`, `loaded`, `open`,
+  `designs`, `design`, `version`), so a tool driving the browser frames a
   part, a scope or a named operation from a named direction in one call
   instead of steering the mouse. The camera is kept in the URL hash, so a
   link or a reload shows the same view.
@@ -136,9 +138,9 @@ for a check, too slow for the loop. [decided as a need]
   (`lang/core/where.py`: the innermost frame outside `lang/` and `lib/`),
   so a board `carcass()` makes points at the build file's `carcass(...)`
   line, the operations a join makes in both boards at the join's line, and
-  a loop's boards share one. The selection's info shows the selected
-  part's or bought part's line as a link; it and the key `o` ask the server
-  to open the editor there (`POST /open`, Serving a folder), and every
+  a loop's boards share one. The selection panel shows each item's line,
+  and the lines of what it belongs to, as links; they and the key `o` (the
+  first item's) ask the server to open the editor there (`POST /open`, Serving a folder), and every
   `file.py:line` in the build log in the status box is such a link
   (`logPieces` in `state.js`, with node tests). From code, `preview.parts()`
   and `preview.ops(path)` carry `where`, and `await
@@ -150,8 +152,66 @@ for a check, too slow for the loop. [decided as a need]
   lang.build examples/van.py` 1.04 s before and after with the scene from
   the mesh cache, 0.71 s without the scene (`--no-scene`; medians of 7
   runs each, the two trees built in turn).
-- Click-to-path in the viewer is the Copy Path helper outside Fusion
-  (faces, edges and anchors proposed in `design/proposals/preview-assist.md`).
+- Click to select, click to copy (`design/proposals/preview-assist.md`,
+  The selection panel, Click to select, click to copy, Snippets to copy,
+  built 2026-10-17): the Copy Path helper outside Fusion. A click in the
+  scene selects the finest thing under the pointer and copies nothing
+  [Florian: two clicks for every reference]: on a board or slat a corner
+  where two of the hit face's box edges lie within 6 screen pixels of the
+  click (a distance seen at a slant counted as it shows), else an edge
+  within them, else the face, the face named by the hit's normal against
+  the part's box and its `faces`; the click's point is kept, on the face. A
+  hit on no face of the part's box (in a notch, a pocket, a hole) selects
+  the part, a click on a bought part its body. Shift-click adds to the
+  selection or takes back what is selected; `h` and `i` act on every part
+  it covers, `esc` clears it, `o` opens the first item's line, the parts
+  tree opens to the first item's part, and alt-click in the parts list
+  selects a part, or a group's scope or module (with shift adds it). The
+  selection is drawn over the parts: a face tinted, an edge as a bold line,
+  a corner or a point as a dot, the click's point on a face as a small blue
+  dot. The selection panel lists each item: what it is (board, slat,
+  hardware, module, scope, face, edge, corner, point), its spellings as the
+  build file writes them (`kitchen.left.inner`, `kitchen.left.right`:
+  `inner` or `outer` where they resolve first, then the directions in the
+  scope's frame), for a face clicked the whole-mm distances of the click
+  from the two nearest edges, its material, its size in its scope's frame
+  as width, depth and height (a face's two, an edge's length), its line (a
+  link to the editor), a board's operations, grain, settings and plan, and
+  what it belongs to, nearest first (a face's board, a body's bought part,
+  the scopes and the module, each with its path, material, size and line).
+  Under the items are the snippets for the selection (a face moved,
+  `.into(15)`, `.gap(15)`, `.center`, `.position`, and the point clicked
+  as anchors, `kitchen.left.inner.front(37).bottom(120)` with the variants
+  from the other edges, the nearest corner and `center(pos)`; an edge's
+  `front(15)` and corners; a corner's offsets; two parallel faces'
+  distance, midpoint, distances from either side and `.between()`, or that
+  they are not parallel; two parts' `.between()` and gaps per extent with
+  the faces bounding them; two edges of one face their corner; two anchors'
+  distances; a face's distance from an anchor). A click on any line of the
+  panel copies it and says so on the line and under the panel; where the
+  clipboard is out of reach (a page driven from code) `preview.copied` has
+  it. The geometry and the text are `refs.js` (`pick`, `parseRef`,
+  `describe`, `snippets`, `nameAt`), plain data in and out, with node tests:
+  boards in each orientation, a mirrored module, both spellings, the
+  tolerance, references read back from their spellings, the panel's items
+  and every snippet. A click costs one raycast and a pick of constant work;
+  the panel is built from the layout once per selection (0.8 ms for a
+  selection of two on the van, 42 parts). From code:
+  `preview.select(refs, {add})` takes spellings (a part's, scope's,
+  module's or bought part's path, or `'kitchen.left.inner'`,
+  `'kitchen.left.inner.front'`, `'kitchen.left.inner.front.bottom'`,
+  `'kitchen.left.inner.front(37).bottom(120)'`, `'kitchen.left.inner.center'`),
+  references or items as `preview.selection()` gives them, a list of them
+  or null, and returns the selection; `preview.selection()` gives the items
+  as data (`kind`, `path`, `spellings`, `material`, `size`, `where`,
+  `point` in world mm, `offsets`, `parents`, `ref`); `preview.snippets()`
+  the snippets (`{text, label, note}`, `text` null for a note);
+  `preview.name(point, path?)` names a world point on a part (its face, the
+  nearest edge with its distance, the nearest corner, the anchor with
+  whole-mm offsets, `off` for a point off the face's plane); and
+  `preview.copied` is the text last copied. Not yet: operations as items,
+  edges made by operations, the master's ghosts, faces and edges listed in
+  the parts tree.
 - The nest view (button or key `k`, `preview.nest(on)` from code) shows a
   nest of the design as the nest step drew it (`nest.svg` in the nest's
   folder beside the build, `<module>/<nest>/`, see `design/nesting.md`):
