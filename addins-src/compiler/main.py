@@ -5,7 +5,11 @@ Two commands so far:
 - Compile: pick a layout file written by `lang.build` and draw it into a
   new direct-modeling document with `lang.emit`; or a nest file written by
   `lang.nesting` (`nest.json`) and draw each material's nest into a document
-  of its own (`lang.emit.nested`).
+  of its own (`lang.emit.nested`); or a CAM plan written by `lang.cam`
+  (`cam.json`) and draw the nest beside it the same way, then build each
+  blank's setup in its material's document (`lang.emit.cam`). A nest file
+  is drawn without setups even where a plan lies beside it: the plan is
+  what is picked to get them.
 - Snapshot: read the active document, the master, into a snapshot file
   for build files (`lang.emit.snapshot`).
 
@@ -80,13 +84,14 @@ class Compiler(addin.Addin):
 
     @property
     def plugin_desc(self) -> str:
-        return "Draws a layout or nest file of the modeling language into new documents."
+        return "Draws a layout, nest or CAM plan file of the modeling language into new documents."
 
     @property
     def plugin_tooltip(self) -> str:
         return ("Pick a layout.json written by the modeling language's build step and "
-                "draw its parts into a new direct-modeling document, or a nest.json written by "
-                "its nest step and draw each material's sheets, blanks and parts into a document.")
+                "draw its parts into a new direct-modeling document, a nest.json written by "
+                "its nest step and draw each material's sheets, blanks and parts into a document, "
+                "or a cam.json written by its CAM step and draw its nest with a setup per blank.")
 
     @property
     def has_command_ui(self) -> bool:
@@ -117,23 +122,31 @@ class Compiler(addin.Addin):
         global _last_dir
         dialog = self.ui.createFileDialog()
         dialog.title = "Compile layout"
-        dialog.filter = "Layout and nest files (*.json);;All files (*.*)"
+        dialog.filter = "Layout, nest and CAM plan files (*.json);;All files (*.*)"
         dialog.isMultiSelectEnabled = False
         dialog.initialDirectory = _last_dir or os.path.join(REPO_DIR, "out")
         if dialog.showOpen() != adsk.core.DialogResults.DialogOK:
             return
         path = dialog.filename
         _last_dir = os.path.dirname(path)
-        emit = load_emit_module("fusion")
-        with open(path) as fh:
-            is_nest = "materials" in json.load(fh)
-        if is_nest:
-            reports = emit.emit_nest_file(path, log=lambda line: None)
-            summary = "\n\n".join(r.summary() for r in reports)
-        else:
-            summary = emit.emit_file(path, log=lambda line: None).summary()
+        summary = compile_file(path)
         self.app.activeViewport.fit()
         self.ui.messageBox(summary, "Compile layout")
+
+
+def compile_file(path: str) -> str:
+    """Draws a layout, nest or CAM plan file (by what it holds) into new
+    documents; the summary to show."""
+    with open(path, encoding="utf-8") as fh:
+        data = json.load(fh)
+    if "setups" in data and "nest_written" in data:
+        cam = load_emit_module("cam")
+        results = cam.emit_cam_file(path, REPO_DIR, log=lambda line: None)
+        return "\n\n".join(f"{nest.summary()}\n{report.summary()}" for nest, report in results)
+    emit = load_emit_module("fusion")
+    if "materials" in data:
+        return "\n\n".join(r.summary() for r in emit.emit_nest_file(path, log=lambda line: None))
+    return emit.emit_file(path, log=lambda line: None).summary()
 
 
 class Snapshot(addin.Addin):
