@@ -665,3 +665,18 @@ def test_a_counterbore_over_a_through_slot_is_one_pocket():
     templates = {r["name"]: op["template"] for op in _ops(setup, "pocket") for f in op["features"] for r in f["ops"]
                  if r["name"]}
     assert templates["head"] == "pocket.dc_Tasche 6mm"
+
+
+def test_the_opening_test_answers_alike_however_a_ring_is_written():
+    """One pocket's region, a round pocket clipped by the board's edge and a
+    hole, written clockwise and counter-clockwise, left 5.3 and 13.5 mm²
+    of it to the 6 mm cutter, so the plan and its check disagreed: the
+    region is normalized first [found by fuzzing, 2026-10-17]."""
+    from shapely.geometry.polygon import orient
+    ring = json.loads((Path(__file__).parent / "data" / "cam_pocket_ring.json").read_text())
+    region = Polygon(ring)
+    left = [round(p.area, 3) for p in unreached(region, 3.0)]
+    assert left == [round(p.area, 3) for p in unreached(orient(region, 1.0), 3.0)] == \
+        [round(p.area, 3) for p in unreached(orient(region, -1.0), 3.0)]
+    turned = ring[50:] + ring[:50]
+    assert [round(p.area, 3) for p in unreached(Polygon(turned), 3.0)] == left

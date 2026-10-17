@@ -272,6 +272,9 @@ def unreached(region: BaseGeometry, radius: float, excused: BaseGeometry | None 
         return []
     if not region.is_valid:
         region = make_valid(region)
+    # (normalized: the buffers and the arcs read off the rings answered otherwise for one polygon
+    # written from another start or the other way round [found by fuzzing, 2026-10-17])
+    region = normalize(region)
     r = radius + clearance / 2 - SLACK - (LENIENT if lenient else 0.0)
     wider = 2 * LENIENT if lenient else 0.0
     inner = region.buffer(-r, quad_segs=QUAD)
@@ -317,7 +320,7 @@ def _is_fillet(piece: Polygon, corner: Point2, angle: float, r: float, wider: fl
 
 def gets_in(region: BaseGeometry, radius: float, clearance: float = TOOL_CLEARANCE) -> bool:
     """Whether a cutter of `radius` gets into the region at all."""
-    return not region.buffer(-(radius + clearance / 2 - SLACK), quad_segs=QUAD).is_empty
+    return not normalize(region).buffer(-(radius + clearance / 2 - SLACK), quad_segs=QUAD).is_empty
 
 
 # -- holding --------------------------------------------------------------------------------------
