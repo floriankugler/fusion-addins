@@ -78,3 +78,60 @@ def test_an_error_in_a_lazy_body_names_the_bodys_line(tmp_path: Path, capsys: py
     assert lines[0].startswith("error: the chamfer of shelf.panel reads chamfer_size, which has no default")
     assert lines[1].endswith("lazy.py:5: panel.chamfer(panel.top.front)")
     assert len(lines) == 2
+
+
+def _lazy_error(tmp_path: Path, capsys: pytest.CaptureFixture[str], text: str) -> list[str]:
+    (tmp_path / "lazy.py").write_text(text)
+    assert main([str(tmp_path / "lazy.py"), "--out", str(tmp_path / "out"), "--no-scene"]) == 1
+    return capsys.readouterr().err.splitlines()
+
+
+def test_a_board_without_material_found_at_the_layout_names_its_line(tmp_path: Path,
+                                                                     capsys: pytest.CaptureFixture[str]):
+    """A board resolves lazily, so a material missing along its chain is
+    found at the layout, where no line of the build file is on the stack:
+    the error starts with the board's line, a loop's line for its boards."""
+    lines = _lazy_error(tmp_path, capsys,
+                        "from lang import *\n"
+                        "with module('floor', Box.from_size(width=1000, depth=600, height=100)) as floor:\n"
+                        "    for i in range(3):\n"
+                        "        board(f'batten{i}').on(floor.bottom).between(floor.left.into(100 * i),\n"
+                        "                                                     floor.left.into(100 * i + 40))\n")
+    assert lines[0].startswith("error: ") and lines[0].endswith(
+        "lazy.py:4: floor.batten0 reads material, which has no default and is set nowhere above it; "
+        "board(name, material) gives a board its own, or use(material(...)) in a scope above sets it for "
+        "everything in it.")
+    assert len(lines) == 1
+
+
+def test_a_board_found_wrong_on_its_own_line_names_it_once(tmp_path: Path, capsys: pytest.CaptureFixture[str]):
+    """Where the board is found wrong on the line that made it, that line
+    is the message's and not repeated below it; found on a later line, the
+    message names the board's line and the stack the later one."""
+    lines = _lazy_error(tmp_path, capsys,
+                        "from lang import *\n"
+                        "with module('m', Box.from_size(width=400, depth=300, height=100)) as m:\n"
+                        "    board('shelf').on(m.bottom).hole(5, depth=through)\n")
+    assert lines[0].startswith("error: ") and "lazy.py:3: m.shelf reads material" in lines[0]
+    assert len(lines) == 1
+    lines = _lazy_error(tmp_path, capsys,
+                        "from lang import *\n"
+                        "with module('m', Box.from_size(width=400, depth=300, height=100)) as m:\n"
+                        "    shelf = board('shelf', sheet_material('birch', t=15))\n"
+                        "    shelf.hole(5, depth=through)\n")
+    assert lines[0].startswith("error: ") and lines[0].endswith("lazy.py:3: m.shelf: no placement: give on() or "
+                                                                 "center().")
+    assert lines[1].endswith("lazy.py:4: shelf.hole(5, depth=through)") and len(lines) == 2
+
+
+def test_an_inherited_grain_along_the_thickness_names_the_boards_line(tmp_path: Path,
+                                                                      capsys: pytest.CaptureFixture[str]):
+    lines = _lazy_error(tmp_path, capsys,
+                        "from lang import *\n"
+                        "use(grain('height'))\n"
+                        "with module('m', Box.from_size(width=400, depth=300, height=100)) as m:\n"
+                        "    board('bottom', sheet_material('birch', t=15)).on(m.bottom)\n")
+    assert lines[0].startswith("error: ") and lines[0].endswith(
+        "lazy.py:4: m.bottom: grain z from root is the thickness axis of this board; give it a grain() of its "
+        "own.")
+    assert len(lines) == 1

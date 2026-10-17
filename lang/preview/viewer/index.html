@@ -15,6 +15,7 @@
   h2 { font-size: 12px; margin: 14px 0 6px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
   #status { color: var(--muted); margin-bottom: 10px; white-space: pre-wrap; max-height: 16em; overflow: auto; }
   #status.error { color: var(--accent); }
+  #status a, #selected a { color: inherit; text-decoration: underline dotted; cursor: pointer; }
   #selected { font-family: ui-monospace, Menlo, monospace; font-size: 12px; margin: 8px 0 12px;
     padding: 8px; background: #f7f5f0; border-radius: 4px; min-height: 2.6em; white-space: pre-wrap; }
   ul { list-style: none; padding: 0; margin: 0; }
@@ -107,6 +108,7 @@
   <div class="row"><label for="design">design</label><select id="design" style="flex:1;min-width:0"></select></div>
   <div id="status">loading…</div>
   <div id="selected">click a part for its path</div>
+  <div id="openLog" class="keys"></div>
 
   <h2>Nest</h2>
   <div class="row"><label for="nestPick">nest</label><select id="nestPick" style="flex:1;min-width:0" disabled></select></div>
@@ -176,6 +178,7 @@
     <div><span>fit view</span><kbd>f</kbd></div>
     <div><span>hide / show selected</span><kbd>h</kbd></div>
     <div><span>isolate selected / show all</span><kbd>i</kbd></div>
+    <div><span>open the selected part's line in the editor</span><kbd>o</kbd></div>
     <div><span>show all</span><kbd>a</kbd></div>
     <div><span>display mode</span><kbd>e</kbd></div>
     <div><span>floor grid on / off</span><kbd>g</kbd></div>
@@ -204,7 +207,7 @@ import { LineGeometry } from 'three/addons/lines/LineGeometry.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { attachSpaceMouse } from './spacemouse.js';
 import { AXIS, ISO, UP, share, disposeTree, clearGroup } from './scene-utils.js';
-import { layoutVersionProblem, setHidden as markHidden, toggleHides, isolate as isolatePaths, LoadTracker, nestStatusText, chosenNest, settingsText, sheetNames, sheetMade, fixable, LevelChoice, untilLevel } from './state.js';
+import { layoutVersionProblem, splitWhere, logPieces, setHidden as markHidden, toggleHides, isolate as isolatePaths, LoadTracker, nestStatusText, chosenNest, settingsText, sheetNames, sheetMade, fixable, LevelChoice, untilLevel } from './state.js';
 import { planVersionProblem, planStatusText, toolColors, setupLabel, legend, chosenOperation, releaseRanks, releaseList, holdText, partText, releaseColors, setupOverlay, planNotes } from './cam.js';
 
 const $ = (id) => document.getElementById(id);
@@ -913,23 +916,88 @@ function select(path) {
   if (path) navigator.clipboard?.writeText(path).catch(() => {});
 }
 
+// The selected part's path, its line in the build file (a link that opens
+// the editor there, as `o` does), its material, size, settings and plan.
 function showSelected() {
   const sel = $('selected');
   if (!selectedPath || !layout) { sel.textContent = 'click a part for its path'; return; }
   const part = layout.modules.flatMap((m) => m.parts).find((p) => p.path === selectedPath);
+  const where = part || hardwareItem(selectedPath) ? whereOf(selectedPath) : '';
+  const line = where ? ['\n', lineLink(where)] : [];
   if (!part) {
     const bought = hardwareBodies().some((h) => h.path === selectedPath);
-    sel.textContent = selectedPath + (bought ? '\nhardware' : ' (gone after rebuild)') +
-      (bought && hidden.has(selectedPath) ? ', hidden' : '');
+    sel.replaceChildren(selectedPath + (bought ? '' : ' (gone after rebuild)'), ...line,
+      (bought ? '\nhardware' : '') + (bought && hidden.has(selectedPath) ? ', hidden' : ''));
     return;
   }
   const b = part.box;
-  sel.textContent = selectedPath + '\n' + part.material + ', ' +
+  sel.replaceChildren(selectedPath, ...line, '\n' + part.material + ', ' +
     `${(b.max[0]-b.min[0]).toFixed(0)} x ${(b.max[1]-b.min[1]).toFixed(0)} x ${(b.max[2]-b.min[2]).toFixed(0)} mm\n` +
     part.ops.length + ' ops' + (part.grain ? ', grain ' + part.grain : '') +
     (hidden.has(selectedPath) ? ', hidden' : '') +
     (Object.keys(part.settings ?? {}).length ? '\n' + settingsText(part.settings) : '') +
-    camPartLine(selectedPath);
+    camPartLine(selectedPath));
+}
+
+// -- lines of the build file: the editor opened there ------------------------
+//
+// The layout names the build file's line of every part, module, hardware
+// item and operation (`where`, `examples/van.py:45`). The server opens the
+// editor there (POST /open, the command its --editor gives).
+
+// The hardware item a path names, itself or one of its bodies.
+function hardwareItem(path) {
+  return (layout?.modules ?? []).flatMap((m) => m.hardware ?? [])
+    .find((item) => path === item.path || path.startsWith(item.path + '.'));
+}
+
+// The line of a part, a hardware item or body, or an operation ('kitchen.left#toekick'); '' for none.
+function whereOf(path) {
+  const [partPath, opName] = String(path).split('#');
+  const part = partOf(partPath);
+  if (part && opName !== undefined) {
+    const found = opsOf(part).find((o) => o.name === opName);
+    if (!found) throw new Error(`${partPath} has no operation ${opName}`);
+    return found.op.where ?? '';
+  }
+  if (part) return part.where ?? '';
+  const item = hardwareItem(path);
+  if (!item) throw new Error(`no part or hardware ${path}`);
+  return item.where ?? '';
+}
+
+// A link to a line that opens the editor there.
+function lineLink(where, text = where) {
+  const a = document.createElement('a');
+  a.href = '#';
+  a.textContent = text;
+  a.title = 'open in the editor';
+  a.onclick = (e) => { e.preventDefault(); openEditor(where); };
+  return a;
+}
+
+// Asks the server to open the editor at a line; resolves with {ok, text}, its answer, which the panel
+// shows when it failed.
+async function openEditor(where) {
+  const at = splitWhere(where);
+  let ok = false, text = where ? `no line in ${JSON.stringify(where)}` : 'no line to open';
+  if (at) {
+    try {
+      const answer = await fetch(`/open?file=${encodeURIComponent(at.file)}&line=${at.line}`, { method: 'POST' });
+      ok = answer.ok;
+      text = await answer.text();
+    } catch (e) { text = `the server did not answer: ${e.message}`; }
+  }
+  $('openLog').textContent = ok ? '' : text;
+  return { ok, text };
+}
+
+// The build log in the status box, every file's line in it a link.
+function showLog(el, text) {
+  el.replaceChildren(...logPieces(text).flatMap((pieces, i) => [
+    ...(i ? ['\n'] : []),
+    ...pieces.map((piece) => (piece.file ? lineLink(`${piece.file}:${piece.line}`, piece.text) : piece.text)),
+  ]));
 }
 
 // -- the parts list: a tree by path (module, scope, part) -----------------------
@@ -937,11 +1005,12 @@ function showSelected() {
 // Every body of a bought part, by path, as the scene names it.
 function hardwareBodies() {
   return (layout?.modules ?? []).flatMap((m) => (m.hardware ?? []).flatMap((item) =>
-    item.bodies.map((body) => ({ path: `${item.path}.${body.name}`, label: 'hardware' }))));
+    item.bodies.map((body) => ({ path: `${item.path}.${body.name}`, label: 'hardware', where: item.where ?? '' }))));
 }
 
 function listItems() {
-  const parts = (layout?.modules ?? []).flatMap((m) => m.parts.map((p) => ({ path: p.path, label: p.material })));
+  const parts = (layout?.modules ?? []).flatMap((m) => m.parts.map((p) => ({ path: p.path, label: p.material,
+    where: p.where ?? '' })));
   return [...parts, ...hardwareBodies()];
 }
 
@@ -1136,6 +1205,7 @@ window.addEventListener('keydown', (e) => {
     case 'f': fit(); break;
     case 'h': if (selectedPath) toggleHidden([selectedPath]); break;
     case 'i': if (selectedPath) isolate([selectedPath], true); break;
+    case 'o': if (selectedPath && (partOf(selectedPath) || hardwareItem(selectedPath))) openEditor(whereOf(selectedPath)); break;
     case 'a': showAll(); break;
     case 'e': setMode(modes[(modes.indexOf(mode) + 1) % modes.length]); break;
     case 'g': setGrid(!grid.visible); break;
@@ -1434,14 +1504,19 @@ window.preview = {
   hardware: (on) => { if (on !== undefined) setHardware(on); draw(); return hardwareOn; },
   /** Part names and face names on or off: labels({names: true, faces: true}); returns both. */
   labels: (state) => { if (state) setLabels(state); draw(); return { ...labelShow }; },
-  /** Every part and bought body: [{path, label}]. */
+  /** Every part and bought body, with the build file's line that made it: [{path, label, where}]. */
   parts: () => listItems(),
-  /** A part's operations, with the world point look() aims at: [{name, kind, at}]. */
+  /** A part's operations, with the world point look() aims at and the line that made each:
+   *  [{name, kind, at, where}]. */
   ops: (path) => { const part = partOf(path); if (!part) throw new Error(`no part ${path}`);
     return opsOf(part).map(({ name, kind, op }) => {
       let at = null; try { at = opPoint(part, op); } catch (e) {}
-      return { name, kind, at };
+      return { name, kind, at, where: op.where ?? '' };
     }); },
+  /** Opens the editor (the server's --editor) at the line of a part, a hardware item or body, an operation
+   *  ('kitchen.left#toekick'), or at a line itself ('examples/van.py:45'), as `o` does; resolves with
+   *  {ok, text}, the server's answer. */
+  openEditor: (at) => openEditor(splitWhere(at) ? at : whereOf(at)),
   /** The version of the build on screen (the server's version.txt), null when none is. */
   get version() { return tracker.version; },
   /** Resolves with the version once the shown design's scene is on screen, or one other than `after`.
@@ -1561,7 +1636,7 @@ async function update(d) {
     }
     if (design !== d.name) return;
     buildLog = text;
-    status.textContent = text;
+    showLog(status, text);
     status.className = d.state === 'failed' ? 'error' : '';
   }
   if (d.version && d.version !== version) {

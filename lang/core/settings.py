@@ -23,25 +23,17 @@ operations theirs and defines the core's keys.
 """
 from __future__ import annotations
 
-import linecache
-import sys
 from collections.abc import Callable
 from dataclasses import dataclass
-from functools import cache
-from pathlib import Path
 from types import EllipsisType
 from typing import Any, Generic, TypeVar, cast
 
 from .directions import Frame
 from .errors import LangError
 from .layout_types import JsonValue, SettingLayout
+from .where import build_line
 
 T = TypeVar("T")
-
-_LANG = Path(__file__).resolve().parents[1]
-#: Code that is not the build's own, skipped when a line is named: the
-#: language, the shared lib, Python and its packages.
-_NOT_BUILD = (_LANG, _LANG.parent / "lib", Path(sys.prefix).resolve(), Path(sys.base_prefix).resolve())
 
 
 class Setting(Generic[T]):
@@ -288,30 +280,3 @@ def is_json(value: object) -> bool:
         return all(isinstance(k, str) and is_json(v) for k, v in items.items())
     return False
 
-
-def build_line() -> str:
-    """The line of the build file that led here, `path:line: code`: the
-    innermost frame outside the language, else "?"."""
-    frame = sys._getframe(1)    # pyright: ignore[reportPrivateUsage] - a cheap walk, since every read names its line
-    while frame is not None:
-        name = frame.f_code.co_filename
-        if not _is_language(name):
-            code = linecache.getline(name, frame.f_lineno).strip()
-            return f"{_shown(name)}:{frame.f_lineno}: {code}" if code else f"{_shown(name)}:{frame.f_lineno}"
-        frame = frame.f_back
-    return "?"
-
-
-@cache
-def _is_language(filename: str) -> bool:
-    if filename.startswith("<"):        # <frozen runpy>, <string>
-        return True
-    path = Path(filename).resolve()
-    return any(path.is_relative_to(d) for d in _NOT_BUILD)
-
-
-@cache
-def _shown(filename: str) -> str:
-    path = Path(filename).resolve()
-    cwd = Path.cwd()
-    return str(path.relative_to(cwd)) if path.is_relative_to(cwd) else str(path)

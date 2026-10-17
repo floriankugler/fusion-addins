@@ -1,12 +1,13 @@
 // The preview page's bookkeeping that needs no three.js and no DOM, so that
 // `node --test lang/preview/viewer/tests/` can check it: the layout version
-// the page reads, the hidden parts, the level each design is meshed at, and
-// the promises of `preview.loaded()`, `preview.open()` and `preview.level()`.
+// the page reads, the build file's lines it links to the editor, the hidden
+// parts, the level each design is meshed at, and the promises of
+// `preview.loaded()`, `preview.open()` and `preview.level()`.
 
 // The layout file version this page draws (lang/core/layout_types.py
 // LAYOUT_VERSION). A layout of another version is not drawn; the status
 // line says so.
-export const LAYOUT_VERSION = 9;
+export const LAYOUT_VERSION = 10;
 
 /**
  * A part's settings (the layout's `settings`, lang/core/settings.py) as the
@@ -23,6 +24,36 @@ export function layoutVersionProblem(layout) {
   const version = layout?.version;
   if (version === LAYOUT_VERSION) return null;
   return `layout version ${version ?? 'missing'}, this viewer reads ${LAYOUT_VERSION}`;
+}
+
+// -- lines of the build file ------------------------------------------------
+
+/** A line as the layout names it (`where`, `examples/van.py:45`) as its
+ * file and line number; null for none ("", or no number). */
+export function splitWhere(where) {
+  const found = /^(.+):(\d+)$/.exec(where ?? '');
+  return found ? { file: found[1], line: Number(found[2]) } : null;
+}
+
+// A Python file's line in a log: `examples/van.py:45`, a whole path too; no
+// spaces, colons or quotes in the path.
+const FILE_LINE = /([^\s:'"()]+\.py):(\d+)/g;
+
+/** The build log as the status box shows it: per line of the text, its
+ * pieces, each `{text}` or, for a file's line in it, `{text, file, line}`,
+ * which the page makes a link that opens the editor there. */
+export function logPieces(text) {
+  return (text ?? '').split('\n').map((row) => {
+    const pieces = [];
+    let at = 0;
+    for (const found of row.matchAll(FILE_LINE)) {
+      if (found.index > at) pieces.push({ text: row.slice(at, found.index) });
+      pieces.push({ text: found[0], file: found[1], line: Number(found[2]) });
+      at = found.index + found[0].length;
+    }
+    if (at < row.length || !pieces.length) pieces.push({ text: row.slice(at) });
+    return pieces;
+  });
 }
 
 // -- the nest ---------------------------------------------------------------

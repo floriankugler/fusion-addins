@@ -172,7 +172,8 @@ def test_a_board_takes_the_material_its_scopes_use():
 def test_a_board_without_material_in_a_chain_that_uses_none_is_an_error():
     with module("m", BOX) as m:
         side = board("side").on(m.left)
-        with pytest.raises(LangError, match=r"^m\.side reads material, which has no default and is set nowhere above "
+        with pytest.raises(LangError, match=r"^tests/test_settings\.py:\d+: m\.side reads material, which has no "
+                                            r"default and is set nowhere above "
                                             r"it; board\(name, material\) gives a board its own, or "
                                             r"use\(material\(\.\.\.\)\) in a scope above sets it"):
             _ = side.inner

@@ -28,7 +28,7 @@ python -m lang.cam examples/drawer_cabinet.py --from-nest            # without r
   `kitchen.carcass-2` included), or those named, and writes each plan
   beside its nest: `out/<build>/<module>/<nest>/cam.json`.
 - The geometry is the nest's: its file and the layout it nested
-  (`nest.layout.json`), of this layout version (9) or refused, so the plan
+  (`nest.layout.json`), of this layout version (10) or refused, so the plan
   and the document Compile Layout draws from the nest agree. The CAM
   settings are the build's as it is now: the command runs the build, so a
   CAM setting changed since the nest holds without nesting again

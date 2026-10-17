@@ -4,11 +4,13 @@ Positions are in the part's (u, v) frame, the frame of its outline. `face`
 names the face the operation is made from, by world direction. Depths are
 resolved to millimetres from the face; `depth_spec` keeps how the build
 file gave it (`"through"`, `"to(outer, leave=3)"`, `"10"`), for a reader of the
-layout file only: no consumer interprets it.
+layout file only: no consumer interprets it. `where` is the build file's
+line that made the operation, a join's or a mount's for what they make;
+it takes no part in comparing operations.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
 
 from .shapes import Shape, circle
@@ -44,6 +46,8 @@ class Cut:
     #: The dog bones its shape holds.
     dogbones: tuple[DogBone, ...] = ()
     kind: Literal["cut"] = "cut"
+    #: The build file's line that made it (`lang.core.where`), set when the board records it.
+    where: str = field(default="", compare=False, repr=False)
 
 
 @dataclass(frozen=True)
@@ -68,6 +72,8 @@ class Pocket:
     #: The dog bones its shape holds.
     dogbones: tuple[DogBone, ...] = ()
     kind: Literal["pocket"] = "pocket"
+    #: The build file's line that made it (`lang.core.where`), set when the board records it.
+    where: str = field(default="", compare=False, repr=False)
 
 
 @dataclass
@@ -82,6 +88,8 @@ class Hole:
     chamfer: float = 0.0
     through: bool = False
     kind: Literal["hole"] = "hole"
+    #: The build file's line that made it (`lang.core.where`), set when the board records it.
+    where: str = field(default="", compare=False, repr=False)
 
 
 @dataclass
@@ -91,6 +99,8 @@ class Chamfer:
     size: float
     face: str
     kind: Literal["chamfer"] = "chamfer"
+    #: The build file's line that made it (`lang.core.where`), set when the board records it.
+    where: str = field(default="", compare=False, repr=False)
 
 
 @dataclass
@@ -107,6 +117,8 @@ class VGroove:
     depth: float
     name: str | None = None
     kind: Literal["vgroove"] = "vgroove"
+    #: The build file's line that made it (`lang.core.where`), set when the board records it.
+    where: str = field(default="", compare=False, repr=False)
 
 
 @dataclass
@@ -122,6 +134,8 @@ class EdgeOp:
     t: float = 0.0
     offset: float = 0.0
     kind: Literal["edge"] = "edge"
+    #: The build file's line that made it (`lang.core.where`), set when the board records it.
+    where: str = field(default="", compare=False, repr=False)
 
 
 Op = Cut | Pocket | Hole | Chamfer | VGroove | EdgeOp

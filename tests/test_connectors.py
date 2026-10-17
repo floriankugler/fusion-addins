@@ -194,7 +194,8 @@ def test_domino_marks_can_skip_the_outer_ones_or_be_left_out():
     layout = next(op for part in build_layout()["modules"][0]["parts"] if part["path"] == "cab.bottom"
                   for op in part["ops"])
     assert layout == {"kind": "vgroove", "name": "domino_left_2_mark", "face": "top", "start": [250, 14],
-                      "end": [250, 19], "depth": 0.3}
+                      "end": [250, 19], "depth": 0.3, "where": layout["where"]}
+    assert layout["where"].startswith("tests/test_connectors.py:")
 
 
 def test_domino_depth_fence_and_loose_slots():

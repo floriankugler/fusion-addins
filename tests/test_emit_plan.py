@@ -108,7 +108,7 @@ def test_unknown_chamfer_target_is_a_problem_not_a_crash():
         board("left", ply15).on(cab.left)
     layout = build_layout()
     layout["modules"][0]["parts"][0]["ops"].append(
-        {"kind": "chamfer", "what": "nothing", "size": 1.0, "face": "left"})
+        {"kind": "chamfer", "what": "nothing", "size": 1.0, "face": "left", "where": ""})
     plan = plan_layout(layout)
     assert plan.problems and "nothing" in plan.problems[0]
     assert plan.parts[0].steps == []

@@ -3,7 +3,7 @@
 Status: proposed by Claude on 2026-10-17 as a brainstorm and gone through
 with Florian the same day, item by item; every item below was taken, with
 his rules for the clicks, the selection and the glow worked in [Florian,
-2026-10-17]. Nothing built. The preview as it is: `design/preview.md`; how
+2026-10-17]. Built: Lines in the layout (2026-10-17); the rest not yet. The preview as it is: `design/preview.md`; how
 to drive it from code: AGENTS.md.
 
 ## Why
@@ -24,6 +24,12 @@ Every item serves both ways of writing: a click or key for the hand, and a
 `preview.*` call for Claude through the built-in browser.
 
 ## Lines in the layout
+
+Built 2026-10-17: layout version 10, `lang/core/where.py`, the viewer's
+`o`, line links and `preview.openEditor()`, the server's `POST /open` and
+`--editor`; `design/preview.md`, The viewer and Serving a folder, says how
+it works and what it costs on the van (nothing measurable). The editor
+stays `code --goto {file}:{line}` by default until Florian names his.
 
 Everything below that links the picture to the text needs the layout to say
 where each thing was written.

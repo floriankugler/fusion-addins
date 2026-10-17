@@ -1,6 +1,6 @@
 """Preview server: rebuilds on every save and serves the viewer.
 
-    python -m lang.preview examples [--out out] [--port 8765]
+    python -m lang.preview examples [--out out] [--port 8765] [--editor 'code --goto {file}:{line}']
     python -m lang.preview examples/drawer_cabinet.py [--out out] [--port 8765]
 
 Given a folder, it serves every build file in it, each built into a
@@ -56,6 +56,14 @@ of another version. "Plan again" (POST /plan?design=...&nest=...) plans
 the nest named, a second nest by its own name, with the build's CAM
 settings as they are now; nests and plans run one at a time, a plan's
 output in cam.log beside it.
+
+The editor: the layout names the build file's line of every part, module,
+hardware item and operation (`where`, `examples/van.py:45`, relative to
+the repo, where the builds run), and the build log names lines too. POST
+/open?file=examples/van.py&line=45 runs the command `--editor` gives
+(`code --goto {file}:{line}` by default; `{file}` becomes the file's whole
+path, `{line}` the line) for a file in the folder served or in the repo,
+and refuses any other file and a request another site's page sends.
 """
 from __future__ import annotations
 
@@ -65,6 +73,7 @@ import http.server
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -84,6 +93,8 @@ REPO = Path(__file__).resolve().parents[2]
 SHOWN = 3.0     # seconds a page counts as open after it last asked for its design
 TIMEOUT = 120.0  # seconds a build may take before it is stopped and counts as failed
 NEST_TIMEOUT = 900.0  # seconds a nest may take
+#: The command that opens the editor at a line, `{file}` and `{line}` filled in.
+EDITOR = "code --goto {file}:{line}"
 
 # Read as text, not parsed, so that a file stays listed while an edit
 # leaves it unparsable.
@@ -152,10 +163,12 @@ class Designs:
     """The build files served and their state, shared by the page's
     requests, the watcher and the builder thread."""
 
-    def __init__(self, source: Path, out_dir: Path):
+    def __init__(self, source: Path, out_dir: Path, editor: str = EDITOR):
         self.single = source.is_file()
         self.folder = source.parent if self.single else source
         self.out_dir = out_dir
+        #: The command `open_editor` runs (`--editor`).
+        self.editor = editor
         self.cond = threading.Condition()
         self.designs: dict[str, Design] = {}
         self.imported: set[str] = set()
@@ -263,6 +276,29 @@ class Designs:
             log, ok = f"error: the mark took longer than {TIMEOUT:g} s and was stopped.", False
         print(f"{design.file.stem}: {' '.join(args)}: {'ok' if ok else 'FAILED'}", flush=True)
         return (200 if ok else 400), log
+
+    def open_editor(self, file: str, line: str) -> tuple[int, str]:
+        """Opens the editor at a line of a file in the folder served or the
+        repo, as a layout's `where` or the build log names it (a relative
+        file is the repo's, where the builds run): the HTTP status and what
+        to say. The command runs without a shell, its arguments filled in
+        one by one."""
+        if not file or not line.isdigit():
+            return 400, "give a file and a line: /open?file=examples/van.py&line=45"
+        path = Path(file).expanduser()
+        path = (path if path.is_absolute() else REPO / path).resolve()
+        if not (path.is_relative_to(self.folder.resolve()) or path.is_relative_to(REPO)):
+            return 403, f"{file} is neither in the folder served nor in the repo"
+        if not path.is_file():
+            return 404, f"no file {file}"
+        command = [arg.replace("{file}", str(path)).replace("{line}", line) for arg in shlex.split(self.editor)]
+        try:
+            editor = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                      stderr=subprocess.DEVNULL, cwd=str(REPO), start_new_session=True)
+        except OSError as error:
+            return 500, f"the editor did not start ({shlex.join(command)}: {error}); give another with --editor"
+        threading.Thread(target=editor.wait, daemon=True).start()      # reaped when it exits
+        return 200, f"opened {file}:{line}"
 
     def nest_forever(self) -> None:
         """Runs the nests and plans asked for, one at a time, nests first."""
@@ -599,6 +635,13 @@ class _Handler(http.server.SimpleHTTPRequestHandler):
         url = urlsplit(self.path)
         query = parse_qs(url.query)
         design, nest = query.get("design", [""])[0], query.get("nest", [""])[0]
+        if url.path == "/open":
+            origin = self.headers.get("Origin")
+            if origin is not None and urlsplit(origin).netloc != self.headers.get("Host", ""):
+                self._answer(403, "the editor opens for this preview's own page only")
+            else:
+                self._answer(*self.designs.open_editor(query.get("file", [""])[0], query.get("line", [""])[0]))
+            return
         if url.path in ("/nest", "/plan"):
             ok = (self.designs.ask_nest if url.path == "/nest" else self.designs.ask_plan)(design, nest)
             self.send_response(200 if ok else 404)
@@ -615,6 +658,9 @@ class _Handler(http.server.SimpleHTTPRequestHandler):
         else:
             self.send_error(404)
             return
+        self._answer(status, text)
+
+    def _answer(self, status: int, text: str) -> None:
         body = text.encode()
         self.send_response(status)
         self.send_header("Content-Type", "text/plain; charset=utf-8")
@@ -673,11 +719,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("source", help="a build file, or a folder of them")
     parser.add_argument("--out", default="out")
     parser.add_argument("--port", type=int, default=8765)
+    parser.add_argument("--editor", default=EDITOR,
+                        help="the command the page's o key and line links run, {file} and {line} filled in "
+                             f"(default: {EDITOR!r})")
     args = parser.parse_args(argv)
     source = Path(args.source).resolve()
     if not source.exists():
         parser.error(f"{args.source} does not exist")
-    designs = Designs(source, Path(args.out).resolve())
+    designs = Designs(source, Path(args.out).resolve(), args.editor)
 
     handler = functools.partial(_Handler, designs=designs)
     server = http.server.ThreadingHTTPServer(("127.0.0.1", args.port), handler)

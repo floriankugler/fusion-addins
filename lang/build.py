@@ -14,7 +14,10 @@ same process.
 
 An error prints its message and the lines of the build files that led to
 it (`examples/van.py:39: bottom.join(...)`), not the frames of runpy, this
-module or the language; `--traceback` prints the whole stack instead.
+module or the language; `--traceback` prints the whole stack instead. An
+error about a board found when it resolves starts with the board's line
+(`error: examples/van.py:45: kitchen.batten3 reads material, ...`), which
+is then not repeated below it.
 """
 from __future__ import annotations
 
@@ -29,13 +32,8 @@ from .core.errors import LangError
 from .core.layout import build_layout, write_layout
 from .core.layout_types import Layout
 from .core.scope import registry
+from .core.where import in_language, is_build_code, shown
 from .preview.levels import LEVELS, NORMAL, Level
-
-LANG_DIR = Path(__file__).resolve().parent
-_LANGUAGE = (LANG_DIR, LANG_DIR.parent / "lib")     # the language and the shared lib it reads
-# Code that is not the build's own: the language, and Python with its
-# packages (the venv and the installation behind it).
-_NOT_BUILD_CODE = (*_LANGUAGE, Path(sys.prefix).resolve(), Path(sys.base_prefix).resolve())
 
 
 def layout_of(build_file: str | Path) -> Layout:
@@ -89,42 +87,27 @@ def _forget_modules_in(folder: Path, before: set[str]) -> None:
             del sys.modules[name]
 
 
-def _is_build_code(filename: str) -> bool:
-    if filename.startswith("<"):       # <frozen runpy>, <string>
-        return False
-    path = Path(filename).resolve()
-    return not any(path.is_relative_to(d) for d in _NOT_BUILD_CODE)
-
-
-def _is_language(filename: str) -> bool:
-    path = Path(filename).resolve()
-    return any(path.is_relative_to(d) for d in _LANGUAGE)
-
-
-def _shown(filename: str) -> str:
-    path = Path(filename).resolve()
-    return str(path.relative_to(Path.cwd())) if path.is_relative_to(Path.cwd()) else str(path)
-
-
 def describe(error: Exception) -> str:
     """The error as a build file's author needs it: the message, then each
-    line of the build files the error passed through, outermost first. A
+    line of the build files the error passed through, outermost first, but
+    the line the message starts with (a board's, `LangError.where`). A
     Python error raised inside the language (a bug there, not in the build)
     also names the line it was raised at."""
     if isinstance(error, SyntaxError) and error.filename:   # raised compiling a file, no frame of its own
-        line = f"  {_shown(error.filename)}:{error.lineno}: {(error.text or '').strip()}".rstrip()
+        line = f"  {shown(error.filename)}:{error.lineno}: {(error.text or '').strip()}".rstrip()
         return f"{type(error).__name__}: {error.msg}\n{line}"
     if isinstance(error, LangError):
         lines = [f"error: {error}"]
     else:   # with Python's own hints ("Did you mean 'name'?")
         lines = "".join(traceback.format_exception_only(error)).rstrip().splitlines()
     frames = traceback.extract_tb(error.__traceback__)
-    lines += [f"  {_shown(f.filename)}:{f.lineno}: {f.line or ''}".rstrip()
-              for f in frames if _is_build_code(f.filename)]
-    build = [i for i, f in enumerate(frames) if _is_build_code(f.filename)]
-    inner = [f for f in frames[build[-1] + 1 if build else 0:] if _is_language(f.filename)]
+    named = error.where if isinstance(error, LangError) else ""
+    lines += [f"  {shown(f.filename)}:{f.lineno}: {f.line or ''}".rstrip()
+              for f in frames if is_build_code(f.filename) and f"{shown(f.filename)}:{f.lineno}" != named]
+    build = [i for i, f in enumerate(frames) if is_build_code(f.filename)]
+    inner = [f for f in frames[build[-1] + 1 if build else 0:] if in_language(f.filename)]
     if not isinstance(error, LangError) and inner:
-        lines.append(f"  raised in {_shown(inner[-1].filename)}:{inner[-1].lineno} ({inner[-1].name}); "
+        lines.append(f"  raised in {shown(inner[-1].filename)}:{inner[-1].lineno} ({inner[-1].name}); "
                      "--traceback prints the whole stack")
     return "\n".join(lines)
 
