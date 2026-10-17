@@ -463,4 +463,4 @@ sessions whenever Florian wants them: the layout refusing a cut through a
 through pocket; rips first in the saw plan; refill past the cut limit;
 the cut list as CSV with the hardware's product data (a layout version,
 best taken together with stage 1's); manufacturing groups (with that same
-version); Compile Layout clicked through with a nest file.
+version).

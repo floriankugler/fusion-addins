@@ -290,10 +290,8 @@ its piece.
   marked on it, says what changed and what is made, nests that one again
   on request, and marks nests, sheets and parts there (Pinning).
 - The compiler's Compile Layout takes a `nest.json` too and draws a
-  document per material (no button of its own [decided 2026-10-16]; its
-  dialog not yet clicked through with a nest file, `design/todo.md`, nor
-  with versions 2 and 3, which changed nothing it reads (3 is not run in
-  Fusion yet either);
+  document per material (no button of its own [decided 2026-10-16];
+  clicked through with a version 3 nest file on 2026-10-17 [Florian: works];
   `lang/emit/nested.py` plans it, Fusion-free): per
   piece of stock a component, the pieces one above the other along y, per
   blank a component at its place holding the blank as a see-through stock
@@ -455,8 +453,6 @@ build order of what remains is in that proposal.
   `--mode deterministic` stays an option; it split 124 parts into many
   small blanks (Measured, below), so measure it on a module's nest before
   anything else.
-- **Compile Layout with a nest file**, clicked through once in Fusion
-  (`design/todo.md`).
 
 ### With the nests defined in the build
 
