@@ -167,8 +167,13 @@ def test_a_pocket_takes_the_widest_cutter_that_reaches_all_of_it():
     assert big.main is not None and big.main.stem == "pocket_Tasche adaptiv 8mm" and not big.rests
     small = _pocket(shapely_box(0, 0, 40, 40))                              # too small for adaptive clearing
     assert small.main is not None and small.main.stem == "pocket.dc_Tasche 6mm"
+    # the 8 mm adaptive rougher takes larger pockets only, never a groove or a slot [Florian, 2026-10-17]
     groove = _pocket(shapely_box(0, 0, 9.4, 400))
-    assert groove.main is not None and groove.main.stem == "pocket_Tasche adaptiv 8mm"
+    assert groove.main is not None and groove.main.stem == "pocket.dc_Tasche 6mm"
+    narrow = _pocket(shapely_box(0, 0, 15.9, 400))
+    assert narrow.main is not None and narrow.main.stem == "pocket.dc_Tasche 6mm"
+    wide = _pocket(shapely_box(0, 0, 16.5, 400))
+    assert wide.main is not None and wide.main.stem == "pocket_Tasche adaptiv 8mm"
     domino = _pocket(slot_shape((0, 0), (20, 0), 4.0).geometry, 10.5)
     assert domino.main is not None and domino.main.stem == "pocket_Tasche 3.175mm"
     rounded = _pocket(rect(depth=40, width=40).rounded(3).geometry)        # too small for adaptive clearing

@@ -23,9 +23,12 @@ reaches it, as a rest, else it is reported. But a narrower template that
 reaches all of it takes it alone where its cutter is at least `ALONE`
 times the widest's: the 6 mm cutter cuts a groove the 8 mm leaves rests
 in, while a 2 mm one only takes the channel a 200 mm pocket runs into.
-The dog bones go by their own rule. An adaptive template only for a region
-of `SMALL_POCKET_AREA` or more (all lead-in and corner below it), a flute
-that reaches the floor.
+The dog bones go by their own rule. An adaptive template (the 8 mm cutter
+is a pure rougher for larger pockets [Florian, 2026-10-17]) only for a
+region of `SMALL_POCKET_AREA` or more (all lead-in and corner below it)
+with room for `ADAPTIVE_ROOM` of its cutters across (the region shrunk by
+its cutter's diameter is not empty): never a slot, a groove or another
+narrow pocket. A flute that reaches the floor.
 
 **Contours** (`contour_cutter`): the widest template, the configured one
 or a narrower one, whose cutter reaches the whole contour on its waste
@@ -77,8 +80,12 @@ DEPTH_TOL = 0.05
 #: A dog bone this much narrower than an operation's cutter, or more,
 #: needs another operation (mm): a cutter of exactly its diameter cuts it.
 RELIEF_TOL = 0.05
-#: The floor (mm²) an adaptive template needs to be worth it.
+#: The floor (mm²) an adaptive template needs to be worth it ...
 SMALL_POCKET_AREA = 2500.0
+#: ... and the room, in its cutter's diameters across: the 8 mm adaptive
+#: rougher takes larger pockets only, nothing narrower than 16 mm
+#: [Florian, 2026-10-17: a pure pocket rougher, not for narrower slots].
+ADAPTIVE_ROOM = 2.0
 #: A narrower pocket template that reaches all of a pocket takes it alone,
 #: instead of the widest that gets in with rests, where its cutter is at
 #: least this share of the widest's (the 6 mm of the 8 mm).
@@ -206,7 +213,8 @@ def pocket_cutters(region: BaseGeometry, depth: float, tried: Sequence[Template]
     out = PocketPlan()
     usable: list[Template] = []
     for t in tried:
-        if t.adaptive and region.area < SMALL_POCKET_AREA:
+        if t.adaptive and (region.area < SMALL_POCKET_AREA or
+                           region.buffer(-ADAPTIVE_ROOM * t.diameter / 2).is_empty):
             continue
         if t.flute is not None and t.flute < depth - DEPTH_TOL:
             out.notes.append(f"{t.stem}: its flute ({t.flute:g}) does not reach {depth:g} deep")
