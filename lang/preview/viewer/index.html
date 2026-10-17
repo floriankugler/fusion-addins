@@ -16,8 +16,31 @@
   #status { color: var(--muted); margin-bottom: 10px; white-space: pre-wrap; max-height: 16em; overflow: auto; }
   #status.error { color: var(--accent); }
   #status a, #selected a { color: inherit; text-decoration: underline dotted; cursor: pointer; }
-  #selected { font-family: ui-monospace, Menlo, monospace; font-size: 12px; margin: 8px 0 12px;
-    padding: 8px; background: #f7f5f0; border-radius: 4px; min-height: 2.6em; white-space: pre-wrap; }
+  /* the selection panel: the items selected, each with what it belongs to, then the snippets; a click
+     on a line copies it */
+  #selected { font-size: 12px; margin: 8px 0 12px; padding: 6px 8px; background: #f7f5f0; border-radius: 4px;
+    min-height: 2.6em; }
+  #selected .empty { color: var(--muted); padding: 2px 0; }
+  #selected .item { padding: 2px 0 6px; }
+  #selected .item + .item { border-top: 1px solid #e6e1d6; padding-top: 6px; }
+  /* a line flows as text, its tag hanging in the margin, the code breaking after its dots */
+  #selected .line { --hang: 5.4em; padding: 1px 3px 1px calc(var(--hang) + 3px); text-indent: calc(-1 * var(--hang));
+    margin: 0 -3px; border-radius: 3px; }
+  #selected .line > * { text-indent: 0; }
+  #selected .line.copy { cursor: copy; }
+  #selected .line.copy:hover { background: #ece6da; }
+  #selected .line.flash { background: #f3d9cc; }
+  #selected .badge { color: var(--accent); font-size: 11px; font-weight: 600; margin-left: 6px; }
+  #selected .text { font-family: ui-monospace, Menlo, monospace; overflow-wrap: anywhere; }
+  #selected .tag { display: inline-block; width: var(--hang); vertical-align: top; color: var(--muted); font-size: 11px;
+    line-height: 1.6; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #selected .note, #selected .more { color: var(--muted); font-size: 11px; margin-left: 6px; }
+  #selected .line a { margin-left: 6px; }
+  #selected .head .text { font-weight: 600; }
+  #selected .parent .text { color: #555; }
+  #selected .snips { margin-top: 4px; border-top: 1px solid #e6e1d6; padding-top: 4px; }
+  #selected .snips .line { --hang: 6.8em; }
+  #copied { color: var(--accent); font-size: 11px; min-height: 1.3em; overflow-wrap: anywhere; }
   ul { list-style: none; padding: 0; margin: 0; }
   #parts ul { padding-left: 14px; }
   .node { display: flex; align-items: baseline; gap: 4px; padding: 2px 0; cursor: pointer;
@@ -107,7 +130,8 @@
   <h1>Layout preview</h1>
   <div class="row"><label for="design">design</label><select id="design" style="flex:1;min-width:0"></select></div>
   <div id="status">loading…</div>
-  <div id="selected">click a part for its path</div>
+  <div id="selected"></div>
+  <div id="copied"></div>
   <div id="openLog" class="keys"></div>
 
   <h2>Nest</h2>
@@ -168,17 +192,19 @@
   <div class="row"><input type="range" id="secPos" min="0" max="1000" value="500"><span id="secValue" style="min-width:5em;text-align:right"></span></div>
 
   <h2>Parts</h2>
-  <div class="hint">click: hide / show &middot; alt-click: select &middot; &#9656;: open / close (alt: all below)</div>
+  <div class="hint">click: hide / show &middot; alt-click: select (shift: add) &middot; &#9656;: open / close (alt: all below)</div>
   <ul id="parts"></ul>
   <div class="problems" id="problems"></div>
 
   <h2>Keys</h2>
   <div class="keys">
+    <div><span>select a corner, edge or face / add to it</span><kbd>click</kbd> <kbd>shift-click</kbd></div>
+    <div><span>copy a line of the selection</span><kbd>click it</kbd></div>
     <div><span>previous / next design</span><kbd>,</kbd> <kbd>.</kbd></div>
     <div><span>fit view</span><kbd>f</kbd></div>
     <div><span>hide / show selected</span><kbd>h</kbd></div>
     <div><span>isolate selected / show all</span><kbd>i</kbd></div>
-    <div><span>open the selected part's line in the editor</span><kbd>o</kbd></div>
+    <div><span>open the first selected item's line in the editor</span><kbd>o</kbd></div>
     <div><span>show all</span><kbd>a</kbd></div>
     <div><span>display mode</span><kbd>e</kbd></div>
     <div><span>floor grid on / off</span><kbd>g</kbd></div>
@@ -209,6 +235,7 @@ import { attachSpaceMouse } from './spacemouse.js';
 import { AXIS, ISO, UP, share, disposeTree, clearGroup } from './scene-utils.js';
 import { layoutVersionProblem, splitWhere, logPieces, TreeOpen, setHidden as markHidden, toggleHides, isolate as isolatePaths, LoadTracker, nestStatusText, chosenNest, settingsText, sheetNames, sheetMade, fixable, LevelChoice, untilLevel } from './state.js';
 import { planVersionProblem, planStatusText, toolColors, setupLabel, legend, chosenOperation, releaseRanks, releaseList, holdText, partText, releaseColors, setupOverlay, planNotes } from './cam.js';
+import { pick, parseRef, describe, snippets, spell, kindOf, anchorPoint, edgeEnds, nameAt, sizeText } from './refs.js';
 
 const $ = (id) => document.getElementById(id);
 const view = $('view');
@@ -274,7 +301,10 @@ let built = null;               // the level that version was meshed at, as the 
 let shownLevel = null;          // the level of the scene on screen
 let bounds = null;              // Box3 of the whole model, for the section slider
 const hidden = new Set();
-let selectedPath = null;
+// The selection: references (refs.js), each a part with an optional face, edge, corner or point; the
+// first one's part is the one the parts tree opens to, `o` opens and the nest marks fixed.
+let selection = [];
+let selectedSet = new Set();    // the scene paths the selection covers, for the tint, the list and the labels
 let mode = 'shaded';
 
 // The materials and geometries below serve every scene the page loads, so
@@ -298,12 +328,32 @@ const ghostEdge = share(new THREE.LineBasicMaterial({ color: 0x4f7cac, transpare
 const ghostEdgeBounds = share(new THREE.LineBasicMaterial({ color: 0xb87a45, transparent: true, opacity: 0.55 }));
 const contourMaterial = share(new LineMaterial({ color: 0x1f6fc0, linewidth: 2, worldUnits: false }));
 
+// The selection drawn over the parts: a face tinted, an edge as a bold line and a corner or a point as a
+// dot, both through everything, and the point a click fell on in a face as a smaller blue dot.
+const selFace = share(new THREE.MeshBasicMaterial({ color: 0xc0502c, transparent: true, opacity: 0.4, depthWrite: false,
+  side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
+const selEdge = share(new LineMaterial({ color: 0xc0502c, linewidth: 4, worldUnits: false, depthTest: false, transparent: true }));
+const dotMap = (() => {
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = 64;
+  const g = canvas.getContext('2d');
+  g.fillStyle = '#fff';
+  g.beginPath(); g.arc(32, 32, 28, 0, 2 * Math.PI); g.fill();
+  return share(new THREE.CanvasTexture(canvas));
+})();
+const dotMaterial = (color, size) => share(new THREE.PointsMaterial({ color, size, sizeAttenuation: false, map: dotMap,
+  transparent: true, alphaTest: 0.5, depthTest: false }));
+const selDot = dotMaterial(0xc0502c, 12);
+const selClick = dotMaterial(0x1f6fc0, 8);
+const selGroup = new THREE.Group();
+selGroup.renderOrder = 200;
+scene.add(selGroup);
+
 function resize() {
   const w = view.clientWidth, h = view.clientHeight;
   renderer.setSize(w, h);
   labelRenderer.setSize(w, h);
-  outlineMaterial.resolution.set(w * window.devicePixelRatio, h * window.devicePixelRatio);
-  contourMaterial.resolution.set(w * window.devicePixelRatio, h * window.devicePixelRatio);
+  for (const m of [outlineMaterial, contourMaterial, selEdge]) m.resolution.set(w * window.devicePixelRatio, h * window.devicePixelRatio);
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
 }
@@ -478,6 +528,7 @@ function clearScene() {
   buildMaster();
   buildLabels();
   renderList();
+  drawSelection();
   showSelected();
   $('problems').textContent = '';
 }
@@ -764,7 +815,7 @@ function updateLabels() {
     const at = mesh.visible ? points.find((p) => inView(p, mesh, normal, shown)) : undefined;
     label.visible = at !== undefined;
     if (at) label.position.copy(at);
-    label.element.classList.toggle('selected', mesh.userData.path === selectedPath);
+    label.element.classList.toggle('selected', selectedSet.has(mesh.userData.path));
   }
 }
 
@@ -803,7 +854,7 @@ function tickLabels() {
 
 // -- visibility, selection and display modes ------------------------------
 
-function applyAll() { applyVisibility(); applyMode(); applySection(); renderList(); showSelected(); }
+function applyAll() { applyVisibility(); applyMode(); applySection(); applySelection(); }
 
 function applyVisibility() {
   const bought = hardwareOn ? null : new Set(hardwareBodies().map((h) => h.path));
@@ -900,43 +951,280 @@ function isolate(paths, toggle = false) {
   refresh();
 }
 
-function select(path) {
-  selectedPath = path;
-  tree.select(path);              // opened to it, the rest closed; a deselection leaves the tree
+// -- the selection ------------------------------------------------------------------
+//
+// A click in the scene selects the finest thing under the pointer (`pick`
+// in refs.js): a corner where two of the hit face's edges lie within a few
+// pixels, else an edge, else the face, keeping the click's point; a click
+// on a bought part selects it. Shift-click adds to the selection, or takes
+// back what is selected already; nothing is copied on a click [Florian,
+// 2026-10-17: two clicks for every reference]. The panel lists the items
+// and the snippets for them, and a click on one of its lines copies it.
+
+/** A reference from what the page and preview.select() pass: a spelling (`kitchen.left.inner.front`),
+ *  or a reference or an item as preview.selection() gives them. */
+function asRef(value) {
+  if (typeof value === 'string') return layout ? parseRef(value, layout) : { part: value };
+  if (value?.ref) value = value.ref;
+  if (typeof value?.part !== 'string') {
+    throw new Error(`not a reference: ${JSON.stringify(value)}; give a spelling ('kitchen.left.inner.front') or {part, face, anchor, point}`);
+  }
+  const ref = { part: value.part };
+  if (value.face) {
+    if (layout && !partOf(value.part)?.faces?.[value.face]) throw new Error(`${value.part} has no face ${value.face} (a world name: ${Object.keys(layout.frame).join(', ')})`);
+    ref.face = value.face;
+    ref.anchor = (value.anchor ?? []).map(([world, mm]) => [world, mm ?? null]);
+  }
+  if (value.center) ref.center = true;
+  if (value.point) ref.point = [...value.point];
+  return ref;
+}
+
+// What tells two references apart: a shift-click on what is selected takes it back.
+function refKey(ref) {
+  try { return layout ? spell(ref, layout) : JSON.stringify(ref); } catch (e) { return JSON.stringify(ref); }
+}
+
+/** Selects references (one, a list, or null for none); with `add`, adds them to the selection, taking
+ *  back those selected already. */
+function select(refs, { add = false } = {}) {
+  const given = (refs === null || refs === undefined ? [] : Array.isArray(refs) ? refs : [refs]).map(asRef);
+  let next = given;
+  if (add) {
+    next = [...selection];
+    for (const ref of given) {
+      const k = next.findIndex((r) => refKey(r) === refKey(ref));
+      if (k >= 0) next.splice(k, 1); else next.push(ref);
+    }
+  }
+  selection = next;
+  tree.select(selection[0]?.part ?? null);     // opened to the first, the rest closed; a deselection leaves the tree
+  applySelection();
+}
+
+// The panel scrolled into view, after a selection made in the scene, the nest drawing or from code.
+function revealPanel() { $('selected').scrollIntoView({ block: 'nearest' }); }
+
+// The scene paths the selection covers, and those it covers whole (not a face, edge or corner of
+// them): a part's or body's own, a bought part's bodies, every one under a scope or module.
+function coveredPaths() {
+  const all = listItems().map((item) => item.path);
+  const covered = new Set(), whole = new Set();
+  for (const ref of selection) {
+    for (const p of all) {
+      if (p !== ref.part && !p.startsWith(ref.part + '.')) continue;
+      covered.add(p);
+      if (!ref.face) whole.add(p);
+    }
+  }
+  return { covered, whole };
+}
+
+/** The scene paths the selection covers, in the parts list's order: what `h` and `i` act on. */
+function selectedPaths() {
+  return listItems().map((item) => item.path).filter((p) => selectedSet.has(p));
+}
+
+function applySelection() {
+  const { covered, whole } = coveredPaths();
+  selectedSet = covered;
+  // a part selected whole is tinted; one of whose faces, edges or corners is selected, a little
   meshes((o) => {
-    const on = o.userData.path === path;
-    o.material.emissive = new THREE.Color(on ? 0xc0502c : 0x000000);
-    o.material.emissiveIntensity = on ? 0.25 : 0;
+    const k = whole.has(o.userData.path) ? 0.25 : covered.has(o.userData.path) ? 0.08 : 0;
+    o.material.emissive = new THREE.Color(k ? 0xc0502c : 0x000000);
+    o.material.emissiveIntensity = k;
   });
   labelsDirty = true;
+  drawSelection();
   showSelected();
   updateFix();
   renderList();
-  $('parts').querySelector('.node.leaf.selected')?.scrollIntoView({ block: 'nearest' });
-  if (path) navigator.clipboard?.writeText(path).catch(() => {});
+  markNestSelection();
 }
 
-// The selected part's path, its line in the build file (a link that opens
-// the editor there, as `o` does), its material, size, settings and plan.
+// The selection drawn over the parts: a face tinted, an edge as a line, a corner or a point as a dot,
+// and the point a face was clicked at.
+function drawSelection() {
+  clearGroup(selGroup);
+  if (!layout) return;
+  const add = (object) => { object.renderOrder = 200; selGroup.add(object); };
+  for (const ref of selection) {
+    const part = partOf(ref.part);
+    if (!part || !ref.face || !part.faces?.[ref.face]) continue;
+    const kind = kindOf(ref, layout);
+    if (kind === 'face') {
+      add(faceMesh(part, ref.face));
+      if (ref.point) add(dots([ref.point], selClick));
+    } else if (kind === 'edge') {
+      const geometry = new LineGeometry();
+      geometry.setPositions(edgeEnds(ref, layout).flat());
+      add(new Line2(geometry, selEdge));
+    } else {
+      add(dots([anchorPoint(ref, layout)], selDot));
+    }
+  }
+}
+
+function dots(points, material) {
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(points.flat(), 3));
+  return new THREE.Points(geometry, material);
+}
+
+// A face of a part as a mesh just off it: a big face as the part's outline, a narrow face as its box's side.
+function faceMesh(part, world) {
+  const code = layout.frame[world], i = AXIS[code[1]], sign = code[0] === '+' ? 1 : -1;
+  const big = code[1] === part.axes.t;
+  const [ja, jb] = big ? [AXIS[part.axes.u], AXIS[part.axes.v]] : [0, 1, 2].filter((j) => j !== i);
+  const b = part.box;
+  const shapes = big ? outlineShapes(part.outline)
+    : [new THREE.Shape([[b.min[ja], b.min[jb]], [b.max[ja], b.min[jb]], [b.max[ja], b.max[jb]], [b.min[ja], b.max[jb]]]
+        .map(([x, y]) => new THREE.Vector2(x, y)))];
+  const flat = new THREE.ShapeGeometry(shapes);
+  const at = (sign > 0 ? b.max[i] : b.min[i]) + sign * 0.2;
+  const pos = flat.attributes.position, out = new Float32Array(pos.count * 3);
+  for (let k = 0; k < pos.count; k++) { out[3 * k + ja] = pos.getX(k); out[3 * k + jb] = pos.getY(k); out[3 * k + i] = at; }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(out, 3));
+  geometry.setIndex([...flat.index.array]);
+  flat.dispose();
+  return new THREE.Mesh(geometry, selFace);
+}
+
+// An outline's rings (counter-clockwise exteriors, each followed by its clockwise holes) as shapes.
+function outlineShapes(rings) {
+  const shapes = [];
+  for (const ring of rings) {
+    let area = 0;
+    for (let k = 0, j = ring.length - 1; k < ring.length; j = k++) area += (ring[j][0] - ring[k][0]) * (ring[j][1] + ring[k][1]);
+    const points = ring.map(([u, v]) => new THREE.Vector2(u, v));
+    if (area > 0) shapes.push(new THREE.Shape(points));
+    else shapes.at(-1)?.holes.push(new THREE.Path(points));
+  }
+  return shapes;
+}
+
+// -- the selection panel -----------------------------------------------------------
+
+let copied = null;              // the text last copied from the panel, for preview.copied
+let copiedTimer = null;
+
+/** Copies a line's text to the clipboard (or, where the page may not, keeps it in preview.copied) and
+ *  says so under the panel; resolves with whether the clipboard took it. */
+async function copy(text, el = null) {
+  copied = text;
+  let ok = false;
+  try {
+    await navigator.clipboard.writeText(text);
+    ok = true;
+  } catch (e) {
+    const area = document.createElement('textarea');
+    area.value = text;
+    area.style.cssText = 'position: fixed; top: 0; left: 0; opacity: 0';
+    document.body.append(area);
+    area.select();
+    try { ok = document.execCommand('copy'); } catch (e2) {}
+    area.remove();
+  }
+  const box = $('copied');
+  box.textContent = ok ? `copied ${text}` : `not copied, the clipboard is out of reach (preview.copied has it): ${text}`;
+  clearTimeout(copiedTimer);
+  for (const old of document.querySelectorAll('#selected .badge')) old.remove();
+  for (const old of document.querySelectorAll('#selected .flash')) old.classList.remove('flash');
+  if (el) {
+    el.classList.add('flash');
+    el.append(note(ok ? 'copied' : 'in preview.copied', 'badge'));
+  }
+  copiedTimer = setTimeout(() => {
+    box.textContent = '';
+    el?.classList.remove('flash');
+    el?.querySelector('.badge')?.remove();
+  }, 1600);
+  return ok;
+}
+
+// A line of the panel: a tag saying what it is, its text, which a click copies, more about it and a
+// note, and a link to its line in the build file.
+function panelLine(text, { tag = '', cls = '', more = null, note: noted = null, where = null } = {}) {
+  const div = document.createElement('div');
+  div.className = `line ${cls}` + (text ? ' copy' : '');
+  div.append(note(tag, 'tag'));
+  div.lastChild.title = tag;
+  if (text) div.append(code(text));
+  if (more) div.append(note(more, 'more'));
+  if (noted) div.append(note(noted, 'note'));
+  if (where) {
+    const link = lineLink(where);
+    link.addEventListener('click', (e) => e.stopPropagation());
+    div.append(link);
+  }
+  if (text) {
+    div.title = 'click to copy';
+    div.onclick = () => copy(text, div);
+  }
+  return div;
+}
+
+// Code as the panel shows it: free to break after a dot, a space or an opening parenthesis.
+function code(text) {
+  const span = document.createElement('span');
+  span.className = 'text';
+  for (const piece of text.split(/(?<=[. (])/)) span.append(piece, document.createElement('wbr'));
+  return span;
+}
+
+// The selection panel: each item with what it is, its spellings, material and size, the line that made
+// it (a link that opens the editor there, as `o` does), a board's operations, grain, settings and plan,
+// and what it belongs to; under the items the snippets for the selection.
 function showSelected() {
   const sel = $('selected');
-  if (!selectedPath || !layout) { sel.textContent = 'click a part for its path'; return; }
-  const part = layout.modules.flatMap((m) => m.parts).find((p) => p.path === selectedPath);
-  const where = part || hardwareItem(selectedPath) ? whereOf(selectedPath) : '';
-  const line = where ? ['\n', lineLink(where)] : [];
-  if (!part) {
-    const bought = hardwareBodies().some((h) => h.path === selectedPath);
-    sel.replaceChildren(selectedPath + (bought ? '' : ' (gone after rebuild)'), ...line,
-      (bought ? '\nhardware' : '') + (bought && hidden.has(selectedPath) ? ', hidden' : ''));
+  if (!layout || !selection.length) {
+    sel.replaceChildren(note('click a face, an edge or a corner (shift: add to the selection), then a line here to copy it', 'empty'));
     return;
   }
-  const b = part.box;
-  sel.replaceChildren(selectedPath, ...line, '\n' + part.material + ', ' +
-    `${(b.max[0]-b.min[0]).toFixed(0)} x ${(b.max[1]-b.min[1]).toFixed(0)} x ${(b.max[2]-b.min[2]).toFixed(0)} mm\n` +
-    part.ops.length + ' ops' + (part.grain ? ', grain ' + part.grain : '') +
-    (hidden.has(selectedPath) ? ', hidden' : '') +
-    (Object.keys(part.settings ?? {}).length ? '\n' + settingsText(part.settings) : '') +
-    camPartLine(selectedPath));
+  const blocks = selection.map(itemBlock);
+  const lines = snippets(selection, layout);
+  const snips = document.createElement('div');
+  snips.className = 'snips';
+  snips.append(...lines.map((s) => panelLine(s.text, { tag: s.label ?? '', note: s.note })));
+  sel.replaceChildren(...blocks, ...(lines.length ? [snips] : []));
+}
+
+function itemBlock(ref) {
+  const item = describe(ref, layout);
+  const div = document.createElement('div');
+  div.className = 'item';
+  if (item.kind === 'gone') {
+    div.append(panelLine(item.path, { tag: 'gone', cls: 'head', note: 'not in the rebuilt layout' }));
+    return div;
+  }
+  const [first, ...others] = item.spellings;
+  div.append(panelLine(first, { tag: item.kind, cls: 'head' }), ...others.map((s) => panelLine(s)));
+  if (item.offsets) div.append(panelLine(item.offsets.map(([edge, mm]) => `${mm} from ${edge}`).join(', '), { tag: 'clicked' }));
+  if (item.material) div.append(panelLine(item.material));
+  if (item.size.length) div.append(panelLine(sizeText(item.size)));
+  if (item.where) div.append(panelLine(null, { tag: 'line', where: item.where }));
+  const part = partOf(ref.part);
+  if (part && !ref.face) {
+    div.append(panelLine(`${part.ops.length} ops` + (part.grain ? `, grain ${part.grain}` : '') + (hidden.has(ref.part) ? ', hidden' : '')));
+    for (const setting of settingsText(part.settings).split('\n').filter(Boolean)) div.append(panelLine(setting));
+    const cam = camPartLine(ref.part).trim();
+    if (cam) div.append(panelLine(cam));
+  } else if (!part && hidden.has(ref.part)) {
+    div.append(panelLine('hidden'));
+  }
+  for (const p of item.parents) {
+    div.append(panelLine(p.path, { tag: p.kind, cls: 'parent', where: p.where || null,
+      more: [p.material, sizeText(p.size), hidden.has(p.path) ? 'hidden' : ''].filter(Boolean).join(' · ') }));
+  }
+  return div;
+}
+
+/** The line the first selected item was made by, or its board's, scope's or module's; '' for none. */
+function firstWhere() {
+  if (!selection.length || !layout) return '';
+  const item = describe(selection[0], layout);
+  return item.where || item.parents.find((p) => p.where)?.where || '';
 }
 
 // -- lines of the build file: the editor opened there ------------------------
@@ -1068,9 +1356,9 @@ function renderNode(node, ul) {
     const div = row('leaf', leaf.name, '');
     div.append(note(leaf.label, 'mat'));
     if (hidden.has(leaf.path)) div.classList.add('hidden');
-    if (leaf.path === selectedPath) div.classList.add('selected');
+    if (selectedSet.has(leaf.path)) div.classList.add('selected');
     div.title = leaf.path;
-    div.onclick = (e) => { if (e.altKey) select(leaf.path); else toggleHidden([leaf.path]); };
+    div.onclick = (e) => { if (e.altKey) select({ part: leaf.path }, { add: e.shiftKey }); else toggleHidden([leaf.path]); };
     li.append(div);
     ul.append(li);
   }
@@ -1082,14 +1370,14 @@ function renderNode(node, ul) {
     const div = row('group', group.name, open ? '\u25be' : '\u25b8');
     div.append(note(String(paths.length), 'count'));
     if (shown === 0) div.classList.add('hidden'); else if (shown < paths.length) div.classList.add('partial');
-    if (selectedPath && selectedPath.startsWith(group.path + '.') && !open) div.classList.add('selected');
+    if (!open && paths.some((p) => selectedSet.has(p))) div.classList.add('selected');
     div.title = group.path;
     div.querySelector('.caret').onclick = (e) => {
       e.stopPropagation();
       tree.set(e.altKey ? groupsUnder(group) : [group.path], !open);
       renderList();
     };
-    div.onclick = () => toggleHidden(paths);
+    div.onclick = (e) => { if (e.altKey) select({ part: group.path }, { add: e.shiftKey }); else toggleHidden(paths); };
     li.append(div);
     if (open) {
       const sub = document.createElement('ul');
@@ -1125,7 +1413,9 @@ function applySection() {
   // Local clipping on every material except the caps, which lie on the plane.
   setClipping(edgeFront, planes);
   setClipping(edgeThrough, planes);
-  for (const m of [ghostFill, ghostFillBounds, ghostEdge, ghostEdgeBounds, contourMaterial]) setClipping(m, planes);
+  for (const m of [ghostFill, ghostFillBounds, ghostEdge, ghostEdgeBounds, contourMaterial, selFace, selEdge, selDot, selClick]) {
+    setClipping(m, planes);
+  }
   for (const m of [stencilBack, stencilFront]) setClipping(m, planes);
   meshes((o) => setClipping(o.material, planes));
   $('secOn').checked = section.on;
@@ -1167,8 +1457,25 @@ renderer.domElement.addEventListener('pointerup', (e) => {
   const hits = raycaster.intersectObjects(visible, false);
   // With a section active, ignore hits on the clipped-away side.
   const hit = hits.find((h) => !section.on || plane.distanceToPoint(h.point) >= -1e-6);
-  select(hit ? hit.object.userData.path : null);
+  if (!hit) { if (!e.shiftKey) select(null); return; }
+  select(refAt(hit, rect.height), { add: e.shiftKey });
+  revealPanel();
 });
+
+// What a raycast hit names (`pick` in refs.js): on a board or slat the corner, edge or face under the
+// pointer, from the hit's point, its face's outward normal (turned toward the eye: the meshes are drawn
+// double-sided), and the mm a screen pixel spans there; on a bought part its body.
+function refAt(hit, height) {
+  const path = hit.object.userData.path;
+  const part = partOf(path);
+  if (!part) return { part: path };
+  const view = raycaster.ray.direction;
+  const normal = hit.face.normal.clone().transformDirection(hit.object.matrixWorld);
+  if (normal.dot(view) > 0) normal.negate();
+  const depth = hit.point.clone().sub(camera.position).dot(camera.getWorldDirection(new THREE.Vector3()));
+  const scale = 2 * depth * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) / height;
+  return pick(part, layout.frame, { point: hit.point.toArray(), normal: normal.toArray() }, { scale, view: view.toArray() });
+}
 
 // -- keys -------------------------------------------------------------------------
 
@@ -1195,9 +1502,9 @@ window.addEventListener('keydown', (e) => {
     case ',': stepDesign(-1); break;
     case '.': stepDesign(1); break;
     case 'f': fit(); break;
-    case 'h': if (selectedPath) toggleHidden([selectedPath]); break;
-    case 'i': if (selectedPath) isolate([selectedPath], true); break;
-    case 'o': if (selectedPath && (partOf(selectedPath) || hardwareItem(selectedPath))) openEditor(whereOf(selectedPath)); break;
+    case 'h': if (selectedSet.size) toggleHidden(selectedPaths()); break;
+    case 'i': if (selectedSet.size) isolate(selectedPaths(), true); break;
+    case 'o': if (firstWhere()) openEditor(firstWhere()); break;
     case 'a': showAll(); break;
     case 'e': setMode(modes[(modes.indexOf(mode) + 1) % modes.length]); break;
     case 'g': setGrid(!grid.visible); break;
@@ -1469,7 +1776,29 @@ window.preview = {
   isolate: (names) => { isolate(pathsOf(names)); draw(); },
   show: (names) => { if (names === undefined) showAll(); else setHidden(pathsOf(names), false); draw(); },
   hide: (names) => { setHidden(pathsOf(names), true); draw(); },
-  select: (path) => { select(path ?? null); draw(); },
+  /** Selects references, replacing the selection or, with {add: true}, adding to it (taking back those
+   *  selected already): a spelling ('kitchen.left', 'kitchen.left.inner.front', 'kitchen.left.inner.front(37).bottom(120)',
+   *  'kitchen.drawer1', a bought part's path), a reference or item as selection() gives them, a list of
+   *  them, or null for none; returns selection(). */
+  select: (refs, { add = false } = {}) => { needScene(); select(refs ?? null, { add }); revealPanel(); draw(); return preview.selection(); },
+  /** The selection as the panel lists it: per item its kind, path (the first of its spellings), spellings,
+   *  material, size ({width, depth, height} in its scope's frame, a face's two, an edge's length), where
+   *  (the build file's line), point (world mm: the click's, else the reference's own), offsets for a face
+   *  clicked (whole mm from the two nearest edges), parents (what it belongs to, nearest first) and ref,
+   *  the reference itself, which select() takes back. */
+  selection: () => (layout ? selection.map((ref) => {
+    const item = describe(ref, layout);
+    return { ...item, size: Object.fromEntries(item.size), ref: structuredClone(ref),
+      parents: item.parents.map((p) => ({ ...p, size: Object.fromEntries(p.size) })) };
+  }) : []),
+  /** The snippets the panel offers for the selection: [{text, label, note}], text null for a note alone. */
+  snippets: () => (layout ? snippets(selection, layout) : []),
+  /** Names a world point [x, y, z] on a part (the part's path given, or the part the point lies on): its
+   *  face, the nearest edge (with its distance) and corner, and the anchor with whole-mm offsets from the two
+   *  nearest edges, each in its spellings; off, mm from the face's plane, for a point off it. */
+  name: (point, path = null) => { needScene(); return nameAt(layout, point, path); },
+  /** The text last copied from the panel (a click on one of its lines), also where the clipboard is out of reach. */
+  get copied() { return copied; },
   /** Section plane: {on, axis: 'x'|'y'|'z', at: mm, flip}. */
   section: ({ on = true, axis, at, flip } = {}) => {
     needScene();
@@ -1565,7 +1894,7 @@ function setDesigns(names) {
 function openDesign(name) {
   if (name === design) { poll(); return; }
   if (design !== null && root) {
-    views.set(design, { camera: cameraState(), hidden: [...hidden], selected: selectedPath, section: { ...section } });
+    views.set(design, { camera: cameraState(), hidden: [...hidden], selection, section: { ...section } });
   }
   tracker.switched(design, name);
   design = name;
@@ -1581,9 +1910,10 @@ function openDesign(name) {
   const view = views.get(name);
   hidden.clear();
   for (const path of view?.hidden ?? []) hidden.add(path);
-  selectedPath = view?.selected ?? null;
+  selection = view?.selection ?? [];
+  selectedSet = new Set();
   tree.collapse();
-  tree.select(selectedPath);
+  tree.select(selection[0]?.part ?? null);
   Object.assign(section, { on: false, axis: 'z', pos: 0.5, flip: false }, view?.section);
   clearScene();
   applySection();
@@ -1699,7 +2029,7 @@ async function updateNest(nests) {
     const view = $('nestView');
     view.innerHTML = text;
     for (const g of view.querySelectorAll('g.part')) {
-      g.addEventListener('click', () => { select(g.dataset.path); draw(); markNestSelection(); });
+      g.addEventListener('click', (e) => { select({ part: g.dataset.path }, { add: e.shiftKey }); revealPanel(); draw(); });
     }
     markNestSelection();
     camDrawn = undefined;
@@ -1728,9 +2058,10 @@ function markPinning(n) {
 /** The "fixed by hand" button, for the selected part where it is made and changed since. */
 function updateFix() {
   const n = nestChosen;
-  const on = !!selectedPath && fixable(n, selectedPath);
+  const path = selection[0]?.part ?? null;
+  const on = !!path && fixable(n, path);
   $('nestFix').hidden = !on;
-  if (on) $('nestFix').textContent = `fixed by hand: ${selectedPath}`;
+  if (on) $('nestFix').textContent = `fixed by hand: ${path}`;
 }
 
 async function pin(what, query) {
@@ -1754,7 +2085,7 @@ function markFixed(nest, part) {
 }
 
 function markNestSelection() {
-  for (const g of $('nestView').querySelectorAll('g.part')) g.classList.toggle('selected', g.dataset.path === selectedPath);
+  for (const g of $('nestView').querySelectorAll('g.part')) g.classList.toggle('selected', selectedSet.has(g.dataset.path));
 }
 
 function showNest(on) {
@@ -1776,8 +2107,9 @@ $('nestRun').onclick = async () => {
 $('nestMade').onclick = () => { if (nestChosen) markMade(nestChosen.path); };
 $('nestFix').onclick = () => {
   const n = nestChosen;
-  if (n && selectedPath && confirm(`Mark ${selectedPath} as fixed by hand, made as the build has it now?`)) {
-    markFixed(n.path, selectedPath);
+  const path = selection[0]?.part ?? null;
+  if (n && path && confirm(`Mark ${path} as fixed by hand, made as the build has it now?`)) {
+    markFixed(n.path, path);
   }
 };
 
