@@ -7,7 +7,7 @@ from lang import *
 from lang.core.ops import Hole
 from lang.core.scope import registry
 from lang.core.layout import build_layout
-from lang.preview.mesh import mesh_part
+from lang.preview.mesh import FINE, mesh_part
 from helpers import ply15, ply18
 
 
@@ -141,7 +141,7 @@ def test_the_preview_shows_countersinks(outer: str):
         shelf.join(left if outer == "left" else right, using=screws(count=1, countersink=True))
     layout = build_layout()
     part = next(p for p in layout["modules"][0]["parts"] if p["path"] == f"unit.{outer}")
-    volume = mesh_part(part, layout["frame"]).volume
+    volume = mesh_part(part, layout["frame"], level=FINE).volume
     r, c = 2.0, 2.2                               # a 4 mm screw, its countersink 8.4 wide
     hole = math.pi * r * r * 15                   # through the 15 mm side, 24-sided in the mesh
     sink = math.pi * c / 3 * ((r + c) ** 2 + (r + c) * r + r * r) - math.pi * r * r * c

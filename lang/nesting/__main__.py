@@ -52,6 +52,7 @@ from pathlib import Path
 
 from ..build import describe, layout_of
 from ..core.errors import LangError
+from ..core.layout import layout_json
 from ..core.layout_types import Layout, NestLayout
 from ..emit.plan import check_version
 from .draw import draw_nest
@@ -187,7 +188,7 @@ def _run(args: argparse.Namespace) -> int:
         inventory = used_up(inventory, result)
         target.mkdir(parents=True, exist_ok=True)
         (target / "nest.json").write_text(json.dumps(result, indent=1))
-        (target / "nest.layout.json").write_text(json.dumps(layout, indent=1))
+        (target / "nest.layout.json").write_text(layout_json(layout))
         items = {item.path: item for items in parts.by_material.values() for item in items}
         (target / "nest.svg").write_text(draw_nest(result, items))
         for m in result["materials"]:
