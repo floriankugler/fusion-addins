@@ -157,6 +157,51 @@ The rules behind every topic file; details in `design/api.md`.
   documents, one per module. [decided]
 - The layout step refuses what it cannot build rather than guessing, and a
   refusal changes nothing. Nothing under 0.01 mm is meant.
+- Turnover is what makes the language usable [Florian, 2026-10-17]: a save
+  shows in the preview in well under a second and a module compiles in
+  seconds, for real designs, which are far larger than the examples. Every
+  feature is designed with its cost per part in mind from the start, not
+  tuned later; the budgets are below, under Performance.
+
+## Performance
+
+Fast turnover is the product, not a refinement [Florian, 2026-10-17]: the
+loop of edit, look, edit is what makes a text language usable for a visual,
+creative process, and the real van has many times the parts of the examples.
+So the two paths that matter are budgeted, and a feature is designed to its
+budget from the beginning:
+
+- **The preview loop**, save to picture: well under a second for a module,
+  where the daily work is done, a cabinet or a bed of a few dozen parts
+  saved and looked at over and over [Florian, 2026-10-17]; the whole van,
+  previewed now and then, may take seconds. The build runs once per save
+  and meshes every part, so the cost per part and per operation is what
+  counts, and an edit that touches one part must not pay for the others
+  (mesh what changed, keep the rest; build one module at a time once the
+  whole van is slow).
+- **The compile into Fusion**: seconds for a module, never minutes, and a
+  nest document the same. Fusion is single-threaded and every write to a
+  document costs milliseconds that grow with the document, so the measure
+  is writes per part, not features: profiles are batched, primitives are
+  cut in memory where the API allows, and nothing is looked up by walking
+  the whole body or document.
+- **The layout step**: linear in parts and operations. No check, join or
+  reference scans every part of the design for each part; shapely and
+  numpy do the arithmetic, Python loops do not visit coordinates.
+- **The files**: the layout is read by the preview, the nest and the
+  emitter on every change, so it carries what they need and no more: a
+  circle is a circle, not three hundred and sixty points (to come).
+
+What this means for a feature: before it is merged, its cost is measured on
+`examples/van.py` (`python -m lang.build examples/van.py --out out`, and a
+timed compile for anything the emitter draws), it grows no faster than the
+number of parts, and a regression against the numbers the topic files record
+(`design/preview.md`, The mesher; `design/emitter.md`, Measured) is a bug,
+as a wrong volume is. Doing less (caching, batching, coarser triangles where
+only the eye looks) beats doing it on more cores: the emitter cannot be
+parallelized, and the mesher's libraries hold the interpreter lock. The
+measured state lives with each topic; what is still open, in the order to
+take it, is `design/proposals/performance.md`.
 
 ## Example
 
@@ -273,6 +318,7 @@ is implemented. [Florian]
 | `settings.md` | Settings that flow down the build and are overridden at any level (Florian's idea, 2026-10-15/16). Built: stage 1, the mechanism, the core's keys, lazy modules, the master's parameters (`design/api.md`); stage 2, nests in the build with the nesting keys and the inventory (`design/nesting.md`); stage 3, fingerprints and pinning with the inventory written back (`design/nesting.md`, Pinning); stage 4, the CAM plan with its keys (`design/cam.md`) |
 | `runs.md` | Hoses, cables, ducts and keep-outs: one run primitive that plans and is checked, routed through the boards' own openings, at the van level or in a module |
 | `detail-levels.md` | Rough and full previews |
+| `performance.md` | What is still open for turnover after the review of 2026-10-17: the emitter's document writes, the loop's fixed costs, curves instead of polygons in the layout, one module at a time |
 | `hand-made-geometry.md` | Escape hatches for what the language cannot say |
 | `copy-path.md` | Copy Path, named faces on hand-modeled bodies, the Planung check |
 | `build-repo.md` | A repo per van, committed outputs (cut list, SVGs, lock file) |

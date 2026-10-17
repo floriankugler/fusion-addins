@@ -30,3 +30,11 @@ detail is added below, not by editing the boards. [decided as a workflow]
 
 Open: two levels or three, and whether chamfers belong to `full` or to a
 middle level with holes but without joints.
+
+Built 2026-10-17 (PR #12, `design/preview.md`, Levels): how finely the
+preview draws arcs is a knob of its own, lossless and worth two thirds of
+the mesh time (`fine`, `normal`). The levels here, which leave operations
+out, were measured too: on the van at normal, leaving out holes, chamfers
+and V-grooves takes the mesh step from 0.36 s to 0.30 s, big-face pockets
+only 0.18 s; their value is the picture, the rough shape first, not the
+time. The control is the level row in the page, which has room for them.
