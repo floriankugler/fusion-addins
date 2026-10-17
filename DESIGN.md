@@ -324,7 +324,7 @@ is implemented. [Florian]
 | `performance.md` | What is still open for turnover after the review of 2026-10-17: the emitter's document writes, the loop's fixed costs, curves instead of polygons in the layout, one module at a time |
 | `hand-made-geometry.md` | Escape hatches for what the language cannot say |
 | `copy-path.md` | Copy Path, named faces on hand-modeled bodies, the Planung check |
-| `preview-assist.md` | The preview as a code assistant, gone through with Florian 2026-10-17: lines in the layout, click to reference (faces, edges, anchors), shift-select and measuring, operations clicked, the selection as the pointer and marks, what a save changed, the source pane, problems anchored, color by, the cut list as a tab |
+| `preview-assist.md` | The preview as a code assistant, gone through with Florian 2026-10-17: lines in the layout, click to reference (faces, edges, anchors), shift-select, the selection panel with snippets to copy and values edited in place, operations clicked, the selection as the pointer and marks, what a save changed, the source pane, problems anchored, color by, the cut list as a tab |
 | `build-repo.md` | A repo per van, committed outputs (cut list, SVGs, lock file) |
 | `syntax.md` | Claude's syntax review of 2026-10-15, gone through with Florian: 16 items, each with his decision |
 
