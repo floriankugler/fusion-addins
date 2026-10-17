@@ -119,6 +119,7 @@ for a check, too slow for the loop. [decided as a need]
 - Camera and visibility from code: the page exposes `window.preview`
   (`look`, `view`, `camera`, `fit`, `isolate`, `show`, `hide`, `select`,
   `section`, `labels`, `hardware`, `level`, `parts`, `ops`, `openEditor`,
+  `changes`, `ghosts`,
   `loaded`, `open`, `designs`, `design`, `version`), so a tool driving the browser frames a
   part, a scope or a named operation from a named direction in one call
   instead of steering the mouse. The camera is kept in the URL hash, so a
@@ -150,6 +151,55 @@ for a check, too slow for the loop. [decided as a need]
   lang.build examples/van.py` 1.04 s before and after with the scene from
   the mesh cache, 0.71 s without the scene (`--no-scene`; medians of 7
   runs each, the two trees built in turn).
+- What a save changed (`design/proposals/preview-assist.md`, built
+  2026-10-17): on each new scene the page diffs the new layout against the
+  one on screen (`lang/preview/viewer/changes.js`, with node tests), per
+  path, parts and bought parts' bodies alike: added, gone or changed. A
+  changed part says whether its box changed, whether it moved whole (by
+  how much, in the layout's directions), was resized or turned, which of
+  its operations differ, were added or removed (named ones matched by
+  name, the others by being equal, then by their order among those of
+  their kind), which outline segments differ, and what else (material,
+  grain, nest, faces, each setting by its value, an operation's own
+  settings). A part that moved whole is also compared as moved, and the
+  comparison that matches more counts, so the operations that moved with
+  it are no change. Provenance is no change: the build file's lines
+  (`where`) and a setting's source, nor are numbers within 0.1 µm (float
+  noise). The page then tints the parts changed (pink) and added (green)
+  for four seconds or until a click (not a drag) or a key; keeps the parts
+  gone and the old meshes of parts moved, resized, turned or reshaped as
+  grey ghosts until the next build, behind the surfaces they share with
+  the new meshes, so a reshaped part's ghost shows only where it was and
+  no longer is; and glows, drawn through the parts at a fixed size on
+  screen: a halo at each operation that differs (pink), was added (green)
+  or removed (red), where `look` aims, a fainter one where a changed one
+  was, a line along a chamfer's edge, and a line along each outline
+  segment that differs. So a hole moved by half a millimetre is found from
+  afar. Key `u` and the checkbox last save under Display show or hide the
+  ghosts and glows. The panel under the build log says what changed:
+  `3 parts changed: shelf.left (3 ops, outline), shelf.middle (moved
+  bottom 20 mm)`, the parts added and gone, each value the scene cannot
+  show (`shelf.middle: material birch 18 → oak 18`), the operations it
+  could not place and the problems that came and went; a path in it
+  selects the part and frames it with its ghost. A build that changed
+  nothing says `no part changed` (`only lines of the build file` when
+  lines moved); a design shown afresh and a reloaded page have no diff.
+  From code, `preview.changes()` gives the last diff (null for none): the
+  parts added, gone and changed as above, each outline as the segments
+  that differ counted with the world point in their middle, the halos
+  with their points (`{at, kind, path, op}`, for `look`), the glowing
+  lines counted, what was not placed, the panel's text, and `ms`, what the
+  diff and the drawing took; `preview.ghosts(on)` shows or hides the
+  ghosts and glows. Cost, on the van (42 parts, 386 operations, a 5.3 MB
+  layout; 2026-10-17): in node, the diff of a layout as before 0.9 ms, a
+  hole moved 2 ms, the kitchen moved whole (23 parts) 3 ms; in the page,
+  the shelf-pin holes of both kitchen sides moved by 2 mm 8.4 ms and
+  0.6 ms to draw, the floor's longs spread anew (17 parts, nearly every
+  point of the battens' outlines moved with their lap notches) 22 ms and
+  6 ms, against 12 ms (node) to 29 ms (page) to parse the layout itself.
+  Once, the first diff after the page loaded took 289 ms, with what the
+  scene's loading left to collect; the same diff run again in the page
+  took 13 to 20 ms.
 - Click-to-path in the viewer is the Copy Path helper outside Fusion
   (faces, edges and anchors proposed in `design/proposals/preview-assist.md`).
 - The nest view (button or key `k`, `preview.nest(on)` from code) shows a
