@@ -489,7 +489,7 @@ function pointSnippets(part, layout, face, point) {
     line(at([r(a.far), r(b.near)]), 'other edges'),
     line(at([r(a.near), r(b.far)]), 'other edges'),
     line(at([r(a.far), r(b.far)]), 'other edges'),
-    line(at([[a.near[0], null], [b.near[0], null]]), 'nearest corner'),
+    line(at([[a.near[0], null], [b.near[0], null]]), 'corner'),
     line(`${at([r(a.near)])}.center(${inward(part, frame, b.near[0], Math.round(b.near[1]))})`, 'centred on'),
     line(`${at([r(b.near)])}.center(${inward(part, frame, a.near[0], Math.round(a.near[1]))})`, 'centred on'),
   ];
