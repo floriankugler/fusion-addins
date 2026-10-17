@@ -8,7 +8,7 @@ from lang import *
 from lang.core.contact import contacts
 from lang.core.layout import build_layout
 from lang.core.ops import Hole, Pocket, VGroove
-from lang.preview.mesh import mesh_part
+from lang.preview.mesh import FINE, mesh_part
 from lang.joints.common import ContactJoint
 from lang.joints.connectors import CabineoInsert, CabineoModel, ClamexModel, DominoSize
 from lib import connector_data
@@ -500,6 +500,6 @@ def test_the_preview_cuts_the_marks():
         p["bottom"].join(p["left"], using=domino("4x20", count=3))
     layout = build_layout()
     part = next(part for part in layout["modules"][0]["parts"] if part["path"] == "cab.bottom")
-    mesh = mesh_part(part, layout["frame"])
+    mesh = mesh_part(part, layout["frame"], level=FINE)
     groove = 0.3 * 0.3 * 4                                  # a 90 degree V: depth squared, 4 long in the board
     assert mesh.volume == pytest.approx(570 * 500 * 15 - 3 * groove, abs=1e-3)

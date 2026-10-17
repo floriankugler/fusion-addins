@@ -92,6 +92,8 @@ CHECKS: dict[str, Check] = {
     "offsets": (fuzzing.recipes(), fuzzing.offset_problems),
     "cutouts": (boards.board_cases(), boards.run_cutout),
     "centers": (boards.center_cases(), boards.run_center),
+    "levels": (boards.board_cases(), boards.run_levels),
+    "mesh_cache": (boards.board_cases(), boards.run_cache),
     "joints": (joints.pair_cases(), joints.run_pair),
     "box_joints": (joints.corner_cases(), joints.run_corner),
     "half_laps": (joints.cross_cases(), joints.run_cross),

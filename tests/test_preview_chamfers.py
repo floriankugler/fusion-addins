@@ -7,14 +7,14 @@ import pytest
 from lang import *
 from lang.core.layout import build_layout
 from lang.core.scope import registry
-from lang.preview.mesh import mesh_part
+from lang.preview.mesh import FINE, mesh_part
 from helpers import ply15
 
 
 def _volume(part: Board) -> float:
     layout = build_layout()
     found = next(p for m in layout["modules"] for p in m["parts"] if p["path"] == part.path)
-    return float(mesh_part(found, layout["frame"]).volume)
+    return float(mesh_part(found, layout["frame"], level=FINE).volume)
 
 
 def _panel() -> tuple[Scope, Board]:

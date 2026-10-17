@@ -27,6 +27,8 @@ _WALL = 1e-9
 #: The narrowest (mm) piece or hole the language keeps: nothing narrower is
 #: meant [Florian, 2026-10-13], so narrower ones are what booleans leave.
 NARROWEST = 0.01
+#: A ring's points, n by 2.
+Ring = np.ndarray[tuple[int, int], np.dtype[np.float64]]
 
 
 def parts_of(g: BaseGeometry) -> list[BaseGeometry]:
@@ -101,16 +103,18 @@ def _clean_polygon(poly: Polygon, walls: bool = True, remake: bool = True) -> li
     A ring is judged narrow without its spikes [found by fuzzing the
     placement, 2026-10-14: a strip 0.2 by 7 mm with a hairline tail 175 mm
     long was narrower than 0.01 mm on average, and went with it]."""
+    # (rings as numpy arrays, which shapely takes without visiting each point in Python: a
+    # list of tuples cost the van's build 0.4 s)
     exterior = _without_spikes(poly.exterior)
-    shell = list(poly.exterior.coords) if exterior is None else exterior
+    shell = np.asarray(poly.exterior.coords) if exterior is None else exterior
     if len(shell) < 4:
         return []
-    if _narrow(LinearRing(shell)):
+    if _narrow(poly.exterior if exterior is None else LinearRing(shell)):
         # (narrow on average, it may be wider pieces that a hairline of no width joins: two
         # slivers of a box beside a pocket, 0.09 mm wide, joined along the pocket's side 6e-14
         # apart, went with it [found by fuzzing the checks, 2026-10-14])
         return _opened(poly) if walls else []
-    holes: list[LinearRing | list[tuple[float, float]]] = []
+    holes: list[LinearRing | Ring] = []
     changed = exterior is not None
     for ring in poly.interiors:
         kept = _without_spikes(ring)
@@ -175,9 +179,10 @@ def _narrow(ring: LinearRing) -> bool:
     return length == 0 or 2 * abs(Polygon(ring).area) < NARROWEST * length
 
 
-def _without_spikes(ring: LinearRing) -> list[tuple[float, float]] | None:
-    """The ring (closed) without points within `SAME_POINT` of the one
-    before and without spike tips, or None when it has neither."""
+def _without_spikes(ring: LinearRing) -> Ring | None:
+    """The ring's points (closed, n by 2) without points within
+    `SAME_POINT` of the one before and without spike tips, or None when it
+    has neither."""
     pts = np.asarray(ring.coords)[:-1, :2]
     changed = False
     while len(pts) >= 3:
@@ -201,8 +206,7 @@ def _without_spikes(ring: LinearRing) -> list[tuple[float, float]] | None:
         changed = True
     if not changed:
         return None
-    coords = [(float(x), float(y)) for x, y in pts]
-    return coords + coords[:1] if coords else []
+    return np.concatenate([pts, pts[:1]])
 
 
 def _has_walls(poly: Polygon) -> bool:

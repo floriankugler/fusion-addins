@@ -18,7 +18,7 @@ import pytest
 from lang import *
 from lang.core.layout import build_layout
 from lang.emit.plan import ChamferStep, HoleStep, PocketStep, Step, VGrooveStep, plan_layout
-from lang.preview.mesh import mesh_part
+from lang.preview.mesh import FINE, mesh_part
 from helpers import ply15
 
 #: A 24-gon's area over its circumscribed circle's radius squared.
@@ -113,7 +113,7 @@ def _build(op: Op) -> tuple[list[Step], float]:
     layout = build_layout()
     (part,) = layout["modules"][0]["parts"]
     problems: list[str] = []
-    mesh = mesh_part(part, layout["frame"], problems.append)
+    mesh = mesh_part(part, layout["frame"], problems.append, FINE)
     assert problems == [] and mesh.is_volume
     (plan,) = plan_layout(layout).parts
     return plan.steps, W * H * T - float(mesh.volume)

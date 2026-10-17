@@ -50,7 +50,7 @@ from lang.core.part import ON_FACE_TOLERANCE, Board
 from lib import connector_data as data
 from lang.joints import box_joint, cabineo, clamex, domino, groove, half_lap, screws, tenons
 from lang.joints.common import face_toward, touching
-from lang.preview.mesh import mesh_part
+from lang.preview.mesh import FINE, mesh_part
 from tests.helpers import overlap
 
 #: How much material (mm3) two boards may share before it counts, and how
@@ -956,7 +956,7 @@ def _run_joined(make: Any, join: Any, from_side: bool, symmetric: bool, fill: An
 
 def _meshes() -> dict[str, Any]:
     layout = build_layout()
-    return {p["path"]: mesh_part(p, layout["frame"]) for m in layout["modules"] for p in m["parts"]}
+    return {p["path"]: mesh_part(p, layout["frame"], level=FINE) for m in layout["modules"] for p in m["parts"]}
 
 
 def _volume_in(mesh: Any, lo: list[float], hi: list[float]) -> float:
