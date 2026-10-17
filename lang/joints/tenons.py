@@ -46,8 +46,9 @@ from typing import ClassVar
 from shapely.geometry import Point
 
 from ..core.contact import Contact
-from ..core.dogbones import DogBones, corner_relief, hidden_relief
+from ..core.dogbones import DogBones, corner_bone, hidden_bone
 from ..core.errors import LangError, one_of
+from ..core.ops import DogBone
 from ..core.part import Board
 from ..core.refs import DepthSpec, Pos, PosLike, to
 from ..core.shapes import Shape, box_shape
@@ -179,20 +180,23 @@ class Tenons(ContactJoint):
                        if self.dogbones is not None
                        and e_outline.geometry.contains(_point(g.on_board(x + side * PROBE, PROBE)))]
             if reliefs:
-                e.add_cut(union_all(reliefs), name=naming(e, f"tenon_{f.name}_{n}_relief"))
+                e.add_cut(union_all([r.shape for r in reliefs]), name=naming(e, f"tenon_{f.name}_{n}_relief"),
+                          dogbones=reliefs)
             corners = (lo - along_clear, across_lo - across_clear), (hi + along_clear, across_hi + across_clear)
             mortise = _box(g.on_face(*corners[0]), g.on_face(*corners[1]))
+            bones: list[DogBone] = []
             for along, across, into_along, into_across in _corners(corners) if self.dogbones is not None else []:
                 outside = g.on_face(along - into_along * PROBE, across - into_across * PROBE)
                 if f_outline.geometry.contains(_point(outside)):
-                    mortise = mortise.union(self._mortise_relief(g, along, across, into_along, into_across))
+                    bones.append(self._mortise_relief(g, along, across, into_along, into_across))
+                    mortise = mortise.union(bones[-1].shape)
             name = naming(f, f"mortise_{e.name}_{n}")
             if mortise_depth is None:
-                f.add_cut(mortise, name=name)
+                f.add_cut(mortise, name=name, dogbones=bones)
             else:
-                f.add_pocket(c.face, mortise, mortise_depth, name=name)
+                f.add_pocket(c.face, mortise, mortise_depth, name=name, dogbones=bones)
 
-    def _root_relief(self, g: ContactGeometry, along: float, side: float) -> Shape:
+    def _root_relief(self, g: ContactGeometry, along: float, side: float) -> DogBone:
         """The relief at a tenon's root, the corner where its side at
         `along` meets the board's end; `side` is -1 at the tenon's start,
         +1 at its end. The tenon grows toward negative distances from the
@@ -200,19 +204,19 @@ class Tenons(ContactJoint):
         corner = g.on_board(along, 0.0)
         out = g.along_board(0.0, -1.0)                        # along the tenon's side, away from the board
         if self.dogbones == "hidden":
-            return hidden_relief(corner, out, self.tool, self.relief)     # biting into the tenon's side
-        return corner_relief(corner, g.along_board(side, 0.0), out, self.tool, self.relief)
+            return hidden_bone(corner, out, self.tool, self.relief)     # biting into the tenon's side
+        return corner_bone(corner, g.along_board(side, 0.0), out, self.tool, self.relief)
 
     def _mortise_relief(self, g: ContactGeometry, along: float, across: float, into_along: float,
-                        into_across: float) -> Shape:
+                        into_across: float) -> DogBone:
         """The relief at a mortise corner; `into_*` point into the mortise."""
         corner = g.on_face(along, across)
         end = g.along_face(0.0, into_across)                  # along the mortise's end, across the joint
         if self.dogbones == "hidden":
             # On the mortise's end: it stays tangent to the long side and
             # reaches past the end, under the shoulder.
-            return hidden_relief(corner, end, self.tool, self.relief)
-        return corner_relief(corner, g.along_face(into_along, 0.0), end, self.tool, self.relief)
+            return hidden_bone(corner, end, self.tool, self.relief)
+        return corner_bone(corner, g.along_face(into_along, 0.0), end, self.tool, self.relief)
 
 
 def _box(a: Point2, b: Point2) -> Shape:

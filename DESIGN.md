@@ -17,6 +17,7 @@ Fusion documents. This file is the overview; the details are in `design/`:
 | `design/geometry.md` | Polygons and arcs, cleaning, tolerances, offsets |
 | `design/emitter.md` | The Fusion backend, compile speed, Fusion findings |
 | `design/nesting.md` | Nesting: the build's nests, their parts on blanks the bed takes, sawn out of the stock on hand and the sheets bought; the inventory, the nest file with the parts' fingerprints, and nests marked as made (pinning) |
+| `design/cam.md` | The CAM plan: a nest's blanks as setups for Fusion, each operation's template, tool, parameters and features; skin and release, tabs, the keys, the plan file |
 | `design/preview.md` | The browser preview |
 | `design/proposals/` | Features worked out but not built, one file each (listed below) |
 | `design/todo.md` | A loose list of things to do |
@@ -55,7 +56,8 @@ Not goals:
 - A general-purpose CAD language.
 - Replacing Fusion. It stays the kernel, the viewer, and the place for
   toolpaths and post-processing. Nesting is in the language
-  (`design/nesting.md`); the choice of CAM operations may follow
+  (`design/nesting.md`), and so is the choice of CAM operations, the CAM
+  plan (`design/cam.md`), which a Fusion emitter is to make into setups
   (`design/proposals/cam.md`); generating G-code stays a non-goal.
 - Describing parts that are curved in 3D (upholstered parts, parts curved two
   ways). Those stay hand-modeled and are referenced by name. Boards bent about
@@ -91,6 +93,12 @@ Not goals:
   carries its fingerprint there, so a nest says which parts changed since;
   a nest marked as made is frozen, what is not made of it is nested beside
   it, and the mark writes the inventory back (pinning).
+- **CAM plan**: a nest's blanks as setups, one per blank: the operations in
+  order, each one of Florian's CAM templates with its tool, the parameters
+  Fusion is to set and the features it machines by position, every contour
+  roughed to a skin and released at the end, tabs for what holds too
+  little; written beside the nest file (`cam.json`), the CAM's settings
+  with it.
 
 ```
 Master document --(snapshot, in Fusion, rarely)--> snapshot.json
@@ -105,12 +113,16 @@ Python source ---------------------------------------> layout step (plain Python
                                   ^           material, inventory)   module)
                                   |                    |                    ^
                                   +---- nest view -----+---- nest.json -----+
-                                                             (a document per material)
+                                                       |     (a document per material)
+                                                       v
+                                             CAM plan (plain Python, per nest,
+                                             seconds) --> cam.json, for a CAM
+                                             emitter in Fusion (to come)
 
-afterwards: Auto Setup (CAM); Multi Arrange stays a fallback for nesting in Fusion
+until that emitter: Auto Setup (CAM); Multi Arrange stays a fallback for nesting in Fusion
 ```
 
-Three steps with files between them. The layout step can use shapely and
+Steps with files between them. The layout step can use shapely and
 numpy because nothing heavy runs inside Fusion's Python, and `core` is tested
 against real van data without Fusion.
 
@@ -253,9 +265,11 @@ lang/
   emit/        plan, loops, arcs, nested (Fusion-free); fusion (draws); the snapshot writer
   nesting/     the nest's keys, a nest's values and stock, the inventory, parts, PackingSolver,
                saw plans, refill, verify, drawing
+  cam/         the CAM's keys, the templates read, the parts on their blank, the rules,
+               holding and tabs, the plan, its check
   preview/     mesher, server, three.js viewer
   master.py    reading the snapshot
-  build.py     `python -m lang.build`; `python -m lang.nesting` nests
+  build.py     `python -m lang.build`; `python -m lang.nesting` nests, `python -m lang.cam` plans
 addins-src/compiler/   Snapshot Master and Compile Layout (layouts and nests) buttons
 lib/           data shared with the add-ins (connector_data, stations, drawer_slides, ...)
 examples/      build files; van_snapshot.json is the sample master's snapshot
@@ -276,7 +290,9 @@ bed, the preview's nest view, nested documents in Fusion), the nests
 declared in the build with the nesting keys, the inventory and own blanks
 for `nest(False)` boards (the settings' second stage), the parts'
 fingerprints and nests marked as made with the inventory written back
-(the third; the nest documents of version 3 not yet drawn in Fusion), the standard
+(the third; the nest documents of version 3 not yet drawn in Fusion), the CAM
+plan of each nest with its keys, dog bones marked in the layout (the fourth,
+Fusion-free; the emitter that makes the setups is to come), the standard
 library's carcass and drawer box, which give the examples' layouts unchanged,
 and the settings' first stage (keys, the chain, freezing, provenance in the
 layout and the preview, `material`, `grain`, `nest` and `chamfer_size`,
@@ -298,8 +314,8 @@ is implemented. [Florian]
 | `tilted-boards.md` | Boards turned about one axis of their scope |
 | `miters.md` | Mitered corners as a joint |
 | `standard-library.md` | What is left of the standard library (built: `design/std.md`): cabinet types per build repo, further blocks |
-| `cam.md` | A CAM plan from the layout, built by an add-in |
-| `settings.md` | Settings that flow down the build and are overridden at any level (Florian's idea, 2026-10-15/16). Built: stage 1, the mechanism, the core's keys, lazy modules, the master's parameters (`design/api.md`); stage 2, nests in the build with the nesting keys and the inventory (`design/nesting.md`); stage 3, fingerprints and pinning with the inventory written back (`design/nesting.md`, Pinning); to come: the CAM's keys |
+| `cam.md` | A CAM plan from the layout, built by an add-in. Built: the plan (`design/cam.md`); to come: the emitter that makes the setups in Fusion, the plan in the preview, manufacturing groups |
+| `settings.md` | Settings that flow down the build and are overridden at any level (Florian's idea, 2026-10-15/16). Built: stage 1, the mechanism, the core's keys, lazy modules, the master's parameters (`design/api.md`); stage 2, nests in the build with the nesting keys and the inventory (`design/nesting.md`); stage 3, fingerprints and pinning with the inventory written back (`design/nesting.md`, Pinning); stage 4, the CAM plan with its keys (`design/cam.md`) |
 | `runs.md` | Hoses, cables, ducts and keep-outs: one run primitive that plans and is checked, routed through the boards' own openings, at the van level or in a module |
 | `detail-levels.md` | Rough and full previews |
 | `performance.md` | What is still open for turnover after the review of 2026-10-17: the emitter's document writes, the loop's fixed costs, curves instead of polygons in the layout, one module at a time |

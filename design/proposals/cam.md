@@ -2,10 +2,36 @@
 
 Status: added by Florian 2026-10-14, worked out by Claude the same day;
 reviewed with Florian on 2026-10-15 (the gaps found, holding and tabs), his
-decisions written in; nothing built. Points marked [Florian] are his,
-[decided] his decisions, [proposed] Claude's. Builds on the nest
-(`design/nesting.md`); the values a plan reads are settings that flow
-down the build (`proposals/settings.md`).
+decisions written in. Points marked [Florian] are his, [decided] his
+decisions, [proposed] Claude's. Builds on the nest (`design/nesting.md`);
+the values a plan reads are settings that flow down the build
+(`proposals/settings.md`).
+
+Built 2026-10-17 (stage 4 of `proposals/settings.md`'s build order): the
+CAM plan, Fusion-free, `lang/cam`, described in `design/cam.md`: a
+`cam.json` beside each nest file with a setup per blank, its operations in
+order (template, tool, the parameters to set, the features by position),
+one side only, Auto Setup's hole rules, the pocket's cutter by the opening
+test with rests, slots as pockets, dog bones marked in the layout (version
+9) and routed as Auto Setup routes them, the V-bit's chamfers and grooves,
+skin and release with the release order, tabs only for what holds too
+little, by the position rules below, own blanks, the CAM keys, the command
+`python -m lang.cam`, and the check, fuzzed. Built otherwise or beyond what
+is written here: the 8 mm adaptive template takes only pockets with room
+for twice its cutter across [Florian, 2026-10-17: a pure pocket rougher];
+a narrower template that reaches a whole pocket takes it alone where its
+cutter is at least ¾ of the widest that gets in, else the widest takes it
+and rests go to narrower ones; bores are kept apart by hole diameter (their
+feed follows the hole); a blind hole's bottom is its own (`from hole
+bottom`), its top the stock's; an inner contour whose cutter is narrower
+than its part's outer contour's is taken out whole (its release would come
+after the part's), and so are an own blank's openings; "the strongest
+neighbour across the kerf" is three classes for now (still held by its
+skin, released before, nothing), and a hidden edge is one another part's
+box reaches across; `cam.waste_area` defaults to the tabs' 10 cm², measured
+as they are. Still to come, kept below: the CAM emitter in the compiler
+add-in, the plan in the preview, manufacturing groups, the holding model's
+calibration and the lift margin, a slot cut along its line.
 
 Florian's points: since the Fusion geometry is generated again on every
 compile, the CAM setups have to be made again too; Auto Setup helps, but it

@@ -34,6 +34,7 @@ import fuzzing  # noqa: E402
 import hardware  # noqa: E402
 import joints  # noqa: E402
 import lips  # noqa: E402
+import machining  # noqa: E402
 import nesting  # noqa: E402
 import nests  # noqa: E402
 import pinning  # noqa: E402
@@ -118,6 +119,7 @@ CHECKS: dict[str, Check] = {
     "nest_choices": (nests.nests_cases(), nests.nests_problems),
     "ledgers": (nests.ledger_cases(), nests.ledger_problems),
     "pinning": (pinning.pin_cases(), pinning.pinning_problems),
+    "plans": (machining.plan_cases(), machining.run_plan),
     "settings": (settings.chain_cases(), settings.chain_problems),
     "setting_orders": (settings.order_cases(), settings.order_problems),
 }

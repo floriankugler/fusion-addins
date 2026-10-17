@@ -12,6 +12,7 @@ from lang import *
 from lang.build import run_build
 from lang.core.dogbones import corner_relief, corners, hidden_relief
 from lang.core.layout import build_layout
+from lang.core.layout_types import DogBoneLayout
 from lang.core.ops import Cut, Pocket
 from lang.core.part import DogBoneTarget
 from lang.core.scope import registry
@@ -561,3 +562,70 @@ def test_a_hairline_spike_two_drawings_of_a_circle_leave_is_no_corner():
         with m:
             b.dogbones(tool=5, relief=0.1, at=b.pocket_1)
             b.dogbones(tool=5, relief=0.1, at=b.pocket_1)
+
+
+# -- dog bones marked in the layout, for the CAM plan ------------------------------------------------
+
+def _on_its_shape(rings: list[list[list[float]]], bone: DogBoneLayout) -> float:
+    """How much of a shape's boundary runs on the bone's circle (mm)."""
+    boundary = Polygon(rings[0]).boundary
+    for ring in rings[1:]:
+        boundary = boundary.union(Polygon(ring).boundary)
+    circle_line = Point(*bone["center"]).buffer(bone["d"] / 2, quad_segs=90).exterior
+    return boundary.intersection(circle_line.buffer(1e-3)).length
+
+
+def test_every_dog_bone_is_marked_with_its_circle_and_tool(tmp_path: Path):
+    layout = run_build(EXAMPLES / "dogbones.py", tmp_path, scene=False)
+    parts = {p["path"]: p for m in layout["modules"] for p in m["parts"]}
+    for path, part in parts.items():
+        for op in part["ops"]:
+            if op["kind"] != "cut" and op["kind"] != "pocket":
+                continue
+            name = op["name"] or ""
+            bones = op["dogbones"]
+            if name.endswith("dogbones"):
+                # a dogbones() relief: its shape is its circles, each the add-in's for a 6 mm tool
+                assert bones, f"{path}.{name}"
+                discs = Polygon()
+                for bone in bones:
+                    assert bone["tool"] == 6.0 and bone["d"] >= 6.1 - 1e-9
+                    discs = discs.union(Point(*bone["center"]).buffer(bone["d"] / 2 + 1e-3, quad_segs=90))
+                shape = Polygon(op["shape"][0], op["shape"][1:])
+                assert shape.difference(discs).area < 1e-6, f"{path}.{name}"
+            elif name.startswith("lap_"):
+                assert len(bones) == 2, f"{path}.{name}"           # the notch's two corners at its floor
+            else:
+                assert bones == [], f"{path}.{name}"
+            for bone in bones:
+                assert _on_its_shape(op["shape"], bone) > 1.0, f"{path}.{name}: {bone}"     # an arc of its wall
+
+
+def test_a_square_corners_mark_is_a_tool_and_the_relief_across():
+    _, panel = _panel()
+    panel.cut(rect(depth=60, width=80), at=panel.top.front.left, name="notch")
+    panel.dogbones()
+    (relief,) = _dogbones(panel)
+    (bone,) = relief.dogbones
+    assert bone.d == pytest.approx(6.1) and bone.tool == 6.0
+    c, r = _centre_radius(relief.shape)
+    assert bone.center == pytest.approx(c, abs=1e-6) and bone.d / 2 == pytest.approx(r)
+
+
+def test_joints_mark_the_dog_bones_in_their_cuts():
+    # tenons: the mortise's four corners, the tenon's two roots
+    with module("m", Box.from_size(width=600, depth=300, height=400)) as m:
+        side = board("side", ply15).on(m.left)
+        shelf = board("shelf", ply15).on(Pos("z", 200), toward=m.top).between(side, m.right)
+        shelf.join(side, using=tenons(count=1, width=60))
+    build_layout()
+    mortise = next(op for op in side.ops if isinstance(op, (Cut, Pocket)) and (op.name or "").startswith("mortise"))
+    root = next(op for op in shelf.ops if isinstance(op, Cut) and (op.name or "").endswith("relief"))
+    assert len(mortise.dogbones) == 4 and len(root.dogbones) == 2
+    assert all(b.tool == 6.0 for b in mortise.dogbones + root.dogbones)
+    # box joints: the circles of the reliefs' pockets, a tool across
+    registry.reset()
+    a, b = _box_jointed(box_joint(5, margin=5, tool=6))
+    pockets = [op for op in a.ops + b.ops if isinstance(op, Pocket) and (op.name or "").endswith("_reliefs")]
+    assert len(pockets) == 2 and all(len(p.dogbones) == 4 for p in pockets)
+    assert all(bone.d == 6.0 and bone.tool == 6.0 for p in pockets for bone in p.dogbones)
