@@ -39,8 +39,14 @@ parameters), with its bottom offset following the height so its top stays
 the parts' top; through the API every chain is turned for its tool to run
 on the waste, as Fusion puts it on the left of a chain's first edge; and a
 rest's region needs a cutter's diameter of room, not its radius, for a
-pocket bounded by it to cut (found in Fusion, since so in the plan). Still to
-come, kept below: the plan in the preview, manufacturing groups, the
+pocket bounded by it to cut (found in Fusion, since so in the plan). The
+plan in the preview built the same day (stage 4c, `design/preview.md`, the
+CAM layer): on the nest's drawing, the parts by their release order with
+their holds and tabs, the tabs as marks, an operation's features in its
+tool's colour from a legend of the setup's operations, what is left out
+and the problems listed, a plan stale when its nest was written again, and
+Plan again from the page. Still to come, kept below: manufacturing groups,
+the
 holding model's calibration and the lift margin, a slot cut along its
 line.
 

@@ -40,6 +40,7 @@ from lang.cam.verify import verify
 from lang.core.layout import build_layout
 from lang.core.layout_types import Layout, PartLayout
 from lang.emit.nested import apply as apply_matrix
+from lang.nesting.items import Item
 from lang.nesting.nest import Options, nest_parts
 from lang.nesting.nest_types import NestFile, PlacedPart
 from lang.nesting.workshop import Sheet, Workshop
@@ -103,27 +104,47 @@ def _build(case: PlanCase) -> list[Board]:
     return boards
 
 
-def run_plan(case: PlanCase) -> list[str]:
+@dataclass(frozen=True)
+class Planned:
+    """A case nested and planned: the plan, its nest, the layout nested and
+    the parts as the nest saw them (what `draw_nest` draws)."""
+    plan: CamFile
+    nest: NestFile
+    layout: Layout
+    items: dict[str, Item]
+
+
+def planned(case: PlanCase) -> Planned | None:
+    """The case built, nested and planned; None where the build or the
+    nest refuses it (their own fuzz tests' business)."""
     with fresh():
         try:
             _in_frame(case.parts[0].frame)
             boards = _build(case)
             layout = build_layout()
         except LangError:
-            return []
+            return None
         workshop = Workshop(bed=BED, sheets=tuple(Sheet(m.label, 2500.0, 1250.0) for m in MATERIALS))
         options = Options(seconds=0.2, saw_seconds=0.05, refill_seconds=0.0)
         paths = [b.path for b in boards] if case.named else None
         try:
-            nest, _parts = nest_parts(layout, paths, workshop, name="fuzz", options=options)
+            nest, parts = nest_parts(layout, paths, workshop, name="fuzz", options=options)
         except LangError:
-            return []                    # what the nest refuses is the nest's fuzz test's
-        plan = plan_nest(nest, layout, registry=REGISTRY)
-        problems = [f"the plan's check: {p}" for p in verify(plan, nest, layout, REGISTRY)]
-        problems += _outside(plan, nest, layout, case)
-        if json.loads(json.dumps(plan)) != plan:
-            problems.append("the plan does not survive JSON")
-        return problems
+            return None
+        items = {item.path: item for items in parts.by_material.values() for item in items}
+        return Planned(plan_nest(nest, layout, registry=REGISTRY), nest, layout, items)
+
+
+def run_plan(case: PlanCase) -> list[str]:
+    done = planned(case)
+    if done is None:
+        return []
+    plan, nest, layout = done.plan, done.nest, done.layout
+    problems = [f"the plan's check: {p}" for p in verify(plan, nest, layout, REGISTRY)]
+    problems += _outside(plan, nest, layout, case)
+    if json.loads(json.dumps(plan)) != plan:
+        problems.append("the plan does not survive JSON")
+    return problems
 
 
 def _outside(plan: CamFile, nest: NestFile, layout: Layout, case: PlanCase) -> list[str]:

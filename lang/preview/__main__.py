@@ -47,6 +47,15 @@ to minutes. The marks (POST /made?design=...&nest=...[&sheet=2...], POST
 /fixed?design=...&nest=...&part=...) run `python -m lang.nesting --made`
 or `--fixed` and answer with what it printed; they wait while a nest of
 the design runs.
+
+The CAM plan: each nest with a nest file says whether a plan
+(`python -m lang.cam`, `cam.json` beside the nest file, served with it)
+was written for it, when, and whether it is stale: planned for another
+nest file than the one beside it (the nest was written again since), or
+of another version. "Plan again" (POST /plan?design=...&nest=...) plans
+the nest named, a second nest by its own name, with the build's CAM
+settings as they are now; nests and plans run one at a time, a plan's
+output in cam.log beside it.
 """
 from __future__ import annotations
 
@@ -116,6 +125,9 @@ class Design:
     nesting: list[str] = field(default_factory=list[str])
     #: The nests whose last run asked for failed.
     nest_failed: set[str] = field(default_factory=set[str])
+    #: The nests whose plans were asked for, by path (a second nest's own), and those whose last plan failed.
+    planning: list[str] = field(default_factory=list[str])
+    plan_failed: set[str] = field(default_factory=set[str])
 
     @property
     def version(self) -> str | None:
@@ -220,6 +232,20 @@ class Designs:
             self.cond.notify_all()
             return True
 
+    def ask_plan(self, name: str, nest: str) -> bool:
+        """Asks for a plan of one of the design's nests by its path as the
+        nests are listed (a second nest's own); False when there is no such
+        design or nest, or the nest is not nested."""
+        with self.cond:
+            design = self.designs.get(name)
+            if design is None or not any(e["path"] == nest and "version" in e for e in nest_state(design)):
+                return False
+            if nest not in design.planning:
+                design.planning.append(nest)
+            design.plan_failed.discard(nest)
+            self.cond.notify_all()
+            return True
+
     def pin(self, name: str, args: list[str]) -> tuple[int, str]:
         """Runs a mark (`--made ...` or `--fixed ...`) for a design: the
         HTTP status and what the command printed."""
@@ -239,17 +265,26 @@ class Designs:
         return (200 if ok else 400), log
 
     def nest_forever(self) -> None:
+        """Runs the nests and plans asked for, one at a time, nests first."""
         while True:
             with self.cond:
-                while (design := next((d for d in self.designs.values() if d.nesting), None)) is None:
+                while (design := next((d for d in self.designs.values() if d.nesting or d.planning), None)) is None:
                     self.cond.wait()
-                nest = design.nesting[0]
-                folder = next((d for path, d in _folders(design) if path == nest), nest.replace(".", "/"))
-            ok = renest(design.file, design.out, nest, folder)
+                nesting = bool(design.nesting)
+                if nesting:
+                    nest = design.nesting[0]
+                    folder = next((d for path, d in _folders(design) if path == nest), nest.replace(".", "/"))
+                else:
+                    nest = design.planning[0]
+                    folder = next((e["dir"] for e in nest_state(design) if e["path"] == nest), "")
+            if nesting:
+                ok = renest(design.file, design.out, nest, folder)
+            else:
+                ok = bool(folder) and replan(design.file, design.out, nest, folder)
             with self.cond:
-                design.nesting.remove(nest)
+                (design.nesting if nesting else design.planning).remove(nest)
                 if not ok:
-                    design.nest_failed.add(nest)
+                    (design.nest_failed if nesting else design.plan_failed).add(nest)
 
     def next_build(self) -> Design | None:
         """A stale design that a page shows; given a single build file, that
@@ -313,7 +348,8 @@ def nest_state(design: Design) -> list[dict[str, Any]]:
       `not_made` (on a sheet not made), which its second nest takes, `gone`
       (made, not in the build's nest now), and `made_parts`, by what each
       was made; `next`, for a nest marked whose next nest is marked too,
-      that one (its sheets cannot be marked any more)."""
+      that one (its sheets cannot be marked any more);
+    - `plan`: its CAM plan (`_plan_entry`)."""
     from lang.core.errors import LangError
     from lang.nesting.pinning import chain, changes, empty, plan_run, read_state, second_folder, sheets_of
     from lang.nesting.resolve import nest_folder
@@ -379,7 +415,7 @@ def nest_state(design: Design) -> list[dict[str, Any]]:
 
 def _nest_entry(design: Design, path: str, folder: Path, follows: str) -> dict[str, Any]:
     """A nest's entry with what its file says (`file`, popped by the
-    caller), `state` `none` without one."""
+    caller), `state` `none` without one, and its plan."""
     from lang.nesting.pinning import sheets_of
     entry: dict[str, Any] = {"path": path, "dir": folder.as_posix() + "/", "follows": follows, "state": "none",
                              "sheets": [], "made": [], "changed": [], "new": [], "gone": []}
@@ -388,7 +424,62 @@ def _nest_entry(design: Design, path: str, folder: Path, follows: str) -> dict[s
     if nest is not None:
         entry |= {"file": nest, "version": str(file.stat().st_mtime_ns),
                   "sheets": [[m, s] for m, s in sheets_of(nest)]}
+    entry["plan"] = _plan_entry(design, path, design.out / folder, nest)
     return entry
+
+
+def _plan_entry(design: Design, path: str, folder: Path, nest: Any) -> dict[str, Any]:
+    """A nest's CAM plan, `cam.json` in its folder: `state` `none` (no plan,
+    or no nest file to plan), `running` (asked for), `failed` (its `log`),
+    `ok` (planned for the nest file beside it) or `stale` (`why`: planned
+    for another nest file, which a nest written again since is, or of
+    another version: plan again); `written` (when it was planned) and
+    `nest_written` (when the nest it was planned for was), and `version`
+    (the file's time) for the page to reload it."""
+    from lang.cam.plan_types import CAM_VERSION
+    busy = "running" if path in design.planning else "failed" if path in design.plan_failed else None
+    out: dict[str, Any] = {"state": busy or "none"}
+    if busy == "failed":
+        out["log"] = _read(folder / "cam.log")
+    file = folder / "cam.json"
+    if nest is None or (head := _plan_head(file)) is None:
+        return out
+    out |= {"written": head.get("written", ""), "nest_written": head.get("nest_written", ""),
+            "version": str(file.stat().st_mtime_ns)}
+    if busy:
+        return out
+    if head.get("version") != CAM_VERSION:
+        out |= {"state": "stale", "why": f"a plan of version {head.get('version')}, this preview reads {CAM_VERSION}"}
+    elif head.get("nest_written") != nest["written"] or head.get("layout_hash") != nest["layout_hash"]:
+        out |= {"state": "stale", "why": f"planned for the nest written {head.get('nest_written')}, "
+                                         f"the nest beside it was written {nest['written']}"}
+    else:
+        out["state"] = "ok"
+    return out
+
+
+_plan_heads: dict[Path, tuple[int, dict[str, Any] | None]] = {}
+
+
+def _plan_head(path: Path) -> dict[str, Any] | None:
+    """A plan file's own fields (its version, nest, when it and its nest
+    were written, the layout's hash), kept while the file is unchanged; None
+    for none."""
+    try:
+        mtime = path.stat().st_mtime_ns
+    except OSError:
+        return None
+    cached = _plan_heads.get(path)
+    if cached is None or cached[0] != mtime:
+        try:
+            plan = json.loads(path.read_text())
+            head = {k: plan.get(k) for k in ("version", "nest", "nest_written", "layout_hash", "written")} \
+                if isinstance(plan, dict) else None  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+        except (OSError, ValueError):
+            head = None
+        cached = (mtime, head)
+        _plan_heads[path] = cached
+    return cached[1]
 
 
 _nest_files: dict[Path, tuple[int, Any]] = {}
@@ -470,6 +561,21 @@ def renest(build_file: Path, out_dir: Path, nest: str, folder: str) -> bool:
     return ok
 
 
+def replan(build_file: Path, out_dir: Path, nest: str, folder: str) -> bool:
+    """Plans one of the design's nests in `out_dir` (`python -m lang.cam`),
+    its output in cam.log in the nest's `folder` there."""
+    command = [sys.executable, "-m", "lang.cam", str(build_file), nest, "--out", str(out_dir)]
+    try:
+        result = subprocess.run(command, capture_output=True, text=True, cwd=str(REPO), timeout=TIMEOUT)
+        log, ok = (result.stdout + result.stderr).strip(), result.returncode == 0
+    except subprocess.TimeoutExpired:
+        log, ok = f"error: the plan took longer than {TIMEOUT:g} s and was stopped.", False
+    (out_dir / folder).mkdir(parents=True, exist_ok=True)
+    (out_dir / folder / "cam.log").write_text(log + "\n")
+    print(f"{build_file.stem}: plan {nest} {'ok' if ok else 'FAILED'}", flush=True)
+    return ok
+
+
 class _Handler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *args: Any, designs: Designs, **kwargs: Any):
         self.designs = designs
@@ -493,8 +599,8 @@ class _Handler(http.server.SimpleHTTPRequestHandler):
         url = urlsplit(self.path)
         query = parse_qs(url.query)
         design, nest = query.get("design", [""])[0], query.get("nest", [""])[0]
-        if url.path == "/nest":
-            ok = self.designs.ask_nest(design, nest)
+        if url.path in ("/nest", "/plan"):
+            ok = (self.designs.ask_nest if url.path == "/nest" else self.designs.ask_plan)(design, nest)
             self.send_response(200 if ok else 404)
             self.send_header("Content-Length", "0")
             self.end_headers()
