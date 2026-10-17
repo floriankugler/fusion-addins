@@ -222,10 +222,11 @@ def _check_op(op: Any, out: cam_plan.OperationPlan, corner: tuple[float, float],
             ok = len(bs) == 1 and isinstance(bs[0], Silhouette) and same(bs[0].ring, f["ring"])
         elif w == "inner":
             ok = len(bs) == 1 and isinstance(bs[0], FaceLoop) and same(bs[0].ring, f["ring"]) and \
-                bs[0].levels == (t, 0.0)
+                bs[0].levels == (t, 0.0) and bs[0].waste_inside
         elif w == "pocket" and f["depth"] is None:
-            ok = len(bs) == len(f["rings"]) and all(isinstance(b, FaceLoop) and same(b.ring, r)
-                                                     for b, r in zip(bs, f["rings"]))
+            ok = len(bs) == len(f["rings"]) and all(isinstance(b, FaceLoop) and same(b.ring, r) and
+                                                     b.waste_inside == (k == 0)
+                                                     for k, (b, r) in enumerate(zip(bs, f["rings"])))
         elif w == "pocket":
             ok = len(bs) == 1 and isinstance(bs[0], Floor) and _close((bs[0].z,), (t - f["depth"],)) and \
                 all(same(r, fr) for r, fr in zip(bs[0].rings, f["rings"]))

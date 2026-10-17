@@ -38,6 +38,7 @@ from __future__ import annotations
 import math
 import os
 from dataclasses import dataclass, field
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from .arcs import Arc2, Circle2, Line2, fit
@@ -108,10 +109,11 @@ class Silhouette:
 class FaceLoop:
     """A closed loop of the part's edges along `ring`, at one of `levels`
     (z, mm), the first that has it: an inner contour, or a ring of a pocket
-    taken out through."""
+    taken out through; the waste inside it, or outside (an island's)."""
     part: str
     ring: list[Point2]
     levels: tuple[float, ...]
+    waste_inside: bool = True
 
 
 @dataclass
@@ -367,7 +369,7 @@ def _feature(kind: str, f: Feature, frame: _Frame, op_name: str) -> FeaturePlan:
         bindings = [FaceLoop(part, frame.ring(f["ring"]), levels)]
     elif f["what"] == "pocket" and kind == "pocket":
         if f["depth"] is None:
-            bindings = [FaceLoop(part, frame.ring(r), levels) for r in f["rings"]]
+            bindings = [FaceLoop(part, frame.ring(r), levels, k == 0) for k, r in enumerate(f["rings"])]
         else:
             bindings = [Floor(part, [frame.ring(r) for r in f["rings"]], frame.depth(f["depth"]))]
     elif f["what"] == "rest" and kind == "pocket":
@@ -651,6 +653,22 @@ def runs(edges: list[EdgeSample]) -> list[tuple[list[int], bool]]:
     return out
 
 
+def left_of(mid: Point3, tangent: Point3, step: float = 2 * TOL) -> Point2:
+    """A point just left of a curve's middle, seen from above, as the curve
+    runs."""
+    n = math.hypot(tangent[0], tangent[1]) or 1.0
+    return (mid[0] - tangent[1] / n * step, mid[1] + tangent[0] / n * step)
+
+
+def chain_reverted(mid: Point3, tangent: Point3, waste: Callable[[Point2], bool]) -> bool:
+    """Whether a chain must be reversed for the tool to run on the waste:
+    through the API Fusion places the tool on the left of the chain's first
+    curve as it runs (its evaluator's direction), whatever the faces beside
+    it say [found 2026-10-17: an inner contour's chain left as it came cut
+    into the part, its toolpath as long as the ring offset outwards]."""
+    return not waste(left_of(mid, tangent))
+
+
 def chamfer_reverted(tangent: Point3, open_side: Point3) -> bool:
     """Whether a 2D Chamfer's chain along a chamfer's lower edge must be
     reversed: the tool runs on the left of the chain, which runs as its
@@ -664,4 +682,4 @@ __all__ = ["CAM_VERSION", "TEMPLATE_EXT", "MAX_BORE_FEED", "TOL", "SELECTION", "
            "FeaturePlan", "OperationPlan", "SetupPlan", "CamDocPlan", "check_plan", "plan_cam", "read_plan",
            "is_plan", "template_path", "param_writes", "OPTIONAL", "bore_feed", "EdgeSample", "edge_on_path",
            "loop_follows", "edge_on_line", "on_circle", "inside", "region_samples", "runs", "to_polyline", "polyline_length",
-           "chamfer_reverted"]
+           "left_of", "chain_reverted", "chamfer_reverted"]

@@ -17,7 +17,8 @@ from lang.cam.resolve import REPO
 from lang.core.layout import build_layout
 from lang.emit import cam_plan
 from lang.emit.cam_plan import (Cylinder, EdgeLine, EdgePath, EdgeSample, FaceLoop, Floor, Height, OperationPlan,
-                                Params, Region, Silhouette, Tabs, WallArc, bore_feed, chamfer_reverted, check_plan,
+                                Params, Region, Silhouette, Tabs, WallArc, bore_feed, chain_reverted, chamfer_reverted,
+                                check_plan, left_of,
                                 edge_on_line, edge_on_path, inside, is_plan, loop_follows, on_circle, param_writes,
                                 plan_cam, read_plan, region_samples, runs, template_path)
 from lang.emit.nested import GAP, plan_nest
@@ -110,6 +111,9 @@ def test_every_feature_is_bound_by_what_its_kind_needs():
                 assert b.ring[0] == (x0 + f["ring"][0][0], y0 + f["ring"][0][1])
             elif f["what"] == "pocket" and f["depth"] is None:
                 assert [type(b) for b in got.bindings] == [FaceLoop] * len(f["rings"])
+                # the waste inside its outer ring, outside its islands
+                assert [isinstance(b, FaceLoop) and b.waste_inside for b in got.bindings] == [
+                    k == 0 for k in range(len(f["rings"]))]
             elif f["what"] == "pocket":
                 (b,) = got.bindings
                 assert isinstance(b, Floor) and b.z == pytest.approx(top - f["depth"])
@@ -339,3 +343,19 @@ def test_a_chamfers_chain_turns_so_the_tool_runs_on_its_open_side():
     assert chamfer_reverted((1.0, 0.0, 0.0), (0.0, -0.7, 0.7))
     assert not chamfer_reverted((-1.0, 0.0, 0.0), (0.0, -0.7, 0.7))
     assert not chamfer_reverted((1.0, 0.0, 0.0), (0.0, 0.7, 0.7))
+
+
+def test_a_chain_turns_so_the_tool_runs_on_the_waste():
+    """Through the API Fusion puts the tool on the left of a chain's first
+    edge: an inner contour's chain as its edge came cut into the part, its
+    toolpath as long as the ring offset outwards [found in Fusion,
+    2026-10-17]."""
+    square = [[(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]]
+    assert left_of((5.0, 0.0, 15.0), (1.0, 0.0, 0.0)) == pytest.approx((5.0, 0.04))
+    # the bottom edge running +x has the opening (the waste) on its left: as it is
+    assert not chain_reverted((5.0, 0.0, 15.0), (1.0, 0.0, 0.0), lambda p: inside(p, square))
+    assert chain_reverted((5.0, 0.0, 15.0), (-1.0, 0.0, 0.0), lambda p: inside(p, square))
+    # an island's waste is outside it
+    assert chain_reverted((5.0, 0.0, 15.0), (1.0, 0.0, 0.0), lambda p: not inside(p, square))
+    # a dog bone's cutter runs inside its circle: an arc running counter-clockwise has it on its left
+    assert not chain_reverted((0.0, -3.0, 15.0), (1.0, 0.0, 0.0), lambda p: math.dist(p, (0.0, 0.0)) < 3.05)
