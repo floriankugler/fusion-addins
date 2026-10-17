@@ -62,6 +62,9 @@ for a check, too slow for the loop. [decided as a need]
   the same closed meshes, the volumes within each shape's length times the
   tolerance over its height. A level that leaves operations out (rough,
   `design/proposals/detail-levels.md`) is not built.
+
+  ![The van at normal and at fine, whole and close up on a drawer's finger
+  joint with its relief pockets](../img/preview-levels.jpg)
 - The mesh cache (`MeshCache` in `lang/preview/mesh.py`): a part is meshed
   in its own (u, v, t) frame and placed last, so its mesh before the
   placement depends on its entry alone. The build keeps each part's mesh
