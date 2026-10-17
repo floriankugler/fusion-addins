@@ -9,9 +9,10 @@ G-code. Part of the modeling language's design; the overview is
 `rules`, `holding`, `tabbing`, `plan`, `verify`, `plan_types`, the command
 in `__main__`). Built 2026-10-17 as stage 4 of `proposals/settings.md`'s
 build order, from `proposals/cam.md`, which keeps what is not built: the
-Fusion emitter that makes the setups from the plan (stage 4b), the plan
-in the preview, manufacturing groups. Points marked [decided] are
-Florian's, [chosen] choices made in building it that he has not seen.
+Fusion emitter that makes the setups from the plan (stage 4b),
+manufacturing groups. The preview shows the plan on the nest's drawing
+(stage 4c, In the preview below). Points marked [decided] are Florian's,
+[chosen] choices made in building it that he has not seen.
 
 ## Running it
 
@@ -387,13 +388,33 @@ blind pockets are clipped by the outline, not by the openings, which are
 material yet when they are cut. Each Cabineo's three access holes are one
 pocket on the 6 mm, and no example has a rest.
 
+## In the preview
+
+The nest view's CAM layer (`design/preview.md`; key `c`) draws the chosen
+nest's plan over its drawing, a setup on its blank: the parts shaded and
+numbered by their release order with their holds and tabs, the tabs as
+marks, and the operation chosen from the setup's legend (its operations in
+order, each in its tool's colour) as its features: pockets filled, rests
+dashed, contours outlined, holes and dog bones as circles, chamfers and
+V-grooves as lines. What a setup leaves out and the problems are listed
+under the drawing. A plan planned for another nest file than the one beside
+it (by `nest_written` and `layout_hash`) is stale and not drawn, and Plan
+again runs the command for that nest from the page. Fuzzed
+(`tests/fuzz/plan_views.py`, check `plan_views`): `machining.py`'s random
+plans, drawn as the nest step draws them and read by the view's own code,
+land where the setup's frame puts them on the blank, every feature drawn
+as its kind says, each part's outer contour on the part drawn but for what
+the plan bores or pockets [found by fuzzing: a through hole across the
+part's edge is a notch in the drawing's outline and a hole beside a
+straight contour in the plan, both right].
+
 ## Still open
 
 - The Fusion emitter (stage 4b, `proposals/cam.md`): the setups from the
   plan, each operation from its template, its geometry bound by position,
   the tab sketch before the first operation, each blank's thickness a user
   parameter the stock and the stock-bottom heights follow.
-- The plan in the preview, manufacturing groups and their shared gaps
+- Manufacturing groups and their shared gaps
   (`cam.smallest_cutter` is there for them), the holding model calibrated
   (the release order and the tabs' neighbour weights would follow it), a
   slot as wide as its cutter cut along its line (Fusion's 2D Slot).
