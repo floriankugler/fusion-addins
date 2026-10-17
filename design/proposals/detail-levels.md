@@ -30,3 +30,9 @@ detail is added below, not by editing the boards. [decided as a workflow]
 
 Open: two levels or three, and whether chamfers belong to `full` or to a
 middle level with holes but without joints.
+
+Measured 2026-10-17 (`performance.md`, Fidelity levels): how finely the
+preview draws arcs is a knob of its own, lossless and worth two thirds of
+the mesh time; the levels here are worth a further 0.2 s on the van and are
+about the picture, not the time. The control for both is one row in the
+page.
