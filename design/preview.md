@@ -97,7 +97,8 @@ for a check, too slow for the loop. [decided as a need]
   the node that set it (`material birch 15: kitchen`; the layout's
   `settings`, `design/api.md`, Settings). Proposed and not built: the grain as
   a stripe on each board, and check results drawn in the scene (interference
-  pairs, sheet fit).
+  pairs, sheet fit); both, with what else the preview could do for writing
+  build files, in `design/proposals/preview-assist.md`.
 - The level row under Display (fine, normal) picks the level the shown
   design is meshed at. The page sends it with its next status requests
   (`status.json?design=van&level=fine`) until the server reports it; the
@@ -120,7 +121,8 @@ for a check, too slow for the loop. [decided as a need]
   `scene-utils.js`) has node tests (`lang/preview/viewer/tests/`, run by
   `tests/test_viewer_js.py`), and a rebuild frees the old scene's GPU
   resources.
-- Click-to-path in the viewer is the Copy Path helper outside Fusion.
+- Click-to-path in the viewer is the Copy Path helper outside Fusion
+  (faces, edges and anchors proposed in `design/proposals/preview-assist.md`).
 - The nest view (button or key `k`, `preview.nest(on)` from code) shows a
   nest of the design as the nest step drew it (`nest.svg` in the nest's
   folder beside the build, `<module>/<nest>/`, see `design/nesting.md`):

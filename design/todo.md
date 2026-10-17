@@ -3,7 +3,8 @@
 A loose list of things that come to mind for the modeling language. An item
 that grows a spec moves into a file of its own in `design/proposals/` (listed
 in `DESIGN.md`); known defects are in `design/bugs.md`. Delete items when
-done.
+done. What the preview could do for writing build files is
+`design/proposals/preview-assist.md`.
 
 - **Snapshot arcs**: carry the master's arcs exactly instead of polylines
   sampled at 0.1 mm, which are up to 0.2 mm off along an axis where an arc
@@ -39,8 +40,6 @@ done.
 - **Manufacturing groups**: decided 2026-10-16 for grain matching, nested
   by the language's nest only; see `design/nesting.md`, Still open.
   [Florian, 2026-10-13]
-- **Check results in the preview's scene**: interference pairs highlighted,
-  sheet fit, parts flagged as not plain flat work.
 - **Slats beyond cosmetic** (see `design/slats.md`): operations and joints
   on slats, all hand work, on the hand-work list (`proposals/cam.md`); the
   rule that every connector is machined from both boards' big faces holds
@@ -60,11 +59,6 @@ done.
 - **Latched drawer box detail**: a cut-out in the drawer box for the latch
   versus keeping the box clear by `latch.reach` (deferred by Florian,
   2026-10-12).
-- **Errors at the layout step name no line**: a board resolves lazily, so a
-  missing placement or material, or an inherited grain along its
-  thickness, is found when the layout resolves it and `lang.build` prints
-  no line of the build file. A board could remember where `board()` made
-  it and name that line.
 - **The inventory between runs of the nest**: the nests of one run of
   `python -m lang.nesting` share the stock on hand in their order, but a
   nest run alone (the preview's "nest again", or naming one nest) sees the
