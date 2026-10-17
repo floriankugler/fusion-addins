@@ -29,9 +29,15 @@ after the part's), and so are an own blank's openings; "the strongest
 neighbour across the kerf" is three classes for now (still held by its
 skin, released before, nothing), and a hidden edge is one another part's
 box reaches across; `cam.waste_area` defaults to the tabs' 10 cm², measured
-as they are. Still to come, kept below: the CAM emitter in the compiler
-add-in, the plan in the preview, manufacturing groups, the holding model's
-calibration and the lift margin, a slot cut along its line.
+as they are. The plan in the preview built the same day (stage 4c,
+`design/preview.md`, the CAM layer): on the nest's drawing, the parts by
+their release order with their holds and tabs, the tabs as marks, an
+operation's features in its tool's colour from a legend of the setup's
+operations, what is left out and the problems listed, a plan stale when its
+nest was written again, and Plan again from the page. Still to come, kept
+below: the CAM emitter in the compiler add-in, manufacturing groups, the
+holding model's calibration and the lift margin, a slot cut along its
+line.
 
 Florian's points: since the Fusion geometry is generated again on every
 compile, the CAM setups have to be made again too; Auto Setup helps, but it

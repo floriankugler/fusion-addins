@@ -20,8 +20,9 @@ for a check, too slow for the loop. [decided as a need]
   graphics inside Fusion's viewport (same mesh, in the van you are looking
   at, worth adding later).
 - Not shown: results of the raw API escape hatch, hand-body booleans,
-  appearance rendering. Those are Fusion's job, as is CAM; the nest is
-  drawn by the nest step and shown as it is.
+  appearance rendering. Those are Fusion's job, as are the CAM's toolpaths;
+  the nest is drawn by the nest step and shown as it is, its CAM plan over
+  it.
 
 ## The mesher
 
@@ -104,6 +105,44 @@ for a check, too slow for the loop. [decided as a need]
   `await preview.markMade(nest, [[material, sheet]])` and
   `await preview.markFixed(nest, part)` (they ask too; `window.confirm` can
   be replaced to script them).
+- The CAM layer (`design/cam.md`; the checkbox CAM plan under Display, key
+  `c`, which also shows the nest view): the chosen nest's plan, `cam.json`
+  beside its `nest.svg`, drawn over the nest's drawing by the page
+  (`lang/preview/viewer/cam.js`, with node tests; the drawing itself is the
+  nest step's, unchanged). On each blank, a setup, the parts are shaded by
+  their release order, the first cut free palest, and labelled with their
+  place in it, their hold (cm², smallest first) and their tabs; a part's
+  tooltip and the selection's info say the same; the tabs are black marks on
+  the contours. The side panel's CAM plan section says whether the nest has
+  a plan and when it was written, and lists per setup its parts in release
+  order and its operations in the order they run, each in its tool's colour
+  (the widest first, the V-bit last) with its features and tabs counted.
+  Clicking an operation draws its features in that colour: pockets as filled
+  regions, a rest (what a wider cutter left) dashed, contours as outlines,
+  holes and dog bones as circles with a ring around them, a dog bone's wall,
+  chamfers' edges and V-grooves as lines, the strokes in screen pixels so
+  that a slot shows on a whole sheet; clicking it again draws none, a
+  setup's name all of its operations, and the drawing scrolls to the blank.
+  What each setup leaves out (but what is in a narrow face) and its
+  problems, and the problems of the plan's own check, are listed under the
+  drawing, after the nest's. A plan is stale when it was planned for
+  another nest file than the one beside it (its `nest_written` and
+  `layout_hash` are not the nest's: the nest was written again since) or is
+  of another version (`CAM_VERSION`, repeated in `cam.js`; a test checks):
+  the panel says so and nothing of it is drawn. Plan again runs `python -m
+  lang.cam <build> <nest>` for the nest chosen (a second nest by its own
+  name), with the build's CAM settings as they are now, one job at a time
+  with the nests (`POST /plan?design=&nest=`; its output in `cam.log`
+  beside the plan, shown when it failed), never on a save. From code:
+  `await preview.cam(on)` (resolves with whether a plan is drawn),
+  `preview.plan()` (the legend: per setup its operations, its parts in
+  release order, and the notes; null without a current plan),
+  `preview.operation(setup, index)` (a setup by its name, with or without
+  the nest's, an operation by its index in it, `'all'` for every one, null
+  for none; it throws for one the plan has not), `await
+  preview.replan(nest?)` (resolves with the plan's state once it is
+  drawn); `preview.nestStates()` gives each nest's `plan` (its state, when
+  it and the nest it is of were written, why it is stale).
 
 ## Serving a folder
 
