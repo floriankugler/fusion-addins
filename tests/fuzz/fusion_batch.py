@@ -75,7 +75,7 @@ from lang.core.scope import registry  # noqa: E402
 from lang.emit.arcs import fit  # noqa: E402
 from lang.emit.plan import pieces  # noqa: E402
 from lang.preview.__main__ import scan  # noqa: E402
-from lang.preview.mesh import _HOLE_SECTIONS, mesh_part  # noqa: E402  # pyright: ignore[reportPrivateUsage]
+from lang.preview.mesh import _HOLE_SECTIONS, FINE, mesh_part  # noqa: E402  # pyright: ignore[reportPrivateUsage]
 
 #: The share of a body's volume by which Fusion and the preview may differ
 #: once the polygons' part is taken out (as `fusion_check.THRESHOLD`).
@@ -261,7 +261,10 @@ def write(out: Path, layout: Layout, cases: Sequence[Case] | None = None) -> Non
 
 
 def preview_volumes(layout: Layout) -> dict[str, float]:
-    return {p["path"]: float(mesh_part(p, layout["frame"]).volume) for m in layout["modules"] for p in m["parts"]}
+    """Each part's volume as the preview meshes it at the fine level, the
+    layout's polygons as they are, which `tessellation` holds Fusion's
+    bodies against."""
+    return {p["path"]: float(mesh_part(p, layout["frame"], level=FINE).volume) for m in layout["modules"] for p in m["parts"]}
 
 
 def read_cases(path: Path) -> list[Case]:

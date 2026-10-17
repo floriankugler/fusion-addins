@@ -137,6 +137,12 @@
     <label><input type="checkbox" id="hwOn" checked> hardware</label>
     <label title="the nest's CAM plan on its drawing"><input type="checkbox" id="camOn"> CAM plan</label>
   </div>
+  <div class="row"><label for="level">level</label>
+    <select id="level" title="how exactly the design is meshed; a change builds it again">
+      <option value="fine">fine: the layout's polygons</option>
+      <option value="normal" selected>normal: arcs to 0.05 mm</option>
+    </select>
+  </div>
 
   <h2>Labels</h2>
   <div class="row">
@@ -198,7 +204,7 @@ import { LineGeometry } from 'three/addons/lines/LineGeometry.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { attachSpaceMouse } from './spacemouse.js';
 import { AXIS, ISO, UP, share, disposeTree, clearGroup } from './scene-utils.js';
-import { layoutVersionProblem, setHidden as markHidden, toggleHides, isolate as isolatePaths, LoadTracker, nestStatusText, chosenNest, settingsText, sheetNames, sheetMade, fixable } from './state.js';
+import { layoutVersionProblem, setHidden as markHidden, toggleHides, isolate as isolatePaths, LoadTracker, nestStatusText, chosenNest, settingsText, sheetNames, sheetMade, fixable, LevelChoice, untilLevel } from './state.js';
 import { planVersionProblem, planStatusText, toolColors, setupLabel, legend, chosenOperation, releaseRanks, releaseList, holdText, partText, releaseColors, setupOverlay, planNotes } from './cam.js';
 
 const $ = (id) => document.getElementById(id);
@@ -261,6 +267,8 @@ const caps = new THREE.Group();          // one striped cap per part, drawn wher
 scene.add(caps);
 let layout = null;
 let version = null;             // the shown design's latest version, as the server reported it
+let built = null;               // the level that version was meshed at, as the server reported it
+let shownLevel = null;          // the level of the scene on screen
 let bounds = null;              // Box3 of the whole model, for the section slider
 const hidden = new Set();
 let selectedPath = null;
@@ -380,7 +388,7 @@ function stencilGroup(geometry, order) {
 // not drawn; the status line says so.
 const loader = new GLTFLoader();
 async function load() {
-  const want = { design, version }, url = designUrl;
+  const want = { design, version, built }, url = designUrl;
   const current = () => design === want.design && version === want.version;
   const status = $('status');
   const fail = (reason) => {
@@ -452,6 +460,7 @@ async function load() {
   bounds = new THREE.Box3().setFromObject(root);
   if (first) { const camera = views.get(design)?.camera; if (camera) setCamera(camera); else fit(); }
   applyAll();
+  shownLevel = want.built;
   tracker.shown(version);
 }
 
@@ -460,6 +469,7 @@ function clearScene() {
   if (root) { scene.remove(root); disposeTree(root); }
   root = null;
   layout = null;
+  shownLevel = null;
   bounds = null;
   clearGroup(caps);
   buildMaster();
@@ -1412,6 +1422,14 @@ window.preview = {
     applySection();
     draw();
   },
+  /** The level of the scene on screen ('fine', 'normal'; null when unknown). level(name) asks for the shown
+   *  design to be meshed at another one and resolves with the version once a scene of it is on screen
+   *  (rejects as loaded() does). */
+  level: (name) => {
+    if (name === undefined) return shownLevel;
+    setLevel(name);
+    return untilLevel(tracker, () => shownLevel, name);
+  },
   /** The hardware on or off: hardware(false); returns whether it shows. */
   hardware: (on) => { if (on !== undefined) setHardware(on); draw(); return hardwareOn; },
   /** Part names and face names on or off: labels({names: true, faces: true}); returns both. */
@@ -1485,7 +1503,7 @@ function openDesign(name) {
   tracker.switched(design, name);
   design = name;
   wanted = null;
-  version = designUrl = shownBuild = null;
+  version = built = designUrl = shownBuild = null;
   nestVersion = null;
   nestsListed = [];
   $('nestView').replaceChildren();
@@ -1516,10 +1534,23 @@ function stepDesign(step) {
 
 $('design').onchange = (e) => openDesign(e.target.value);
 
+// The level the shown design is meshed at: the server keeps it per design,
+// for every page; a level picked here goes with the status requests until
+// the server reports it, and builds the design again.
+const levels = new LevelChoice();
+function setLevel(name) {
+  if (design === null) throw new Error('no design shown yet; await preview.loaded()');
+  levels.pick(design, name);
+  $('level').value = name;
+  poll();
+}
+$('level').onchange = (e) => setLevel(e.target.value);
+
 // The shown design's state from the server: the status line shows its
 // latest build's log, the scene follows its version.
 async function update(d) {
   designUrl = d.url;
+  $('level').value = levels.reported(d.name, d.level);
   const status = $('status');
   if (shownBuild?.builds !== d.builds || shownBuild?.state !== d.state) {
     shownBuild = { builds: d.builds, state: d.state };
@@ -1535,6 +1566,7 @@ async function update(d) {
   }
   if (d.version && d.version !== version) {
     version = d.version;
+    built = d.built ?? null;
     await load();
   }
   if (design === d.name) await updateNest(d.nests ?? []);
@@ -1910,7 +1942,7 @@ async function poll() {
   clearTimeout(pollTimer);
   const asked = design ?? wanted ?? '';
   try {
-    const query = `design=${encodeURIComponent(asked)}&page=${pageId}`;
+    const query = `design=${encodeURIComponent(asked)}&page=${pageId}${levels.query(asked)}`;
     const s = await (await fetch('status.json?' + query, { cache: 'no-store' })).json();
     setDesigns(s.designs);
     if (asked === (design ?? wanted ?? '')) {      // else the page switched meanwhile

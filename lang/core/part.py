@@ -55,6 +55,7 @@ from dataclasses import dataclass, replace
 from collections.abc import Sequence
 from typing import Any, Literal, Protocol, Self, TypeVar, Union, cast, overload
 
+import numpy as np
 import shapely
 from shapely import affinity
 from shapely.geometry import LineString, Point, Polygon
@@ -2605,7 +2606,7 @@ def _rings(shape: Shape) -> Rings:
     for poly in shape.polygons():
         poly = orient(poly, 1.0)
         for ring in [poly.exterior] + list(poly.interiors):
-            rings.append([[float(c[0]), float(c[1])] for c in list(ring.coords)[:-1]])
+            rings.append(np.asarray(ring.coords)[:-1, :2].tolist())
     return rings
 
 

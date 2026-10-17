@@ -52,7 +52,7 @@ from lang.core.geometry import clean, polygons_of
 from lang.core.scope import Scope
 from lang.core.layout import build_layout
 from lang.core.ops import MIN_CHAMFER, Cut, Op, Pocket
-from lang.preview.mesh import mesh_part
+from lang.preview.mesh import FINE, mesh_part
 
 OpKind = Literal["dogbones", "corner chamfer", "rim chamfer"]
 
@@ -367,7 +367,7 @@ def _angle_at(g: BaseGeometry, p: tuple[float, float]) -> float | None:
 def _volume(b: Board) -> float:
     layout = build_layout()
     part = next(p for m in layout["modules"] for p in m["parts"] if p["path"] == b.path)
-    return float(mesh_part(part, layout["frame"]).volume)
+    return float(mesh_part(part, layout["frame"], level=FINE).volume)
 
 
 def _rim_problems(case: CornerOpCase, b: Board, before: float) -> list[str]:

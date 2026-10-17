@@ -152,10 +152,31 @@ There is nothing to recognise: the layout says what each operation is.
   its cutter takes that cutter. Of what is left, slivers narrower than 0.01
   mm are noise; the fillet a round cutter leaves in a sharp inside corner
   (a corner between two curves that meet at an angle, as `arcs.fit` reads
-  the ring) is what any cutter leaves, within the tangent points of its
-  circle there; then the dog bones, which go by their own rule. What else
-  is left (a passage too narrow, a rounded corner tighter than the cutter)
-  is unreached.
+  the ring, lines or arcs) is what any cutter leaves, within the tangent
+  points of its circle there; then the dog bones, which go by their own
+  rule. What else is left (a passage too narrow, a rounded corner tighter
+  than the cutter, an area) is unreached, and only that is a rest for a
+  narrower cutter, never a corner's sliver [review, 2026-10-17: the
+  Cabineos' access holes over the board's edge, a line meeting an arc,
+  sent the 2 mm cutter for 176 such slivers in the examples].
+  A fillet is told so: between two lines, the piece lies within r/tan(θ/2)
+  of the corner of angle θ; else where the cutter comes nearest the corner
+  it touches the boundary on each side (an arc puts the contact farther
+  out than a line does), and the piece lies within the contact farther
+  from the corner, if the boundary from one contact through the corner to
+  the other turns only toward the region and in all less than half a turn.
+  So a corner cut off and two sharp corners close by are one corner; the
+  boundary may turn away along an arc that meets the corner bulging into
+  the region and through a dog bone, which its own cutter mills; walls
+  that run apart no more than parallel are a passage. Beyond that zone,
+  what is narrower than 0.05 mm is the buffers' noise along a wall. The
+  region is normalized first, as the buffers and `arcs.fit` answered
+  otherwise for a ring written from another start; vertices closer than
+  1e-9 mm are one, as `arcs.fit` read a corner into a line between them;
+  where the boundary turns back (two dog bones that touch), a point between
+  its neighbours tells a needle of the region from a cusp outside it; and
+  the shrunk region drops the pieces GEOS leaves nearer the boundary than r
+  [all found 2026-10-17, by fuzzing and by probing dog bones].
 - **Pockets** (`rules.pocket_cutters`): the configured template
   (`cam.pocket_template`, "Tasche adaptiv 8mm") or a narrower one: the
   widest that gets into the region (its cutter fits at all) takes it; where
@@ -169,9 +190,13 @@ There is nothing to recognise: the layout says what each operation is.
   with room for twice its cutter across (the region shrunk by its cutter's
   diameter is not empty), never a slot, a groove or another narrow pocket.
   A flute must reach the floor (through: the stock's bottom and the
-  breakthrough). A pocket's region is its shape on the part's outline,
-  openings under it included, as they are material yet when the blind
-  pockets run. A pocket in several pieces is planned piece by piece; a
+  breakthrough). A pocket's region is its shape on the part's outline
+  within its outer loop, openings under it included, as they are material
+  yet when the blind pockets run (a counterbore over a through slot is one
+  pocket), but an opening another part lies in (one at the board's edge,
+  where the nest may put a part). Blind pockets of one depth that overlap
+  or touch are one region, as their floor is one face (a Cabineo's three
+  access holes). A pocket in several pieces is planned piece by piece; a
   piece nothing gets into is left out as `piece <k>`. A slot is a pocket
   like any other, so it takes a cutter narrower than its width and its
   round ends are no dog bones [decided]. Heights: from the stock's top to
@@ -330,7 +355,8 @@ a part has tabs exactly when its hold says so (unless the plan found no
 room for them), and the plan survives JSON. 4000 random nests surveyed
 clean on 2026-10-17 after the fixes the survey led to (each a regression
 test in `tests/test_cam.py` or a fixed case in
-`tests/fuzz/test_fuzz_machining.py`). Every example that nests is planned
+`tests/fuzz/test_fuzz_machining.py`), and again after the fillets between
+arcs. Every example that nests is planned
 with the check clean.
 
 ## On the examples
@@ -347,7 +373,8 @@ battens (430 by 14, a hold of 7 cm²) get 8 tabs each on both their
 operations; an 18 mm shelf's through holes are deeper than the 2 mm
 cutter's flute (a note). A counterbore over a through slot is one pocket:
 blind pockets are clipped by the outline, not by the openings, which are
-material yet when they are cut.
+material yet when they are cut. Each Cabineo's three access holes are one
+pocket on the 6 mm, and no example has a rest.
 
 ## In the preview
 

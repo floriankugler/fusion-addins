@@ -30,3 +30,10 @@ test('the constants live in one place', () => {
 test('paths come from the meshes, not from their sanitised names', () => {
   assert.doesNotMatch(page, /sanitized/);
 });
+
+test('the level row offers the levels state.js knows, normal chosen', async () => {
+  const { LEVELS } = await import(new URL('state.js', viewer));
+  const row = page.match(/<select id="level"[^>]*>([\s\S]*?)<\/select>/)[1];
+  assert.deepEqual([...row.matchAll(/value="(\w+)"/g)].map((m) => m[1]), LEVELS);
+  assert.match(row, /value="normal" selected/);
+});
