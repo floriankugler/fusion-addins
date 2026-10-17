@@ -26,7 +26,7 @@ from .hardware import (BallCatch, BracketModel, CatchModel, ConcealedHinge, Door
                        hatch_hinge, hinge, latch, sliding_bracket)
 from .joints import box_joint, cabineo, clamex, domino, groove, half_lap, screws, tenons
 from .master import Master, Plane, master
-from . import nesting
+from . import cam, nesting
 
 __all__ = [
     "Direction", "Frame", "set_frame", "world_frame",
@@ -36,6 +36,7 @@ __all__ = [
     "Board", "Slat", "Face", "Edge", "Anchor", "Outline", "Operation", "Joint", "board", "slat",
     "Scope", "ModuleBody", "module", "scope", "check", "uncheck",
     "Setting", "Binding", "setting", "use", "value", "material", "grain", "nest", "chamfer_size", "Nest", "nesting",
+    "cam",
     "no_interference", "fits_sheet", "inside", "inside_box", "LangError",
     "master", "Master", "Plane", "Contour", "half_lap", "domino", "clamex", "cabineo", "tenons", "screws",
     "box_joint", "groove",
