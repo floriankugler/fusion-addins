@@ -139,8 +139,8 @@ lifts a small part whose vacuum is too weak, and the cutter then grabs and
 destroys it, so the hold must beat the extraction's pull as well as the
 cutting force; what he is unhappy with today is where the tabs are put,
 more than how many. Tested 2026-10-17 [Florian]: strips down to 300 by
-20 mm and discs down to 60 mm across, milled to 0.4 mm above the bed and
-then cut free by one release pass, held, in a board that already had a big
+20 mm and discs down to 60 mm across, milled down to a thin skin and
+then cut free by one release pass of 0.4 mm, held, in a board that already had a big
 cutout in it and on a spoilboard that had been in use for a while. Skin and
 release is the strategy (below).
 
@@ -184,11 +184,12 @@ and 12 parts are given up as unholdable. Three faults:
 ### Decided 2026-10-17: skin and release
 
 - **Every contour is roughed to a skin and cut free afterwards.** Inner
-  and outer contours alike are milled down to 0.4 mm above the stock
+  and outer contours alike are milled down to 0.2 mm above the stock
   bottom, and release passes at the end of the setup cut them free
   [decided]. Two operations per cutter [proposed]: a roughing contour with
-  0.4 mm of axial stock to leave, in Fusion's own order, and a release
-  contour from 0.4 mm above the stock bottom through to the breakthrough,
+  0.2 mm of axial stock to leave, in Fusion's own order, and a release
+  contour from 0.2 mm above the stock bottom through to the breakthrough,
+  0.4 mm of cut,
   one pass, `preserveOrder` on. Not one operation with a finishing
   stepdown: with order by depth Fusion would do the roughing in the
   preserved order too, and travel would suffer.
@@ -198,15 +199,15 @@ and 12 parts are given up as unholdable. Three faults:
   parameters that differ, as Auto Setup sets a through hole's bottom today,
   so Florian's templates need no change. Roughing: `topHeight_mode` 'from
   stock top' as the template has it, `bottomHeight_mode` 'from stock
-  bottom' with `bottomHeight_offset` 0.4 mm (the template says 'from
+  bottom' with `bottomHeight_offset` 0.2 mm (the template says 'from
   contour', −0.2), `doMultipleDepths` as the template (6.4 mm steps),
   `tabsPerContour` 0, Fusion's own order. Release: `topHeight_mode` 'from
-  stock bottom' with offset 0.4 mm, `bottomHeight_mode` 'from stock bottom'
+  stock bottom' with offset 0.2 mm, `bottomHeight_mode` 'from stock bottom'
   with offset −0.2 mm (the breakthrough setting), `doMultipleDepths` off,
   `preserveOrder` on with the chains handed over in the release order, no
   tabs, the same compensation. Stock bottom rather than the contour's
   edge, so the measured thickness entered per blank moves both heights and
-  the skin stays 0.4 mm whatever the ply measures. A release template of
+  the skin stays 0.2 mm whatever the ply measures. A release template of
   its own (a tag like `.finish`, say `contour.release_Kontur 6mm`) only if
   the thin pass should run at another feed or with the downcut cutter; the
   template's finishing stepdown stays unused.
