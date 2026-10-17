@@ -6,8 +6,12 @@ import math
 from pathlib import Path
 
 import pytest
+from shapely import normalize
+from shapely.affinity import rotate
 from shapely.geometry import LineString, Point, Polygon
 from shapely.geometry import box as shapely_box
+from shapely.geometry.base import BaseGeometry
+from shapely.ops import unary_union
 
 from lang import *
 from lang import cam
@@ -19,7 +23,7 @@ from lang.cam.regions import gets_in, hold, sharp_corners, unreached
 from lang.cam.resolve import REPO
 from lang.cam.tooling import Registry, evaluate, parse_stem, scan
 from lang.cam.verify import verify
-from lang.core.dogbones import corner_bone
+from lang.core.dogbones import corner_bone, hidden_bone
 from lang.core.layout import build_layout
 from lang.core.layout_types import Layout
 from lang.core.scope import registry
@@ -657,6 +661,8 @@ def test_what_any_cutter_leaves_in_a_corner_is_excused_but_a_passage_is_not():
     assert unreached(line_arc, 3.0) == []
     chamfered = Polygon([(1, 0), (50, 0), (50, 50), (0, 50), (0, 1)])                            # a corner cut off
     assert unreached(chamfered, 4) == []
+    bitten = shapely_box(0, 0, 50, 50).difference(Point(50, 25).buffer(10, quad_segs=90))       # an arc bulging in
+    assert unreached(bitten, 3) == []
     channel = shapely_box(0, 0, 50, 50).union(shapely_box(50, 20, 90, 25))
     notch = shapely_box(0, 0, 50, 50).union(shapely_box(50, 20, 54, 25))
     assert len(unreached(channel, 4)) == 1 and len(unreached(notch, 4)) == 1
@@ -672,6 +678,81 @@ def test_a_dog_bone_over_a_corner_leaves_its_fillet_a_fillet():
     square = shapely_box(0, 0, 50, 50)
     bone = Point(0.3, 0.3).buffer(0.6, quad_segs=32)             # over the corner: the fillet's horns are left
     assert unreached(square, 4, bone) == []
+
+
+def test_a_cap_between_an_arc_and_a_line_is_a_fillet_for_the_plan_and_its_check():
+    """A round blind pocket over a board's opening left a cap 0.36 mm high
+    beyond it, between the arc and the opening's edge at 11°, which no
+    cutter gets into. Cleaning its slivers took the cap's tips back from the
+    corners, 0.03 mm for the plan and 0.14 for its check, which then saw no
+    fillet and reported the pocket unreached [found by fuzzing,
+    2026-10-17]."""
+    hole = Point(0, 0).buffer(18.25, quad_segs=90).intersection(shapely_box(-20, -10.637, 20, 20))
+    region = hole.difference(shapely_box(-20, 1.831, 20, 17.895))           # the opening across it
+    assert unreached(region, 3.0) == [] and unreached(region, 3.0, lenient=True) == []
+
+
+def test_a_corner_beside_an_arc_bulging_into_the_pocket_is_a_fillet():
+    """A disc with another bitten out of it, cut off by a line: along the
+    arc that bulges into the pocket the boundary turns away, which the test
+    took for a passage's mouth beyond the corner where that arc meets the
+    line, and the plan sent the 3.175 mm cutter for what the 6 mm leaves
+    there [found by fuzzing, 2026-10-17]."""
+    bitten = Point(16, 16).buffer(16, quad_segs=32).difference(Point(41, 0.25).buffer(26.5, quad_segs=32))
+    assert unreached(bitten.intersection(shapely_box(-1, -1, 29.25, 40)), 3.0) == []
+
+
+def _hidden_bones(w: float, h: float, tool: float) -> BaseGeometry:
+    return unary_union([hidden_bone(c, u, tool, 0.1).shape.geometry
+                        for c, u in [((0, 0), (1, 0)), ((w, 0), (-1, 0)), ((w, h), (-1, 0)), ((0, h), (1, 0))]])
+
+
+def test_each_corner_beside_a_dog_bone_leaves_its_cusp_wherever_the_ring_starts():
+    """Next to a hidden dog bone tangent to a wall, a cutter wider than the
+    bone's leaves a cusp in each corner, which a narrower one takes. Where
+    the ring started at a tangent point, the union's vertices 3e-18 mm apart
+    read as a corner of 90°, and GEOS's erosion left a piece of 6e-8 mm²
+    by the wall, which grown back took a cusp for reached: three cusps of
+    four [found 2026-10-17]."""
+    for w, h, tool, r in ((20, 10, 6.0, 4.0), (20, 10, 3.175, 3.0)):
+        bones = _hidden_bones(w, h, tool)
+        pocket = shapely_box(0, 0, w, h).union(bones)
+        for turn in (0, 90, 180):
+            turned = rotate(pocket, turn, origin=(0, 0))
+            assert sharp_corners(normalize(turned)) == []
+            left = unreached(turned, r, rotate(bones, turn, origin=(0, 0)))
+            assert len(left) == 4 and max(p.area for p in left) - min(p.area for p in left) < 1e-3
+
+
+def test_dog_bones_that_touch_make_no_corner():
+    """Two hidden dog bones on one edge that touch: the boundary turns back
+    there, out of the pocket, which read as a corner of no angle inside it,
+    and that corner took any piece near it for its fillet [found
+    2026-10-17]."""
+    bones = _hidden_bones(8.2, 8.2, 4.0)
+    left = unreached(shapely_box(0, 0, 8.2, 8.2).union(bones), 3.0, bones)
+    assert len(left) == 4
+
+
+def test_a_slot_the_cutter_does_not_get_into_is_no_fillet_beyond_a_dog_bone():
+    """In a slot as wide as the 8 mm cutter, which gets in only where a dog
+    bone widens it, the boundary from where the cutter touches round the
+    slot's far end turns only toward the slot but at the other dog bone,
+    which its own cutter mills: the slot passed for the fillet of the
+    corner there [found 2026-10-17]."""
+    bones = unary_union([hidden_bone((0, 0), (1, 0), 6.0, 0.1).shape.geometry,
+                         corner_bone((40, 0), (-1, 0), (0, 1), 6.0, 0.1).shape.geometry])
+    left = unreached(shapely_box(0, 0, 40, 8).union(bones), 4.0, bones)
+    assert max(p.area for p in left) > 200
+
+
+def test_a_fillets_tail_of_noise_along_a_wall_is_no_rest():
+    """A round pocket cut off by a line left its fillets with a tail 0.01 mm
+    wide along 7 mm of the wall, the buffers' noise, which reached past the
+    corners' zone, and the plan sent the 2 mm cutter for it [found by
+    fuzzing, 2026-10-17]."""
+    ring = json.loads((Path(__file__).parent / "data" / "cam_fillet_tail.json").read_text())
+    assert unreached(Polygon(ring), 3.0) == []
 
 
 def test_the_plan_says_the_smallest_cutter():

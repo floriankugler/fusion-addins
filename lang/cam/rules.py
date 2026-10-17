@@ -58,7 +58,7 @@ from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
 
 from ..core.geometry import polygons_of
-from .regions import TOOL_CLEARANCE, gets_in, unreached
+from .regions import TOOL_CLEARANCE, gets_in, shrunk, unreached
 from .tooling import Kind, Registry, Template
 
 #: Whether a hole of a drill template's diameter is drilled rather than
@@ -214,7 +214,7 @@ def pocket_cutters(region: BaseGeometry, depth: float, tried: Sequence[Template]
     usable: list[Template] = []
     for t in tried:
         if t.adaptive and (region.area < SMALL_POCKET_AREA or
-                           region.buffer(-ADAPTIVE_ROOM * t.diameter / 2).is_empty):
+                           shrunk(region, ADAPTIVE_ROOM * t.diameter / 2).is_empty):
             continue
         if t.flute is not None and t.flute < depth - DEPTH_TOL:
             out.notes.append(f"{t.stem}: its flute ({t.flute:g}) does not reach {depth:g} deep")
