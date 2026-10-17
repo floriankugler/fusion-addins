@@ -93,10 +93,6 @@ done.
   concealed_hinge_native, hatch_hinge, ball_catch, door_latch_native,
   connectors_native and tenons_native now read their dimensions and stations
   from `lib/`; they were compared headless only (2026-10-12).
-- **Open Compile Layout with a nest file once in Fusion**: a `nest.json`
-  was drawn through MCP only (2026-10-14); click through the dialog with
-  one, with a screenshot, the next time the nest is worked on [Florian,
-  2026-10-16].
 - **Naming**: the package name; German or English path names (suggestion:
   English, with an optional label override for the machine); "module" and
   "layout" collide with Python's and nesting's terms (see `build-repo.md`).
