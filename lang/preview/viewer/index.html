@@ -56,15 +56,15 @@
      tool's colour, the tabs; before the selection and pinning, which win over it */
   #nestView.cam g.part path { fill: var(--release, #7aa6d8); }
   #nestView g.cam { pointer-events: none; }
-  #nestView .cam-feature { stroke-linejoin: round; stroke-linecap: round; }
-  #nestView path.cam-pocket, #nestView path.cam-rest { fill-opacity: 0.5; stroke-width: 1.5; fill-rule: evenodd; }
-  #nestView path.cam-rest { fill-opacity: 0.85; stroke-width: 3; stroke-dasharray: 6 4; stroke: #222; }
-  #nestView path.cam-outer, #nestView path.cam-inner { stroke-width: 6; }
-  #nestView path.cam-dogbone { stroke-width: 3; }
-  #nestView path.cam-chamfer, #nestView path.cam-vgroove { stroke-width: 4; }
+  /* strokes in screen pixels, so that a slot or a hole shows on a whole sheet as when zoomed in */
+  #nestView .cam-feature, #nestView .cam-tab { vector-effect: non-scaling-stroke; stroke-linejoin: round; stroke-linecap: round; }
+  #nestView path.cam-pocket, #nestView path.cam-rest { fill-opacity: 0.5; stroke-width: 2; fill-rule: evenodd; }
+  #nestView path.cam-rest { fill-opacity: 0.85; stroke-dasharray: 4 3; stroke: #222; }
+  #nestView path.cam-outer, #nestView path.cam-inner { stroke-width: 3; }
+  #nestView path.cam-dogbone, #nestView path.cam-chamfer, #nestView path.cam-vgroove { stroke-width: 2.5; }
   #nestView circle.cam-feature { fill-opacity: 0.95; }
-  #nestView circle.cam-feature.halo { stroke-width: 2.5; }
-  #nestView .cam-tab { fill: #111; stroke: #fff; stroke-width: 2.5; }
+  #nestView circle.cam-feature.halo { stroke-width: 2; }
+  #nestView .cam-tab { fill: #111; stroke: #fff; stroke-width: 1.5; }
   #nestView .cam-release { fill: #102a4a; font-weight: bold; paint-order: stroke; stroke: #fff; stroke-width: 4; }
   #nestView .cam-notes { white-space: pre-wrap; color: #555; font-size: 12px; margin: 8px 4px; }
   #nestView .cam-notes .problem { color: var(--accent); }
@@ -1604,11 +1604,12 @@ async function updateNest(nests) {
     camDrawn = undefined;
   }
   if (has) markPinning(n);
+  await updatePlan(n);
+  // replan() calls resolve once their plan is done, and drawn when it is the chosen nest's
   for (const wait of planWaits.splice(0)) {
     const state = nests.find((x) => x.path === wait.nest)?.plan?.state ?? 'none';
     if (state === 'running') planWaits.push(wait); else wait.resolve(state);
   }
-  await updatePlan(n);
 }
 
 /** The sheets marked made and the parts changed since or gone, on the drawing. */
@@ -1730,8 +1731,8 @@ async function updatePlan(n) {
     camPlan = read;
     camVersion = read ? key : null;
     camChoice = chosenOperation(camPlan, camWanted.get(`${design}\n${n?.path}`));
-    renderCamLegend();
   }
+  renderCamLegend();
   const info = $('camInfo');
   info.textContent = !plan ? 'no nest to plan' : problem ? `${planStatusText(plan)}\n${problem}` : planStatusText(plan) + camSummary();
   info.className = 'keys' + (plan?.state === 'stale' || plan?.state === 'failed' || problem ? ' stale' : '');
@@ -1743,13 +1744,20 @@ function camSummary() {
   if (!camPlan || nestChosen?.plan?.state !== 'ok') return '';
   const ops = camPlan.setups.reduce((n, s) => n + s.operations.length, 0);
   const left = camPlan.setups.reduce((n, s) => n + s.left_out.filter((l) => l.why !== 'narrow face').length, 0);
-  return `\n${camPlan.setups.length} setups, ${ops} operations; ${left} left out, ${camPlan.problems.length} problems` +
+  const count = (k, what) => `${k} ${what}${k === 1 ? '' : 's'}`;
+  return `\n${count(camPlan.setups.length, 'setup')}, ${count(ops, 'operation')}; ${left} left out, ` +
+    count(camPlan.problems.length, 'problem') +
     (left || camPlan.problems.length ? ' (under the drawing)' : '');
 }
 
+let camLegendFor;               // what the legend lists: the plan, its state and the choice
+
 function renderCamLegend() {
-  const box = $('camLegend');
   const shown = camPlan && nestChosen?.plan?.state === 'ok';
+  const now = shown ? `${camVersion} ${JSON.stringify(camChoice)}` : null;
+  if (now === camLegendFor) return;
+  camLegendFor = now;
+  const box = $('camLegend');
   box.replaceChildren(...(shown ? legend(camPlan) : []).map((entry) => {
     const setup = camPlan.setups.find((s) => s.name === entry.setup);
     const div = document.createElement('div');
