@@ -945,6 +945,10 @@ class Board:
             raise LangError(f"operation name {name!r} is taken by the board itself ({self.name}.{name}), so the "
                             "operation could not be reached by it; give it another name.", self.path)
         inner = op.op if isinstance(op, EdgeOp) else op
+        if isinstance(inner, (Cut, Pocket)) and inner.shape.is_empty():
+            # (an operation with an empty shape would put a ring without points into the layout, which
+            # the emitter's arc recovery and the mesher cannot read [found by fuzzing, 2026-10-17])
+            raise LangError(f"{self._label(op, name)} has no area; nothing to cut.", self.path)
         if isinstance(inner, (Cut, Pocket, Hole, Chamfer)):
             self._check_chamfer(inner.size if isinstance(inner, Chamfer) else inner.chamfer, "chamfer")
         if isinstance(inner, (Cut, Pocket, Hole)) and inner.chamfer > 0:
@@ -1679,6 +1683,11 @@ class Board:
         if not result.pieces:
             raise LangError(f"cutout(): every piece is too small for radius={radius:g}.", self.path)
         shape = Shape(result.geometry)
+        if shape.is_empty():
+            # (a board 40 wide with its border 20: the openings a hairline, which cleaning takes away;
+            # recorded, the cutout had an empty shape [found by fuzzing, 2026-10-17])
+            raise LangError(f"cutout(): border={border:g} and around={around:g} leave nothing wider than 0.01 mm "
+                            "to cut out.", self.path)
         opening = shape.geometry
         pieces = [q for p in result.pieces for q in polygons_of(clean(p))]
         self._check_pinched(pieces)

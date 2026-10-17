@@ -197,9 +197,9 @@ def candidates(registry: Registry, kind: Kind, label: str, finish: bool, cutter:
 @dataclass
 class PocketPlan:
     """The templates a pocket takes: the first gets into it, the others
-    take rests (what the wider ones left, with a cutter's radius of room
-    around it in what they cleared), the pieces no candidate reaches are
-    left."""
+    take rests (what the wider ones left, with a cutter's diameter and the
+    clearance of room around it in what they cleared), the pieces no
+    candidate reaches are left."""
     main: Template | None = None
     rests: list[tuple[Template, Polygon]] = field(default_factory=list[tuple[Template, Polygon]])
     unreached: list[Polygon] = field(default_factory=list[Polygon])
@@ -239,8 +239,12 @@ def pocket_cutters(region: BaseGeometry, depth: float, tried: Sequence[Template]
         blocked = unary_union(theirs) if theirs else Polygon()
         took = [p for p in left if p.intersection(blocked).area < 1e-6] if theirs else list(left)
         if took:
-            # with the room around them the narrower cutter works in, in the region the wider one cleared
-            grown = unary_union([p.buffer(t.diameter / 2 + TOOL_CLEARANCE) for p in took]).intersection(region)
+            # with the room around them the narrower cutter works in, in the region the wider one cleared:
+            # a cutter that reaches a point of them lies within its diameter of it, so kept inside the rest
+            # (a pocket bounded by it, as Fusion's is) it reaches all it does in the whole pocket [found in
+            # Fusion, 2026-10-17: grown by its radius, a rest in a rounded corner had no room for its cutter,
+            # and the 2D Pocket bounded by it had no passes]
+            grown = unary_union([p.buffer(t.diameter + TOOL_CLEARANCE) for p in took]).intersection(region)
             out.rests += [(t, g) for g in polygons_of(grown)]
         left = [p for p in left if p not in took]
     out.unreached = left

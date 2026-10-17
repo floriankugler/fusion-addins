@@ -376,10 +376,19 @@ class _Setup:
         if face == "narrow":
             self.leave(path, ref(k, op, "op"), "narrow face")
             return
+        center = pp.point(op["u"], op["v"])
+        big = through and op["d"] > rules.BIG_HOLE_LIMIT     # an opening of the outline
+        if not big and (through or face != "other") and \
+                Point(center).buffer(op["d"] / 2, quad_segs=90).intersection(self.pocket_base(pp)).area < CLEAN * CLEAN:
+            # (in what a through pocket takes off the board [found by fuzzing, 2026-10-17: bored off the blank])
+            self.leave(path, ref(k, op, "op"), "gone", "nothing of it is left on the board")
+            if op["chamfer"] > 0:
+                self.leave(path, ref(k, op, "chamfer"), "gone")
+            return
         if op["chamfer"] > 0:
             self.hole_chamfer(pp, k, op, face)
-        if through and op["d"] > rules.BIG_HOLE_LIMIT:
-            return                                       # an opening of the outline
+        if big:
+            return
         if not through and face == "other":
             self.leave(path, ref(k, op, "op"), "other face")
             return
@@ -387,7 +396,6 @@ class _Setup:
         cutter = self.cutter(path, name)
         bores = rules.by_diameter(self.registry.of("bore", cutter, self.value(keys.bore_template, path, name)))
         drills = rules.by_diameter(self.registry.of("drill", cutter, self.value(keys.drill_template, path, name)))
-        center = pp.point(op["u"], op["v"])
         if not through and bores and op["d"] > 2 * max(bores):
             circle = Point(center).buffer(op["d"] / 2, quad_segs=90).intersection(self.pocket_base(pp))
             self.pending.append(_Pending(k, op, 0, circle, op["depth"], name, [], None))
