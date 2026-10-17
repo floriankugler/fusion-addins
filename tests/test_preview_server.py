@@ -12,7 +12,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -328,7 +328,7 @@ def test_the_cam_view_reads_the_plans_version():
 
 
 @contextmanager
-def _serving(designs: Designs) -> Iterator[str]:
+def _serving(designs: Designs) -> Generator[str]:
     """The preview's server on a free port, without its builder: its url."""
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(_Handler, designs=designs))
     threading.Thread(target=server.serve_forever, daemon=True).start()
