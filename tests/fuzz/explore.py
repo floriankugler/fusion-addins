@@ -27,6 +27,7 @@ from hypothesis import strategies as st  # noqa: E402
 from hypothesis.errors import NonInteractiveExampleWarning  # noqa: E402
 
 import boards  # noqa: E402
+import cam_emit  # noqa: E402
 import checks  # noqa: E402
 import contours  # noqa: E402
 import corners  # noqa: E402
@@ -118,6 +119,8 @@ CHECKS: dict[str, Check] = {
     "ledgers": (nests.ledger_cases(), nests.ledger_problems),
     "pinning": (pinning.pin_cases(), pinning.pinning_problems),
     "plans": (machining.plan_cases(), machining.run_plan),
+    "emit_plans": (cam_emit.emit_plans(), cam_emit.run_emit_plan),
+    "emit_nests": (machining.plan_cases(), cam_emit.run_emit_nest),
     "settings": (settings.chain_cases(), settings.chain_problems),
     "setting_orders": (settings.order_cases(), settings.order_problems),
 }
