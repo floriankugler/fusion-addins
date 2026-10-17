@@ -139,10 +139,10 @@ lifts a small part whose vacuum is too weak, and the cutter then grabs and
 destroys it, so the hold must beat the extraction's pull as well as the
 cutting force; what he is unhappy with today is where the tabs are put,
 more than how many. Tested 2026-10-17 [Florian]: strips down to 300 by
-20 mm and discs down to 60 mm across, milled down to a thin skin and
-then cut free by one release pass of 0.4 mm, held, in a board that already had a big
-cutout in it and on a spoilboard that had been in use for a while. Skin and
-release is the strategy (below).
+20 mm and discs down to 60 mm across, milled down to a thin skin and then
+cut free by one release pass of 0.4 mm, held, in a board that already had
+a big cutout in it and on a spoilboard that had been in use for a while.
+Skin and release is the strategy (below).
 
 ### The model as it is
 
