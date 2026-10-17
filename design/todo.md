@@ -83,6 +83,13 @@ done.
   run with differ from those in its file.
 - **`nest(False)` boards no nest names** are still only listed as not
   nested; the cut list (`design/nesting.md`, Still open) is where they go.
+- **The CAM plan's choices to review** (`design/cam.md`, marked [chosen]):
+  a narrower pocket template alone at ¾ of the widest, the 8 mm adaptive's
+  room of twice its cutter, the tabs' neighbour classes and weights, a
+  hidden edge by another part's box, `cam.waste_area` at 10 cm², the CAM
+  settings read from the build as it is now. Keys of the settings table not
+  built: `cam.tab_edges`, `cam.finishing_stepdown`, Auto Setup's rule
+  constants and the holding calibration.
 - **Corners named by a point** (`panel.top.front(60).left(40)`) for
   `fillet()` and `chamfer()`, once a build needs it.
 - **Try the language on real modules**: write two modules from the van in
