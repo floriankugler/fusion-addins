@@ -85,8 +85,9 @@ from .layout_types import (ChamferLayout, CutLayout, DogBoneLayout, EdgeOpLayout
 from .material import Material, SheetMaterial, SlatMaterial
 from .ops import MIN_CHAMFER, Chamfer, Cut, DogBone, EdgeOp, Hole, Op, Pocket, SlotLine, VGroove
 from .refs import Affine, DepthSpec, HasPosition, Pos, PosLike, Side, Through, ToFace, as_pos, through
-from .settings import Binding, Node, Setting, build_line
+from .settings import Binding, Node, Setting
 from .shapes import Shape, box_shape, slot_shape
+from .where import build_line, where
 
 Point2 = tuple[float, float]
 #: How far a point may lie off a face and still be on it, mm (the add-ins'
@@ -130,6 +131,9 @@ class Board:
                             f"thickness; a board takes a sheet_material(), and solid wood makes a slat: "
                             f"slat({name!r}, {material.name}, section=(w, h)).")
         self.name = name
+        #: The build file's line that made it (`lang.core.where`): what the
+        #: layout carries and an error found when it resolves starts with.
+        self.where = where()
         #: The material, once known: the board's own, or its scope's read on
         #: first use (`material`).
         self._material: Material | None = material
@@ -194,7 +198,11 @@ class Board:
         thickness when the placement resolves, the layout), which freezes
         the key for them."""
         if self._material is None:
-            self._material = self.settings.read(keys.material, self.path)[0]
+            try:
+                self._material = self.settings.read(keys.material, self.path)[0]
+            except LangError as error:
+                error.locate(self.where)
+                raise
         return self._material
 
     @property
@@ -433,14 +441,21 @@ class Board:
         axis = keys.grain_axis(spec, source.frame)
         if axis == self.t_axis:
             raise LangError(f"grain {axis} from {source.label} is the thickness axis of this board; give it a "
-                            "grain() of its own.", self.path)
+                            "grain() of its own.", self.path, self.where)
         return axis
 
     # -- resolution ------------------------------------------------------------------------
 
     def box(self) -> Box:
+        """Where the board is, resolved on first use; an error found
+        resolving it names the board's line, which may lie long before the
+        line that needed it or, at the layout, before none."""
         if self._box is None:
-            self._resolve()
+            try:
+                self._resolve()
+            except LangError as error:
+                error.locate(self.where)
+                raise
         assert self._box is not None
         return self._box
 
@@ -968,6 +983,9 @@ class Board:
                         "after it, or keep material there with keep=.", self.path)
         self._check_on_material(op, name)
         self._check_through(op, name)
+        op.where = where()
+        if isinstance(op, EdgeOp):
+            op.op.where = op.where
         self.ops.append(op)
         if name:
             self._named_ops[name] = op
@@ -2350,9 +2368,19 @@ class Board:
     # -- layout ---------------------------------------------------------------------------------------
 
     def to_layout(self) -> PartLayout:
+        """The part as the layout has it; an error found on the way (its
+        placement, material, grain, machining face) names its line."""
+        try:
+            return self._layout()
+        except LangError as error:
+            error.locate(self.where)
+            raise
+
+    def _layout(self) -> PartLayout:
         b = self.box()
         return {
             "path": self.path,
+            "where": self.where,
             "kind": self.kind,
             "section": None,
             "material": self.material.label,
@@ -2572,8 +2600,8 @@ class Slat(Board):
                                 "between() gives a slat's two ends, on(), edge_on() and center() its section.",
                                 self.path)
 
-    def to_layout(self) -> PartLayout:
-        layout = super().to_layout()
+    def _layout(self) -> PartLayout:
+        layout = super()._layout()
         layout["section"] = list(self._section)
         return layout
 
@@ -2622,21 +2650,22 @@ def _rings(shape: Shape) -> Rings:
 def _op_to_layout(op: Op) -> OpLayout:
     if isinstance(op, Cut):
         cut: CutLayout = {"kind": "cut", "name": op.name, "chamfer": op.chamfer, "shape": _rings(op.shape),
-                          "dogbones": _dogbones_to_layout(op.dogbones)}
+                          "dogbones": _dogbones_to_layout(op.dogbones), "where": op.where}
         return cut
     if isinstance(op, Pocket):
         return _pocket_to_layout(op)
     if isinstance(op, Hole):
         return _hole_to_layout(op)
     if isinstance(op, Chamfer):
-        chamfer: ChamferLayout = {"kind": "chamfer", "what": op.what, "size": op.size, "face": op.face}
+        chamfer: ChamferLayout = {"kind": "chamfer", "what": op.what, "size": op.size, "face": op.face,
+                                  "where": op.where}
         return chamfer
     if isinstance(op, VGroove):
         groove: VGrooveLayout = {"kind": "vgroove", "name": op.name, "face": op.face, "start": [op.u0, op.v0],
-                                 "end": [op.u1, op.v1], "depth": op.depth}
+                                 "end": [op.u1, op.v1], "depth": op.depth, "where": op.where}
         return groove
     inner = _hole_to_layout(op.op) if isinstance(op.op, Hole) else _pocket_to_layout(op.op)
-    edge: EdgeOpLayout = {"kind": "edge", "face": op.face, "s": op.s, "t": op.t, "op": inner}
+    edge: EdgeOpLayout = {"kind": "edge", "face": op.face, "s": op.s, "t": op.t, "op": inner, "where": op.where}
     if op.offset:
         edge["offset"] = op.offset
     return edge
@@ -2648,7 +2677,7 @@ def _pocket_to_layout(op: Pocket) -> PocketLayout:
         slot = {"start": list(op.slot.start), "end": list(op.slot.end), "width": op.slot.width}
     return {"kind": "pocket", "name": op.name, "face": op.face, "depth": op.depth, "depth_spec": op.depth_spec,
             "chamfer": op.chamfer, "shape": _rings(op.shape), "slot": slot,
-            "dogbones": _dogbones_to_layout(op.dogbones)}
+            "dogbones": _dogbones_to_layout(op.dogbones), "where": op.where}
 
 
 def _dogbones_to_layout(bones: tuple[DogBone, ...]) -> list[DogBoneLayout]:
@@ -2657,7 +2686,7 @@ def _dogbones_to_layout(bones: tuple[DogBone, ...]) -> list[DogBoneLayout]:
 
 def _hole_to_layout(op: Hole) -> HoleLayout:
     return {"kind": "hole", "name": op.name, "face": op.face, "u": op.u, "v": op.v, "d": op.d, "depth": op.depth,
-            "depth_spec": op.depth_spec, "through": op.through, "chamfer": op.chamfer}
+            "depth_spec": op.depth_spec, "through": op.through, "chamfer": op.chamfer, "where": op.where}
 
 
 @dataclass

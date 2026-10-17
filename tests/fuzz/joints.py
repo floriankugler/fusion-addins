@@ -18,14 +18,16 @@ other error than a LangError; a refused join changes no board; a join
 from the side equals the join from the shelf; an accepted one plans,
 draws and meshes, leaves every board in one piece, lets no two boards
 share material, cuts no blind pocket or hole as deep as its board,
-sinks no countersink past a board's edge, and a connector's operations
-lie within its contact; a Domino slot is the Domino's outline inset by
+sinks no countersink past a board's edge, names the join's line on every
+operation it made in either board, and a connector's operations lie
+within its contact; a Domino slot is the Domino's outline inset by
 half of `undersize`. A join across a
 pocket made before, in the side's face or the shelf's end where they meet,
 is refused, and only such a one [Florian, 2026-10-13].
 """
 from __future__ import annotations
 
+import linecache
 import math
 import traceback
 from dataclasses import dataclass, field
@@ -449,6 +451,7 @@ def _run_pair(case: PairCase) -> list[str]:
         problems += _depth_problems(x, before)
     problems += _shared_problems(b, meshes)
     problems += _sink_problems(b, before)
+    problems += _line_problems(b, before)
     if case.joint.kind in ("domino", "clamex", "cabineo", "screws"):
         problems += _within_problems(b, contacts, before)
         problems += _station_problems(case.joint, b, contacts, before)
@@ -529,6 +532,20 @@ def _symmetry_problems(case: PairCase, b: Built) -> list[str]:
 def _new_ops(x: Board, before: list[tuple[str, str, list[Op]]]) -> list[Op]:
     old = next(ops for p, _, ops in before if p == x.path)
     return x.ops[len(old):] if x.ops[:len(old)] == old else list(x.ops)
+
+
+def _line_problems(b: Built, before: list[tuple[str, str, list[Op]]]) -> list[str]:
+    """Every operation the joins made, in either board, names the join
+    call's line (`where`): a line of this file that calls `join(`."""
+    problems: list[str] = []
+    for x in b.boards:
+        for op in _new_ops(x, before):
+            file, _, line = op.where.rpartition(":")
+            code = linecache.getline(file, int(line)) if line.isdigit() else ""
+            if Path(file).name != "joints.py" or ".join(" not in code:
+                problems.append(f"{x.path}: the {op.kind} {getattr(op, 'name', None)!r} a join made names "
+                                f"{op.where!r}, not the join's line")
+    return problems
 
 
 def _depth_problems(x: Board, before: list[tuple[str, str, list[Op]]]) -> list[str]:

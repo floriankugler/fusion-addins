@@ -616,11 +616,22 @@ def part_key(part: PartLayout, frame: dict[str, str], level: Level) -> str:
     """The hash of everything a part's mesh in its own frame comes from:
     its outline, ops, thickness, axes, box and show face, the layout's
     frame, the level, and the mesher's code. A part moved (its box, or its
-    outline in its plane) is meshed anew; its path and the rest of its
-    entry do not count."""
-    entry = {name: part[name] for name in _MESHED_FROM}
+    outline in its plane) is meshed anew; its path, the rest of its entry
+    and its operations' lines (`where`) do not count, so a line inserted
+    above it in the build file meshes nothing again."""
+    entry: dict[str, object] = {name: part[name] for name in _MESHED_FROM}
+    entry["ops"] = [_unplaced(op) for op in part["ops"]]
     data = {"part": entry, "frame": frame, "level": [level.name, level.tolerance], "code": _code_hash()}
     return hashlib.sha256(json.dumps(data, sort_keys=True, separators=(",", ":")).encode()).hexdigest()[:32]
+
+
+def _unplaced(op: OpLayout) -> dict[str, object]:
+    """An operation's entry without its line, the inner one's of an
+    operation on a narrow face too."""
+    out: dict[str, object] = {k: v for k, v in op.items() if k != "where"}
+    if op["kind"] == "edge":
+        out["op"] = {k: v for k, v in op["op"].items() if k != "where"}
+    return out
 
 
 class MeshCache:

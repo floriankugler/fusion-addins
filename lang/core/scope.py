@@ -42,6 +42,7 @@ from .errors import LangError
 from .layout_types import HardwareBodyLayout, HardwareLayout, SnapshotLayout
 from .refs import Pos, Side
 from .settings import Binding, Node, Setting
+from .where import where
 
 if TYPE_CHECKING:
     from .material import SheetMaterial
@@ -165,6 +166,9 @@ class Scope:
         if not name or "." in name:
             raise LangError(f"Scope name {name!r} must be non-empty and contain no dots.")
         self.name = name
+        #: The build file's line that opened it (`lang.core.where`): the
+        #: `module(...)` or `scope(...)` call, a module type's call.
+        self.where = where()
         self.parent: Scope | None = _stack[-1] if _stack else None
         self.is_module = is_module
         self.frame: Frame = frame if frame is not None else current().frame
@@ -383,14 +387,16 @@ class Scope:
         return out
 
     def place_hardware(self, name: str, bodies: list[HardwareBodyLayout]) -> HardwareLayout:
-        """Records a bought part as bodies made of world boxes. Hardware
-        objects call this from `mount`, with a name from
-        `unique_hardware_name` where one scope may hold several."""
+        """Records a bought part as bodies made of world boxes, with the
+        build file's line that mounted it. Hardware objects call this from
+        `mount`, with a name from `unique_hardware_name` where one scope
+        may hold several."""
         if name in self.parts or name in self.children:
             raise LangError(f"hardware name {name!r} collides with a part or scope name.", self.path)
         if any(item["name"] == name for item in self.hardware):
             raise LangError(f"hardware name {name!r} is used twice in this scope.", self.path)
-        item: HardwareLayout = {"path": f"{self.path}.{name}", "kind": "hardware", "name": name, "bodies": bodies}
+        item: HardwareLayout = {"path": f"{self.path}.{name}", "kind": "hardware", "name": name, "bodies": bodies,
+                                "where": where()}
         self._hardware.append(item)
         return item
 

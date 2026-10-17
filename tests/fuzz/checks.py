@@ -877,7 +877,7 @@ def _hole_pockets(part: PartLayout, around: bool) -> PartLayout:
             ring = [[float(x), float(y)] for x, y in circle.exterior.coords[:-1]]
             ops.append({"kind": "pocket", "name": op["name"], "face": op["face"], "depth": op["depth"],
                         "depth_spec": op["depth_spec"], "chamfer": 0.0, "shape": [ring], "slot": None,
-                        "dogbones": []})
+                        "dogbones": [], "where": op["where"]})
     out = part.copy()
     out["ops"] = ops
     return out

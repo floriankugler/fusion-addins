@@ -38,6 +38,7 @@ def build_layout() -> Layout:
         notes = [note for part in all_parts for note in part.notes]
         modules.append({
             "path": root.path,
+            "where": root.where,
             "box": box.as_dict() if box else None,
             "parts": parts,
             "hardware": root.all_hardware(),
@@ -49,8 +50,8 @@ def build_layout() -> Layout:
     loose = [part.to_layout() for part in registry.root_parts]
     if loose:
         notes = [note for part in registry.root_parts for note in part.notes]
-        modules.append({"path": "", "box": None, "parts": loose, "hardware": [], "exports": {}, "problems": notes,
-                        "nests": nests.get("", [])})
+        modules.append({"path": "", "where": "", "box": None, "parts": loose, "hardware": [], "exports": {},
+                        "problems": notes, "nests": nests.get("", [])})
         problems += notes
     # One entry per snapshot file and hash, however often it was read.
     snapshots: dict[tuple[str, str], SnapshotLayout] = {}
@@ -86,7 +87,7 @@ def _materials() -> dict[str, MaterialLayout]:
         first = seen.setdefault(material.label, material)
         if first != material:
             raise LangError(f"two materials are called {material.label}: {first} and {material}; give them names "
-                            "of their own.", part.path)
+                            "of their own.", part.path, part.where)
         out[material.label] = {"thickness": material.thickness, "grain": material.grain,
                                "size": list(material.size) if material.size is not None else None}
     return dict(sorted(out.items()))

@@ -45,11 +45,14 @@ def test_every_std_module_imports_the_public_api_only():
 # -- carcass ------------------------------------------------------------------------------------
 
 def _module_layout(name: str) -> str:
-    """One module's layout as text, its name replaced, so two modules
-    written differently can be compared."""
+    """One module's layout as text, its name replaced and its lines left
+    out (`where`: a board the library makes has the library call's, one
+    written by hand its own), so two modules written differently can be
+    compared."""
     layout = build_layout()
     mod = next(m for m in layout["modules"] if m["path"] == name)
-    return re.sub(rf"\b{name}\.", "m.", json.dumps(mod, sort_keys=True).replace(f'"{name}"', '"m"'))
+    text = re.sub(r', "where": "[^"]*"', "", json.dumps(mod, sort_keys=True))
+    return re.sub(rf"\b{name}\.", "m.", text.replace(f'"{name}"', '"m"'))
 
 
 def test_carcass_writes_the_drawer_cabinet_s_lines():

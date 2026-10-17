@@ -1,11 +1,14 @@
-"""The layout file's shape, version 9.
+"""The layout file's shape, version 10.
 
 This is the contract between the language and its consumers (the preview
 mesher, the Fusion emitter, the viewer page, the nest). Bump LAYOUT_VERSION
 on incompatible changes; `lang.emit.plan` and the viewer repeat it and
 refuse other versions.
 
-Version 9 (2026-10-17): a cut and a pocket list the `dogbones` their shape
+Version 10 (2026-10-17): every module, part, hardware item and operation
+carries `where`, the build file's line that made it (`examples/van.py:45`,
+`lang.core.where`), for the preview to point at the text. Version 9
+(2026-10-17): a cut and a pocket list the `dogbones` their shape
 holds, each a circle with the tool it was drawn for, for the CAM plan
 (`lang.cam`). Version 8 (2026-10-16): each module lists its `nests`, declared and
 default, with their parts and own settings, and the layout its sheet
@@ -24,7 +27,17 @@ from __future__ import annotations
 
 from typing import Literal, NotRequired, TypedDict
 
-LAYOUT_VERSION = 9
+LAYOUT_VERSION = 10
+
+#: `where`, on every module, part, hardware item and operation: the build
+#: file's line that made it, `examples/van.py:45`, the file relative to the
+#: build's working directory where it lies in it (`lang.core.where`): the
+#: innermost line outside the language, so a board the standard library
+#: makes has the build file's `carcass(...)` line, the operations a join
+#: makes in both boards the join's, and a loop's boards share one. "" where
+#: nothing outside the language made it. For a reader only, as
+#: `depth_spec`: no consumer machines or meshes by it, and the mesh cache
+#: and the fingerprints leave it out, so a line moved changes no part.
 
 #: One or more polygons as rings of [u, v] points, one polygon after the
 #: other: its exterior ring, counter-clockwise, then its holes, clockwise.
@@ -74,6 +87,7 @@ class CutLayout(TypedDict):
     #: The dog bones its shape holds: a `dogbones()` relief's, a joint's
     #: in its cut.
     dogbones: list[DogBoneLayout]
+    where: str
 
 
 class SlotLayout(TypedDict):
@@ -99,6 +113,7 @@ class PocketLayout(TypedDict):
     slot: SlotLayout | None
     #: The dog bones its shape holds.
     dogbones: list[DogBoneLayout]
+    where: str
 
 
 class HoleLayout(TypedDict):
@@ -114,6 +129,7 @@ class HoleLayout(TypedDict):
     depth_spec: str
     through: bool
     chamfer: float
+    where: str
 
 
 class ChamferLayout(TypedDict):
@@ -121,6 +137,7 @@ class ChamferLayout(TypedDict):
     what: str
     size: float
     face: str
+    where: str
 
 
 class VGrooveLayout(TypedDict):
@@ -132,6 +149,7 @@ class VGrooveLayout(TypedDict):
     start: list[float]
     end: list[float]
     depth: float
+    where: str
 
 
 class EdgeOpLayout(TypedDict):
@@ -139,7 +157,10 @@ class EdgeOpLayout(TypedDict):
     face: str
     s: float
     t: float
+    #: The operation in the face's frame; its `where` is the edge
+    #: operation's.
     op: HoleLayout | PocketLayout
+    where: str
     #: How far in front of the face the operation starts (mm, absent when
     #: it starts at the face): a box joint's finger grooves start at the
     #: fingers' tips, past the board's box.
@@ -151,6 +172,9 @@ OpLayout = CutLayout | PocketLayout | HoleLayout | ChamferLayout | VGrooveLayout
 
 class PartLayout(TypedDict):
     path: str
+    #: The line of its `board(...)` or `slat(...)` call, or of the call in
+    #: the build file that made it (`carcass(...)`, a `lip(...)`'s strips).
+    where: str
     #: A board, or a slat (solid wood by section and length, cosmetic for
     #: now: it has no operations).
     kind: Literal["board", "slat"]
@@ -207,6 +231,9 @@ class HardwareLayout(TypedDict):
     """A bought part, drawn as simple boxes: the space it takes, not its
     detail. Each body is one piece of it (a left and a right runner)."""
     path: str
+    #: The line of the `mount(...)` call (or the call in the build file
+    #: that mounted it).
+    where: str
     kind: Literal["hardware"]
     name: str
     bodies: list[HardwareBodyLayout]
@@ -248,6 +275,9 @@ class MaterialLayout(TypedDict):
 
 class ModuleLayout(TypedDict):
     path: str
+    #: The line of its `module(...)` or module type's call; "" for the
+    #: parts outside every module.
+    where: str
     box: BoxDict | None
     parts: list[PartLayout]
     hardware: list[HardwareLayout]

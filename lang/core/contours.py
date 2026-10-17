@@ -294,7 +294,7 @@ class ContourLimits:
             n = c.normal_axis
             c.check_planar()
         except LangError as error:
-            raise LangError(error.message, self.path) from None
+            raise LangError(error.message, self.path, error.where) from None
         if n == self.t:
             if c.closed:
                 self.areas.append((c.name, round_offset(c.polygon(self.u, self.v), -limit.gap)))

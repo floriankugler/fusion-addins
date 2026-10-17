@@ -68,7 +68,7 @@ def reported(label: str, part: Board, other: Board | None = None) -> Generator[N
     except LangError as err:
         head = label if other is None else f"{label} with {other.path}"
         message = err.message if err.path in (None, part.path) else f"{err.path}: {err.message}"
-        raise JointError(f"{head}: {message}", part.path) from err
+        raise JointError(f"{head}: {message}", part.path, err.where) from err
 
 
 def other_of(c: Contact, part: Board) -> Board:
@@ -385,7 +385,7 @@ def big_face(label: str, part: Board, choice: FaceChoice, default: Face) -> Face
     except LangError as err:
         if err.path is not None:
             raise
-        raise LangError(f"{label}: {err.message}", part.path) from None
+        raise LangError(f"{label}: {err.message}", part.path, err.where) from None
 
 
 def hidden_face(part: Board) -> Face:

@@ -8,6 +8,7 @@ import http.server
 import json
 import os
 import re
+import sys
 import threading
 import time
 import urllib.error
@@ -16,10 +17,12 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import pytest
 
 from lang.cam.plan_types import CAM_VERSION
+from lang.preview import __main__ as server
 from lang.preview.__main__ import (VIEWER_DIR, Designs, _Handler, nest_state, rebuild, renest, replan,  # type: ignore[reportPrivateUsage]
                                    scan)
 
@@ -417,3 +420,90 @@ def test_the_server_lists_serves_and_plans_a_nests_plan(tmp_path: Path):
             plan = json.loads(response.read())
         assert plan["version"] == CAM_VERSION and plan["nest"] == "cabinet.sides"
         assert [s["name"] for s in plan["setups"]] == ["cabinet.sides birch 15 1.1"]
+
+
+def _opened(path: Path) -> str:
+    """What the stand-in editor wrote, once it ran (it runs on its own)."""
+    for _ in range(100):
+        if path.exists() and path.read_text():
+            return path.read_text()
+        time.sleep(0.05)
+    return ""
+
+
+def test_the_editor_opens_at_a_line_of_the_folder_or_the_repo_only(tmp_path: Path):
+    """POST /open runs `--editor` with the file's whole path and the line
+    filled in, its arguments one by one without a shell; a relative file is
+    the repo's, where the builds run; other files are refused."""
+    (tmp_path / "designs").mkdir()
+    folder = folder_of_files(tmp_path / "designs")
+    log = tmp_path / "opened.txt"
+    editor = f"{sys.executable} -c \"import sys; open(sys.argv[1], 'w').write(sys.argv[2])\" {log} {{file}}:{{line}}"
+    designs = Designs(folder, tmp_path / "out", editor)
+    assert designs.open_editor("examples/van.py", "45") == (200, "opened examples/van.py:45")
+    assert _opened(log) == f"{EXAMPLES / 'van.py'}:45"
+    log.unlink()
+    assert designs.open_editor(str(folder / "van.py"), "3")[0] == 200
+    assert _opened(log) == f"{(folder / 'van.py').resolve()}:3"
+    (tmp_path / "secret.py").write_text("x = 1\n")
+    assert designs.open_editor(str(tmp_path / "secret.py"), "1")[0] == 403
+    assert designs.open_editor(str(folder / ".." / "secret.py"), "1")[0] == 403
+    assert designs.open_editor("examples/missing.py", "1")[0] == 404
+    assert designs.open_editor("examples/van.py", "x")[0] == 400
+    assert designs.open_editor("", "3")[0] == 400
+    status, text = Designs(folder, tmp_path / "out", "no-such-editor-here {file}").open_editor("examples/van.py", "1")
+    assert status == 500 and "the editor did not start" in text and "--editor" in text
+
+
+def test_code_comes_from_vs_codes_app_bundle_when_the_path_has_none(tmp_path: Path,
+                                                                    monkeypatch: pytest.MonkeyPatch):
+    """The default editor is VS Code's `code`, which the app does not put
+    on the PATH: without one there, the app bundle's runs; with neither,
+    the answer says the editor did not start and names --editor."""
+    (tmp_path / "designs").mkdir()
+    folder = folder_of_files(tmp_path / "designs")
+    log = tmp_path / "opened.txt"
+    bundle = tmp_path / "code"
+    bundle.write_text(f"#!/bin/sh\necho \"$0 $*\" > '{log}'\n")
+    bundle.chmod(0o755)
+    empty = tmp_path / "bin"
+    empty.mkdir()
+    monkeypatch.setenv("PATH", str(empty))
+    monkeypatch.setattr(server, "VSCODE_BUNDLE", str(bundle))
+    designs = Designs(folder, tmp_path / "out")
+    assert designs.editor == "code --goto {file}:{line}"
+    assert designs.open_editor("examples/van.py", "45") == (200, "opened examples/van.py:45")
+    assert _opened(log).strip() == f"{bundle} --goto {EXAMPLES / 'van.py'}:45"
+    log.unlink()
+    on_path = empty / "code"                     # a code on the PATH wins over the bundle's
+    on_path.write_text(f"#!/bin/sh\necho \"path $*\" > '{log}'\n")
+    on_path.chmod(0o755)
+    assert designs.open_editor("examples/van.py", "7")[0] == 200
+    assert _opened(log).strip() == f"path --goto {EXAMPLES / 'van.py'}:7"
+    on_path.unlink()
+    monkeypatch.setattr(server, "VSCODE_BUNDLE", str(tmp_path / "missing" / "code"))
+    status, text = designs.open_editor("examples/van.py", "45")
+    assert status == 500 and "the editor did not start" in text and "--editor" in text
+
+
+def test_the_editor_opens_for_the_previews_own_page_only(tmp_path: Path):
+    log = tmp_path / "opened.txt"
+    editor = f"{sys.executable} -c \"import sys; open(sys.argv[1], 'w').write(sys.argv[2])\" {log} {{file}}:{{line}}"
+    (tmp_path / "designs").mkdir()
+    designs = Designs(folder_of_files(tmp_path / "designs"), tmp_path / "out", editor)
+    with _serving(designs) as url:
+        own = urlsplit(url).netloc
+
+        def post(origin: str | None) -> int:
+            headers = {} if origin is None else {"Origin": origin}
+            request = urllib.request.Request(url + "open?file=examples/van.py&line=7", method="POST", headers=headers)
+            try:
+                with urllib.request.urlopen(request) as response:
+                    return response.status
+            except urllib.error.HTTPError as error:
+                return error.code
+
+        assert post("http://evil.example") == 403 and not log.exists()
+        assert post(f"http://{own}") == 200
+        assert _opened(log).endswith("examples/van.py:7")
+        assert post(None) == 200                    # a script, not a page

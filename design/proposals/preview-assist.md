@@ -3,8 +3,9 @@
 Status: proposed by Claude on 2026-10-17 as a brainstorm and gone through
 with Florian the same day, item by item; every item below was taken, with
 his rules for the clicks, the selection and the glow worked in [Florian,
-2026-10-17]. Nothing built. The preview as it is: `design/preview.md`; how
-to drive it from code: AGENTS.md.
+2026-10-17]. Built: Lines in the layout (2026-10-17); the rest not yet.
+The preview as it is: `design/preview.md`; how to drive it from code:
+AGENTS.md.
 
 ## Why
 
@@ -24,6 +25,13 @@ Every item serves both ways of writing: a click or key for the hand, and a
 `preview.*` call for Claude through the built-in browser.
 
 ## Lines in the layout
+
+Built 2026-10-17: layout version 10, `lang/core/where.py`, the viewer's
+`o`, line links and `preview.openEditor()`, the server's `POST /open` and
+`--editor`; `design/preview.md`, The viewer and Serving a folder, says how
+it works and what it costs on the van (nothing measurable). The editor is
+VS Code [Florian]: `code --goto {file}:{line}` by default, the `code` in
+VS Code's app bundle when the PATH has none; `o` verified with it.
 
 Everything below that links the picture to the text needs the layout to say
 where each thing was written.
@@ -46,8 +54,9 @@ where each thing was written.
   start, `--editor 'code --goto {file}:{line}'` the default). Florian uses
   VS Code [2026-10-17]; where `code` is not on the server's PATH (it is not
   in the app's shell), the default falls back to the binary in the app
-  bundle, `/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code`.
-  The build log's `file:line:` lines become the same links.
+  bundle, `/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code`;
+  `o` was verified with VS Code on 2026-10-17. The build log's `file:line:`
+  lines become the same links.
 - From code: `preview.parts()` and `preview.ops()` carry the line, and so
   does `preview.selection()` (below).
 
@@ -71,6 +80,11 @@ might write about them next, every line copied by a click [Florian,
   with its own lines, and then what relates them: the distance between two
   faces, the gap between two parts, with the code for it (Snippets to
   copy).
+- The parts tree follows the selection: collapsed by default and opened to
+  what is selected, and it grows below the boards as faces, edges and
+  operations become selectable, listing them under their part [Florian,
+  2026-10-17]. Built for parts and bought parts on 2026-10-17
+  (`design/preview.md`, The viewer).
 - From code: `preview.selection()` gives the same as data, with each
   item's world point and line.
 

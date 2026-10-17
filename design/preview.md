@@ -72,7 +72,9 @@ for a check, too slow for the loop. [decided as a need]
   in `out/<design>/.mesh/<hash>.npz` (`--mesh-cache DIR`, or
   `--no-mesh-cache`), the hash (`part_key`) of exactly what the mesh comes
   from: the outline, ops, thickness, axes, box and show face, the layout's
-  frame, the level, and the mesher's code and libraries. The next build
+  frame, the level, and the mesher's code and libraries; the operations'
+  lines (`where`) stay out, so a line inserted above a part in the build
+  file meshes nothing again. The next build
   takes the unchanged parts from there and meshes the rest, and the
   folder keeps only what the last build used. A part whose meshing
   reported a problem is not kept, so it says so on every build. A scene
@@ -86,8 +88,14 @@ for a check, too slow for the loop. [decided as a need]
 ## The viewer
 
 - A static three.js page: orbit, a collapsible part tree by path (hardware
-  bodies included; clicking a group hides or shows all of it), click to
-  select, hide and isolate, display modes, a capped section plane, a floor
+  bodies included; clicking a group hides or shows all of it) that follows
+  the selection [Florian, 2026-10-17]: collapsed at first, a part selected
+  in the scene, the list or the nest drawing closes every group and opens
+  those above it, so it shows and earlier opens do not pile up; a caret
+  click opens or closes a group by hand (with alt the ones below it) until
+  the next selection, and a deselection (`esc`) leaves the tree as it is
+  (`TreeOpen` in `state.js`, with node tests); click to select, hide and
+  isolate, display modes, a capped section plane, a floor
   grid, the master's ghost boxes and contour lines (`m`), hardware on or off
   (`w`), labels with the parts' names (`n`) and their faces' names (`d`) as
   the build file writes them (a cabinet's own front and left, inner and outer
@@ -110,8 +118,8 @@ for a check, too slow for the loop. [decided as a need]
   resolves once its scene is on screen.
 - Camera and visibility from code: the page exposes `window.preview`
   (`look`, `view`, `camera`, `fit`, `isolate`, `show`, `hide`, `select`,
-  `section`, `labels`, `hardware`, `level`, `parts`, `ops`, `loaded`,
-  `open`, `designs`, `design`, `version`), so a tool driving the browser frames a
+  `section`, `labels`, `hardware`, `level`, `parts`, `ops`, `openEditor`,
+  `loaded`, `open`, `designs`, `design`, `version`), so a tool driving the browser frames a
   part, a scope or a named operation from a named direction in one call
   instead of steering the mouse. The camera is kept in the URL hash, so a
   link or a reload shows the same view.
@@ -121,6 +129,27 @@ for a check, too slow for the loop. [decided as a need]
   `scene-utils.js`) has node tests (`lang/preview/viewer/tests/`, run by
   `tests/test_viewer_js.py`), and a rebuild frees the old scene's GPU
   resources.
+- Lines of the build file (`design/proposals/preview-assist.md`, Lines in
+  the layout, built 2026-10-17): the layout names the line that made every
+  module, part, hardware item and operation (`where`, `examples/van.py:45`,
+  layout version 10), found as the settings' errors find theirs
+  (`lang/core/where.py`: the innermost frame outside `lang/` and `lib/`),
+  so a board `carcass()` makes points at the build file's `carcass(...)`
+  line, the operations a join makes in both boards at the join's line, and
+  a loop's boards share one. The selection's info shows the selected
+  part's or bought part's line as a link; it and the key `o` ask the server
+  to open the editor there (`POST /open`, Serving a folder), and every
+  `file.py:line` in the build log in the status box is such a link
+  (`logPieces` in `state.js`, with node tests). From code, `preview.parts()`
+  and `preview.ops(path)` carry `where`, and `await
+  preview.openEditor(at)` opens the editor at a part's, a bought part's or
+  an operation's (`'kitchen.left#toekick'`) line or at a line given. The
+  lines cost nothing measurable (2026-10-17, on the van: 42 parts, 386
+  operations, a frame walk for each): the layout step took 449 ms before
+  and 448 ms after (medians of 20 runs in one process), and `python -m
+  lang.build examples/van.py` 1.04 s before and after with the scene from
+  the mesh cache, 0.71 s without the scene (`--no-scene`; medians of 7
+  runs each, the two trees built in turn).
 - Click-to-path in the viewer is the Copy Path helper outside Fusion
   (faces, edges and anchors proposed in `design/proposals/preview-assist.md`).
 - The nest view (button or key `k`, `preview.nest(on)` from code) shows a
@@ -216,7 +245,27 @@ for a check, too slow for the loop. [decided as a need]
   (`examples/van.py:39: bottom.join(...)`), not runpy's or the language's
   frames; a Python error raised inside the language also names where
   (`raised in lang/core/shapes.py:243`), and `python -m lang.build
-  --traceback` prints the whole stack.
+  --traceback` prints the whole stack. An error found when a board
+  resolves, which may be at the layout where no line of the build file is
+  on the stack (no placement, no material along its chain, a grain along
+  its thickness), starts with the board's line
+  (`error: examples/van.py:45: floor.batten3 reads material, ...`), and the
+  stack below it leaves that line out.
+- The editor: `POST /open?file=examples/van.py&line=45` runs the command
+  `--editor` gives, VS Code's `code --goto {file}:{line}` by default
+  (Florian's editor; `{file}` the file's whole path, `{line}` the line;
+  split like a shell's words and run without a shell), for a file in the
+  folder served or in the repo; a
+  relative file is the repo's, where the builds run. It refuses other
+  files, and a request whose `Origin` is not the preview's own page. The
+  page's `o`, its line links and `preview.openEditor()` post it. The VS
+  Code app does not put `code` on the PATH by itself, so without one there
+  the server runs the one in the app bundle (`/Applications/Visual Studio
+  Code.app/Contents/Resources/app/bin/code`); only with neither does the
+  answer say the editor did not start, and name `--editor`, under the
+  selection. Verified 2026-10-17: `o` on `kitchen.left` in the van opened
+  `examples/drawer_cabinet.py` in VS Code at line 35, its `carcass(...)`
+  call, through the bundle's `code`.
 - The hash carries the design (`#design=van&eye=…`); without one the page
   opens the folder's first design alphabetically [decided]. Each design keeps
   its own camera, hidden parts, selection and section while the page is

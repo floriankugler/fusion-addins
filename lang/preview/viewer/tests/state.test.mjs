@@ -1,9 +1,9 @@
-// The page's bookkeeping (state.js): the layout version, hidden parts, the
-// levels asked for, and the promises of preview.loaded(), preview.open()
+// The page's bookkeeping (state.js): the layout version, the build file's
+// lines, the parts tree, hidden parts, the levels asked for, and the promises of preview.loaded(), preview.open()
 // and preview.level().
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { LAYOUT_VERSION, layoutVersionProblem, setHidden, toggleHides, isolate, LoadTracker, nestStatusText, chosenNest, settingsText, sheetNames, sheetMade, fixable, LEVELS, LevelChoice, untilLevel } from '../state.js';
+import { LAYOUT_VERSION, layoutVersionProblem, splitWhere, logPieces, openedTo, TreeOpen, setHidden, toggleHides, isolate, LoadTracker, nestStatusText, chosenNest, settingsText, sheetNames, sheetMade, fixable, LEVELS, LevelChoice, untilLevel } from '../state.js';
 
 // Whether a promise settled, without waiting for it: 'pending', or
 // ['resolved', value] / ['rejected', message].
@@ -32,12 +32,68 @@ test('a part\'s settings, one line each with where it came from', () => {
 });
 
 test('the layout version the page reads', () => {
-  assert.equal(LAYOUT_VERSION, 9);
+  assert.equal(LAYOUT_VERSION, 10);
   assert.equal(layoutVersionProblem({ version: LAYOUT_VERSION }), null);
-  assert.equal(layoutVersionProblem({ version: 2 }), 'layout version 2, this viewer reads 9');
-  assert.equal(layoutVersionProblem({ version: 10 }), 'layout version 10, this viewer reads 9');
-  assert.equal(layoutVersionProblem({}), 'layout version missing, this viewer reads 9');
-  assert.equal(layoutVersionProblem(null), 'layout version missing, this viewer reads 9');
+  assert.equal(layoutVersionProblem({ version: 2 }), 'layout version 2, this viewer reads 10');
+  assert.equal(layoutVersionProblem({ version: 9 }), 'layout version 9, this viewer reads 10');
+  assert.equal(layoutVersionProblem({}), 'layout version missing, this viewer reads 10');
+  assert.equal(layoutVersionProblem(null), 'layout version missing, this viewer reads 10');
+});
+
+test('a line of the layout splits into its file and number', () => {
+  assert.deepEqual(splitWhere('examples/van.py:45'), { file: 'examples/van.py', line: 45 });
+  assert.deepEqual(splitWhere('/Users/f/designs/a:b.py:7'), { file: '/Users/f/designs/a:b.py', line: 7 });
+  assert.equal(splitWhere(''), null);
+  assert.equal(splitWhere(undefined), null);
+  assert.equal(splitWhere('examples/van.py'), null);
+});
+
+test('the build log links every file line in it', () => {
+  const log = 'error: examples/van.py:45: floor.batten3 reads material, which has no default\n' +
+    '  examples/drawer_cabinet.py:83: d.mount(slide, sides=(left, right))\n' +
+    '  raised in lang/core/shapes.py:12 (circle); --traceback prints the whole stack\n' +
+    '\n' +
+    '42 parts in 3 module(s) -> /Users/f/out/van';
+  const rows = logPieces(log);
+  assert.equal(rows.length, 5);
+  assert.deepEqual(rows[0], [{ text: 'error: ' }, { text: 'examples/van.py:45', file: 'examples/van.py', line: 45 },
+    { text: ': floor.batten3 reads material, which has no default' }]);
+  assert.deepEqual(rows[1][1], { text: 'examples/drawer_cabinet.py:83', file: 'examples/drawer_cabinet.py', line: 83 });
+  assert.deepEqual(rows[2].filter((p) => p.file).map((p) => [p.file, p.line]), [['lang/core/shapes.py', 12]]);
+  assert.deepEqual(rows[3], [{ text: '' }]);
+  assert.deepEqual(rows[4], [{ text: '42 parts in 3 module(s) -> /Users/f/out/van' }]);
+  assert.deepEqual(logPieces('/Users/f/designs/van.py:3: x'), [[
+    { text: '/Users/f/designs/van.py:3', file: '/Users/f/designs/van.py', line: 3 }, { text: ': x' }]]);
+  assert.equal(logPieces(rows.map((r) => r.map((p) => p.text).join('')).join('\n')).length, 5);
+  assert.deepEqual(logPieces(undefined), [[{ text: '' }]]);
+});
+
+test('the groups above a path open to it', () => {
+  assert.deepEqual(openedTo('kitchen.drawer1.left'), ['kitchen', 'kitchen.drawer1']);
+  assert.deepEqual(openedTo('kitchen.drawer1.runners.left'), ['kitchen', 'kitchen.drawer1', 'kitchen.drawer1.runners']);
+  assert.deepEqual(openedTo('floor.batten3'), ['floor']);
+  assert.deepEqual(openedTo('loose'), []);
+});
+
+test('the parts tree follows the selection', () => {
+  const tree = new TreeOpen();
+  assert.equal(tree.isOpen('kitchen'), false, 'collapsed at first');
+  tree.select('kitchen.drawer1.left');
+  assert.deepEqual([...tree.open], ['kitchen', 'kitchen.drawer1']);
+  tree.set(['floor'], true);                                    // opened by hand
+  assert.ok(tree.isOpen('floor'));
+  tree.select(null);                                            // deselected: left as it is
+  assert.deepEqual([...tree.open].sort(), ['floor', 'kitchen', 'kitchen.drawer1']);
+  tree.select('kitchen.drawer2.front');                         // the first chain and the hand's open close
+  assert.deepEqual([...tree.open], ['kitchen', 'kitchen.drawer2']);
+  tree.set(['kitchen', 'kitchen.drawer2'], false);              // closed by hand, with alt the group below too
+  assert.deepEqual([...tree.open], []);
+  tree.select('kitchen.drawer2.front');                         // the same part again opens to it again
+  assert.deepEqual([...tree.open], ['kitchen', 'kitchen.drawer2']);
+  tree.collapse();
+  assert.deepEqual([...tree.open], []);
+  tree.select('loose');
+  assert.deepEqual([...tree.open], []);
 });
 
 test('the nest state as the side panel says it', () => {
