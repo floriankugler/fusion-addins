@@ -140,7 +140,10 @@ There is nothing to recognise: the layout says what each operation is.
   mm deep only, with a note; a hole no bore cutter fits is drilled with a
   drill template of exactly its diameter, at most 4 mm deep, with a note;
   else nothing fits. A through hole over 30 mm is an opening of the
-  outline, a blind one over twice the widest bore cutter a round pocket.
+  outline, a blind one over twice the widest bore cutter a round pocket. A
+  hole with nothing of the board where it is (in what a through pocket
+  takes off the board's edge; the board as a blind pocket's region sees it,
+  below) is gone [found by fuzzing, 2026-10-17: bored off the blank].
   Heights from the stock's top, a chamfered hole's too (its chamfer is the
   V-bit's afterwards), the bottom the hole's own (`from hole bottom`), a
   through one's the stock's bottom less the breakthrough, a tight one's 4

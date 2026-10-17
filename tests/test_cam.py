@@ -827,6 +827,24 @@ def test_the_opening_test_answers_alike_however_a_ring_is_written():
     assert [round(p.area, 3) for p in unreached(Polygon(turned), 3.0)] == left
 
 
+def test_a_hole_in_what_a_through_pocket_takes_off_the_board_is_gone():
+    """A hole whose material a through pocket takes off the board's edge was
+    bored all the same, off what is left of the part and, where the blank
+    fits the part, off the blank [found by fuzzing, 2026-10-17]."""
+    with module("m", Box.from_size(width=600, depth=400, height=100)) as m:
+        p = board("panel", ply15).on(m.bottom)
+        p.hole(d=10, at=p.top.front(10).left(100), depth=through, name="lost", chamfer=1)
+        p.hole(d=8, at=p.top.front(10).left(300), depth=5, name="blind")
+        p.hole(d=8, at=p.top.front(60).left(300), depth=5, name="kept")
+        p.pocket(rect(depth=40, width=700), at=p.top.front, depth=through, name="strip")    # 20 off the front
+    nest, layout = _nested()
+    (setup,) = _plan(nest, layout)["setups"]
+    gone = {(lo["op"]["name"], lo["op"]["aspect"]) for lo in setup["left_out"] if lo["why"] == "gone"}
+    assert {("lost", "op"), ("lost", "chamfer"), ("blind", "op")} <= gone
+    holes = [f["ops"][0]["name"] for op in setup["operations"] for f in op["features"] if f["what"] == "hole"]
+    assert holes == ["kept"]
+
+
 def test_a_pocket_over_an_opening_at_the_edge_stays_within_the_parts_outer_loop():
     """Clipped by the outline alone, a pocket over a through pocket that
     opens the board's edge reached where the nest may have put another part,
