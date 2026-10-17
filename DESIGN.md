@@ -183,12 +183,13 @@ budget from the beginning:
 What this means for a feature: before it is merged, its cost is measured on
 `examples/van.py` (`python -m lang.build examples/van.py --out out`, and a
 timed compile for anything the emitter draws), it grows no faster than the
-number of parts, and a regression against the numbers in
-`design/proposals/performance.md` is a bug, as a wrong volume is. Doing less
-(caching, batching, coarser triangles where only the eye looks) beats doing
-it on more cores: the emitter cannot be parallelized, and the mesher's
-libraries hold the interpreter lock. The measured state and the open
-options are in `design/proposals/performance.md`.
+number of parts, and a regression against the numbers the topic files record
+(`design/preview.md`, The mesher; `design/emitter.md`, Measured) is a bug,
+as a wrong volume is. Doing less (caching, batching, coarser triangles where
+only the eye looks) beats doing it on more cores: the emitter cannot be
+parallelized, and the mesher's libraries hold the interpreter lock. The
+measured state lives with each topic; what is still open, in the order to
+take it, is `design/proposals/performance.md`.
 
 ## Example
 
@@ -301,6 +302,7 @@ is implemented. [Florian]
 | `settings.md` | Settings that flow down the build and are overridden at any level (Florian's idea, 2026-10-15/16). Built: stage 1, the mechanism, the core's keys, lazy modules, the master's parameters (`design/api.md`); stage 2, nests in the build with the nesting keys and the inventory (`design/nesting.md`); stage 3, fingerprints and pinning with the inventory written back (`design/nesting.md`, Pinning); to come: the CAM's keys |
 | `runs.md` | Hoses, cables, ducts and keep-outs: one run primitive that plans and is checked, routed through the boards' own openings, at the van level or in a module |
 | `detail-levels.md` | Rough and full previews |
+| `performance.md` | What is still open for turnover after the review of 2026-10-17: the emitter's document writes, the loop's fixed costs, curves instead of polygons in the layout, one module at a time |
 | `hand-made-geometry.md` | Escape hatches for what the language cannot say |
 | `copy-path.md` | Copy Path, named faces on hand-modeled bodies, the Planung check |
 | `build-repo.md` | A repo per van, committed outputs (cut list, SVGs, lock file) |
