@@ -73,7 +73,7 @@ from . import holding, keys, rules, tabbing
 from .plan_types import (CAM_VERSION, CamFile, ChamferFeature, ContourFeature, DogboneFeature, Feature,
                          GrooveFeature, HeightOut, HoleFeature, LeftOutOut, OperationKind, OperationOut, OpRef,
                          ParamsOut, PartOut, PathOut, PocketFeature, ReleaseOut, SetupOut, StockOut, TabsOut, ToolOut)
-from .regions import CLEAN, Placed, hold, lines_of, polygons, ring_points
+from .regions import CLEAN, Placed, hold, lines_of, ring_points
 from .resolve import Values, resolve, summary
 from .tooling import Registry, Template, registry_of
 
@@ -158,7 +158,10 @@ def _tool(t: Template) -> ToolOut:
 
 
 def _pt(p: Point2) -> list[float]:
-    return [round(p[0], 9), round(p[1], 9)]
+    """A point for the file, as it is: rounded, the rings would recover
+    their arcs otherwise where a circle meets an edge at a glancing angle
+    [found by fuzzing, 2026-10-17]."""
+    return [float(p[0]), float(p[1])]
 
 
 @dataclass
@@ -231,6 +234,8 @@ class _Setup:
         self.placed = [(p, Placed.of(by_path[p["path"]], p["transform"], layout["frame"])) for p in blank["parts"]]
         # every part's footprint on the blank, for what lies across a kerf
         self.footprints = {pp.path: pp.footprint() for _p, pp in self.placed}
+        #: ... and in its own frame, where its hold is measured.
+        self.footprints_uv = {pp.path: pp.machine_outline(0.0, uv=True) for _p, pp in self.placed}
         self.tabbed: dict[str, tuple[Template, list[Point2], float, float]] = {}
         #: Each part's outer contour's cutter.
         self.outer_tool: dict[str, float] = {}
@@ -306,7 +311,9 @@ class _Setup:
         # the outline's rings
         self.rings(pp, own, [r for r in reliefs if r.op["kind"] == "cut" or pp.is_through(r.op["depth"])])
         # holding
-        footprint = self.footprints[path]
+        # (in the part's own frame: shrunk on the blank, a narrow neck pinched off or not as the part lay
+        # [found by fuzzing, 2026-10-17])
+        footprint = self.footprints_uv[path]
         margin = float(self.value(keys.tab_margin, path))
         held = hold(footprint, margin)
         policy = str(self.value(keys.tabs, path))
@@ -350,8 +357,9 @@ class _Setup:
         drills = rules.by_diameter(self.registry.of("drill", cutter, self.value(keys.drill_template, path, name)))
         center = pp.point(op["u"], op["v"])
         if not through and bores and op["d"] > 2 * max(bores):
-            circle = Point(center).buffer(op["d"] / 2, quad_segs=90)
-            self.pocket_region(pp, [ref(k, op, "op")], circle, op["depth"], name, [], None)
+            circle = Point(center).buffer(op["d"] / 2, quad_segs=90).intersection(self.footprints[pp.path])
+            if not self.pocket_region(pp, [ref(k, op, "op")], circle, op["depth"], name, [], None):
+                self.leave(path, ref(k, op, "op"), "nothing fits", "no pocket cutter gets into it")
             return
         choice = rules.hole_choice(op["d"], op["depth"], through, self.breakthrough, bores, drills)
         if choice is None:
@@ -396,7 +404,7 @@ class _Setup:
             return
         if op["chamfer"] > 0:
             self.op_chamfer(pp, k, op, face, op["chamfer"])
-        region = pp.region(op["shape"]).intersection(pp.outline())
+        region = pp.region(op["shape"]).intersection(self.footprints[pp.path])
         pieces = [p for p in polygons_of(region) if p.area > CLEAN * CLEAN]
         if not pieces:
             self.leave(path, ref(k, op, "op"), "gone", "nothing of it is left on the board")
@@ -412,19 +420,24 @@ class _Setup:
         for r in reliefs:
             best = max(range(len(pieces)), key=lambda i: pieces[i].intersection(r.disc).area)
             own[best].append(r)
-        for i, piece in enumerate(pieces):
-            self.pocket_region(pp, [ref(k, op, "op")], piece, op["depth"], op["name"], own[i], slot)
+        missed = [i for i, piece in enumerate(pieces)
+                  if not self.pocket_region(pp, [ref(k, op, "op")], piece, op["depth"], op["name"], own[i], slot)]
+        for i in missed:
+            # a piece no cutter gets into: the pocket, where it is all of it, else that piece
+            aspect = "op" if len(missed) == len(pieces) and i == missed[0] else f"piece {i}"
+            if aspect == "op" or len(missed) < len(pieces):
+                self.leave(path, ref(k, op, aspect), "nothing fits", "no pocket cutter gets into it")
 
     def pocket_region(self, pp: Placed, refs: list[OpRef], region: BaseGeometry, depth: float | None,
-                      name: str | None, reliefs: list[_Relief], slot: Any) -> None:
+                      name: str | None, reliefs: list[_Relief], slot: Any) -> bool:
         """A region to take out, `depth` deep from the stock's top (None:
-        through), with the dog bones in it."""
+        through), with the dog bones in it; whether it is planned (else the
+        caller leaves `refs` out: nothing fits)."""
         path = pp.path
         discs = unary_union([r.disc.buffer(2 * CLEAN) for r in reliefs]) if reliefs else None
         if discs is not None and region.difference(discs).area < 1e-6:
             # all of it is dog bones: each its own way, the region with the first
-            self.route(pp, reliefs, depth, refs)
-            return
+            return self.route(pp, reliefs, depth, refs)
         cutter = self.cutter(path, name)
         finish = bool(self.value(keys.finish_pockets if depth is not None else keys.finish_inner, path, name))
         tried, notes = rules.candidates(self.registry, "pocket", str(self.value(keys.pocket_template, path, name)),
@@ -436,10 +449,8 @@ class _Setup:
         for n in plan.notes:
             self.note(path, n)
         if plan.main is None:
-            for r in refs:
-                self.leave(path, r, "nothing fits", "no pocket cutter gets into it")
             self.route(pp, reliefs, depth, [])
-            return
+            return False
         mine = [r for r in reliefs if rules.self_cut(r.d, plan.main.narrowest)]
         routed = [r for r in reliefs if r not in mine]
         bottom = self.through_bottom() if depth is None else _height("from contour", 0.0)
@@ -455,6 +466,7 @@ class _Setup:
             self.note(path, f"no pocket cutter reaches {piece.area:.1f} mm² of {_names(refs)} near "
                             f"({piece.centroid.x:.0f}, {piece.centroid.y:.0f})")
         self.route(pp, routed, depth, [])
+        return True
 
     def add_pocket(self, t: Template, bottom: HeightOut, feature: PocketFeature) -> None:
         through = bottom["mode"] == "from stock bottom"
@@ -465,25 +477,25 @@ class _Setup:
 
     # -- dog bones ---------------------------------------------------------------------------------
 
-    def route(self, pp: Placed, reliefs: list[_Relief], depth: float | None, refs: list[OpRef]) -> None:
+    def route(self, pp: Placed, reliefs: list[_Relief], depth: float | None, refs: list[OpRef]) -> bool:
         """Dog bones their operation's cutter does not cut: a drill of their
         diameter, else a dog bone cutter, along their wall. `refs` go with
-        the first one routed (a pocket that is all dog bones)."""
+        the first one routed (a pocket that is all dog bones); whether they
+        went (else the caller leaves them out)."""
         path = pp.path
-        material = pp.outline()
+        material = self.footprints[pp.path]
         for r in reliefs:
             name = r.op["name"]
             cutter = self.cutter(path, name)
             drills = rules.by_diameter(self.registry.of("drill", cutter, self.value(keys.drill_template, path, name)))
             dogbones = self.registry.of("dogbone", cutter, self.value(keys.dogbone_template, path, name))
             routed = rules.dogbone_route(r.d, drills, dogbones)
+            if routed is None:
+                self.leave(path, ref(r.index, r.op, f"relief {r.k}"), "nothing fits",
+                           f"no drill template of {r.d:g} mm and no dog bone cutter {rules.RELIEF_TOL:g} narrower")
+                continue
             mine = [ref(r.index, r.op, f"relief {r.k}")] + refs
             refs = []
-            if routed is None:
-                for m in mine:
-                    self.leave(path, m, "nothing fits", f"no drill template of {r.d:g} mm and no dog bone cutter "
-                                                        f"{rules.RELIEF_TOL:g} narrower")
-                continue
             t: Template = routed
             if t.flute is not None and t.flute < (depth if depth is not None else self.thickness + self.breakthrough) \
                     - rules.DEPTH_TOL:
@@ -498,6 +510,7 @@ class _Setup:
             self.add((kind, "relief", t.stem, bottom["mode"], bottom["offset"]),
                      lambda: _Work(kind, t, _params(_height("from stock top", 0.0), bottom), label,
                                    (1, -bottom["offset"])), feature)
+        return not refs
 
     # -- the outline -------------------------------------------------------------------------------
 
@@ -516,9 +529,9 @@ class _Setup:
                 for rel in ring.reliefs:
                     self.leave(path, ref(rel.index, rel.op, f"relief {rel.k}"), "hand work")
                 continue
-            self.ring(pp, ring)
+            self.ring(pp, ring, own)
 
-    def ring(self, pp: Placed, ring: _Ring) -> None:
+    def ring(self, pp: Placed, ring: _Ring, own: bool = False) -> None:
         path, name = pp.path, ring.op_name
         cutter = self.cutter(path, name)
         finish = bool(self.value(keys.finish_outer if ring.outer else keys.finish_inner, path, name))
@@ -535,12 +548,15 @@ class _Setup:
             self.outer_tool[path] = t.diameter
         if not ring.outer:
             # its waste is milled away, or too small to keep, or it would be cut free after its part (by a
-            # narrower cutter, whose release comes later): taken out whole
+            # narrower cutter, whose release comes later), or the part is its own blank, which is not
+            # released: taken out whole
             survives = ring.waste.buffer(-t.diameter) if t is not None else Polygon()
             margin = float(self.value(keys.tab_margin, path, name))
-            if t is None or survives.is_empty or t.diameter < self.outer_tool.get(path, 0.0) - 1e-9 or \
+            if own or t is None or survives.is_empty or t.diameter < self.outer_tool.get(path, 0.0) - 1e-9 or \
                     hold(survives, margin) < float(self.value(keys.waste_area, path, name)):
-                self.pocket_region(pp, ring.ops, ring.waste, None, name, ring.reliefs, None)
+                if not self.pocket_region(pp, ring.ops, ring.waste, None, name, ring.reliefs, None):
+                    for r in ring.ops:
+                        self.leave(path, r, "nothing fits", "no pocket cutter gets into its waste")
                 return
         if t is None:
             for r in ring.ops:
@@ -634,7 +650,7 @@ class _Setup:
         cached = getattr(self, "_order", None)
         if cached is not None:
             return cached
-        entries = [(pp.path, hold(self.footprints[pp.path], float(self.value(keys.tab_margin, pp.path))),
+        entries = [(pp.path, hold(self.footprints_uv[pp.path], float(self.value(keys.tab_margin, pp.path))),
                     self.footprints[pp.path].centroid) for _p, pp in self.placed if self.footprints[pp.path].area > 0]
         order = holding.release_order([(path, h, (c.x, c.y)) for path, h, c in entries])
         self._order = order
@@ -743,7 +759,7 @@ class _Setup:
             self.leave(path, r, "other face" if face == "other" else "narrow face")
             return
         target = chamfer_target(op, named, self.frame)
-        outline = pp.outline()
+        outline = pp.machine_outline(rules.BIG_HOLE_LIMIT)
         if isinstance(target, OutlineTarget):
             self.add_chamfer(pp, [r], op["size"], [_closed(orient(outline, 1.0).exterior)], None, None)
         elif isinstance(target, EdgeTarget):
@@ -770,15 +786,15 @@ class _Setup:
         if face != "machine":
             self.leave(pp.path, ref(k, op, "chamfer"), "other face")
             return
-        self.add_chamfer(pp, [ref(k, op, "chamfer")], op["chamfer"], _rim_paths(pp.region(op["shape"]),
-                                                                                 pp.outline()), None, op["name"])
+        self.add_chamfer(pp, [ref(k, op, "chamfer")], op["chamfer"],
+                         _rim_paths(pp.region(op["shape"]), pp.machine_outline(rules.BIG_HOLE_LIMIT)), None, op["name"])
 
     def op_chamfer(self, pp: Placed, k: int, op: PocketLayout, face: str, size: float) -> None:
         if face != "machine":
             self.leave(pp.path, ref(k, op, "chamfer"), "other face" if face == "other" else "narrow face")
             return
-        self.add_chamfer(pp, [ref(k, op, "chamfer")], size, _rim_paths(pp.region(op["shape"]), pp.outline()), None,
-                         op["name"])
+        self.add_chamfer(pp, [ref(k, op, "chamfer")], size,
+                         _rim_paths(pp.region(op["shape"]), pp.machine_outline(rules.BIG_HOLE_LIMIT)), None, op["name"])
 
     def hole_chamfer(self, pp: Placed, k: int, op: HoleLayout, face: str) -> None:
         if face != "machine":
@@ -905,7 +921,7 @@ def _edge_paths(pp: Placed, narrow: str) -> list[PathOut]:
     coord = 0 if axis == u else 1 if axis == v else None
     if coord is None or axis == t:
         return []
-    ring = orient(polygons(part["outline"])[0], 1.0).exterior
+    ring = orient(pp.machine_outline(rules.BIG_HOLE_LIMIT, uv=True), 1.0).exterior
     pts = list(ring.coords)
     out: list[PathOut] = []
     current: list[Point2] = []
@@ -963,7 +979,7 @@ def _hidden(pp: Placed, boxes: list[tuple[str, Any]], frame: LayoutFrame) -> Bas
     it, iu, iv = ("xyz".index(t), "xyz".index(u), "xyz".index(v))
     lo, hi = part["box"]["min"], part["box"]["max"]
     lines: list[BaseGeometry] = []
-    ring = orient(polygons(part["outline"])[0], 1.0).exterior
+    ring = orient(pp.machine_outline(rules.BIG_HOLE_LIMIT, uv=True), 1.0).exterior
     pts = list(ring.coords)
     for path, box in boxes:
         if path == part["path"]:
@@ -998,7 +1014,7 @@ def _chamfered(pp: Placed, frame: LayoutFrame) -> BaseGeometry | None:
     a cut's chamfer."""
     part = pp.part
     named = named_ops(part)
-    outline = pp.outline()
+    outline = pp.machine_outline(rules.BIG_HOLE_LIMIT)
     exterior = LineString(list(orient(outline, 1.0).exterior.coords))
     lines: list[BaseGeometry] = []
     for op in part["ops"]:

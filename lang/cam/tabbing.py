@@ -26,6 +26,8 @@ import math
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
+from shapely.geometry import LineString, Point
+
 from ..emit.arcs import Arc2, Circle2, Curve2, Line2, fit
 
 Point2 = tuple[float, float]
@@ -214,8 +216,15 @@ def choose(sites: Sequence[tuple[Point2, float]], centroid: Point2, count: int, 
 def place(ring: Sequence[Sequence[float]], width: float, least: int, centroid: Point2,
           weight: Callable[[Point2], float]) -> tuple[list[Point2], int]:
     """The tabs on a contour: its sites weighted by `weight` (0 leaves one
-    out), spread; and how many it should have had."""
+    out), spread; and how many it should have had. A site on an arc is
+    put onto the ring's polygon, which the emitter draws the arc through."""
     contour = Contour(ring)
     want = tab_count(contour.perimeter, least)
-    weighted = [(p, weight(p)) for _s, p in contour.sites(width)]
+    line = LineString([*ring, ring[0]])
+
+    def onto(p: Point2) -> Point2:
+        q = line.interpolate(line.project(Point(p)))
+        return (float(q.x), float(q.y))
+
+    weighted = [(q, weight(q)) for q in (onto(p) for _s, p in contour.sites(width))]
     return choose(weighted, centroid, want, SEPARATION * width), want

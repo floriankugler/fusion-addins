@@ -8,7 +8,8 @@ tests require it to find nothing.
   and each of its dog bones exactly once, a pocket or a cut (whose
   material the outline's contours take) at least once; every ring of the
   outline (`plan.contours`) exactly once, but in a release operation,
-  which cuts again what a roughing one cut.
+  which cuts again what a roughing one cut, and in a rest, which takes
+  what a pocket's cutter did not reach.
 - Every cutter reaches the region it is given (`regions.unreached`): a
   pocket by its template's narrowest cutter, what it does not reach in a
   rest that a narrower template reaches or in a problem; a contour on its
@@ -30,6 +31,7 @@ import math
 from collections import Counter
 from typing import Any
 
+from shapely import make_valid
 from shapely.geometry import LineString, Point, Polygon
 from shapely.geometry import box as shapely_box
 from shapely.geometry.base import BaseGeometry
@@ -45,6 +47,9 @@ from .rules import KIND_ORDER, RELIEF_TOL
 from .tooling import Registry, Template, registry_of
 
 _ON = 1e-6
+#: What a cutter leaves (mm²) below which the plan's rounding of the rings
+#: to a nanometre may have made it.
+MINUTE = 1e-2
 
 
 def verify(plan: CamFile, nest: NestFile, layout: Layout, registry: Registry | None = None) -> list[str]:
@@ -79,6 +84,8 @@ def _setup(setup: SetupOut, placed: dict[str, Placed], rect: list[float], by_ste
         if op["kind"] == "release":
             continue
         for f in op["features"]:
+            if f["what"] == "rest":          # a narrower cutter where the pocket's did not reach
+                continue
             if f["part"] not in found:
                 problems.append(f"a feature of {f['part']}, which is not on the blank")
                 continue
@@ -101,7 +108,8 @@ def _setup(setup: SetupOut, placed: dict[str, Placed], rect: list[float], by_ste
             elif n and not (least <= n <= most):
                 problems.append(f"{what} is planned {n} times")
         for key in set(found[path]) | set(left[path]):
-            if key not in want:
+            if key not in want and not (key[1].startswith("piece ") and left[path][key] == 1 and
+                                        pp.part["ops"][key[0]]["kind"] == "pocket"):
                 problems.append(f"{path}: {_label(pp.part, key)} is no operation of it")
     # -- the cutters reach their regions
     problems += _reach(setup, placed, by_stem)
@@ -154,20 +162,26 @@ def _label(part: PartLayout, key: tuple[int, str]) -> str:
     return f"{op['kind']} {name or k}" + ("" if aspect == "op" else f" ({aspect})")
 
 
-def _discs(pp: Placed) -> BaseGeometry | None:
+def _discs(pp: Placed, f: Feature) -> BaseGeometry | None:
+    """The dog bones of the operations a feature machines, which go by
+    their own rule."""
+    indices = {r["index"] for r in f["ops"] if r["index"] >= 0}
     discs = [Point(pp.point(*bone["center"])).buffer(bone["d"] / 2 + 2 * CLEAN, quad_segs=90)
-             for op in pp.part["ops"] if op["kind"] == "cut" or op["kind"] == "pocket" for bone in op["dogbones"]]
+             for k, op in enumerate(pp.part["ops"]) if k in indices and (op["kind"] == "cut" or op["kind"] == "pocket")
+             for bone in op["dogbones"]]
     return unary_union(discs) if discs else None
 
 
 def _region(rings: list[list[list[float]]]) -> BaseGeometry:
-    return unary_union(polygons(rings))
+    """A feature's region; valid, as its rings rounded for the file may
+    have made it touch itself."""
+    g = unary_union(polygons(rings))
+    return g if g.is_valid else make_valid(g)
 
 
 def _reach(setup: SetupOut, placed: dict[str, Placed], by_stem: dict[str, Template]) -> list[str]:
     problems: list[str] = []
     reported = " ".join(setup["problems"])
-    discs = {path: _discs(pp) for path, pp in placed.items()}
     rests: dict[tuple[str, str], list[tuple[Template, BaseGeometry]]] = {}
     mains: list[tuple[Template, Feature, OperationOut]] = []
     for op in setup["operations"]:
@@ -184,24 +198,28 @@ def _reach(setup: SetupOut, placed: dict[str, Placed], by_stem: dict[str, Templa
                     f["what"] != "vgroove" and op["kind"] != "release":
                 mains.append((t, f, op))
     for t, f, op in mains:
-        excused = discs.get(f["part"])
+        excused = _discs(placed[f["part"]], f) if f["part"] in placed else None
         if f["what"] == "pocket":
+            # what each of the pocket's cutters leaves where it works, a narrower one's rest takes
             region = _region(f["rings"])
-            left = unreached(region, t.narrowest / 2, excused)
-            covered = unary_union([g for _t, g in rests.get((f["part"], _key(f)), [])]) if left else None
-            for piece in left:
-                if covered is not None and piece.difference(covered.buffer(CLEAN)).area < 1e-4:
-                    continue
-                if "no pocket cutter reaches" in reported:
-                    continue
-                problems.append(f"{op['name']}: its cutter does not reach {piece.area:.2f} mm² of a pocket of "
-                                f"{f['part']}")
-            for rt, rest in rests.get((f["part"], _key(f)), []):
+            near = region.buffer(10 * CLEAN)                 # a piece of a pocket of several: its own rests
+            mine = sorted([e for e in rests.get((f["part"], _key(f)), []) if e[1].difference(near).area < MINUTE],
+                          key=lambda e: -e[0].narrowest)
+            for rt, _g in mine:
                 if rt.narrowest >= t.narrowest:
                     problems.append(f"a rest of {f['part']} takes a cutter no narrower than its pocket's")
-                miss = unary_union(unreached(region, rt.narrowest / 2, excused)).intersection(rest)
-                if miss.area > 1e-4:
-                    problems.append(f"a rest of {f['part']} is not reached by its cutter ({miss.area:.2f} mm²)")
+            for k, (tool, works) in enumerate([(t, region)] + mine):
+                left = [p for p in unreached(region, tool.narrowest / 2, excused, lenient=True)
+                        if p.intersection(works).area > MINUTE]
+                after = unary_union([g for rt, g in mine[k:] if rt.narrowest < tool.narrowest])
+                for piece in left:
+                    if not after.is_empty and piece.difference(after.buffer(10 * CLEAN)).area < MINUTE:
+                        continue
+                    if "no pocket cutter reaches" in reported:
+                        continue
+                    what = "a pocket" if k == 0 else "a rest"
+                    problems.append(f"{op['name']}: {what} of {f['part']} is not reached by its cutter "
+                                    f"({piece.area:.2f} mm²)")
         elif f["what"] == "outer" or f["what"] == "inner":
             ring = Polygon(f["ring"])
             if f["what"] == "outer":
@@ -209,7 +227,7 @@ def _reach(setup: SetupOut, placed: dict[str, Placed], by_stem: dict[str, Templa
                 waste: BaseGeometry = shapely_box(x0 - 30, y0 - 30, x1 + 30, y1 + 30).difference(ring)
             else:
                 waste = ring
-            left = unreached(waste, t.narrowest / 2, excused, clearance=0.0)
+            left = unreached(waste, t.narrowest / 2, excused, clearance=0.0, lenient=True)
             if left and "no contour cutter reaches" not in reported:
                 problems.append(f"{op['name']}: its cutter does not reach all of a contour of {f['part']} "
                                 f"({sum(p.area for p in left):.2f} mm²)")

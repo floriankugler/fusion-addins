@@ -190,7 +190,9 @@ def candidates(registry: Registry, kind: Kind, label: str, finish: bool, cutter:
 @dataclass
 class PocketPlan:
     """The templates a pocket takes: the first gets into it, the others
-    take rests, the pieces no candidate reaches are left."""
+    take rests (what the wider ones left, with a cutter's radius of room
+    around it in what they cleared), the pieces no candidate reaches are
+    left."""
     main: Template | None = None
     rests: list[tuple[Template, Polygon]] = field(default_factory=list[tuple[Template, Polygon]])
     unreached: list[Polygon] = field(default_factory=list[Polygon])
@@ -228,7 +230,10 @@ def pocket_cutters(region: BaseGeometry, depth: float, tried: Sequence[Template]
         theirs = unreached(region, t.narrowest / 2, excused)
         blocked = unary_union(theirs) if theirs else Polygon()
         took = [p for p in left if p.intersection(blocked).area < 1e-6] if theirs else list(left)
-        out.rests += [(t, p) for p in took]
+        if took:
+            # with the room around them the narrower cutter works in, in the region the wider one cleared
+            grown = unary_union([p.buffer(t.diameter / 2 + TOOL_CLEARANCE) for p in took]).intersection(region)
+            out.rests += [(t, g) for g in polygons_of(grown)]
         left = [p for p in left if p not in took]
     out.unreached = left
     return out

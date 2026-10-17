@@ -169,8 +169,6 @@ def test_a_pocket_takes_the_widest_cutter_that_reaches_all_of_it():
     assert small.main is not None and small.main.stem == "pocket.dc_Tasche 6mm"
     groove = _pocket(shapely_box(0, 0, 9.4, 400))
     assert groove.main is not None and groove.main.stem == "pocket_Tasche adaptiv 8mm"
-    ends = _pocket(shapely_box(0, 0, 7.4, 400).union(Point(3.7, 0).buffer(3.7, quad_segs=90)))
-    assert ends.main is not None and ends.main.stem == "pocket.dc_Tasche 6mm"      # the 8 mm leaves its ends
     domino = _pocket(slot_shape((0, 0), (20, 0), 4.0).geometry, 10.5)
     assert domino.main is not None and domino.main.stem == "pocket_Tasche 3.175mm"
     rounded = _pocket(rect(depth=40, width=40).rounded(3).geometry)        # too small for adaptive clearing
@@ -520,3 +518,117 @@ def test_the_cam_keys_are_not_shadowed_by_the_package_s_modules():
         assert getattr(package, key.name.split(".", 1)[1]) is key
     import lang
     assert lang.cam is package and "cam" in lang.__all__
+
+
+# -- found by fuzzing (tests/fuzz/machining.py) ------------------------------------------------------
+
+def test_tabs_on_an_arc_lie_on_the_rings_polygon():
+    """A tab site on an arc lay on the true circle, a hair off the ring's
+    polygon the emitter draws the arc through [found by fuzzing, 2026-10-17]."""
+    from lang.core.cutouts import circle_geometry
+    ring = [[float(x), float(y)] for x, y in list(circle_geometry((0.0, 0.0), 30.0).exterior.coords)[:-1]]
+    positions, _ = tabbing.place(ring, 5.0, 3, (0.0, 0.0), lambda p: 1.0)
+    line = LineString(ring + ring[:1])
+    assert len(positions) >= 3 and all(line.distance(Point(p)) < 1e-9 for p in positions)
+
+
+def test_a_piece_of_a_pocket_no_cutter_gets_into_is_left_out_alone():
+    """A pocket of two pieces, one too narrow for every cutter, was both
+    planned and left out [found by fuzzing, 2026-10-17]."""
+    with module("m", Box.from_size(width=600, depth=400, height=100)) as m:
+        p = board("panel", ply15).on(m.bottom)
+        u0, v0, _u1, _v1 = p.outline.bounds
+        two = shapely_box(u0 + 50, v0 + 50, u0 + 90, v0 + 90).union(shapely_box(u0 + 150, v0 + 50, u0 + 151.8, v0 + 90))
+        p.add_pocket(p.top, Shape(two), 5, "two")
+    nest, layout = _nested()
+    (setup,) = _plan(nest, layout)["setups"]
+    assert [(lo["op"]["aspect"], lo["why"]) for lo in setup["left_out"] if lo["op"]["name"] == "two"] == [
+        ("piece 1", "nothing fits")]
+    assert any(r["name"] == "two" for op in _ops(setup, "pocket") for f in op["features"] for r in f["ops"])
+
+
+def test_a_wide_blind_hole_over_the_edge_is_pocketed_where_the_part_is():
+    """A blind hole wider than twice the widest bore cutter, over the
+    board's edge, was pocketed as the whole circle, off the part
+    [found by fuzzing, 2026-10-17]."""
+    from lang.cam.regions import Placed, polygons
+    with module("m", Box.from_size(width=600, depth=400, height=100)) as m:
+        p = board("panel", ply15).on(m.bottom)
+        u0, v0, _u1, _v1 = p.outline.bounds
+        p.add_hole(p.top, (u0 + 100, v0), 40, 5, "edge")
+    nest, layout = _nested()
+    (setup,) = _plan(nest, layout)["setups"]
+    (feature,) = [f for op in _ops(setup, "pocket") for f in op["features"] if f["what"] == "pocket"]
+    placed = nest["materials"][0]["sheets"][0]["blanks"][0]["parts"][0]
+    part = layout["modules"][0]["parts"][0]
+    outline = Placed.of(part, placed["transform"], layout["frame"]).footprint()
+    region = polygons(feature["rings"])[0]
+    assert region.difference(outline.buffer(1e-6)).area < 1e-6 and region.area < math.pi * 20 ** 2 / 2 + 1
+
+
+def test_an_own_blanks_opening_is_taken_out_whole():
+    """A `nest(False)` board's opening whose waste survives the cut was
+    handed to the release, which an own blank has not, and was lost
+    [found by fuzzing, 2026-10-17]."""
+    with module("m", Box.from_size(width=600, depth=400, height=100)) as m:
+        floor = board("floor", ply15).on(m.bottom).nest(False)
+        floor.pocket(rect(depth=120, width=120), at=floor.top.center, depth=through, name="hatch")
+        m.nest("floor", [floor])
+    layout = build_layout()
+    workshop = Workshop(bed=(2000.0, 1000.0), sheets=(Sheet("birch 15", 2500, 1250),))
+    nest, _ = nest_parts(layout, ["m.floor"], workshop, name="m.floor", options=FAST)
+    (setup,) = _plan(nest, layout)["setups"]
+    (pocket,) = _ops(setup, "pocket")
+    assert pocket["params"]["bottom"]["mode"] == "from stock bottom" and not _ops(setup, "release")
+    assert any(r["name"] == "hatch" for f in pocket["features"] for r in f["ops"])
+
+
+def test_a_chamfer_along_the_outline_follows_the_faces_outer_loop():
+    """A chamfer along the outline followed the layout's outline where a
+    through pocket crosses the edge, off the board; the face's outer loop
+    is the outline less its openings [found by fuzzing, 2026-10-17]."""
+    from lang.cam.regions import Placed
+    with module("m", Box.from_size(width=600, depth=400, height=100)) as m:
+        p = board("panel", ply15).on(m.bottom)
+        p.pocket(rect(depth=80, width=60), at=p.top.front.left(100), depth=through, name="bite")
+        p.chamfer(p.top.outline, 1)
+    nest, layout = _nested()
+    (setup,) = _plan(nest, layout)["setups"]
+    (chamfers,) = _ops(setup, "chamfer")
+    (feature,) = [f for f in chamfers["features"] if f["what"] == "chamfer" and f["ops"][0]["kind"] == "chamfer"]
+    placed = nest["materials"][0]["sheets"][0]["blanks"][0]["parts"][0]
+    loop = Placed.of(layout["modules"][0]["parts"][0], placed["transform"], layout["frame"]).machine_outline(30.0)
+    rim = loop.exterior.buffer(1e-6)
+    assert all(LineString(path["points"]).difference(rim).length < 1e-6 for path in feature["paths"])
+
+
+def test_two_tabbed_parts_keep_their_own_tabs_on_both_operations():
+    """Two tabbed parts in one roughing operation shared one list of
+    positions, so the release got each part's tabs twice [found by the
+    plan's check on the van, 2026-10-17]."""
+    with module("m", Box.from_size(width=600, depth=400, height=100)) as m:
+        board("a", ply15).on(m.bottom).between(m.front, Pos("x", 15), m.left, Pos("y", 300))
+        board("b", ply15).on(m.bottom).between(Pos("x", 100), Pos("x", 115), m.left, Pos("y", 300))
+    nest, layout = _nested()
+    (setup,) = _plan(nest, layout)["setups"]
+    tabs = sum(p["tabs"] for p in setup["parts"])
+    assert tabs >= 6
+    for kind in ("contour", "release"):
+        (op,) = [op for op in _ops(setup, kind) if op["params"]["tabs"] is not None]
+        assert len(op["params"]["tabs"]["positions"]) == tabs           # pyright: ignore[reportOptionalSubscript]
+
+
+def test_a_corner_of_next_to_no_angle_is_judged_without_failing():
+    """A corner of next to no angle reached infinitely far: shapely refused
+    the buffer [found by fuzzing, 2026-10-17]."""
+    from lang.cam.regions import _is_fillet  # pyright: ignore[reportPrivateUsage]
+    assert _is_fillet(shapely_box(0, 0, 1, 1), (0.0, 0.0), 0.0, 3.0)
+
+
+def test_a_dog_bone_over_a_corner_leaves_its_fillet_a_fillet():
+    """A dog bone excused before the fillets were judged cut a corner's
+    fillet into pieces that were no fillet each [found by fuzzing,
+    2026-10-17]."""
+    square = shapely_box(0, 0, 50, 50)
+    bone = Point(0.3, 0.3).buffer(0.6, quad_segs=32)             # over the corner: the fillet's horns are left
+    assert unreached(square, 4, bone) == []

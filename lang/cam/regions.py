@@ -32,7 +32,7 @@ import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from shapely import affinity
+from shapely import affinity, make_valid, normalize
 from shapely.geometry import LineString, MultiLineString, Point, Polygon
 from shapely.geometry.base import BaseGeometry
 from shapely.geometry.polygon import orient
@@ -54,6 +54,10 @@ CLEAN = 0.005
 #: allows: the layout's circles are polygons with their corners on the
 #: circle a degree apart, a hair inside it (1e-4 mm at 3 mm radius).
 SLACK = 1e-3
+#: How much narrower (mm) a lenient test takes the cutter (`unreached`).
+LENIENT = 0.01
+#: A piece of what a cutter leaves smaller than this (mm²) is none.
+LEFT = 1e-2
 #: Segments per quarter circle of the buffers.
 QUAD = 32
 #: A junction turning less than this (radians) is tangent: no corner.
@@ -167,25 +171,30 @@ class Placed:
         """The layout's outline (through cuts are in it)."""
         return _one(self.region(self.part["outline"]))
 
-    def openings(self, big_hole: float) -> list[tuple[int, BaseGeometry]]:
+    def openings(self, big_hole: float, uv: bool = False) -> list[tuple[int, BaseGeometry]]:
         """The through pockets and the through holes wider than `big_hole`
-        (either big face), by their index in the part's ops."""
+        (either big face), by their index in the part's ops; in the part's
+        frame with `uv`."""
         out: list[tuple[int, BaseGeometry]] = []
         for k, op in enumerate(self.part["ops"]):
             if op["kind"] == "pocket" and self.face(op["face"]) != "narrow" and self.is_through(op["depth"]):
-                out.append((k, self.region(op["shape"])))
+                g = unary_union(polygons(op["shape"]))
             elif op["kind"] == "hole" and self.face(op["face"]) != "narrow" and \
                     (op["through"] or self.is_through(op["depth"])) and op["d"] > big_hole:
-                out.append((k, Point(*self.point(op["u"], op["v"])).buffer(op["d"] / 2, quad_segs=90)))
+                g = Point(op["u"], op["v"]).buffer(op["d"] / 2, quad_segs=90)
+            else:
+                continue
+            out.append((k, g if uv else self.geometry(g)))
         return out
 
-    def machine_outline(self, big_hole: float) -> Polygon:
-        """The outline less its openings (`openings`): what its contours cut."""
-        shape: BaseGeometry = self.outline()
-        holes = [g for _k, g in self.openings(big_hole)]
+    def machine_outline(self, big_hole: float, uv: bool = False) -> Polygon:
+        """The outline less its openings (`openings`): what its contours cut,
+        the outer loop of its faces; in the part's frame with `uv`."""
+        shape: BaseGeometry = unary_union(polygons(self.part["outline"]))
+        holes = [g for _k, g in self.openings(big_hole, uv=True)]
         if holes:
             shape = shape.difference(unary_union(holes))
-        return _one(shape)
+        return _one(shape if uv else self.geometry(shape))
 
     def footprint(self) -> Polygon:
         """What lies on the bed: the outline less every through pocket and hole."""
@@ -249,40 +258,60 @@ def sharp_corners(region: BaseGeometry) -> list[tuple[Point2, float]]:
 
 
 def unreached(region: BaseGeometry, radius: float, excused: BaseGeometry | None = None,
-              clearance: float = TOOL_CLEARANCE) -> list[Polygon]:
+              clearance: float = TOOL_CLEARANCE, lenient: bool = False) -> list[Polygon]:
     """What a cutter of `radius` leaves of `region` (see the module's doc):
     the pieces neither its opening covers, nor the corners' fillets, nor
     `excused` (the dog bones other operations cut). `clearance` is what it
     must leave in the narrowest passage: none for a contour, which follows
-    a fillet of its own radius (a box joint's)."""
+    a fillet of its own radius (a box joint's). `lenient` (the plan's
+    check) takes the cutter `LENIENT` narrower, a fillet's zone that much
+    wider and slivers that much wider as noise: what is on the edge for the
+    plan, which noise may tip either way, is no fault for the check [found
+    by fuzzing, 2026-10-17]."""
     if region.is_empty:
         return []
-    r = radius + clearance / 2 - SLACK
+    if not region.is_valid:
+        region = make_valid(region)
+    r = radius + clearance / 2 - SLACK - (LENIENT if lenient else 0.0)
+    wider = 2 * LENIENT if lenient else 0.0
     inner = region.buffer(-r, quad_segs=QUAD)
     opening = inner.buffer(r, quad_segs=QUAD) if not inner.is_empty else Polygon()
     residue = region.difference(opening) if not opening.is_empty else region
-    if excused is not None and not excused.is_empty:
-        residue = residue.difference(excused)
-    residue = residue.buffer(-CLEAN, join_style="mitre").buffer(CLEAN, join_style="mitre")
+    clean = CLEAN + (2 * LENIENT if lenient else 0.0)
+    residue = _cleaned(residue, clean)
     if residue.is_empty:
         return []
     corners = sharp_corners(region) if not opening.is_empty else []
+
+    def fillet(piece: Polygon) -> bool:
+        return any(_is_fillet(piece, corner, angle, r, wider) for corner, angle in corners)
+
+    # (the fillets first, then the dog bones: a dog bone over a corner cuts
+    # its fillet into pieces that are no fillet each [found by fuzzing,
+    # 2026-10-17])
     out: list[Polygon] = []
     for piece in polygons_of(residue):
-        if piece.area < CLEAN * CLEAN:
+        if piece.area < LEFT or fillet(piece):
             continue
-        if not any(_is_fillet(piece, corner, angle, r) for corner, angle in corners):
-            out.append(piece)
+        rest = _cleaned(piece.difference(excused), clean) if excused is not None and not excused.is_empty else piece
+        out += [q for q in polygons_of(rest) if q.area >= LEFT and not fillet(q)]
     return out
 
 
-def _is_fillet(piece: Polygon, corner: Point2, angle: float, r: float) -> bool:
+def _cleaned(g: BaseGeometry, clean: float = CLEAN) -> BaseGeometry:
+    """Without slivers narrower than twice `clean`."""
+    return g.buffer(-clean, join_style="mitre").buffer(clean, join_style="mitre")
+
+
+def _is_fillet(piece: Polygon, corner: Point2, angle: float, r: float, wider: float = 0.0) -> bool:
     """Whether a piece a cutter left is its fillet in the corner: at the
-    corner, within the tangent points of its circle there."""
+    corner, within the tangent points of its circle there (`wider`, and
+    a tenth more)."""
     p = Point(corner)
-    if piece.distance(p) > 10 * CLEAN:
+    if piece.distance(p) > 10 * CLEAN + wider:
         return False
-    reach = r / math.tan(angle / 2) + 2 * CLEAN if angle > 1e-9 else math.inf
+    # (a corner of next to no angle reaches far: capped [found by fuzzing, 2026-10-17])
+    reach = min(r / math.tan(max(angle, 1e-9) / 2), 1e4) * (1.1 if wider else 1.0) + 2 * CLEAN + wider
     return piece.difference(p.buffer(reach, quad_segs=QUAD)).area < CLEAN * CLEAN
 
 
@@ -294,8 +323,11 @@ def gets_in(region: BaseGeometry, radius: float, clearance: float = TOOL_CLEARAN
 # -- holding --------------------------------------------------------------------------------------
 
 def eroded(footprint: BaseGeometry, margin: float) -> BaseGeometry:
-    """The footprint shrunk by `margin`: where the vacuum holds."""
-    return footprint.buffer(-margin, quad_segs=QUAD) if margin > 0 else footprint
+    """The footprint shrunk by `margin`: where the vacuum holds. Normalized
+    first: where a narrow neck pinches off, shapely's result depends on
+    where the rings start and which way they run (1% of the area, found
+    by fuzzing, 2026-10-17)."""
+    return normalize(footprint).buffer(-margin, quad_segs=QUAD) if margin > 0 else footprint
 
 
 def hold(footprint: BaseGeometry, margin: float) -> float:
