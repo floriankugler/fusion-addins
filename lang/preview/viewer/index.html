@@ -15,7 +15,11 @@
   h2 { font-size: 12px; margin: 14px 0 6px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
   #status { color: var(--muted); margin-bottom: 10px; white-space: pre-wrap; max-height: 16em; overflow: auto; }
   #status.error { color: var(--accent); }
-  #status a, #selected a { color: inherit; text-decoration: underline dotted; cursor: pointer; }
+  #status a, #selected a, #changes a { color: inherit; text-decoration: underline dotted; cursor: pointer; }
+  /* what the last save changed, under the build's log */
+  #changes { white-space: pre-wrap; font-size: 12px; margin: -4px 0 10px; color: #8a2050; max-height: 12em; overflow: auto; }
+  #changes:empty { display: none; }
+  #changes.hidden-glows { color: var(--muted); }
   #selected { font-family: ui-monospace, Menlo, monospace; font-size: 12px; margin: 8px 0 12px;
     padding: 8px; background: #f7f5f0; border-radius: 4px; min-height: 2.6em; white-space: pre-wrap; }
   ul { list-style: none; padding: 0; margin: 0; }
@@ -107,6 +111,7 @@
   <h1>Layout preview</h1>
   <div class="row"><label for="design">design</label><select id="design" style="flex:1;min-width:0"></select></div>
   <div id="status">loading…</div>
+  <div id="changes" title="what the last save changed: pink changed, green added, grey ghosts where parts were (u)"></div>
   <div id="selected">click a part for its path</div>
   <div id="openLog" class="keys"></div>
 
@@ -138,6 +143,7 @@
     <label><input type="checkbox" id="gridOn" checked> floor grid</label>
     <label><input type="checkbox" id="hwOn" checked> hardware</label>
     <label title="the nest's CAM plan on its drawing"><input type="checkbox" id="camOn"> CAM plan</label>
+    <label title="ghosts and glows of what the last save changed"><input type="checkbox" id="chOn"> last save</label>
   </div>
   <div class="row"><label for="level">level</label>
     <select id="level" title="how exactly the design is meshed; a change builds it again">
@@ -190,6 +196,7 @@
     <div><span>section axis</span><kbd>x</kbd> <kbd>y</kbd> <kbd>z</kbd></div>
     <div><span>move section (shift: coarse)</span><kbd>[</kbd> <kbd>]</kbd></div>
     <div><span>flip section</span><kbd>\</kbd></div>
+    <div><span>ghosts and glows of the last save</span><kbd>u</kbd></div>
     <div><span>nest view on / off</span><kbd>k</kbd></div>
     <div><span>CAM plan on the nest on / off</span><kbd>c</kbd></div>
     <div><span>deselect</span><kbd>esc</kbd></div>
@@ -206,8 +213,9 @@ import { Line2 } from 'three/addons/lines/Line2.js';
 import { LineGeometry } from 'three/addons/lines/LineGeometry.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { attachSpaceMouse } from './spacemouse.js';
-import { AXIS, ISO, UP, share, disposeTree, clearGroup } from './scene-utils.js';
+import { AXIS, ISO, UP, share, disposeTree, clearGroup, ringBounds, opPoint } from './scene-utils.js';
 import { layoutVersionProblem, splitWhere, logPieces, TreeOpen, setHidden as markHidden, toggleHides, isolate as isolatePaths, LoadTracker, nestStatusText, chosenNest, settingsText, sheetNames, sheetMade, fixable, LevelChoice, untilLevel } from './state.js';
+import { diffLayouts, changeMarks, changeRows, changeReport } from './changes.js';
 import { planVersionProblem, planStatusText, toolColors, setupLabel, legend, chosenOperation, releaseRanks, releaseList, holdText, partText, releaseColors, setupOverlay, planNotes } from './cam.js';
 
 const $ = (id) => document.getElementById(id);
@@ -298,12 +306,49 @@ const ghostEdge = share(new THREE.LineBasicMaterial({ color: 0x4f7cac, transpare
 const ghostEdgeBounds = share(new THREE.LineBasicMaterial({ color: 0xb87a45, transparent: true, opacity: 0.55 }));
 const contourMaterial = share(new LineMaterial({ color: 0x1f6fc0, linewidth: 2, worldUnits: false }));
 
+// What the last save changed (below, What a save changed): the old meshes
+// of parts gone, moved or reshaped as grey ghosts, and the glows, a halo of
+// a fixed size on screen at each operation that differs and a line along
+// each outline segment that differs, drawn through the parts. Pink is
+// changed, green added, red removed; a changed operation's old place glows
+// fainter. A ghost lies behind the surfaces it shares with the new meshes
+// (a polygon offset), so a reshaped part's ghost shows only where it was
+// and no longer is.
+const CHANGE_COLORS = { changed: 0xe0287a, added: 0x1f9e55, removed: 0xc8321e, was: 0xe0287a, outline: 0xe0287a };
+const changeGhost = share(new THREE.MeshBasicMaterial({ color: 0x8a8a8a, transparent: true, opacity: 0.18,
+  depthWrite: false, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: 2, polygonOffsetUnits: 8 }));
+const changeGhostEdge = share(new THREE.LineBasicMaterial({ color: 0x5a5a5a, transparent: true, opacity: 0.55 }));
+function haloTexture() {
+  const size = 128, canvas = document.createElement('canvas');
+  canvas.width = canvas.height = size;
+  const g = canvas.getContext('2d');
+  const ring = g.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  ring.addColorStop(0, 'rgba(255,255,255,0.25)');
+  ring.addColorStop(0.12, 'rgba(255,255,255,0.9)');
+  ring.addColorStop(0.2, 'rgba(255,255,255,0.1)');
+  ring.addColorStop(0.5, 'rgba(255,255,255,0.15)');
+  ring.addColorStop(0.66, 'rgba(255,255,255,1)');
+  ring.addColorStop(0.8, 'rgba(255,255,255,0.45)');
+  ring.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = ring;
+  g.fillRect(0, 0, size, size);
+  return new THREE.CanvasTexture(canvas);
+}
+const haloMap = share(haloTexture());
+const haloMaterials = Object.fromEntries(Object.entries(CHANGE_COLORS).map(([kind, color]) => [kind,
+  share(new THREE.SpriteMaterial({ map: haloMap, color, transparent: true, depthTest: false, depthWrite: false,
+    sizeAttenuation: false, opacity: kind === 'was' ? 0.55 : 1 }))]));
+const glowLineMaterials = Object.fromEntries(Object.entries(CHANGE_COLORS).map(([kind, color]) => [kind,
+  share(new LineMaterial({ color, linewidth: 4, worldUnits: false, transparent: true, opacity: 0.75, depthTest: false }))]));
+const changeMaterials = [changeGhost, changeGhostEdge, ...Object.values(haloMaterials), ...Object.values(glowLineMaterials)];
+
 function resize() {
   const w = view.clientWidth, h = view.clientHeight;
   renderer.setSize(w, h);
   labelRenderer.setSize(w, h);
   outlineMaterial.resolution.set(w * window.devicePixelRatio, h * window.devicePixelRatio);
   contourMaterial.resolution.set(w * window.devicePixelRatio, h * window.devicePixelRatio);
+  for (const m of Object.values(glowLineMaterials)) m.resolution.set(w * window.devicePixelRatio, h * window.devicePixelRatio);
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
 }
@@ -410,9 +455,11 @@ async function load() {
     gltf = await loader.loadAsync(url + 'scene.glb?v=' + Date.now());
   } catch (err) { fail('scene failed to load: ' + err); return; }
   if (!current()) { disposeTree(gltf.scene); return; }
+  const before = layout;         // the layout on screen, for what the save changed
   layout = next;
   const first = !root;
-  if (root) { scene.remove(root); disposeTree(root); }
+  const old = root;
+  if (old) scene.remove(old);
   root = gltf.scene;
   // Each mesh carries its path: the mesher's metadata, which GLTFLoader
   // puts into userData from the glTF mesh's extras.
@@ -461,6 +508,7 @@ async function load() {
   buildMaster();
   buildLabels();
   bounds = new THREE.Box3().setFromObject(root);
+  showChanges(before, old);     // frees the old scene but for its ghosts
   if (first) { const camera = views.get(design)?.camera; if (camera) setCamera(camera); else fit(); }
   applyAll();
   shownLevel = want.built;
@@ -469,6 +517,7 @@ async function load() {
 
 // Takes the shown design off the page, for the next one to load.
 function clearScene() {
+  clearChanges();
   if (root) { scene.remove(root); disposeTree(root); }
   root = null;
   layout = null;
@@ -480,6 +529,194 @@ function clearScene() {
   renderList();
   showSelected();
   $('problems').textContent = '';
+}
+
+// -- what a save changed -------------------------------------------------------
+//
+// On a rebuild the page diffs the new layout against the one on screen
+// (changes.js, linear in the parts and operations): the parts changed and
+// added are tinted for a few seconds, or until a click or a key; the parts
+// gone, and the old meshes of parts moved or reshaped, stay as grey ghosts
+// until the next build; a halo glows at each operation that differs, was
+// added or removed, and a line along each outline segment that differs, so
+// that a hole moved by half a millimetre is found. `u` shows or hides the
+// ghosts and glows; the panel says what changed, and what the scene cannot
+// show (a material, a setting). A reload of the page loses only the last
+// diff; a design shown afresh has none.
+
+const changeGroup = new THREE.Group();
+changeGroup.renderOrder = 3;
+scene.add(changeGroup);
+let changesOn = stored('changes', true);
+$('chOn').checked = changesOn;
+let lastChanges = null;         // the last diff, as preview.changes() gives it
+let tint = null;                // {meshes: [[mesh, color]], until}: the parts tinted, until when (ms)
+const TINT_MS = 4000;
+const HALO_PX = { changed: 34, added: 34, removed: 34, was: 20 };
+
+function setChanges(on) {
+  changesOn = on;
+  $('chOn').checked = on;
+  store('changes', on);
+  applyChanges();
+}
+$('chOn').onchange = (e) => setChanges(e.target.checked);
+
+// The ghosts and glows of a part shown while it is: hidden with it, a bought part's with the hardware.
+function applyChanges() {
+  changeGroup.visible = changesOn;
+  for (const item of changeGroup.children) {
+    const { path, hardware } = item.userData;
+    item.visible = !hidden.has(path) && (hardwareOn || !hardware);
+  }
+  $('changes').classList.toggle('hidden-glows', !changesOn);
+}
+
+function clearChanges() {
+  endTint();
+  clearGroup(changeGroup);
+  lastChanges = null;
+  $('changes').replaceChildren();
+}
+
+function endTint() {
+  if (!tint) return;
+  for (const [mesh] of tint.meshes) mesh.material?.color.copy(mesh.userData.baseColor);
+  tint = null;
+}
+
+// A click in the scene (a drag orbits and keeps the tint) or a key ends it.
+let tintDown = null;
+renderer.domElement.addEventListener('pointerdown', (e) => { tintDown = [e.clientX, e.clientY]; });
+renderer.domElement.addEventListener('pointerup', (e) => {
+  if (tintDown && Math.hypot(e.clientX - tintDown[0], e.clientY - tintDown[1]) <= 4) endTint();
+});
+window.addEventListener('keydown', endTint);
+
+// The tint fading out over its last second, and the halos a fixed size on
+// screen, pulsing while the tint lasts. Every frame; a few objects.
+const _size = new THREE.Vector2();
+function tickChanges() {
+  const now = performance.now();
+  let pulse = 1;
+  if (tint) {
+    const left = tint.until - now;
+    if (left <= 0) endTint();
+    else {
+      const k = 0.6 * Math.min(1, left / 1000);
+      for (const [mesh, color] of tint.meshes) mesh.material.color.copy(mesh.userData.baseColor).lerp(color, k);
+      pulse = 1 + 0.25 * Math.sin(now / 130);
+    }
+  }
+  if (!changeGroup.visible || !changeGroup.children.length) return;
+  const perPx = 2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) / renderer.getSize(_size).y;
+  for (const item of changeGroup.children) {
+    if (item.isSprite) item.scale.setScalar(item.userData.px * perPx * (item.userData.kind === 'was' ? 1 : pulse));
+  }
+}
+
+// Diffs the layout that was on screen against the one loaded and shows
+// what changed; takes the ghosts out of the old scene and frees the rest.
+function showChanges(before, old) {
+  endTint();
+  clearGroup(changeGroup);
+  const t0 = performance.now();
+  const diff = before ? diffLayouts(before, layout) : null;
+  const glows = diff ? changeMarks(diff, before, layout) : null;
+  const t1 = performance.now();
+  if (old) {
+    if (diff) takeGhosts(old, new Set([...diff.gone,
+      ...diff.changed.filter((c) => c.box || c.turned || c.outline?.added.length || c.outline?.removed.length).map((c) => c.path)]),
+      new Set((before.modules ?? []).flatMap((m) => (m.hardware ?? []).flatMap((item) => item.bodies.map((b) => `${item.path}.${b.name}`)))));
+    disposeTree(old);
+  }
+  if (!diff) { lastChanges = null; $('changes').replaceChildren(); return; }
+  const changed = new Set(diff.changed.map((c) => c.path)), added = new Set(diff.added);
+  const meshesTinted = [];
+  meshes((o) => {
+    const path = o.userData.path;
+    if (changed.has(path) || added.has(path)) {
+      meshesTinted.push([o, new THREE.Color(added.has(path) ? CHANGE_COLORS.added : CHANGE_COLORS.changed)]);
+    }
+  });
+  if (meshesTinted.length) tint = { meshes: meshesTinted, until: performance.now() + TINT_MS };
+  addGlows(glows);
+  applyChanges();
+  const rows = changeRows(diff, layout.frame, glows.unplaced);
+  $('changes').replaceChildren(...rows.flatMap((pieces, i) => [
+    ...(i ? ['\n'] : []),
+    ...pieces.map((piece) => (piece.path ? changeLink(piece.path, piece.text) : piece.text)),
+  ]));
+  const t2 = performance.now();
+  lastChanges = { version, since: tracker.version, ...changeReport(diff, glows),
+    text: rows.map((pieces) => pieces.map((p) => p.text).join('')).join('\n'),
+    ms: { diff: +(t1 - t0).toFixed(2), draw: +(t2 - t1).toFixed(2) } };
+}
+
+// The old meshes of the paths, out of the old scene into the ghosts, where they were in the world;
+// those of `bought` (bought parts' bodies) hide with the hardware.
+function takeGhosts(old, paths, bought) {
+  if (!paths.size) return;
+  const found = [];
+  old.traverse((o) => { if (o.isMesh && paths.has(o.userData.path)) found.push(o); });
+  for (const mesh of found) {
+    changeGroup.attach(mesh);
+    // the stencil pass and the edges drawn through share its geometries: dropped, not freed
+    for (const child of [...mesh.children]) {
+      if (child.userData.role === 'front') child.material = changeGhostEdge; else mesh.remove(child);
+    }
+    mesh.material.dispose();
+    mesh.material = changeGhost;
+    mesh.renderOrder = 3;
+    mesh.userData.hardware = bought.has(mesh.userData.path);
+  }
+}
+
+// The halos at the marks and the glowing lines, grouped by part so they hide with it.
+function addGlows({ marks, lines }) {
+  for (const mark of marks) {
+    const sprite = new THREE.Sprite(haloMaterials[mark.kind]);
+    share(sprite.geometry);         // three.js's one sprite quad, for every sprite
+    sprite.position.set(...mark.at);
+    sprite.renderOrder = 50;
+    sprite.userData = { path: mark.path, kind: mark.kind, px: HALO_PX[mark.kind] };
+    changeGroup.add(sprite);
+  }
+  const byPart = new Map();
+  for (const line of lines) {
+    const k = `${line.path}\n${line.kind}`;
+    if (!byPart.has(k)) byPart.set(k, { path: line.path, kind: line.kind, points: [] });
+    byPart.get(k).points.push(...line.from, ...line.to);
+  }
+  for (const { path, kind, points } of byPart.values()) {
+    const geometry = new LineSegmentsGeometry();
+    geometry.setPositions(points);
+    const glow = new LineSegments2(geometry, glowLineMaterials[kind]);
+    glow.renderOrder = 49;
+    glow.userData = { path };
+    changeGroup.add(glow);
+  }
+}
+
+// A path the panel names: selects it (when it is still there) and frames it with its ghost.
+function changeLink(path, text) {
+  const a = document.createElement('a');
+  a.href = '#';
+  a.textContent = text;
+  a.title = 'select and frame it';
+  a.onclick = (e) => {
+    e.preventDefault();
+    const box = new THREE.Box3();
+    meshes((o) => { if (o.userData.path === path) box.expandByObject(o); });
+    for (const item of changeGroup.children) if (item.userData.path === path) box.expandByObject(item);
+    if (!box.isEmpty()) {
+      const dir = camera.position.clone().sub(controls.target).normalize();
+      const center = box.getCenter(new THREE.Vector3());
+      look({ at: center.toArray(), from: dir.toArray(), size: Math.max(150, box.getSize(new THREE.Vector3()).length()) });
+    }
+    if (partOf(path) || hardwareBodies().some((h) => h.path === path)) select(path);
+  };
+  return a;
 }
 
 // -- the master ------------------------------------------------------------
@@ -808,6 +1045,7 @@ function applyAll() { applyVisibility(); applyMode(); applySection(); renderList
 function applyVisibility() {
   const bought = hardwareOn ? null : new Set(hardwareBodies().map((h) => h.path));
   meshes((o) => { o.visible = !hidden.has(o.userData.path) && !bought?.has(o.userData.path); });
+  applyChanges();
   labelsDirty = true;
   applyCaps();
 }
@@ -1126,6 +1364,7 @@ function applySection() {
   setClipping(edgeFront, planes);
   setClipping(edgeThrough, planes);
   for (const m of [ghostFill, ghostFillBounds, ghostEdge, ghostEdgeBounds, contourMaterial]) setClipping(m, planes);
+  for (const m of changeMaterials) setClipping(m, planes);
   for (const m of [stencilBack, stencilFront]) setClipping(m, planes);
   meshes((o) => setClipping(o.material, planes));
   $('secOn').checked = section.on;
@@ -1216,6 +1455,7 @@ window.addEventListener('keydown', (e) => {
     case '\\': section.flip = !section.flip; applySection(); break;
     case 'k': if (!$('nestShow').disabled) showNest(!nestShown); break;
     case 'c': setCam(!camOn); break;
+    case 'u': setChanges(!changesOn); break;
     case 'Escape': select(null); break;
     default: return;
   }
@@ -1271,46 +1511,6 @@ function partOf(path) {
   return (layout?.modules ?? []).flatMap((m) => m.parts).find((p) => p.path === path);
 }
 
-// A point of a part's operation, in world mm: the centre of a hole, pocket,
-// cut or V-groove on the face it is made from.
-function opPoint(part, op) {
-  const axes = part.axes, b = part.box;
-  const inner = op.kind === 'edge' ? op.op : op;
-  const code = layout.frame[op.face ?? inner.face] ?? null;
-  const p = [0, 0, 0];
-  let a, c;
-  if (op.kind === 'edge') {
-    const faceAxis = code[1];
-    const s = faceAxis === axes.u ? axes.v : axes.u;
-    [a, c] = [op.s, op.t];
-    const [u0, v0, u1, v1] = inner.kind === 'pocket' ? ringBounds(inner.shape) : [0, 0, 0, 0];
-    p[AXIS[s]] = a + (u0 + u1) / 2; p[AXIS[axes.t]] = c + (v0 + v1) / 2;
-  } else if (op.kind === 'hole') {
-    p[AXIS[axes.u]] = op.u; p[AXIS[axes.v]] = op.v;
-  } else if (op.kind === 'vgroove') {
-    p[AXIS[axes.u]] = (op.start[0] + op.end[0]) / 2; p[AXIS[axes.v]] = (op.start[1] + op.end[1]) / 2;
-  } else if (op.shape) {
-    const [u0, v0, u1, v1] = ringBounds(op.shape);
-    p[AXIS[axes.u]] = (u0 + u1) / 2; p[AXIS[axes.v]] = (v0 + v1) / 2;
-  } else {
-    throw new Error(`a ${op.kind} has no point to look at`);
-  }
-  if (code) {
-    const i = AXIS[code[1]];
-    p[i] = code[0] === '+' ? b.max[i] : b.min[i];
-  } else {
-    const i = AXIS[axes.t];
-    p[i] = (b.min[i] + b.max[i]) / 2;
-  }
-  return p;
-}
-
-function ringBounds(rings) {
-  const pts = rings.flat();
-  const us = pts.map((q) => q[0]), vs = pts.map((q) => q[1]);
-  return [Math.min(...us), Math.min(...vs), Math.max(...us), Math.max(...vs)];
-}
-
 function opsOf(part) {
   return part.ops.map((op) => ({ name: (op.kind === 'edge' ? op.op.name : op.name) ?? null, kind: op.kind, op }));
 }
@@ -1327,7 +1527,7 @@ function resolveAt(at) {
       if (!part) throw new Error(`no part ${path}`);
       const found = opsOf(part).find((o) => o.name === opName);
       if (!found) throw new Error(`${path} has no operation ${opName}; it has ${opsOf(part).map((o) => o.name).filter(Boolean).join(', ')}`);
-      const p = new THREE.Vector3(...opPoint(part, found.op));
+      const p = new THREE.Vector3(...opPoint(layout.frame, part, found.op));
       box.expandByPoint(p.clone().addScalar(-15)); box.expandByPoint(p.clone().addScalar(15));
       continue;
     }
@@ -1492,6 +1692,16 @@ window.preview = {
     setLevel(name);
     return untilLevel(tracker, () => shownLevel, name);
   },
+  /** What the last build changed against the scene before it, null when the page has no diff (the first
+   *  scene of a design): {version, since, added, gone, changed, problems, provenance, marks, lines, unplaced,
+   *  text, ms, shown}. `changed` lists each part's or bought body's change (moved, resized, turned, ops
+   *  {changed, added, removed}, outline {added, removed, at}: the segments that differ counted and where,
+   *  rest with its values, settings); `marks` the halos ({at, kind, path, op}), `lines` the glowing lines
+   *  counted; `text` what the panel says; `ms` what the diff and the drawing took; `shown` whether the
+   *  ghosts and glows show (`u`). */
+  changes: () => (lastChanges ? { ...structuredClone(lastChanges), shown: changesOn } : null),
+  /** The ghosts and glows of the last save on or off (`u`); returns whether they show. */
+  ghosts: (on) => { if (on !== undefined) setChanges(on); draw(); return changesOn; },
   /** The hardware on or off: hardware(false); returns whether it shows. */
   hardware: (on) => { if (on !== undefined) setHardware(on); draw(); return hardwareOn; },
   /** Part names and face names on or off: labels({names: true, faces: true}); returns both. */
@@ -1502,7 +1712,7 @@ window.preview = {
    *  [{name, kind, at, where}]. */
   ops: (path) => { const part = partOf(path); if (!part) throw new Error(`no part ${path}`);
     return opsOf(part).map(({ name, kind, op }) => {
-      let at = null; try { at = opPoint(part, op); } catch (e) {}
+      let at = null; try { at = opPoint(layout.frame, part, op); } catch (e) {}
       return { name, kind, at, where: op.where ?? '' };
     }); },
   /** Opens the editor (the server's --editor) at the line of a part, a hardware item or body, an operation
@@ -2033,6 +2243,7 @@ poll();
 function animate() {
   requestAnimationFrame(animate);
   tickLabels();
+  tickChanges();
   renderer.render(scene, camera);
   labelRenderer.render(scene, camera);
 }

@@ -3,7 +3,8 @@
 Status: proposed by Claude on 2026-10-17 as a brainstorm and gone through
 with Florian the same day, item by item; every item below was taken, with
 his rules for the clicks, the selection and the glow worked in [Florian,
-2026-10-17]. Built: Lines in the layout (2026-10-17); the rest not yet.
+2026-10-17]. Built: Lines in the layout, What a save changed (both
+2026-10-17); the rest not yet.
 The preview as it is: `design/preview.md`; how to drive it from code:
 AGENTS.md.
 
@@ -225,6 +226,22 @@ keep a pointer for later.
 - No text channel in the page beyond the note. [decided]
 
 ## What a save changed
+
+Built 2026-10-17: `lang/preview/viewer/changes.js` (the diff, where it
+glows and what the panel says, with node tests), the page's tint, ghosts
+and glows, `u` and the checkbox last save, `preview.changes()` and
+`preview.ghosts(on)`; `design/preview.md`, The viewer, says how it works
+and what it costs on the van. Settled while building [Claude]: unnamed
+operations are matched by being equal before their order among those of
+their kind, so a hole inserted before others is one hole added; a part
+that moved whole is compared as moved too, so the operations that moved
+with it are no change and the panel says the move in the layout's
+directions (`moved right 20 mm`); `where`, a setting's source and numbers
+within 0.1 µm are no change; a part whose operations alone changed glows
+and gets no ghost, which would lie on its new mesh; `u` toggles the
+glows with the ghosts; a build that changed nothing (another file saved,
+a level picked) is the next build all the same, and the panel says `no
+part changed`.
 
 The question the loop exists for: did the edit do what I meant. [decided]
 

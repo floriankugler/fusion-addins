@@ -2,7 +2,7 @@
 // objects that count their dispose() calls.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { AXIS, ISO, UP, share, disposeTree, clearGroup } from '../scene-utils.js';
+import { AXIS, ISO, UP, share, disposeTree, clearGroup, ringBounds, opPoint } from '../scene-utils.js';
 
 class Resource {
   constructor(name) { this.name = name; this.disposed = 0; }
@@ -82,4 +82,24 @@ test('clearGroup frees the children and empties the group', () => {
   assert.equal(group.children.length, 0);
   assert.equal(g1.disposed, 1);
   assert.equal(g2.disposed, 1);
+});
+
+test('the bounds of rings', () => {
+  assert.deepEqual(ringBounds([[[0, 5], [10, -2], [3, 8]], [[-1, 0], [2, 2]]]), [-1, -2, 10, 8]);
+});
+
+test('where an operation is: on the face it is made from, at its centre', () => {
+  const frame = { front: '-y', back: '+y', left: '-x', right: '+x', top: '+z', bottom: '-z' };
+  // a side standing at x 0..18, its u along y and v along z
+  const part = { axes: { t: 'x', u: 'y', v: 'z' }, box: { min: [0, 0, 0], max: [18, 500, 700] } };
+  assert.deepEqual(opPoint(frame, part, { kind: 'hole', face: 'right', u: 30, v: 40 }), [18, 30, 40]);
+  assert.deepEqual(opPoint(frame, part, { kind: 'hole', face: 'left', u: 30, v: 40 }), [0, 30, 40]);
+  assert.deepEqual(opPoint(frame, part, { kind: 'pocket', face: 'right', shape: [[[10, 10], [30, 10], [30, 50], [10, 50]]] }),
+    [18, 20, 30]);
+  assert.deepEqual(opPoint(frame, part, { kind: 'cut', shape: [[[0, 0], [100, 0], [100, 80], [0, 80]]] }), [9, 50, 40]);
+  assert.deepEqual(opPoint(frame, part, { kind: 'vgroove', face: 'right', start: [0, 100], end: [500, 100] }), [18, 250, 100]);
+  // an edge operation on the top face: along y at s, across the thickness at t
+  assert.deepEqual(opPoint(frame, part, { kind: 'edge', face: 'top', s: 250, t: 9, op: { kind: 'hole', face: 'top', u: 0, v: 0 } }),
+    [9, 250, 700]);
+  assert.throws(() => opPoint(frame, part, { kind: 'chamfer', what: 'outline', face: 'right' }), /a chamfer has no point/);
 });
