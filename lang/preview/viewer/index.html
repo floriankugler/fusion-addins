@@ -52,6 +52,22 @@
     box-sizing: border-box; z-index: 10; }
   #nestView svg { width: 100%; height: auto; }
   #nestView g.part { cursor: pointer; }
+  /* the CAM layer: the parts by their release order, the features of the operation chosen in its
+     tool's colour, the tabs; before the selection and pinning, which win over it */
+  #nestView.cam g.part path { fill: var(--release, #7aa6d8); }
+  #nestView g.cam { pointer-events: none; }
+  #nestView .cam-feature { stroke-linejoin: round; stroke-linecap: round; }
+  #nestView path.cam-pocket, #nestView path.cam-rest { fill-opacity: 0.5; stroke-width: 1.5; fill-rule: evenodd; }
+  #nestView path.cam-rest { fill-opacity: 0.85; stroke-width: 3; stroke-dasharray: 6 4; stroke: #222; }
+  #nestView path.cam-outer, #nestView path.cam-inner { stroke-width: 6; }
+  #nestView path.cam-dogbone { stroke-width: 3; }
+  #nestView path.cam-chamfer, #nestView path.cam-vgroove { stroke-width: 4; }
+  #nestView circle.cam-feature { fill-opacity: 0.95; }
+  #nestView circle.cam-feature.halo { stroke-width: 2.5; }
+  #nestView .cam-tab { fill: #111; stroke: #fff; stroke-width: 2.5; }
+  #nestView .cam-release { fill: #102a4a; font-weight: bold; paint-order: stroke; stroke: #fff; stroke-width: 4; }
+  #nestView .cam-notes { white-space: pre-wrap; color: #555; font-size: 12px; margin: 8px 4px; }
+  #nestView .cam-notes .problem { color: var(--accent); }
   #nestView g.part.selected path { fill: #f0a830; }
   /* pinning: the sheets marked made, the parts changed since or gone */
   #nestView g.stock.made > rect.sheet { fill: #dfe3ec; stroke: #34507a; stroke-width: 12; }
@@ -63,6 +79,16 @@
   #nestSheets { flex-wrap: wrap; gap: 4px; }
   #nestSheets button { min-width: 2.2em; }
   #nestSheets button.made { background: #dfe3ec; border-color: #34507a; }
+  #camInfo.stale { color: var(--accent); }
+  #camInfo { white-space: pre-wrap; }
+  #camLegend .setup { margin: 6px 0 8px; }
+  #camLegend .head { font-weight: 600; cursor: pointer; padding: 1px 2px; border-radius: 3px; }
+  #camLegend .release { color: var(--muted); font-size: 11px; padding: 0 2px 2px; }
+  #camLegend .op { display: flex; gap: 6px; align-items: baseline; cursor: pointer; padding: 1px 2px; border-radius: 3px;
+    font-size: 12px; }
+  #camLegend .op.chosen, #camLegend .head.chosen { background: #f3e2d9; }
+  #camLegend .swatch { flex: none; width: 10px; height: 10px; border-radius: 2px; align-self: center; }
+  #camLegend .count { color: var(--muted); margin-left: auto; white-space: nowrap; }
   /* a big face's name sits under the part's name, which marks the same spot */
   .labels.with-names .flabel.big { margin-top: 19px; }
 </style>
@@ -90,6 +116,11 @@
   <div class="row"><button id="nestFix" hidden title="the selected part was changed by hand as the build has it now">fixed by hand</button></div>
   <div id="nestLog" class="keys"></div>
 
+  <h2>CAM plan</h2>
+  <div id="camInfo" class="keys">no nest to plan</div>
+  <div class="row"><button id="camRun" disabled title="python -m lang.cam for the nest chosen, with the build's CAM settings as they are now">plan again</button></div>
+  <div id="camLegend"></div>
+
   <h2>SpaceMouse</h2>
   <div id="smStatus" class="keys">connecting…</div>
 
@@ -104,6 +135,7 @@
   <div class="row">
     <label><input type="checkbox" id="gridOn" checked> floor grid</label>
     <label><input type="checkbox" id="hwOn" checked> hardware</label>
+    <label title="the nest's CAM plan on its drawing"><input type="checkbox" id="camOn"> CAM plan</label>
   </div>
 
   <h2>Labels</h2>
@@ -150,6 +182,7 @@
     <div><span>move section (shift: coarse)</span><kbd>[</kbd> <kbd>]</kbd></div>
     <div><span>flip section</span><kbd>\</kbd></div>
     <div><span>nest view on / off</span><kbd>k</kbd></div>
+    <div><span>CAM plan on the nest on / off</span><kbd>c</kbd></div>
     <div><span>deselect</span><kbd>esc</kbd></div>
   </div>
 </div>
@@ -166,6 +199,7 @@ import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer
 import { attachSpaceMouse } from './spacemouse.js';
 import { AXIS, ISO, UP, share, disposeTree, clearGroup } from './scene-utils.js';
 import { layoutVersionProblem, setHidden as markHidden, toggleHides, isolate as isolatePaths, LoadTracker, nestStatusText, chosenNest, settingsText, sheetNames, sheetMade, fixable } from './state.js';
+import { planVersionProblem, planStatusText, toolColors, setupLabel, legend, chosenOperation, releaseRanks, releaseList, holdText, partText, releaseColors, setupOverlay, planNotes } from './cam.js';
 
 const $ = (id) => document.getElementById(id);
 const view = $('view');
@@ -884,7 +918,8 @@ function showSelected() {
     `${(b.max[0]-b.min[0]).toFixed(0)} x ${(b.max[1]-b.min[1]).toFixed(0)} x ${(b.max[2]-b.min[2]).toFixed(0)} mm\n` +
     part.ops.length + ' ops' + (part.grain ? ', grain ' + part.grain : '') +
     (hidden.has(selectedPath) ? ', hidden' : '') +
-    (Object.keys(part.settings ?? {}).length ? '\n' + settingsText(part.settings) : '');
+    (Object.keys(part.settings ?? {}).length ? '\n' + settingsText(part.settings) : '') +
+    camPartLine(selectedPath);
 }
 
 // -- the parts list: a tree by path (module, scope, part) -----------------------
@@ -1108,6 +1143,7 @@ window.addEventListener('keydown', (e) => {
     case ']': section.pos = Math.min(1, section.pos + step); section.on = true; applySection(); break;
     case '\\': section.flip = !section.flip; applySection(); break;
     case 'k': if (!$('nestShow').disabled) showNest(!nestShown); break;
+    case 'c': setCam(!camOn); break;
     case 'Escape': select(null); break;
     default: return;
   }
@@ -1323,6 +1359,32 @@ window.preview = {
     await poll();
     return preview.nest(true);
   },
+  /** The CAM layer on the nest view on or off (`c`; on shows the nest view); resolves with whether a plan
+   * is drawn: false when the nest chosen has none, or it is stale. */
+  cam: async (on = true) => { setCam(on); await poll(); return !!camShown(); },
+  /** The chosen nest's plan as the panel lists it: its state, and per setup its operations in order (each
+   * {index, name, kind, tool, color, features, tabs}), its parts by their release order and what it leaves
+   * out; null for a plan not read (none, or stale). */
+  plan: () => {
+    const state = nestChosen?.plan ?? { state: 'none' };
+    if (!camPlan || state.state !== 'ok') return null;
+    return { nest: camPlan.nest, state: state.state, written: camPlan.written, chosen: camChoice,
+      setups: legend(camPlan).map((entry, k) => ({ ...entry, release: releaseList(camPlan.setups[k]) })),
+      notes: planNotes(camPlan) };
+  },
+  /** Highlights an operation of a setup of the chosen nest's plan (the setup by its name, with or without
+   * the nest's, the operation by its index in the setup, 'all' for every one of it; null: none), turning
+   * the layer on; returns the choice {setup, index}, or throws when the plan has no such operation. */
+  operation: (setup, index = 'all') => {
+    if (setup === null) return chooseOperation(null);
+    const found = camPlan?.setups.find((s) => s.name === setup || setupLabel(camPlan, s) === setup);
+    const choice = found ? chooseOperation(found.name, index) : null;
+    if (!choice) throw new Error(`no operation ${JSON.stringify(index)} of ${JSON.stringify(setup)} in the plan shown` +
+      (camPlan ? `; its setups: ${camPlan.setups.map((s) => setupLabel(camPlan, s)).join(', ')}` : ': there is none'));
+    return choice;
+  },
+  /** Plans the chosen nest (or the one named) again; resolves with its plan's state once it is done. */
+  replan: (nest) => replan(nest),
   /** The camera: {eye, target, fov}. */
   camera: cameraState,
   /** Sets the camera: eye and target as [x, y, z] mm, fov in degrees; each optional. */
@@ -1428,6 +1490,9 @@ function openDesign(name) {
   nestsListed = [];
   $('nestView').replaceChildren();
   showNest(false);
+  camPlan = camVersion = null;
+  camDrawn = undefined;
+  renderCamLegend();
   const view = views.get(name);
   hidden.clear();
   for (const path of view?.hidden ?? []) hidden.add(path);
@@ -1536,8 +1601,14 @@ async function updateNest(nests) {
       g.addEventListener('click', () => { select(g.dataset.path); draw(); markNestSelection(); });
     }
     markNestSelection();
+    camDrawn = undefined;
   }
   if (has) markPinning(n);
+  for (const wait of planWaits.splice(0)) {
+    const state = nests.find((x) => x.path === wait.nest)?.plan?.state ?? 'none';
+    if (state === 'running') planWaits.push(wait); else wait.resolve(state);
+  }
+  await updatePlan(n);
 }
 
 /** The sheets marked made and the parts changed since or gone, on the drawing. */
@@ -1606,6 +1677,220 @@ $('nestFix').onclick = () => {
   if (n && selectedPath && confirm(`Mark ${selectedPath} as fixed by hand, made as the build has it now?`)) {
     markFixed(n.path, selectedPath);
   }
+};
+
+// -- the CAM layer --------------------------------------------------------------
+//
+// The chosen nest's CAM plan (python -m lang.cam, or "plan again"), cam.json
+// beside its nest.svg, on the nest's drawing: the parts coloured and numbered
+// by their release order with their holds and tabs, the tabs as marks on the
+// contours, and the features of the operation chosen in the legend in its
+// tool's colour (cam.js). A stale plan, made for another nest file than the
+// one drawn, is not drawn: its places are another nest's.
+
+let camOn = stored('cam', false);
+let camPlan = null;             // the chosen nest's plan as it was read, null for none
+let camVersion = null;          // the nest and the plan file's version camPlan is of
+let camDrawn;                   // what the drawing shows of it, to draw it again only when that changed
+let camChoice = null;           // the operation highlighted: {setup, index}, index 'all' for all of the setup's
+const camWanted = new Map();    // per design and nest, the choice
+let planWaits = [];             // replan() calls: {nest, resolve}
+
+function setCam(on) {
+  camOn = on;
+  $('camOn').checked = on;
+  store('cam', on);
+  if (on && !nestShown && !$('nestShow').disabled) showNest(true);
+  drawCam();
+}
+$('camOn').checked = camOn;
+$('camOn').onchange = (e) => setCam(e.target.checked);
+
+/** The plan the drawing shows: the chosen nest's, planned for its nest file, with the layer on. */
+function camShown() {
+  return camOn && camPlan && nestChosen?.plan?.state === 'ok' && camVersion?.startsWith(nestChosen.path + ' ') ? camPlan : null;
+}
+
+async function updatePlan(n) {
+  const plan = n?.version ? n.plan ?? { state: 'none' } : null;
+  const busy = nestsNow.some((x) => x.state === 'running') || plan?.state === 'running';
+  $('camRun').disabled = !plan || busy;
+  const key = plan?.version && (plan.state === 'ok' || plan.state === 'stale') ? `${n.path} ${plan.version}` : null;
+  let problem = null;
+  if (key !== camVersion) {
+    let read = null;
+    if (key) {
+      const url = designUrl;
+      try { read = await (await fetch(url + n.dir + 'cam.json', { cache: 'no-store' })).json(); }
+      catch (e) { problem = `cam.json could not be read: ${e.message}`; }
+      if (url !== designUrl) return;
+      problem ??= planVersionProblem(read);
+      if (problem) read = null;
+    }
+    camPlan = read;
+    camVersion = read ? key : null;
+    camChoice = chosenOperation(camPlan, camWanted.get(`${design}\n${n?.path}`));
+    renderCamLegend();
+  }
+  const info = $('camInfo');
+  info.textContent = !plan ? 'no nest to plan' : problem ? `${planStatusText(plan)}\n${problem}` : planStatusText(plan) + camSummary();
+  info.className = 'keys' + (plan?.state === 'stale' || plan?.state === 'failed' || problem ? ' stale' : '');
+  drawCam();
+}
+
+/** A line on what the plan holds and leaves out, for the panel. */
+function camSummary() {
+  if (!camPlan || nestChosen?.plan?.state !== 'ok') return '';
+  const ops = camPlan.setups.reduce((n, s) => n + s.operations.length, 0);
+  const left = camPlan.setups.reduce((n, s) => n + s.left_out.filter((l) => l.why !== 'narrow face').length, 0);
+  return `\n${camPlan.setups.length} setups, ${ops} operations; ${left} left out, ${camPlan.problems.length} problems` +
+    (left || camPlan.problems.length ? ' (under the drawing)' : '');
+}
+
+function renderCamLegend() {
+  const box = $('camLegend');
+  const shown = camPlan && nestChosen?.plan?.state === 'ok';
+  box.replaceChildren(...(shown ? legend(camPlan) : []).map((entry) => {
+    const setup = camPlan.setups.find((s) => s.name === entry.setup);
+    const div = document.createElement('div');
+    div.className = 'setup';
+    const head = document.createElement('div');
+    head.className = 'head' + (camChoice?.setup === entry.setup && camChoice.index === 'all' ? ' chosen' : '');
+    head.textContent = `${entry.label} · ${entry.parts} part${entry.parts === 1 ? '' : 's'}` +
+      (setup.stock.own_blank ? ', its own blank' : '');
+    head.title = 'every operation of the setup';
+    head.onclick = () => chooseOperation(entry.setup, 'all', true);
+    const release = document.createElement('div');
+    release.className = 'release';
+    const order = releaseList(setup).filter((p) => p.rank !== null);
+    release.textContent = order.length
+      ? 'released: ' + order.map((p) => `${p.rank} ${p.path.split('.').pop()} ${holdText(p.hold)}${p.tabs ? `, ${p.tabs} tabs` : ''}`).join(' · ')
+      : 'no release';
+    div.append(head, release, ...entry.operations.map((op) => {
+      const row = document.createElement('div');
+      row.className = 'op' + (camChoice?.setup === entry.setup && camChoice.index === op.index ? ' chosen' : '');
+      const swatch = document.createElement('span');
+      swatch.className = 'swatch';
+      swatch.style.background = op.color;
+      const name = document.createElement('span');
+      name.textContent = op.name;
+      const count = document.createElement('span');
+      count.className = 'count';
+      count.textContent = `${op.features}` + (op.tabs ? ` · ${op.tabs} tabs` : '');
+      count.title = `${op.features} features` + (op.tabs ? `, ${op.tabs} tabs` : '');
+      row.append(swatch, name, count);
+      row.title = `${op.kind}, ${op.tool}`;
+      row.onclick = () => chooseOperation(entry.setup, op.index, true);
+      return row;
+    }));
+    return div;
+  }));
+}
+
+/** Highlights an operation of a setup (`index` 'all': every one of it; a setup of null: none). With
+ * `toggle`, choosing the one chosen again chooses none. Turns the layer on. */
+function chooseOperation(setup, index, toggle = false) {
+  const wanted = setup === null ? null : { setup, index };
+  const same = camChoice && wanted && camChoice.setup === wanted.setup && camChoice.index === wanted.index;
+  camChoice = toggle && same ? null : chosenOperation(camPlan, wanted);
+  camWanted.set(`${design}\n${nestChosen?.path}`, camChoice);
+  renderCamLegend();
+  if (camChoice && !camOn) setCam(true); else drawCam();
+  if (camChoice) {
+    const blank = [...$('nestView').querySelectorAll('g.cam')].find((g) => g.dataset.setup === camChoice.setup);
+    blank?.parentNode.scrollIntoView({ block: 'nearest' });
+  }
+  return camChoice;
+}
+
+function svgElement({ tag, attrs, text }) {
+  const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
+  for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, String(v));
+  if (text !== undefined) el.textContent = text;
+  return el;
+}
+
+function drawCam() {
+  const plan = camShown();
+  const now = plan ? `${camVersion} ${nestVersion} ${JSON.stringify(camChoice)}` : null;
+  if (now === camDrawn) return;
+  camDrawn = now;
+  const view = $('nestView');
+  for (const g of view.querySelectorAll('g.cam, .cam-notes')) g.remove();
+  for (const g of view.querySelectorAll('g.part')) {
+    g.style.removeProperty('--release');
+    const title = g.querySelector('title');
+    if (title?.dataset.nest !== undefined) title.textContent = title.dataset.nest;
+  }
+  view.classList.toggle('cam', !!plan);
+  if (!plan) { showSelected(); return; }
+  const colors = toolColors(plan);
+  const stocks = [...view.querySelectorAll('g.stock')];
+  for (const setup of plan.setups) {
+    const stock = stocks.find((g) => g.dataset.material === setup.stock.material && g.dataset.sheet === setup.stock.sheet);
+    const rect = stock?.querySelector('rect.sheet');
+    if (!rect) continue;
+    const sheet = { x: +rect.getAttribute('x'), y: +rect.getAttribute('y'), height: +rect.getAttribute('height') };
+    const parts = new Map([...stock.querySelectorAll('g.part')].map((g) => [g.dataset.path, g]));
+    const labels = {};
+    for (const p of setup.parts) {
+      const t = parts.get(p.path)?.querySelector('text');
+      if (t) labels[p.path] = { x: +t.getAttribute('x'), y: +t.getAttribute('y'), size: +t.getAttribute('font-size') };
+    }
+    const g = svgElement({ tag: 'g', attrs: { class: 'cam', 'data-setup': setup.name } });
+    for (const e of setupOverlay(setup, { sheet, chosen: camChoice, colors, labels })) g.appendChild(svgElement(e));
+    stock.appendChild(g);
+    const fills = releaseColors(setup);
+    const released = releaseRanks(setup).size;
+    for (const info of releaseList(setup)) {
+      const part = parts.get(info.path);
+      if (!part) continue;
+      if (fills.has(info.path)) part.style.setProperty('--release', fills.get(info.path));
+      const title = part.querySelector('title');
+      if (!title) continue;
+      title.dataset.nest ??= title.textContent;
+      title.textContent = `${title.dataset.nest}\n${setupLabel(plan, setup)}: ${partText(info, released)}`;
+    }
+  }
+  // what the plan leaves out and its problems, under the nest's own
+  const notes = planNotes(plan);
+  if (notes) {
+    const div = document.createElement('div');
+    div.className = 'cam-notes';
+    div.append(...notes.split('\n').map((line) => {
+      const el = document.createElement('div');
+      el.textContent = line;
+      if (/^\s*problem: /.test(line)) el.className = 'problem';
+      return el;
+    }));
+    view.append(div);
+  }
+  showSelected();
+}
+
+/** The selected part's place in the plan shown, for its info. */
+function camPartLine(path) {
+  const plan = camShown();
+  const setup = plan?.setups.find((s) => s.parts.some((p) => p.path === path));
+  if (!setup) return '';
+  const info = releaseList(setup).find((p) => p.path === path);
+  return `\ncam: ${setupLabel(plan, setup)}, ${partText(info, releaseRanks(setup).size)}`;
+}
+
+/** Plans the nest named (the chosen one by default) again; resolves with its plan's state once it is done. */
+async function replan(nest = nestChosen?.path) {
+  if (!nest || !nestsListed.includes(nest)) throw new Error(`no nest ${JSON.stringify(nest)} in ${design}`);
+  const response = await fetch(`plan?design=${encodeURIComponent(design)}&nest=${encodeURIComponent(nest)}`, { method: 'POST' });
+  if (!response.ok) throw new Error(`${nest} cannot be planned: it is not nested`);
+  const done = new Promise((resolve) => planWaits.push({ nest, resolve }));
+  await poll();
+  return done;
+}
+
+$('camRun').onclick = () => {
+  $('camRun').disabled = true;
+  $('camInfo').textContent = planStatusText({ state: 'running' });
+  replan().catch((e) => { $('camInfo').textContent = e.message; });
 };
 
 // -- reload loop ---------------------------------------------------------------

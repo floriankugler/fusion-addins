@@ -10,7 +10,7 @@ const page = await readFile(new URL('index.html', viewer), 'utf8');
 
 test('every name the page imports from its own modules is exported', async () => {
   const imports = [...page.matchAll(/import\s*\{([^}]*)\}\s*from\s*'\.\/([\w.-]+)'/g)];
-  assert.deepEqual(imports.map((m) => m[2]).sort(), ['scene-utils.js', 'spacemouse.js', 'state.js']);
+  assert.deepEqual(imports.map((m) => m[2]).sort(), ['cam.js', 'scene-utils.js', 'spacemouse.js', 'state.js']);
   for (const [, names, file] of imports) {
     const module = await import(new URL(file, viewer));
     for (const name of names.split(',').map((n) => n.trim().split(/\s+as\s+/)[0]).filter(Boolean)) {
