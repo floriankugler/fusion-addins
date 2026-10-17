@@ -89,7 +89,11 @@ done.
   hidden edge by another part's box, `cam.waste_area` at 10 cm², the CAM
   settings read from the build as it is now. Keys of the settings table not
   built: `cam.tab_edges`, `cam.finishing_stepdown`, Auto Setup's rule
-  constants and the holding calibration.
+  constants and the holding calibration. In Fusion (`design/cam.md`, In
+  Fusion): a rest's region needs a cutter's diameter of room for its pocket
+  to cut; a dog bone plunged with a drill, an own blank and a finishing
+  template not yet tried; the stock as a fixed box and a `nest.json`
+  drawn without setups, chosen.
 - **Corners named by a point** (`panel.top.front(60).left(40)`) for
   `fillet()` and `chamfer()`, once a build needs it.
 - **Try the language on real modules**: write two modules from the van in

@@ -2,8 +2,9 @@
 
 How a layout becomes a Fusion document, why it is done this way, and what
 was measured. Part of the modeling language's design; the overview is
-`DESIGN.md`. Code: `lang/emit/plan.py`, `loops.py`, `arcs.py` (Fusion-free),
-`lang/emit/fusion.py` (draws), `addins-src/compiler/`.
+`DESIGN.md`. Code: `lang/emit/plan.py`, `loops.py`, `arcs.py`, `nested.py`,
+`cam_plan.py` (Fusion-free), `lang/emit/fusion.py` (draws), `cam.py` (the
+CAM setups), `addins-src/compiler/`.
 
 ## Decisions
 
@@ -32,8 +33,8 @@ was measured. Part of the modeling language's design; the overview is
 - Where code runs: the snapshot and the emitter run in Fusion, the layout
   step anywhere (plain Python with shapely). Fusion's Python has no shapely,
   so `lang.emit` is loaded inside Fusion without its parent package (see
-  AGENTS.md). The compiler add-in's Compile Layout button picks a layout file
-  and runs it.
+  AGENTS.md). The compiler add-in's Compile Layout button picks a layout,
+  nest or CAM plan file and runs it.
 
 ## What the emitter does
 
@@ -80,6 +81,25 @@ origin. Drawn inside a component whose occurrence was moved, most parts
 failed ("the path is tangent to the profile": Fusion read the profiles in
 the other space) and the others came out a thickness too high
 [2026-10-14].
+
+## CAM setups
+
+A CAM plan (`design/cam.md`, `cam.json`) is built into the nested
+documents: `lang/emit/cam_plan.py` (Fusion-free, unit tested and fuzzed)
+checks the plan against the nest beside it, maps every setup's features
+from its blank's frame into the document (`nested.sheet_places`, the
+blank's corner, the stock's top at the nominal thickness) and says what
+each binds by and which parameters each operation gets; `cam.py` builds
+them after `NestEmitter` has drawn the document: every sketch first (tab
+positions, rest regions), `checkValidity`, then per blank a setup with a
+fixed-box stock the blank's size whose height is the measured thickness to
+enter, per operation one from its template file, its parameters written,
+its geometry bound by position (silhouettes, loops of edges, floors,
+cylinders, arc edges, a chamfer's lower edges, a groove's bottom), every
+chain turned so the tool runs on its waste, and the toolpaths generated at
+the end. The faces and edges are found as the chamfers are: by position,
+in the body each part path names on its blank, read once per body.
+Details and what was verified: `design/cam.md`, In Fusion.
 
 ## Handing parts to Multi Arrange and Auto Setup
 

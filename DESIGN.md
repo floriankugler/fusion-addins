@@ -247,7 +247,8 @@ for `nest(False)` boards (the settings' second stage), the parts'
 fingerprints and nests marked as made with the inventory written back
 (the third; the nest documents of version 3 not yet drawn in Fusion), the CAM
 plan of each nest with its keys, dog bones marked in the layout (the fourth,
-Fusion-free; the emitter that makes the setups is to come), the standard
+Fusion-free) and the emitter that builds its setups in the nested documents
+(Compile Layout takes a `cam.json`, verified on the drawer cabinet), the standard
 library's carcass and drawer box, which give the examples' layouts unchanged,
 and the settings' first stage (keys, the chain, freezing, provenance in the
 layout and the preview, `material`, `grain`, `nest` and `chamfer_size`,
@@ -269,7 +270,7 @@ is implemented. [Florian]
 | `tilted-boards.md` | Boards turned about one axis of their scope |
 | `miters.md` | Mitered corners as a joint |
 | `standard-library.md` | What is left of the standard library (built: `design/std.md`): cabinet types per build repo, further blocks |
-| `cam.md` | A CAM plan from the layout, built by an add-in. Built: the plan (`design/cam.md`); to come: the emitter that makes the setups in Fusion, the plan in the preview, manufacturing groups |
+| `cam.md` | A CAM plan from the layout, built by an add-in. Built: the plan and the emitter that makes the setups in Fusion (`design/cam.md`); to come: the plan in the preview, manufacturing groups |
 | `settings.md` | Settings that flow down the build and are overridden at any level (Florian's idea, 2026-10-15/16). Built: stage 1, the mechanism, the core's keys, lazy modules, the master's parameters (`design/api.md`); stage 2, nests in the build with the nesting keys and the inventory (`design/nesting.md`); stage 3, fingerprints and pinning with the inventory written back (`design/nesting.md`, Pinning); stage 4, the CAM plan with its keys (`design/cam.md`) |
 | `runs.md` | Hoses, cables, ducts and keep-outs: one run primitive that plans and is checked, routed through the boards' own openings, at the van level or in a module |
 | `detail-levels.md` | Rough and full previews |

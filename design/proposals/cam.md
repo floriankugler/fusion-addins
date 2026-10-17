@@ -29,9 +29,20 @@ after the part's), and so are an own blank's openings; "the strongest
 neighbour across the kerf" is three classes for now (still held by its
 skin, released before, nothing), and a hidden edge is one another part's
 box reaches across; `cam.waste_area` defaults to the tabs' 10 cm², measured
-as they are. Still to come, kept below: the CAM emitter in the compiler
-add-in, the plan in the preview, manufacturing groups, the holding model's
-calibration and the lift margin, a slot cut along its line.
+as they are. The CAM emitter (stage 4b) built the same day (`design/cam.md`,
+In Fusion): Compile Layout takes a `cam.json`, draws the nest beside it and
+builds a setup per blank, each operation from its template, its geometry
+bound by position, the tab sketch before the first operation; built
+otherwise than written here: the stock is a fixed box whose height the
+operator sets to the measured thickness (a direct document has no user
+parameters), with its bottom offset following the height so its top stays
+the parts' top; through the API every chain is turned for its tool to run
+on the waste, as Fusion puts it on the left of a chain's first edge; and a
+rest's region needs a cutter's diameter of room, not its radius, for a
+pocket bounded by it to cut (found, not changed in the plan). Still to
+come, kept below: the plan in the preview, manufacturing groups, the
+holding model's calibration and the lift margin, a slot cut along its
+line.
 
 Florian's points: since the Fusion geometry is generated again on every
 compile, the CAM setups have to be made again too; Auto Setup helps, but it
