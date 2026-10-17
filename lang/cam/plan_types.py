@@ -267,6 +267,10 @@ class CamSettings(TypedDict):
     read_from: Literal["build", "nest"]
     #: The templates' folder read.
     templates: str
+    #: The smallest cutter (mm) the nest's manufacturing groups and the
+    #: checks may count on: `cam.smallest_cutter`, else the narrowest
+    #: cutter of the pocket and contour templates for the nest's cutter.
+    smallest_cutter: float
 
 
 class CamFile(TypedDict):

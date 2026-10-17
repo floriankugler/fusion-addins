@@ -637,3 +637,31 @@ def test_a_dog_bone_over_a_corner_leaves_its_fillet_a_fillet():
     square = shapely_box(0, 0, 50, 50)
     bone = Point(0.3, 0.3).buffer(0.6, quad_segs=32)             # over the corner: the fillet's horns are left
     assert unreached(square, 4, bone) == []
+
+
+def test_the_plan_says_the_smallest_cutter():
+    with module("m", Box.from_size(width=600, depth=400, height=100)) as m:
+        board("a", ply15).on(m.bottom)
+    nest, layout = _nested()
+    assert _plan(nest, layout)["settings"]["smallest_cutter"] == 2.0
+    registry.reset()
+    with module("m", Box.from_size(width=600, depth=400, height=100)) as m:
+        use(cam.smallest_cutter(3.175))
+        board("a", ply15).on(m.bottom)
+    nest, layout = _nested()
+    assert _plan(nest, layout)["settings"]["smallest_cutter"] == 3.175
+
+
+def test_a_counterbore_over_a_through_slot_is_one_pocket():
+    """A counterbore was clipped by the through slot under it, still
+    material when the blind pockets are cut, and the narrow ring left took
+    the 2 mm cutter (the examples' operations panel, 2026-10-17)."""
+    with module("m", Box.from_size(width=600, depth=400, height=100)) as m:
+        p = board("panel", ply15).on(m.bottom)
+        p.slot(12, at=p.top.center, centers=40, along="depth", depth=4, name="head")
+        p.slot(6, at=p.top.center, centers=40, along="depth", depth=through, name="mount")
+    nest, layout = _nested()
+    (setup,) = _plan(nest, layout)["setups"]
+    templates = {r["name"]: op["template"] for op in _ops(setup, "pocket") for f in op["features"] for r in f["ops"]
+                 if r["name"]}
+    assert templates["head"] == "pocket.dc_Tasche 6mm"

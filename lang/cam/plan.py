@@ -122,9 +122,21 @@ def plan_nest(nest: NestFile, layout: Layout, *, settings: Layout | None = None,
         "layout_hash": nest["layout_hash"],
         "written": (written or datetime.now()).astimezone().isoformat(timespec="seconds"),
         "settings": {"values": out_values, "sources": sources, "parts": part_values, "ops": op_values,
-                     "read_from": "build" if values.read_from == "build" else "nest", "templates": registry.folder},
+                     "read_from": "build" if values.read_from == "build" else "nest", "templates": registry.folder,
+                     "smallest_cutter": smallest_cutter(values, registry)},
         "setups": setups, "problems": problems,
     }
+
+
+def smallest_cutter(values: Values, registry: Registry) -> float:
+    """`cam.smallest_cutter`, else the narrowest cutter of the pocket and
+    contour templates for the cutter the nest's parts take most."""
+    given = values.value(keys.smallest_cutter)
+    if given is not None:
+        return float(given)
+    cutter = str(summary(values)[0]["cam.cutter"])
+    tools = [t.narrowest for kind in ("pocket", "contour") for t in registry.of(kind, cutter)]
+    return min(tools) if tools else 0.0
 
 
 def setup_name(nest: str, material: str, blank: str) -> str:
@@ -357,7 +369,7 @@ class _Setup:
         drills = rules.by_diameter(self.registry.of("drill", cutter, self.value(keys.drill_template, path, name)))
         center = pp.point(op["u"], op["v"])
         if not through and bores and op["d"] > 2 * max(bores):
-            circle = Point(center).buffer(op["d"] / 2, quad_segs=90).intersection(self.footprints[pp.path])
+            circle = Point(center).buffer(op["d"] / 2, quad_segs=90).intersection(pp.outline())
             if not self.pocket_region(pp, [ref(k, op, "op")], circle, op["depth"], name, [], None):
                 self.leave(path, ref(k, op, "op"), "nothing fits", "no pocket cutter gets into it")
             return
@@ -404,7 +416,9 @@ class _Setup:
             return
         if op["chamfer"] > 0:
             self.op_chamfer(pp, k, op, face, op["chamfer"])
-        region = pp.region(op["shape"]).intersection(self.footprints[pp.path])
+        # (the outline, not the footprint: a through slot under a counterbore is material yet when the
+        # counterbore is cut, the blind pockets first)
+        region = pp.region(op["shape"]).intersection(pp.outline())
         pieces = [p for p in polygons_of(region) if p.area > CLEAN * CLEAN]
         if not pieces:
             self.leave(path, ref(k, op, "op"), "gone", "nothing of it is left on the board")
