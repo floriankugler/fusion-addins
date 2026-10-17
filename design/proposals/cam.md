@@ -138,9 +138,11 @@ enough, never with clamps or tape [decided]; the dust extraction's suction
 lifts a small part whose vacuum is too weak, and the cutter then grabs and
 destroys it, so the hold must beat the extraction's pull as well as the
 cutting force; what he is unhappy with today is where the tabs are put,
-more than how many; the holding itself he will test: strips of 60, 40, 30
-and 20 mm by 300 mm to calibrate the leak margin, and the thin final pass
-below.
+more than how many. Tested 2026-10-17 [Florian]: strips down to 300 by
+20 mm and discs down to 60 mm across, milled to 0.4 mm above the bed and
+then cut free by one release pass, held, in a board that already had a big
+cutout in it and on a spoilboard that had been in use for a while. Skin and
+release is the strategy (below).
 
 ### The model as it is
 
@@ -179,49 +181,74 @@ and 12 parts are given up as unholdable. Three faults:
   right order; the leak margin is the unknown, which the strips calibrate
   (half the narrowest width that holds alone).
 
+### Decided 2026-10-17: skin and release
+
+- **Every contour is roughed to a skin and cut free afterwards.** Inner
+  and outer contours alike are milled down to 0.4 mm above the stock
+  bottom, and release passes at the end of the setup cut them free
+  [decided]. Two operations per cutter [proposed]: a roughing contour with
+  0.4 mm of axial stock to leave, in Fusion's own order, and a release
+  contour from 0.4 mm above the stock bottom through to the breakthrough,
+  one pass, `preserveOrder` on. Not one operation with a finishing
+  stepdown: with order by depth Fusion would do the roughing in the
+  preserved order too, and travel would suffer.
+- **The order of operations**: by tool, widest first, 8 mm, 6 mm, 1/8",
+  2 mm and the V-bit, as Auto Setup orders them today, then the release
+  passes at the very end: the 6 mm cutter's and, where a contour is cut
+  with it, the 1/8" cutter's. One tool change more, which is much better
+  than lots of tabs or destroyed parts [decided 2026-10-17]. The V-bit
+  stays before the release: no V-cuts on parts that are already free
+  [Florian].
+- **The release order**: smallest hold first, by eroded area, ties by
+  travel [Florian: the size ordering makes sense]; the inner contours of a
+  part before its outer. The reason [proposed]: until the release passes
+  the skin seals every kerf, so the sheet is one airtight plate and the
+  vacuum under it is at its strongest; each released contour opens a slot
+  through the sheet onto the bleed-through spoilboard, and the pump's
+  capacity is finite, so the vacuum under everything still attached drops
+  with every part set free. The parts that need it most go while the sheet
+  is still sealed, the large ones last, when their area makes up for the
+  loss. Against it stands only the time a released small part lies loose
+  under the passing hood, which the experiments survived; the next
+  experiment watches it.
+- **Tabs** only for a part that fails even the release pass, whose force is
+  about a tenth of a full stepdown's, and the hood's pull; where they go,
+  by the rules below [proposed]. The model's job becomes the release order
+  and that exception, and its pressure should fall with the kerf area
+  opened before a part's release [proposed].
+- **Calibration** [found 2026-10-17]: at a leak margin of 12 mm a 20 mm
+  strip has no eroded area left, yet it held, so the margin is under 10 mm,
+  or the force scaling carries the difference. Open: the failing size.
+  The next experiment [proposed]: strips of 15 and 10 mm by 300, discs of
+  45 and 30 mm, and the smallest of them released last on a sheet whose
+  other parts are already free, the leak budget at its worst.
+
 ### Proposed
 
-1. **The order stays by tool**, widest first, then by kind, the V-bit
-   last, since tool changes cost most [decided; Auto Setup's rule]. Within
-   one tool's contour operation the parts go weakest first, by eroded area,
-   with the operation's `preserveOrder` on, so a weak part is freed while
-   the stronger ones still stiffen the sheet. The check judges every part
-   at its moment: the skeleton is the blank less the parts freed before it,
-   one shapely erosion per part, no raster. A part freed by a wider cutter's
-   contour before a narrower cutter's pockets is judged for those too.
-2. **A thin final pass.** Florian's 6 mm contour template steps down
-   6.4 mm, with `numberOfFinishingStepdowns` 0 and `finishingStepdown`
-   0.2 mm. One finishing stepdown of 0.5 to 1 mm cuts the force that frees
-   a part five to ten times, costs one pass along the contour and leaves no
-   tab to trim. The plan sets it per operation on weak parts, or on all;
-   the downcut template for that pass, since an upcut lifts the part
-   [proposed]. Florian will try it [to do]; it does not help against the
-   extraction's lift.
-3. **A lift margin** [proposed]: pressure times the eroded area against the
+1. **A lift margin** [proposed]: pressure times the eroded area against the
    extraction's pull on the part's top face plus an upcut cutter's lift,
    next to slide and twist. Narrow parts suffer twice, since the pull acts
    on the whole top and the hold on the eroded bottom.
-4. **Tabs only for what still fails**, by rules Florian called good: into
-   the strongest neighbour across the kerf, by its margin at that moment,
-   not the nearest; at least three, spread about the centroid, since two
-   are a hinge line; on straight stretches, a tab width from convex and
-   three from concave corners as today; preferably on edges the layout
-   knows are hidden, against another board, lipped, or in a groove or
-   joint; never on a show edge, under a chamfer, or where a pocket thins the
-   part. A tabbed part is judged by its own pivot with the tabs as a couple
-   (`joint_margin`), not by the assembly's lever, which fixes the second
-   fault. The same position rules go into Auto Setup's length-based mode
-   (`lib/auto_setup/tabs.py`), which is what Florian uses today and is
-   unhappy with.
-5. **No wider web.** A wider web around weak parts was dropped in the
+2. **Where tabs go**, for the parts that still need them, by rules Florian
+   called good: into the strongest neighbour across the kerf, by its margin
+   at that moment, not the nearest; at least three, spread about the
+   centroid, since two are a hinge line; on straight stretches, a tab width
+   from convex and three from concave corners as today; preferably on edges
+   the layout knows are hidden, against another board, lipped, or in a
+   groove or joint; never on a show edge, under a chamfer, or where a pocket
+   thins the part. A tabbed part is judged by its own pivot with the tabs
+   as a couple (`joint_margin`), not by the assembly's lever, which fixes
+   the second fault. The same position rules go into Auto Setup's
+   length-based mode (`lib/auto_setup/tabs.py`), which is what Florian uses
+   today and is unhappy with.
+3. **No wider web.** A wider web around weak parts was dropped in the
    nesting review [decided 2026-10-16, `design/nesting.md`]: 13 to 19 mm of
-   web holds nothing either. A small part is anchored to larger ones by
-   tabs, which is what the order in 1 and the anchor rule in 4 are for;
-   what fails even with tabs is reported.
-6. **Loose waste.** The waste inside a through cutout is a piece too; the
-   examples have five of 3 to 36 cm², which the cutter can throw. Tabs
-   where it fails, as for a part, since the plan has the same model for it
-   [proposed].
+   web holds nothing either. Skin and release holds a small part by its own
+   vacuum; what fails even with tabs is reported.
+4. **Loose waste.** The waste inside a through cutout is a piece too; the
+   examples have five of 3 to 36 cm², which the cutter can throw. It is
+   released like a part, in the release order; tabs where it fails, as for
+   a part, since the plan has the same model for it [proposed].
 
 ### Prior art
 
