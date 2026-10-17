@@ -152,8 +152,8 @@ The values a build standardizes (a material, a chamfer size, the nest's,
 later the CAM's) flow down the build as settings, set once where they
 apply and overridden below, as SwiftUI's environment does [Florian,
 2026-10-16]. Code: `lang/core/settings.py`, the core's keys in
-`lang/core/keys.py`, the nest's in `lang/nesting/keys.py`; what is still
-to come (the CAM keys, pinning) in `design/proposals/settings.md`.
+`lang/core/keys.py`, the nest's in `lang/nesting/keys.py`, the CAM's in
+`lang/cam/keys.py`; the design in `design/proposals/settings.md`.
 
 - **Keys.** `setting(default, name)` makes a typed key where the code that
   reads it lives: `drawer_gap = setting(3.0, "drawer_gap")` is a
@@ -219,6 +219,11 @@ to come (the CAM keys, pinning) in `design/proposals/settings.md`.
   give two, naming two parts, their values and where each came from;
   between two parts the larger of their spacings holds
   (`design/nesting.md`, What is nested).
+- **The CAM's keys**, from `lang.cam` (`from lang import cam`): the
+  templates per kind, the cutter, finishing, the breakthrough and the skin,
+  tabs and their thresholds (`cam.tabs("forced")` on a part), the waste
+  area, the smallest cutter; nothing reads them during the build, the CAM
+  plan from the layout (`design/cam.md`, Keys).
 - **The master's parameters** become settings where the build's index of
   the master binds them: `spalt = van.setting("Spalt")` (`design/master.md`).
 - **Provenance.** The layout carries per part the settings set along its
@@ -293,7 +298,7 @@ to come (the CAM keys, pinning) in `design/proposals/settings.md`.
   each module by material, and a board a remake around its module names
   stays in its module's nest too. A declared nest that would take the default's name is an
   error, and one that takes no board a problem in the layout.
-- The layout (version 8) lists each module's nests, declared and default:
+- The layout (version 8 on) lists each module's nests, declared and default:
   path, module, how the parts were chosen, the material, the parts' paths,
   the boards of its material in its scope left out (`nest(False)`,
   manual), and the nest's own settings with their source; and the sheet

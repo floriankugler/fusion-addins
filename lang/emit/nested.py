@@ -75,6 +75,17 @@ def check_nest_version(nest: Any) -> None:
         raise ValueError(f"nest version {found} is not supported (this reads {NEST_VERSION}).")
 
 
+def sheet_places(material: Any) -> list[float]:
+    """Where each piece of stock of a material's nest lies in its document:
+    its corner's y (mm), one above the other, `GAP` apart; x is 0."""
+    places: list[float] = []
+    y = 0.0
+    for s in material["sheets"]:
+        places.append(y)
+        y += float(s["size"][1]) + GAP
+    return places
+
+
 def plan_nest(nest: Any, layout: Layout, material: str | None = None) -> list[NestDocPlan]:
     """The documents a nest draws: one per material (or the one named)."""
     check_nest_version(nest)
@@ -86,8 +97,7 @@ def plan_nest(nest: Any, layout: Layout, material: str | None = None) -> list[Ne
             continue
         t = float(m["thickness"])
         sheets: list[SheetPlan] = []
-        y = 0.0
-        for s in m["sheets"]:
+        for s, y in zip(m["sheets"], sheet_places(m)):
             length, width = float(s["size"][0]), float(s["size"][1])
             sheet = SheetPlan(str(s["name"]), str(s["stock"]), (length, width), (0.0, y))
             for b in s["blanks"]:
@@ -103,7 +113,6 @@ def plan_nest(nest: Any, layout: Layout, material: str | None = None) -> list[Ne
                     blank.parts.append(PlacedPartPlan(path, parts[path], rows))
                 sheet.blanks.append(blank)
             sheets.append(sheet)
-            y += width + GAP
         problems = [str(p) for p in nest["problems"] if str(p).startswith(f"{m['material']}:")]
         docs.append(NestDocPlan(str(m["material"]), t, sheets, problems))
     if material is not None and not docs:

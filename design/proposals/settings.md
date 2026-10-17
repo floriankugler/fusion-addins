@@ -69,6 +69,20 @@ through tomlkit (added to the venv after the first build of this stage,
 which rewrote it line by line), read back and checked; the fingerprint is taken in the four quarter turns of the part's plane,
 rounded to 1/1024 mm.
 
+Built 2026-10-17, stage 4: the CAM plan with its keys (`cam.*` in
+`lang/cam/keys.py`, the table's cam rows less `tab_edges`,
+`finishing_stepdown`, the rule constants and the holding calibration,
+which stay constants or open; plus `cam.templates`, `cam.skin`,
+`cam.tab_margin`, `cam.tab_area` and `cam.waste_area` from the
+2026-10-17 holding decision), described in `design/cam.md`. Read as the
+nest reads its keys: the templates' folder, the breakthrough, the skin and
+the smallest cutter agree across the nest; every other key per part and
+named operation, nearest first, the operation, the nest, the part's chain,
+the default. The plan reads them from the build as it is now (the command
+runs it), its geometry from the layout nested. `smallest_cutter` defaults
+to the templates' narrowest and the plan states it; a group's shared gaps
+wait for manufacturing groups.
+
 The syntax review's item 16 (`syntax.md`, 2026-10-15) decided against a
 defaults object for the modeling calls. Florian reopened it the next day:
 the values a build standardizes across its modules (drawer gaps, finger
@@ -456,7 +470,8 @@ built [Florian]. Each stage is a session of its own [proposed].
    the nest file (its version 3), the state file marking nests as made,
    re-nesting changed parts beside a frozen nest, rests into the ledger.
 4. **The CAM plan** (`cam.md`) with its keys, including `smallest_cutter`
-   and a group's shared gaps.
+   [built 2026-10-17, `design/cam.md`; the Fusion emitter of the plan
+   comes next, a group's shared gaps with manufacturing groups].
 
 Independent of the settings, from the nesting review, in their own
 sessions whenever Florian wants them: the layout refusing a cut through a

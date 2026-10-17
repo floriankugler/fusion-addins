@@ -65,8 +65,9 @@ from shapely.ops import unary_union
 from ..core import corners as corner_geometry
 from ..core.contact import Contact
 from ..core.directions import Axis
-from ..core.dogbones import DogBones, corner_relief, hidden_relief
+from ..core.dogbones import DogBones, corner_bone, hidden_bone
 from ..core.errors import LangError, one_of
+from ..core.ops import DogBone
 from ..core.part import Board, Face
 from ..core.shapes import Shape, box_shape
 from .common import (EPS, Names, Point2, PROBE, find_contacts, hidden_far_side, hidden_fits, hidden_width, other_of,
@@ -191,7 +192,7 @@ class Groove:
         frame = _Frame(board, c.axis, t)
         shape = frame.rect(a0, a1, w0, w1)
         material = board.outline.geometry
-        reliefs: list[Shape] = []
+        reliefs: list[DogBone] = []
         notes: list[str] = []
         for a, s_a, joined in ((a0, -1, ends[0][1]), (a1, 1, ends[1][1])):
             beyond = material.contains(Point(frame.point(a + s_a * PROBE, (w0 + w1) / 2)))
@@ -208,11 +209,11 @@ class Groove:
                 if all(material.contains(Point(p)) for p in around):
                     reliefs.append(self._relief(frame, (a, w), s_a, s_w, w1 - w0, panel, board))
         for relief in reliefs:
-            shape = shape.union(relief)
-        return _Cut(board, c.face, shape, self.depth + clearance, notes)
+            shape = shape.union(relief.shape)
+        return _Cut(board, c.face, shape, self.depth + clearance, notes, reliefs)
 
     def _relief(self, frame: _Frame, corner: tuple[float, float], s_a: int, s_w: int, width: float,
-                panel: Board, board: Board) -> Shape:
+                panel: Board, board: Board) -> DogBone:
         """The dog bone in the groove's corner at its end `s_a` and edge
         `s_w`; the end runs across the groove, the edge along it."""
         if self.tool > width + EPS:
@@ -230,19 +231,21 @@ class Groove:
             if not board.outline.geometry.contains(Point(frame.point(*far))):
                 raise LangError(f"hidden dog bones would break out of {board.path} past the end of the groove for "
                                 f"{panel.path}; use corner dog bones or a smaller tool.")
-            return hidden_relief(point, across, self.tool, self.relief)
-        return corner_relief(point, across, back, self.tool, self.relief)
+            return hidden_bone(point, across, self.tool, self.relief)
+        return corner_bone(point, across, back, self.tool, self.relief)
 
 
 @dataclass
 class _Cut:
     """A groove to cut: its board, the face it is cut from, its shape in
-    the board's outline frame, its depth and the notes it leaves."""
+    the board's outline frame, its depth, the notes it leaves and the dog
+    bones in its shape."""
     board: Board
     face: Face
     shape: Shape
     depth: float
     notes: list[str]
+    bones: list[DogBone] = field(default_factory=list[DogBone])
 
 
 @dataclass
@@ -257,7 +260,7 @@ class _Plan:
         for i, other in enumerate(self.cuts):
             if other.board is cut.board:
                 self.cuts[i] = _Cut(cut.board, cut.face, other.shape.union(cut.shape), cut.depth,
-                                    other.notes + cut.notes)
+                                    other.notes + cut.notes, other.bones + cut.bones)
                 return
         self.cuts.append(cut)
 
@@ -271,7 +274,8 @@ class _Plan:
         for cut in self.cuts:
             board = cut.board
             with reported(Groove.label, part, board if part is panel else panel):
-                board.add_pocket(cut.face, cut.shape, cut.depth, name=names(board, f"groove_{panel.name}", panel))
+                board.add_pocket(cut.face, cut.shape, cut.depth, name=names(board, f"groove_{panel.name}", panel),
+                                 dogbones=cut.bones)
             board.notes.extend(cut.notes)
 
 

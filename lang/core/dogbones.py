@@ -53,8 +53,8 @@ from shapely.ops import unary_union
 from ..emit.arcs import MAX_STEP, Line2, fit
 from .cutouts import circle_geometry
 from .errors import LangError
-from .ops import Cut, Hole, Pocket
-from .shapes import Shape, circle
+from .ops import Cut, DogBone, Hole, Pocket
+from .shapes import Shape
 from .geometry import NARROWEST, opened, polygons_of
 
 if TYPE_CHECKING:
@@ -77,7 +77,7 @@ _SLIVER = 1e-6
 
 # -- the reliefs' geometry -------------------------------------------------------------------
 
-def corner_relief(corner: Point2, a: Point2, b: Point2, tool: float, relief: float) -> Shape:
+def corner_bone(corner: Point2, a: Point2, b: Point2, tool: float, relief: float) -> DogBone:
     """The dog bone at `corner`, whose edges run along the unit vectors `a`
     and `b` from it, as dog_bones_native draws it: centred on the bisector,
     `(tool / 2) / sin(angle)` from the corner, and that plus `relief / 2` in
@@ -89,10 +89,15 @@ def corner_relief(corner: Point2, a: Point2, b: Point2, tool: float, relief: flo
     reach = tool / 2 / sin
     bx, by = a[0] + b[0], a[1] + b[1]
     k = reach / math.hypot(bx, by)
-    return circle(2 * reach + relief, (corner[0] + bx * k, corner[1] + by * k))
+    return DogBone((corner[0] + bx * k, corner[1] + by * k), 2 * reach + relief, tool)
 
 
-def hidden_relief(corner: Point2, along: Point2, tool: float, relief: float) -> Shape:
+def corner_relief(corner: Point2, a: Point2, b: Point2, tool: float, relief: float) -> Shape:
+    """The circle of `corner_bone`."""
+    return corner_bone(corner, a, b, tool, relief).shape
+
+
+def hidden_bone(corner: Point2, along: Point2, tool: float, relief: float) -> DogBone:
     """A dog bone that stays out of sight: centred on the edge that runs
     from `corner` along the unit vector `along`, half the tool plus half
     the relief from the corner, so it touches the corner's other edge and
@@ -100,7 +105,12 @@ def hidden_relief(corner: Point2, along: Point2, tool: float, relief: float) -> 
     it (a tenon's root under the mortise, a mortise's end under the
     shoulder, a lap's floor in the other board's notch)."""
     r = (tool + relief) / 2
-    return circle(2 * r, (corner[0] + along[0] * r, corner[1] + along[1] * r))
+    return DogBone((corner[0] + along[0] * r, corner[1] + along[1] * r), 2 * r, tool)
+
+
+def hidden_relief(corner: Point2, along: Point2, tool: float, relief: float) -> Shape:
+    """The circle of `hidden_bone`."""
+    return hidden_bone(corner, along, tool, relief).shape
 
 
 # -- inside corners of a board ---------------------------------------------------------------
@@ -314,41 +324,43 @@ class Relief:
     """The reliefs of one operation's corners at one depth, to add to the
     board as an operation named `name` (made unique by the board): a
     through cut when `face` is None, else a pocket from `face`, `depth`
-    deep or through when `depth` is None."""
+    deep or through when `depth` is None; `bones` the circles."""
     name: str
     face: str | None
     depth: float | None
     shape: Shape
+    bones: tuple[DogBone, ...] = ()
 
 
 def reliefs(board: Board, request: Request) -> list[Relief]:
     """The reliefs a request puts into the board's corners as it is now,
     one per operation the corners belong to (the last that runs through
     each) and depth."""
-    groups: dict[tuple[str, str | None, float | None], list[Shape]] = {}
+    groups: dict[tuple[str, str | None, float | None], list[tuple[Shape, DogBone]]] = {}
     for c in corners(board):
         if request.at is not None and not any(_names(c, target) for target in request.at):
             continue
         base = f"{c.ops[-1]}_dogbones" if c.ops else "outline_dogbones"
         face = None if c.bottom is None and c.outline_cut else c.face
-        groups.setdefault((base, face, c.bottom), []).append(_relief_shape(c, request))
+        groups.setdefault((base, face, c.bottom), []).append(
+            (_relief_shape(c, request), corner_bone(c.point, c.a, c.b, request.tool, request.relief)))
     # In the order of the operations they belong to, the outline's own corners
     # first, then by face and depth: the order the corners are found in
     # follows where each ring starts, which follows the board's place in the
     # world [found by fuzzing, 2026-10-13].
     order = {getattr(op, "name", None): k for k, op in enumerate(board.ops)}
 
-    def key(item: tuple[tuple[str, str | None, float | None], list[Shape]]) -> tuple[int, str, float]:
+    def key(item: tuple[tuple[str, str | None, float | None], list[tuple[Shape, DogBone]]]) -> tuple[int, str, float]:
         (base, face, depth), _ = item
         owner = base.removesuffix("_dogbones")
         return (order.get(owner, -1), face or "", math.inf if depth is None else depth)
 
     out: list[Relief] = []
-    for (base, face, depth), shapes in sorted(groups.items(), key=key):
-        shape = shapes[0]
-        for s in shapes[1:]:
+    for (base, face, depth), made in sorted(groups.items(), key=key):
+        shape = made[0][0]
+        for s, _bone in made[1:]:
             shape = shape.union(s)
-        out.append(Relief(base, face, depth, shape))
+        out.append(Relief(base, face, depth, shape, tuple(bone for _s, bone in made)))
     return out
 
 

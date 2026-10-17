@@ -63,8 +63,9 @@ from shapely.geometry import box as shapely_box
 from ..core.contact import Contact
 from ..core.directions import Axis
 from ..core.errors import LangError
+from ..core.ops import DogBone
 from ..core.part import Face
-from ..core.shapes import Shape, circle
+from ..core.shapes import Shape
 from .common import EPS, ContactJoint, Naming, Point2, face_toward, union_all
 
 #: How far notches and gaps reach past the end they open toward, so they open cleanly, mm.
@@ -146,8 +147,9 @@ class BoxJoint(ContactJoint):
             grooves = union_all([corner.on_tips(_lens(corner.tb, z, r)) for z in sides])
             b.add_edge_pocket(c.end, grooves, seat - r, name=naming(b, f"finger_{a.name}_grooves"),
                               offset=corner.tips_offset)
-            reliefs = union_all([circle(2 * r, corner.point_b(seat - r, z)) for z in sides])
-            b.add_pocket(corner.b_inner, reliefs, r, name=naming(b, f"finger_{a.name}_reliefs"))
+            bones = [DogBone(corner.point_b(seat - r, z), 2 * r, self.tool) for z in sides]
+            b.add_pocket(corner.b_inner, union_all([bone.shape for bone in bones]), r,
+                         name=naming(b, f"finger_{a.name}_reliefs"), dogbones=bones)
 
         # The notched board: the notches, the grooves along their walls
         # (open toward the notch) and the dog bones on those walls.
@@ -158,9 +160,10 @@ class BoxJoint(ContactJoint):
                               for z, opens in ((z0, 1), (z1, -1))])
             a.add_edge_pocket(corner.a_end, grooves, bottom, name=naming(a, f"notch_{b.name}_grooves"),
                               offset=corner.a_end_offset)
-            reliefs = union_all([circle(2 * r, corner.point_a(bottom - r, z)) for z0, z1 in notches
-                              for z in (z0, z1)])
-            a.add_pocket(c.face, reliefs, r, name=naming(a, f"notch_{b.name}_reliefs"))
+            bones = [DogBone(corner.point_a(bottom - r, z), 2 * r, self.tool) for z0, z1 in notches
+                     for z in (z0, z1)]
+            a.add_pocket(c.face, union_all([bone.shape for bone in bones]), r,
+                         name=naming(a, f"notch_{b.name}_reliefs"), dogbones=bones)
 
 
 class _Corner:

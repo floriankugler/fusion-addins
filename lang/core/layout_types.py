@@ -1,11 +1,13 @@
-"""The layout file's shape, version 8.
+"""The layout file's shape, version 9.
 
 This is the contract between the language and its consumers (the preview
 mesher, the Fusion emitter, the viewer page, the nest). Bump LAYOUT_VERSION
 on incompatible changes; `lang.emit.plan` and the viewer repeat it and
 refuse other versions.
 
-Version 8 (2026-10-16): each module lists its `nests`, declared and
+Version 9 (2026-10-17): a cut and a pocket list the `dogbones` their shape
+holds, each a circle with the tool it was drawn for, for the CAM plan
+(`lang.cam`). Version 8 (2026-10-16): each module lists its `nests`, declared and
 default, with their parts and own settings, and the layout its sheet
 `sheet_materials` with their sizes. Version 7 (2026-10-16): a part carries `settings`, the settings set along
 its chain with the node that set each, and `op_settings`, its named
@@ -22,7 +24,7 @@ from __future__ import annotations
 
 from typing import Literal, NotRequired, TypedDict
 
-LAYOUT_VERSION = 8
+LAYOUT_VERSION = 9
 
 #: One or more polygons as rings of [u, v] points, one polygon after the
 #: other: its exterior ring, counter-clockwise, then its holes, clockwise.
@@ -54,11 +56,24 @@ class AxesDict(TypedDict):
     v: str
 
 
+class DogBoneLayout(TypedDict):
+    """A dog bone in a cut's or pocket's shape (`lang.core.dogbones`): the
+    circle drawn as a relief, its centre [u, v] in the frame of the shape
+    and its diameter, for a cutter `tool` mm across. The shape has it
+    already."""
+    center: list[float]
+    d: float
+    tool: float
+
+
 class CutLayout(TypedDict):
     kind: Literal["cut"]
     name: str | None
     chamfer: float
     shape: Rings
+    #: The dog bones its shape holds: a `dogbones()` relief's, a joint's
+    #: in its cut.
+    dogbones: list[DogBoneLayout]
 
 
 class SlotLayout(TypedDict):
@@ -82,6 +97,8 @@ class PocketLayout(TypedDict):
     shape: Rings
     #: The centre line of a slot (`shape` is the slot itself), else None.
     slot: SlotLayout | None
+    #: The dog bones its shape holds.
+    dogbones: list[DogBoneLayout]
 
 
 class HoleLayout(TypedDict):

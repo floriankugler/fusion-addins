@@ -75,8 +75,25 @@ done. What the preview could do for writing build files is
   another bed) do not count as a change: a nest compares its parts'
   fingerprints only. The preview could say when the values a nest would
   run with differ from those in its file.
+- **A CAM plan whose settings changed in the build** is not shown as stale
+  in the preview: only one planned for another nest file is. The server
+  could resolve the nest's CAM settings from the build (`lang.cam.resolve`)
+  and compare them with the plan's `settings.values`.
+- **The nest view's zoom**: a 2 mm hole or a Domino slot is a speck on a
+  whole sheet; the CAM layer's strokes are in screen pixels, but a zoom to
+  the blank or to the chosen operation's features would show them.
 - **`nest(False)` boards no nest names** are still only listed as not
   nested; the cut list (`design/nesting.md`, Still open) is where they go.
+- **The CAM plan's choices to review** (`design/cam.md`, marked [chosen]):
+  a narrower pocket template alone at ¾ of the widest, the 8 mm adaptive's
+  room of twice its cutter, the tabs' neighbour classes and weights, a
+  hidden edge by another part's box, `cam.waste_area` at 10 cm², the CAM
+  settings read from the build as it is now. Keys of the settings table not
+  built: `cam.tab_edges`, `cam.finishing_stepdown`, Auto Setup's rule
+  constants and the holding calibration. In Fusion (`design/cam.md`, In
+  Fusion): a rest, a dog bone plunged with a drill, an own blank and a
+  finishing template not yet tried; the stock as a fixed box and a `nest.json`
+  drawn without setups, chosen.
 - **Corners named by a point** (`panel.top.front(60).left(40)`) for
   `fillet()` and `chamfer()`, once a build needs it.
 - **Try the language on real modules**: write two modules from the van in

@@ -374,3 +374,12 @@ Rules:
 - Verified in Fusion against dog_bones_native on `examples/dogbones.py`'s
   boards: zero boolean difference both ways and equal face counts on all
   seven parts.
+- **Marked in the layout** (version 9, 2026-10-17): a cut or pocket lists
+  the dog bones its shape holds (`dogbones`: each circle's centre and
+  diameter, and the tool it was drawn for), a `dogbones()` relief its
+  circles, a joint's cut or pocket those it put in (tenons, half laps,
+  grooves, the box joints' relief pockets, whose circles are a tool
+  across). The shape has them already; the mark says what they are, so the
+  CAM plan mills one with a dog bone cutter where its operation's cutter is
+  too wide, and never takes a slot's round end for one (`design/cam.md`).
+  `corner_bone` and `hidden_bone` give a relief with its mark.

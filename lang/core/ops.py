@@ -11,12 +11,28 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-from .shapes import Shape
+from .shapes import Shape, circle
 
 #: The smallest chamfer (mm) an operation takes, besides 0 for none: Fusion
 #: fails on far smaller ones (6e-5 mm, compiling fuzz boards 2026-10-12),
 #: and a hundredth of a millimetre is less than any tool leaves anyway.
 MIN_CHAMFER = 0.01
+
+
+@dataclass(frozen=True)
+class DogBone:
+    """A dog bone in a cut's or pocket's shape (`lang.core.dogbones`): the
+    circle drawn as a relief, its centre in the shape's frame and its
+    diameter, for a cutter of `tool` mm. The shape has it already; this
+    says what it is, for the CAM plan, which mills it with a dog bone
+    cutter where the operation's own is too wide."""
+    center: tuple[float, float]
+    d: float
+    tool: float
+
+    @property
+    def shape(self) -> Shape:
+        return circle(self.d, self.center)
 
 
 @dataclass
@@ -25,6 +41,8 @@ class Cut:
     shape: Shape
     name: str | None = None
     chamfer: float = 0.0
+    #: The dog bones its shape holds.
+    dogbones: tuple[DogBone, ...] = ()
     kind: Literal["cut"] = "cut"
 
 
@@ -47,6 +65,8 @@ class Pocket:
     chamfer: float = 0.0
     #: For a slot (`Board.slot`), its centre line; its `shape` is the slot.
     slot: SlotLine | None = None
+    #: The dog bones its shape holds.
+    dogbones: tuple[DogBone, ...] = ()
     kind: Literal["pocket"] = "pocket"
 
 

@@ -1,14 +1,27 @@
 """The preview server's bookkeeping (`lang.preview.__main__`): which files
 of a folder are build files, which designs a change makes stale, which
 ones it builds, a build that fails or runs too long keeping the last good
-one, and the files it serves."""
+one, the nests and their CAM plans it lists and runs, and the files it
+serves."""
+import functools
+import http.server
+import json
 import os
+import re
+import threading
+import time
+import urllib.error
+import urllib.request
+from collections.abc import Generator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from lang.preview.__main__ import VIEWER_DIR, Designs, _Handler, nest_state, rebuild, renest, scan  # type: ignore[reportPrivateUsage]
+from lang.cam.plan_types import CAM_VERSION
+from lang.preview.__main__ import (VIEWER_DIR, Designs, _Handler, nest_state, rebuild, renest, replan,  # type: ignore[reportPrivateUsage]
+                                   scan)
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
 
@@ -183,7 +196,7 @@ with module('cabinet', Box.from_size(width=300, depth=200, height=400)) as m:
 
 def _entry(path: str, folder: str, state: str = "none") -> dict[str, object]:
     return {"path": path, "dir": folder, "follows": "", "state": state, "sheets": [], "made": [], "changed": [],
-            "new": [], "gone": []}
+            "new": [], "gone": [], "plan": {"state": "none"}}
 
 
 def test_the_nests_listed_say_what_changed_since_by_their_parts(tmp_path: Path):
@@ -300,3 +313,107 @@ def test_the_server_serves_nothing_outside_out(tmp_path: Path):
     for escape in ("/out/../secret.txt", "/out/%2e%2e/secret.txt", "/out/cabinet/../../secret.txt", "/out/link.txt"):
         assert handler.translate_path(escape) == str(out.resolve() / "missing"), escape
     assert handler.translate_path("/index.html") == str(VIEWER_DIR / "index.html")
+
+
+def test_a_nests_plan_says_when_it_was_written_and_goes_stale_with_its_nest(tmp_path: Path):
+    path = write(tmp_path, "cabinet.py", NESTED)
+    designs = Designs(path, tmp_path / "out")
+    design = designs.designs["cabinet"]
+    assert rebuild(path, design.out)
+    assert not designs.ask_plan("cabinet", "cabinet.sides")                 # not nested yet
+    assert renest(path, design.out, "cabinet.sides", "cabinet/sides")
+    assert nest_state(design)[0]["plan"] == {"state": "none"}
+    assert not designs.ask_plan("gone", "cabinet.sides") and not designs.ask_plan("cabinet", "cabinet.oak")
+    assert designs.ask_plan("cabinet", "cabinet.sides") and design.planning == ["cabinet.sides"]
+    assert nest_state(design)[0]["plan"]["state"] == "running"
+    assert replan(path, design.out, "cabinet.sides", "cabinet/sides/")
+    design.planning.clear()
+    folder = design.out / "cabinet" / "sides"
+    nest, plan = json.loads((folder / "nest.json").read_text()), json.loads((folder / "cam.json").read_text())
+    entry = nest_state(design)[0]
+    assert entry["plan"] == {"state": "ok", "written": plan["written"], "nest_written": nest["written"],
+                             "version": str((folder / "cam.json").stat().st_mtime_ns)}
+    assert "planned ->" in (folder / "cam.log").read_text()
+    # The nest written again: its plan is of another nest file.
+    nest["written"] = "2026-10-18T09:00:00+02:00"
+    (folder / "nest.json").write_text(json.dumps(nest))
+    entry = nest_state(design)[0]["plan"]
+    assert entry["state"] == "stale" and entry["nest_written"] == plan["nest_written"]
+    assert entry["why"] == f"planned for the nest written {plan['nest_written']}, the nest beside it was written " \
+                           "2026-10-18T09:00:00+02:00"
+    assert replan(path, design.out, "cabinet.sides", "cabinet/sides/")
+    assert nest_state(design)[0]["plan"]["state"] == "ok"
+    # A plan of another version.
+    (folder / "cam.json").write_text(json.dumps({**plan, "version": CAM_VERSION + 1, "nest_written": nest["written"]}))
+    entry = nest_state(design)[0]["plan"]
+    assert entry["state"] == "stale" and entry["why"] == f"a plan of version {CAM_VERSION + 1}, this preview reads " \
+                                                         f"{CAM_VERSION}"
+    # The other nest, not nested, has no plan to show.
+    assert nest_state(design)[1]["plan"] == {"state": "none"}
+
+
+def test_a_failed_plan_says_why(tmp_path: Path):
+    path = write(tmp_path, "cabinet.py", NESTED)
+    designs = Designs(path, tmp_path / "out")
+    design = designs.designs["cabinet"]
+    assert rebuild(path, design.out) and renest(path, design.out, "cabinet.sides", "cabinet/sides")
+    (design.out / "cabinet" / "sides" / "nest.layout.json").write_text('{"version": 2}')
+    assert not replan(path, design.out, "cabinet.sides", "cabinet/sides/")
+    design.plan_failed.add("cabinet.sides")
+    plan = nest_state(design)[0]["plan"]
+    assert plan["state"] == "failed" and "Nest it again" in plan["log"]
+    assert designs.ask_plan("cabinet", "cabinet.sides") and design.plan_failed == set()
+
+
+def test_the_cam_view_reads_the_plans_version():
+    """The viewer repeats CAM_VERSION, as it repeats the layout's."""
+    cam_js = (VIEWER_DIR / "cam.js").read_text()
+    found = re.search(r"^export const CAM_VERSION = (\d+);", cam_js, re.MULTILINE)
+    assert found is not None and int(found.group(1)) == CAM_VERSION
+
+
+@contextmanager
+def _serving(designs: Designs) -> Generator[str]:
+    """The preview's server on a free port, without its builder: its url."""
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(_Handler, designs=designs))
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        yield f"http://127.0.0.1:{server.server_address[1]}/"
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def _post(url: str) -> int:
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, method="POST")) as response:
+            return response.status
+    except urllib.error.HTTPError as error:
+        return error.code
+
+
+def test_the_server_lists_serves_and_plans_a_nests_plan(tmp_path: Path):
+    path = write(tmp_path, "cabinet.py", NESTED)
+    designs = Designs(path, tmp_path / "out")
+    design = designs.designs["cabinet"]
+    assert rebuild(path, design.out) and renest(path, design.out, "cabinet.sides", "cabinet/sides")
+    with _serving(designs) as url:
+        assert _post(url + "plan?design=cabinet&nest=cabinet.oak") == 404
+        assert _post(url + "plan?design=cabinet&nest=cabinet.birch_15") == 404          # not nested
+        assert _post(url + "plan?design=cabinet&nest=cabinet.sides") == 200
+        with urllib.request.urlopen(url + "status.json?design=cabinet&page=t") as response:
+            (sides, _default) = json.loads(response.read())["design"]["nests"]
+        assert sides["plan"]["state"] == "running" and design.planning == ["cabinet.sides"]
+        threading.Thread(target=designs.nest_forever, daemon=True).start()
+        for _ in range(600):
+            if not design.planning:
+                break
+            time.sleep(0.1)
+        with urllib.request.urlopen(url + "status.json?design=cabinet&page=t") as response:
+            shown = json.loads(response.read())["design"]
+        (sides, _default) = shown["nests"]
+        assert sides["plan"]["state"] == "ok"
+        with urllib.request.urlopen(url + shown["url"] + sides["dir"] + "cam.json") as response:
+            plan = json.loads(response.read())
+        assert plan["version"] == CAM_VERSION and plan["nest"] == "cabinet.sides"
+        assert [s["name"] for s in plan["setups"]] == ["cabinet.sides birch 15 1.1"]
