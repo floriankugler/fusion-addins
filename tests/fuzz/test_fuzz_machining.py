@@ -55,8 +55,8 @@ def test_the_plan_writes_its_rings_unrounded():
 def test_a_rest_has_room_around_what_it_takes():
     """A rest that was only what the wider cutter left missed the corner's
     fillet beside it, which a cutter a hair smaller leaves with it: a rest
-    reaches a cutter's radius into what the wider one cleared [found by
-    fuzzing, 2026-10-17]."""
+    reaches into what the wider one cleared (now a cutter's diameter and the
+    clearance) [found by fuzzing, 2026-10-17]."""
     part = PartCase(material=2, side="back", size=(126.02619231962115, 344.94422405029616), features=(
         Feature("hole", 0, 7.0, 307.94422405029616, 25.0, 0.0, 0.0, 0.5),
         Feature("hole", 0, 10.0, 324.94422405029616, 18.55368990985904, 0.0, 0.0, 0.6308834993105018)),
@@ -82,3 +82,17 @@ def test_each_piece_of_a_pocket_has_its_own_rests():
         Feature("slot", 1, 52.5, 25.43747801059446, 38.0, 92.0, 90.0, 0.5),),
         opening=(0.6714566566125633, 0.8), machined=1)
     assert run_plan(_one(part, tabs="forced", cutter="udc", tab_margin=3.0)) == []
+
+
+def test_a_rest_need_not_reach_what_another_rest_takes():
+    """Kept inside its rest, the 2 mm cutter missed a sliver of what the 6 mm
+    left where its rest overlapped the 3.175 mm rest's, which takes it: what
+    the pocket's cutter leaves, some rest's cutter reaches [found by
+    fuzzing, 2026-10-17]."""
+    part = PartCase(material=0, side="right", size=(57.0, 122.5), frame=21, features=(
+        Feature("pocket", 0, 0.5, 30.476174936080177, 76.5, 0.0, 30.99004785827913, 0.4623258492163291),
+        Feature("edge_hole", 3, 1.0, 65.5, 10.0, 27.0, 0.0, None),
+        Feature("slot", 1, 26.0, 2.651364678297058, 14.0, 0.005, 9.455349402425226, None),
+        Feature("cut", 0, 19.0, 0.99999, 38.0, 10.951959527940522, 76.42013129730218, None)))
+    assert run_plan(_one(part, dogbones=True, tabs="forced", finish=(True, False, True), tab_margin=3.0,
+                         named=True)) == []

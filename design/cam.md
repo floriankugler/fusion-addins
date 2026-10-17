@@ -99,8 +99,12 @@ the emitter will repeat and refuse others of):
     contour's waste taken out whole), its rings, its depth, a slot's line
     (`slot`: its round ends' centres and its width);
   - `rest`: where a pocket's cutter did not reach, for a narrower one: the
-    region it is to clear, a cutter's radius of room around what was left,
-    in the pocket of the same operation;
+    region it is to clear, what was left with the narrower cutter's
+    diameter and the clearance of room around it, within the pocket of the
+    same operation, so a pocket bounded by it holds the cutter wherever it
+    reaches what was left [found in Fusion, 2026-10-17: with a radius of
+    room, a rest in a rounded corner held no cutter, and the 2D Pocket
+    bounded by it had no passes];
   - `hole`: centre, diameter, depth;
   - `dogbone`: centre, diameter, the tool it was drawn for, depth, and its
     wall as points along the circle where it borders the material;
@@ -137,7 +141,10 @@ There is nothing to recognise: the layout says what each operation is.
   mm deep only, with a note; a hole no bore cutter fits is drilled with a
   drill template of exactly its diameter, at most 4 mm deep, with a note;
   else nothing fits. A through hole over 30 mm is an opening of the
-  outline, a blind one over twice the widest bore cutter a round pocket.
+  outline, a blind one over twice the widest bore cutter a round pocket. A
+  hole with nothing of the board where it is (in what a through pocket
+  takes off the board's edge; the board as a blind pocket's region sees it,
+  below) is gone [found by fuzzing, 2026-10-17: bored off the blank].
   Heights from the stock's top, a chamfered hole's too (its chamfer is the
   V-bit's afterwards), the bottom the hole's own (`from hole bottom`), a
   through one's the stock's bottom less the breakthrough, a tight one's 4
@@ -182,7 +189,10 @@ There is nothing to recognise: the layout says what each operation is.
   widest that gets into the region (its cutter fits at all) takes it; where
   its cutters (an adaptive template's 6 mm clean-up too) leave more than
   the corners' fillets, what is left goes to the next narrower template that
-  reaches it, as a rest, else it is reported. A narrower template that
+  reaches it, as a rest (what was left grown by that cutter's diameter and
+  the clearance, within the pocket: a cutter reaching a point of it lies
+  within its diameter of the point, so it reaches in the rest all it does
+  in the pocket), else it is reported. A narrower template that
   reaches all of the pocket takes it alone where its cutter is at least ¾ of
   the widest's (the 6 mm cuts a groove the 8 mm would leave rests in) [chosen].
   The 8 mm adaptive template is a pure rougher for larger pockets [Florian,
@@ -325,8 +335,10 @@ tests and fuzz tests require it to find nothing:
   material the outline's contours take) at least once, every ring of the
   outline exactly once (a release cuts again what a roughing cut, a rest
   what a pocket's cutter left);
-- every cutter reaches its region: what each cutter of a pocket leaves
-  where it works, a narrower one's rest takes, or a problem says; a contour
+- every cutter reaches its region: what a pocket's cutter leaves, one of
+  its rests' narrower cutters reaches, kept inside that rest as Fusion's
+  pocket bounded by it is (where rests overlap, the one that takes it), or
+  a problem says; a contour
   on its waste side; a dog bone's cutter is narrower than it. The check is
   lenient by a hundredth (a cutter 0.01 mm narrower, a fillet's zone that
   much wider, slivers under 0.05 mm noise), so a decision on the edge for
@@ -507,15 +519,11 @@ van's floor (16 tab positions on both operations of two battens: the
 release's cut 64 mm longer with them, a tab's ramps). Screenshots on that
 Mac, under the worktree's `out/fusion-cam/`, not kept in the repository.
 
-Not exercised in Fusion yet: rests (no example's plan has one now); an
-earlier plan of the drawer cabinet had 24, in the corners where a
-Cabineo hole meets the board's edge, and their 2 mm pocket came out
-empty ("No passes to link"): a rest's region has a cutter's radius of
-room around what was left, so a cutter kept inside it has no room to
-move. A rest needs room of the narrower cutter's diameter (and Fusion's
-clearance) around what was left, within the pocket, for a pocket bounded
-by it [proposed for the plan]. Also not exercised: a dog bone plunged with
-a drill, an own blank, a template with a finishing pass.
+Not exercised in Fusion yet: rests (no example's plan has one now; an
+earlier plan's, with a cutter's radius of room, gave an empty 2D Pocket,
+and a rest now has the narrower cutter's diameter, The plan file), a dog
+bone plunged with a drill, an own blank, a template with a finishing
+pass.
 
 ## Still open
 
@@ -526,7 +534,7 @@ a drill, an own blank, a template with a finishing pass.
   `claude/fusion-cam-dependency-2e0017`, step 1): after the toolpaths are
   generated, once Fusion's future says they are done; not built in stage
   4b, whose brief left posting out.
-- A rest's room (In Fusion, above); the plan in the preview,
+- A rest in Fusion (In Fusion, above); the plan in the preview,
   manufacturing groups and their shared gaps (`cam.smallest_cutter` is
   there for them), the holding model calibrated (the release order and the
   tabs' neighbour weights would follow it), a slot as wide as its cutter

@@ -39,7 +39,7 @@ parameters), with its bottom offset following the height so its top stays
 the parts' top; through the API every chain is turned for its tool to run
 on the waste, as Fusion puts it on the left of a chain's first edge; and a
 rest's region needs a cutter's diameter of room, not its radius, for a
-pocket bounded by it to cut (found, not changed in the plan). Still to
+pocket bounded by it to cut (found in Fusion, since so in the plan). Still to
 come, kept below: the plan in the preview, manufacturing groups, the
 holding model's calibration and the lift margin, a slot cut along its
 line.

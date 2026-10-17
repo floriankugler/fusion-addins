@@ -157,6 +157,42 @@ roughly one kitchen.
 - Today's emitter, with no sketches at all, draws the drawer cabinet (23
   parts) in under 2 s and the van example (42 parts, 119 features) in 1.0 s.
 
+## Measured: document writes (2026-10-17)
+
+The van example (42 parts, 233 features, two modules) compiled in 2.3 s, in
+a Fusion session holding 53 open documents, plus 0.12 s for the new document
+and 0.58 s for the viewport fit the add-in asks for. The drawer cabinet's
+nest (12 parts, one material) in 1.24 s. Per step, the emitter's methods
+timed from an MCP script:
+
+| step | count | s | each |
+|---|---|---|---|
+| pocket steps (`_pockets`) | 64 | 1.35 | 21 ms |
+| bodies (`_make_body`) | 42 | 0.42 | 10 ms |
+| holes (`_holes`) | 116 | 0.42 | 3.6 ms, 1 ms of it `_find_face` |
+| V-grooves | 8 | 0.03 | |
+| the nest's copy, move and place | 12 | 0.07 | 5.5 ms |
+
+The cost is document writes, not kernel work: the 233 features take 1 046
+writes, because every pocket profile is a temporary face body of its own,
+added and deleted again (308 adds and 308 deletes for 64 extrudes), and
+every hole is a feature with a face search before it. A write in a direct
+document costs 2 to 20 ms and grows with the document (above), so the count
+of writes per part is the measure to cut; `design/proposals/performance.md`
+has the options.
+
+What a fresh direct document showed the same day:
+
+- A body from a temporary face, an extrude and the face's deletion: 4 ms.
+- A hole feature: 2.8 ms (3.6 ms in the van's document).
+- The same hole as a temporary cylinder (`createCylinderOrCone`) subtracted
+  from a temporary copy of the body with `booleanOperation`: 0.1 ms, in
+  memory, the volume exact; adding the copy and deleting the old body, once
+  per part, 11 to 21 ms. Forty holes: 17 ms instead of 112 ms.
+- A pocket step of six circles the emitter's way: 11 ms (adds 2, extrude 7,
+  deletes 2; 21 ms in the van's document). As six temporary cylinders: 0.2 ms
+  each.
+
 ## Fusion findings
 
 - A sketch on a face auto-projects the face edges, so its profiles include
@@ -182,3 +218,14 @@ roughly one kitchen.
   only (non-manifold). Chamfers of 6e-5 mm fail.
 - A session-wide slowdown of every modifying call after many document cycles
   is open (see `design/bugs.md`).
+- Two disjoint temporary sheet faces united with `booleanOperation` give one
+  sheet body with two faces (two lumps), so one temporary body can carry
+  every profile of a pocket step (2026-10-17).
+- A prism cannot be built in memory: `createRuledSurface` (it takes the
+  `BRepWire`s, `wireBody.wires.item(0)`, not the wire bodies) between an
+  outline's wires at two heights, united with two planar caps, stays a sheet
+  body (`isSolid` false, volume 0). A stitch feature in the design makes it a
+  solid, returning None while doing so, which costs the same writes as the
+  extrude (2026-10-17).
+- Temporary-B-rep booleans of cylinders and boxes have given exact volumes;
+  a torus boolean was wrong once (2026-10-04).

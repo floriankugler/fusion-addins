@@ -202,6 +202,35 @@ def test_what_no_template_reaches_whole_goes_to_a_narrower_one_as_a_rest():
     assert [t.diameter for t, _p in rounded.rests] == [3.175] * 4
 
 
+def test_a_rests_cutter_has_room_in_it_to_reach_what_it_takes():
+    """A rest is a pocket bounded by its region, for the narrower cutter, so
+    the region must hold that cutter wherever it reaches what the wider one
+    left: a cutter's radius of room around a rounded corner's leftover held
+    no 3.175 mm cutter at all, and Fusion's 2D Pocket bounded by it had no
+    passes; at a channel's mouth it missed a sliver [found in Fusion,
+    2026-10-17]."""
+    channel = shapely_box(0, 0, 200, 100).union(shapely_box(200, 40, 260, 44))   # narrower than 8, not than 3.175
+    rounded = rect(depth=200, width=200).rounded(3).geometry                       # corners tighter than 8
+    for region in (channel, rounded):
+        plan = _pocket(region)
+        assert plan.main is not None and plan.main.diameter == 8 and plan.rests and not plan.unreached
+        left = unreached(region, plan.main.narrowest / 2)
+        for t, rest in plan.rests:
+            assert gets_in(rest, t.diameter / 2)
+            inside = unary_union(unreached(rest, t.narrowest / 2))
+            assert sum(p.intersection(rest).intersection(inside).area for p in left) < 1e-3
+
+
+def test_a_plans_check_keeps_a_rests_cutter_inside_the_rest():
+    with module("m", Box.from_size(width=600, depth=400, height=100)) as m:
+        p = board("panel", ply15).on(m.bottom)
+        p.pocket(rect(depth=200, width=200).rounded(3), at=p.top.center, depth=5, name="tray")
+    nest, layout = _nested()
+    plan = _plan(nest, layout)                   # checked: each rest's cutter, kept inside it, reaches what it takes
+    rests = [(op, f) for s in plan["setups"] for op in s["operations"] for f in op["features"] if f["what"] == "rest"]
+    assert len(rests) == 4 and all(op["tool"]["diameter"] == 3.175 for op, _f in rests)
+
+
 def test_an_adaptive_pocket_needs_its_flute_and_its_area():
     deep = _pocket(shapely_box(0, 0, 200, 100), depth=23)
     assert deep.main is not None and deep.main.stem == "pocket.dc_Tasche 6mm"      # 8 mm flute is 22
@@ -796,6 +825,24 @@ def test_the_opening_test_answers_alike_however_a_ring_is_written():
         [round(p.area, 3) for p in unreached(orient(region, -1.0), 3.0)]
     turned = ring[50:] + ring[:50]
     assert [round(p.area, 3) for p in unreached(Polygon(turned), 3.0)] == left
+
+
+def test_a_hole_in_what_a_through_pocket_takes_off_the_board_is_gone():
+    """A hole whose material a through pocket takes off the board's edge was
+    bored all the same, off what is left of the part and, where the blank
+    fits the part, off the blank [found by fuzzing, 2026-10-17]."""
+    with module("m", Box.from_size(width=600, depth=400, height=100)) as m:
+        p = board("panel", ply15).on(m.bottom)
+        p.hole(d=10, at=p.top.front(10).left(100), depth=through, name="lost", chamfer=1)
+        p.hole(d=8, at=p.top.front(10).left(300), depth=5, name="blind")
+        p.hole(d=8, at=p.top.front(60).left(300), depth=5, name="kept")
+        p.pocket(rect(depth=40, width=700), at=p.top.front, depth=through, name="strip")    # 20 off the front
+    nest, layout = _nested()
+    (setup,) = _plan(nest, layout)["setups"]
+    gone = {(lo["op"]["name"], lo["op"]["aspect"]) for lo in setup["left_out"] if lo["why"] == "gone"}
+    assert {("lost", "op"), ("lost", "chamfer"), ("blind", "op")} <= gone
+    holes = [f["ops"][0]["name"] for op in setup["operations"] for f in op["features"] if f["what"] == "hole"]
+    assert holes == ["kept"]
 
 
 def test_a_pocket_over_an_opening_at_the_edge_stays_within_the_parts_outer_loop():

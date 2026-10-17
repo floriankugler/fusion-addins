@@ -469,6 +469,8 @@ def fit(ring: Sequence[Sequence[float]]) -> list[Curve2]:
     points: list[Point2] = [(float(p[0]), float(p[1])) for p in ring]
     if len(points) > 1 and points[0] == points[-1]:
         points.pop()
+    if not points:      # (a ring without points has no curves [found by fuzzing, 2026-10-17])
+        return []
     points = _from_corner(points)
     n = len(points)
     pieces: list[_Piece] = []

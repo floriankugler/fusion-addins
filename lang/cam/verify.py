@@ -12,8 +12,9 @@ tests require it to find nothing.
   what a pocket's cutter did not reach.
 - Every cutter reaches the region it is given (`regions.unreached`): a
   pocket by its template's narrowest cutter, what it does not reach in a
-  rest that a narrower template reaches or in a problem; a contour on its
-  waste side; the dog bones excused.
+  rest whose narrower template reaches it kept inside the rest (as Fusion's
+  pocket bounded by it is), or in a problem; a contour on its waste side;
+  the dog bones excused.
 - Every contour roughed is released and every one released roughed; the
   release operations' contours are the release order, in it, each part's
   inner contours before its outer one, the parts by their hold (smallest
@@ -37,6 +38,7 @@ from shapely.geometry import box as shapely_box
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
 
+from ..core.geometry import polygons_of
 from ..core.layout_types import Layout, OpLayout, PartLayout
 from ..nesting.nest_types import NestFile
 from . import holding
@@ -200,7 +202,7 @@ def _reach(setup: SetupOut, placed: dict[str, Placed], by_stem: dict[str, Templa
     for t, f, op in mains:
         excused = _discs(placed[f["part"]], f) if f["part"] in placed else None
         if f["what"] == "pocket":
-            # what each of the pocket's cutters leaves where it works, a narrower one's rest takes
+            # what the pocket's cutter leaves, one of its rests' cutters reaches
             region = _region(f["rings"])
             near = region.buffer(10 * CLEAN)                 # a piece of a pocket of several: its own rests
             mine = sorted([e for e in rests.get((f["part"], _key(f)), []) if e[1].difference(near).area < MINUTE],
@@ -208,16 +210,18 @@ def _reach(setup: SetupOut, placed: dict[str, Placed], by_stem: dict[str, Templa
             for rt, _g in mine:
                 if rt.narrowest >= t.narrowest:
                     problems.append(f"a rest of {f['part']} takes a cutter no narrower than its pocket's")
-            for k, (tool, works) in enumerate([(t, region)] + mine):
-                left = [p for p in unreached(region, tool.narrowest / 2, excused, lenient=True)
-                        if p.intersection(works).area > MINUTE]
-                after = unary_union([g for rt, g in mine[k:] if rt.narrowest < tool.narrowest])
-                for piece in left:
-                    if not after.is_empty and piece.difference(after.buffer(10 * CLEAN)).area < MINUTE:
+            left = unreached(region, t.narrowest / 2, excused, lenient=True)
+            # each rest's cutter kept inside the rest, as a pocket bounded by it is in Fusion [found in Fusion,
+            # 2026-10-17: a rest a cutter's radius around what was left had no room for it]; where one rest's
+            # region overlaps what another's cutter takes, that one reaches it [found by fuzzing, 2026-10-17]
+            reached = unary_union([g.difference(unary_union(unreached(g, rt.narrowest / 2, excused, lenient=True)))
+                                   for rt, g in mine]).buffer(10 * CLEAN) if mine else Polygon()
+            regions = unary_union([g for _rt, g in mine]) if mine else Polygon()
+            for p in left:
+                for piece in polygons_of(p.difference(reached) if not reached.is_empty else p):
+                    if piece.area <= MINUTE or "no pocket cutter reaches" in reported:
                         continue
-                    if "no pocket cutter reaches" in reported:
-                        continue
-                    what = "a pocket" if k == 0 else "a rest"
+                    what = "a rest" if piece.intersection(regions).area > MINUTE else "a pocket"
                     problems.append(f"{op['name']}: {what} of {f['part']} is not reached by its cutter "
                                     f"({piece.area:.2f} mm²)")
         elif f["what"] == "outer" or f["what"] == "inner":

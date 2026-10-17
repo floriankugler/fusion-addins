@@ -687,3 +687,33 @@ def test_an_inset_that_parts_a_circle_from_its_neck_keeps_it_on_its_own_circle()
         for c in fit(ring):
             if not isinstance(c, Line2):
                 assert math.dist(c.center, (0, 183)) < 1e-6 and c.radius == pytest.approx(1.75)
+
+
+def test_a_cutout_left_a_hairline_is_refused_and_changes_nothing():
+    """Found by fuzzing (2026-10-17): a 40 mm wide board with rounded
+    corners, its border 20, left the openings a hairline, which `clean`
+    (nothing under 0.01 mm) took away; the cutout was still recorded, with
+    an empty shape, so the layout carried a ring without points and the
+    emitter's arc recovery raised IndexError on it."""
+    with module("m", Box.from_size(width=600, depth=500, height=720)) as m:
+        panel = board("panel", ply12, Shape(box(0, 0, 40, 68)).rounded(15)).on(m.bottom)
+        before = panel.outline.geometry.wkt
+        with pytest.raises(LangError, match="nothing wider than 0.01 mm"):
+            panel.cutout(radius=0)
+    assert panel.ops == [] and panel.outline.geometry.wkt == before
+    layout = build_layout()
+    rings = [r for mod in layout["modules"] for part in mod["parts"]
+             for r in part["outline"] + [ring for op in part["ops"] for ring in op.get("shape", [])]]
+    assert rings and all(len(r) >= 3 for r in rings)
+
+
+def test_an_operation_without_area_is_refused():
+    """Found by fuzzing (2026-10-17), the general rule behind the test
+    above: a cut or pocket whose shape has no area is refused when it is
+    recorded, so no operation with an empty shape reaches the layout."""
+    from lang.core.ops import Cut as _Cut
+    from shapely.geometry import Polygon as _Polygon
+    cab, side = _side()
+    with cab, pytest.raises(LangError, match="has no area"):
+        side._record(_Cut(Shape(_Polygon()), "nothing", 0.0), "nothing")  # pyright: ignore[reportPrivateUsage]
+    assert side.ops == []

@@ -223,3 +223,14 @@ def test_minus_or_plus_a_number_is_an_error():
         _ = rect(depth=20, height=20) + 5  # type: ignore[operator]  -- a number is a type error too
     with pytest.raises(LangError, match=r"shape - 0.5: - takes another shape; .* grows with offset\(\)"):
         _ = rect(depth=20, height=20) - 0.5  # type: ignore[operator]
+
+
+def test_an_empty_shape_has_no_polygons_and_no_rings():
+    """Found by fuzzing (2026-10-17): an empty polygon counted as one
+    polygon of a shape, so the layout got a ring without points, which the
+    emitter's arc recovery and the mesher cannot read."""
+    from shapely.geometry import Polygon as _Polygon
+    empty = Shape(_Polygon())
+    assert empty.is_empty()
+    assert empty.polygons() == []
+    assert empty.rings() == []
