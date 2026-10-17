@@ -13,7 +13,8 @@ heuristics stay out of the language.
 - A command in the compiler add-in that copies the path of the current
   selection to the clipboard, so a face or edge picked in Fusion can be
   written into a build file. Click-to-path in the browser preview is the
-  same thing outside Fusion.
+  same thing outside Fusion, grown to faces, edges and anchors in
+  `preview-assist.md`.
 - Nested copies of parts carry the full path as body name, which is also the
   part label at the machine (done for compiled parts).
 
