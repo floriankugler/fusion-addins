@@ -12,8 +12,9 @@ tests require it to find nothing.
   what a pocket's cutter did not reach.
 - Every cutter reaches the region it is given (`regions.unreached`): a
   pocket by its template's narrowest cutter, what it does not reach in a
-  rest that a narrower template reaches or in a problem; a contour on its
-  waste side; the dog bones excused.
+  rest whose narrower template reaches it kept inside the rest (as Fusion's
+  pocket bounded by it is), or in a problem; a contour on its waste side;
+  the dog bones excused.
 - Every contour roughed is released and every one released roughed; the
   release operations' contours are the release order, in it, each part's
   inner contours before its outer one, the parts by their hold (smallest
@@ -37,6 +38,7 @@ from shapely.geometry import box as shapely_box
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
 
+from ..core.geometry import polygons_of
 from ..core.layout_types import Layout, OpLayout, PartLayout
 from ..nesting.nest_types import NestFile
 from . import holding
@@ -208,11 +210,17 @@ def _reach(setup: SetupOut, placed: dict[str, Placed], by_stem: dict[str, Templa
             for rt, _g in mine:
                 if rt.narrowest >= t.narrowest:
                     problems.append(f"a rest of {f['part']} takes a cutter no narrower than its pocket's")
+            left = unreached(region, t.narrowest / 2, excused, lenient=True)
             for k, (tool, works) in enumerate([(t, region)] + mine):
-                left = [p for p in unreached(region, tool.narrowest / 2, excused, lenient=True)
-                        if p.intersection(works).area > MINUTE]
+                if k == 0:
+                    pieces = left
+                else:
+                    # a rest's cutter kept inside the rest, as a pocket bounded by it is in Fusion [found in
+                    # Fusion, 2026-10-17: a rest a cutter's radius around what was left had no room for it]
+                    inside = unary_union(unreached(works, tool.narrowest / 2, excused, lenient=True))
+                    pieces = [q for p in left for q in polygons_of(p.intersection(works).intersection(inside))]
                 after = unary_union([g for rt, g in mine[k:] if rt.narrowest < tool.narrowest])
-                for piece in left:
+                for piece in [p for p in pieces if p.area > MINUTE]:
                     if not after.is_empty and piece.difference(after.buffer(10 * CLEAN)).area < MINUTE:
                         continue
                     if "no pocket cutter reaches" in reported:

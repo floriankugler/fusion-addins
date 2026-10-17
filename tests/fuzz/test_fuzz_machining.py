@@ -55,8 +55,8 @@ def test_the_plan_writes_its_rings_unrounded():
 def test_a_rest_has_room_around_what_it_takes():
     """A rest that was only what the wider cutter left missed the corner's
     fillet beside it, which a cutter a hair smaller leaves with it: a rest
-    reaches a cutter's radius into what the wider one cleared [found by
-    fuzzing, 2026-10-17]."""
+    reaches into what the wider one cleared (now a cutter's diameter and the
+    clearance) [found by fuzzing, 2026-10-17]."""
     part = PartCase(material=2, side="back", size=(126.02619231962115, 344.94422405029616), features=(
         Feature("hole", 0, 7.0, 307.94422405029616, 25.0, 0.0, 0.0, 0.5),
         Feature("hole", 0, 10.0, 324.94422405029616, 18.55368990985904, 0.0, 0.0, 0.6308834993105018)),

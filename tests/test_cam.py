@@ -202,6 +202,35 @@ def test_what_no_template_reaches_whole_goes_to_a_narrower_one_as_a_rest():
     assert [t.diameter for t, _p in rounded.rests] == [3.175] * 4
 
 
+def test_a_rests_cutter_has_room_in_it_to_reach_what_it_takes():
+    """A rest is a pocket bounded by its region, for the narrower cutter, so
+    the region must hold that cutter wherever it reaches what the wider one
+    left: a cutter's radius of room around a rounded corner's leftover held
+    no 3.175 mm cutter at all, and Fusion's 2D Pocket bounded by it had no
+    passes; at a channel's mouth it missed a sliver [found in Fusion,
+    2026-10-17]."""
+    channel = shapely_box(0, 0, 200, 100).union(shapely_box(200, 40, 260, 44))   # narrower than 8, not than 3.175
+    rounded = rect(depth=200, width=200).rounded(3).geometry                       # corners tighter than 8
+    for region in (channel, rounded):
+        plan = _pocket(region)
+        assert plan.main is not None and plan.main.diameter == 8 and plan.rests and not plan.unreached
+        left = unreached(region, plan.main.narrowest / 2)
+        for t, rest in plan.rests:
+            assert gets_in(rest, t.diameter / 2)
+            inside = unary_union(unreached(rest, t.narrowest / 2))
+            assert sum(p.intersection(rest).intersection(inside).area for p in left) < 1e-3
+
+
+def test_a_plans_check_keeps_a_rests_cutter_inside_the_rest():
+    with module("m", Box.from_size(width=600, depth=400, height=100)) as m:
+        p = board("panel", ply15).on(m.bottom)
+        p.pocket(rect(depth=200, width=200).rounded(3), at=p.top.center, depth=5, name="tray")
+    nest, layout = _nested()
+    plan = _plan(nest, layout)                   # checked: each rest's cutter, kept inside it, reaches what it takes
+    rests = [(op, f) for s in plan["setups"] for op in s["operations"] for f in op["features"] if f["what"] == "rest"]
+    assert len(rests) == 4 and all(op["tool"]["diameter"] == 3.175 for op, _f in rests)
+
+
 def test_an_adaptive_pocket_needs_its_flute_and_its_area():
     deep = _pocket(shapely_box(0, 0, 200, 100), depth=23)
     assert deep.main is not None and deep.main.stem == "pocket.dc_Tasche 6mm"      # 8 mm flute is 22

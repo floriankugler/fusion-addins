@@ -98,8 +98,12 @@ the emitter will repeat and refuse others of):
     contour's waste taken out whole), its rings, its depth, a slot's line
     (`slot`: its round ends' centres and its width);
   - `rest`: where a pocket's cutter did not reach, for a narrower one: the
-    region it is to clear, a cutter's radius of room around what was left,
-    in the pocket of the same operation;
+    region it is to clear, what was left with the narrower cutter's
+    diameter and the clearance of room around it, within the pocket of the
+    same operation, so a pocket bounded by it holds the cutter wherever it
+    reaches what was left [found in Fusion, 2026-10-17: with a radius of
+    room, a rest in a rounded corner held no cutter, and the 2D Pocket
+    bounded by it had no passes];
   - `hole`: centre, diameter, depth;
   - `dogbone`: centre, diameter, the tool it was drawn for, depth, and its
     wall as points along the circle where it borders the material;
@@ -181,7 +185,10 @@ There is nothing to recognise: the layout says what each operation is.
   widest that gets into the region (its cutter fits at all) takes it; where
   its cutters (an adaptive template's 6 mm clean-up too) leave more than
   the corners' fillets, what is left goes to the next narrower template that
-  reaches it, as a rest, else it is reported. A narrower template that
+  reaches it, as a rest (what was left grown by that cutter's diameter and
+  the clearance, within the pocket: a cutter reaching a point of it lies
+  within its diameter of the point, so it reaches in the rest all it does
+  in the pocket), else it is reported. A narrower template that
   reaches all of the pocket takes it alone where its cutter is at least ¾ of
   the widest's (the 6 mm cuts a groove the 8 mm would leave rests in) [chosen].
   The 8 mm adaptive template is a pure rougher for larger pockets [Florian,
@@ -325,7 +332,8 @@ tests and fuzz tests require it to find nothing:
   outline exactly once (a release cuts again what a roughing cut, a rest
   what a pocket's cutter left);
 - every cutter reaches its region: what each cutter of a pocket leaves
-  where it works, a narrower one's rest takes, or a problem says; a contour
+  where it works, a narrower one's rest takes (its cutter kept inside the
+  rest, as Fusion's pocket bounded by it is), or a problem says; a contour
   on its waste side; a dog bone's cutter is narrower than it. The check is
   lenient by a hundredth (a cutter 0.01 mm narrower, a fillet's zone that
   much wider, slivers under 0.05 mm noise), so a decision on the edge for
