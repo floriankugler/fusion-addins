@@ -9,10 +9,17 @@ Two halves:
   Python, unit tested.
 - `fusion` draws a plan into a Fusion document with Fusion's own features.
 
+A nest (`nest.json`) is drawn a document per material (`nested`, its
+Fusion-free plan; `fusion.NestEmitter`), and a CAM plan (`cam.json`) into
+the nest's documents as a setup per blank (`cam_plan`, Fusion-free and
+unit tested: the plan mapped into the document and what each feature
+binds by; `cam` builds the setups, `cam.emit_cam_file(path, repo)`).
+
 The master's snapshot is written here too: `snapshot` reads the active
 design (`snapshot.write_snapshot(path)`), `snapshot_format` is its
-Fusion-free half (chaining curves, names, hash), unit tested. `fusion` and
-`snapshot` are the only modules in the language that import `adsk`.
+Fusion-free half (chaining curves, names, hash), unit tested. `fusion`,
+`cam` and `snapshot` are the only modules in the language that import
+`adsk`.
 
 Fusion's Python has no shapely, so `lang` itself cannot be imported there.
 Load this sub-package without its parent, from an MCP script or an add-in::

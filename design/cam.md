@@ -9,10 +9,11 @@ G-code. Part of the modeling language's design; the overview is
 `rules`, `holding`, `tabbing`, `plan`, `verify`, `plan_types`, the command
 in `__main__`). Built 2026-10-17 as stage 4 of `proposals/settings.md`'s
 build order, from `proposals/cam.md`, which keeps what is not built: the
-Fusion emitter that makes the setups from the plan (stage 4b),
-manufacturing groups. The preview shows the plan on the nest's drawing
-(stage 4c, In the preview below). Points marked [decided] are Florian's,
-[chosen] choices made in building it that he has not seen.
+manufacturing groups. The Fusion emitter that makes the setups from the
+plan (stage 4b, the same day) is In Fusion below, and the preview shows
+the plan on the nest's drawing (stage 4c, In the preview below). Points
+marked [decided] are Florian's, [chosen] choices made in building it that
+he has not seen.
 
 ## Running it
 
@@ -388,6 +389,143 @@ blind pockets are clipped by the outline, not by the openings, which are
 material yet when they are cut. Each Cabineo's three access holes are one
 pocket on the 6 mm, and no example has a rest.
 
+## In Fusion
+
+Compile Layout builds the setups (stage 4b, built 2026-10-17;
+`lang/emit/cam_plan.py` Fusion-free and unit tested, `lang/emit/cam.py`
+in Fusion, `addins-src/compiler`): pick a `cam.json` and it draws the nest
+beside it as a `nest.json` is drawn (`design/emitter.md`, Nested
+documents), a document per material, then builds that material's setups
+in it. A `nest.json` picked is drawn without setups [chosen: the plan is
+what is picked to get them, so a nest is never planned behind the
+user's back].
+
+- **Refused**: a plan of another version (`CAM_VERSION`, repeated in
+  `cam_plan.py`), of another nest than the `nest.json` beside it (its
+  name, `nest_written`, `layout_hash`), one placing a blank where the nest
+  has another or none, or machining a part that is not on the blank: plan
+  the nest again.
+- **The frame** (`cam_plan.plan_cam`): a setup's point is its blank's
+  corner in the document plus the point, the sheets one above the other
+  as `nested.sheet_places` lays them; a feature's height is the stock's
+  top (the nominal thickness) less its depth.
+- **The sketches first**: every setup's, before the first operation of
+  the document, as they change the design and an operation made before a
+  change keeps the model it was made against: per setup a hidden sketch
+  `<setup> tabs` holding each tab position once (the roughing and the
+  release share them; Fusion takes a tab position only as a model entity)
+  and one `<setup> rests` with the rest regions drawn as lines and arcs
+  (`arcs.fit`) at their pocket's floor; then `cam.checkValidity()`. They
+  are never deleted.
+- **The setup**: named as the plan names it; its models the parts' bodies
+  on the blank; its stock a fixed box of the blank's rectangle and nominal
+  thickness, placed from the model's origin (`job_groundStockModelOrigin`,
+  x and y `'model'` at the blank's corner), its bottom offset the parts'
+  top less its height (`<top> mm - job_stockFixedZ`), so its top stays at
+  the parts' top; the WCS the stock's top corner at the blank's corner
+  (box point `top 1`), in the model's orientation, so x runs along the
+  blank's length. [chosen: a fixed box rather than the see-through stock
+  body as a solid stock: the box's height is a value to edit, the body is
+  not in a direct document; the body stays for the eye.] The emitter reads
+  the stock back and reports it where it is not the blank.
+- **What the operator edits**: the blank's measured thickness, as the
+  setup's Stock > Height (Z). The box grows down from the top; every
+  height from the stock's bottom (the roughing's skin, the release, the
+  through holes and pockets) follows it, what the model gives (a pocket's
+  floor, a hole's bottom, a chamfer's edge) keeps its depth from the top,
+  and Z zero stays the stock's top. [Direct documents have no user
+  parameters, so this is the one value instead of the proposal's user
+  parameter.]
+- **Each operation** from its template file (the folder the plan read,
+  else the one `cam.templates` names in the repository the add-in lies in,
+  for a plan made in another checkout) with `createFromCAMTemplate2`, in
+  the plan's order, named as the plan names it (a template of several
+  operations makes several, `<name> – <the template's operation>`), and
+  written as `cam_plan.param_writes` says: the heights as the plan's mode
+  (Fusion's values are the plan's names: `'from stock top'`, `'from stock
+  bottom'`, `'from hole bottom'`, `'from contour'`) and offset in mm, each
+  mode before its offset, none on a Trace (its tip follows the groove's
+  bottom; it has no heights); `doMultipleDepths` and a Trace's
+  `numberOfStepdowns` only where the plan has them, the stepdowns only
+  with several depths; `preserveOrder`; on drills and bores
+  `selectSameDiameter` off (Fusion pulls in every hole of the diameter
+  otherwise); a Trace's `doChamfer` off; a 2D Chamfer's `chamferWidth` and
+  `chamferClearance` 0; a bore's cutting feed the template's times the
+  plan's scale, never past 3000 mm/min (Auto Setup's cap) nor below the
+  template's; tabs (`group_tabs`, the plan's width and height,
+  `tabPositioning` `'tabCount'`, `tabsPerContour` 0, `tabPositions` the
+  sketch's points of the operation's positions) where the plan gives them,
+  `group_tabs` off elsewhere. A parameter an operation lacks or refuses is
+  reported, but the tabs' group, the order and the hole selection where
+  the strategy has none.
+- **The geometry, by position** (`cam_plan`'s bindings, matched within
+  0.02 mm, an arc's middle within its chord's sagitta):
+
+  | Feature | Bound by |
+  |---|---|
+  | outer contour | the part body's silhouette, outside loop, `isSetupModelSelected` off |
+  | inner contour | the loop of the body's edges at the stock's top (else its underside) whose edges all lie on the ring and add up to its length |
+  | pocket | its floor: the body's upward faces at its depth holding a point of its region (a floor shared by pockets that overlap, the Cabineo's three holes, is bound once) |
+  | pocket through | a loop of edges per ring, as an inner contour |
+  | rest | its region in the `rests` sketch, a chain per ring |
+  | hole, dog bone drilled | the body's cylinders about its centre of its diameter (`holeFaces`, `circularFaces`) |
+  | dog bone milled | its wall's arc edges at its floor (else the top), an open chain |
+  | chamfer | the chamfer's lower edges, its edge before the chamfer moved down by its size, a chain per run, open where it is |
+  | V-groove | its bottom's straight edges at its depth, an open chain per run |
+
+  The tool's side: through the API Fusion puts the tool on the left of a
+  chain's first edge as it runs, whatever the faces beside it say, so
+  every chain is turned (`isReverted`) for the tool to run on its waste:
+  inside an opening or a pocket's ring, outside a through pocket's island,
+  inside a dog bone's circle, on a chamfer's open side [found 2026-10-17:
+  left as they came, the drawer cabinet's 108 dog bones and 4 of the
+  cutouts example's 24 inner contours were cut on the part's side, their
+  toolpaths as long as their circles and rings offset outwards; a pocket's
+  ring the wrong way round cleared all the stock around it]. A silhouette
+  takes its side from its loop.
+- **The toolpaths** are generated per setup at the end
+  (`cam.generateToolpath`), as Fusion may generate an operation the moment
+  it is made, against the bare template. An operation that fails is
+  reported and the next one goes on; the summary lists per setup each
+  operation with how many of its features were bound, and every problem.
+  `cam.toolpath_report` checks the generated toolpaths (AGENTS.md,
+  Testing the CAM Emitter Through MCP).
+
+Verified in Fusion 2026-10-17 (build 2705.1.30, through the MCP server,
+the add-in's `compile_file` loaded from the worktree) on the drawer
+cabinet nested and planned with the plan's fixes of that day: every
+operation has a toolpath, valid, not empty, with no warning (no "contours
+were not machined"), none failed to bind:
+
+| Setup | Operations (features) | Built in |
+|---|---|---|
+| birch 15 1.1 | 6 mm roughing (3), 1/8" bores ⌀5 (19), 1/8" pockets (2), 2 mm drills (12), 6 mm release (3) | 3.8 s |
+| birch 15 2.1 | 6 mm pockets (12), 6 mm roughing (4), 1/8" bores ⌀5 (19), 1/8" pockets (6), 2 mm drills (12), 6 mm release (4) | 6.2 s |
+| birch 12 1.1 | 6 mm pockets (9), 6 mm roughing (12), 1/8" dog bones 3 deep (108), 2 mm drills 4 deep (18), 6 mm release (12) | 18.9 s (3.5 s in a fresh session) |
+| birch 9 1.1 | 6 mm roughing (4), V-grooves (8), 6 mm release (4) | 0.3 s |
+
+The nest's document took 2.3, 8.2 and 0.1 s more, the toolpaths 16, 14
+and 3 s to generate (Fusion's session slowdown after many documents,
+`design/bugs.md`, makes the first numbers vary sixfold). The stock's
+height set from 15 to 15.6 mm on birch 15 2.1 put the stock's bottom at
+-0.6 with its top and the WCS where they were, and left the pockets',
+bores' and drills' toolpaths as they were while the roughing went deeper;
+on the van's floor battens the release's top and bottom followed the
+height (-15.3 and -15.7 at 15.5 mm). Also built clean: the cutouts example
+(inner contours, each of its 24 a release 37.7 mm longer turned the other
+way round, chamfers, V-grooves, the 8 mm adaptive), the dog bones
+panels (through pockets, milled dog bones), the operations example
+(chamfers along edges, rims and the outline, through pockets) and the
+van's floor (16 tab positions on both operations of two battens: the
+release's cut 64 mm longer with them, a tab's ramps). Screenshots on that
+Mac, under the worktree's `out/fusion-cam/`, not kept in the repository.
+
+Not exercised in Fusion yet: rests (no example's plan has one now; an
+earlier plan's, with a cutter's radius of room, gave an empty 2D Pocket,
+and a rest now has the narrower cutter's diameter, The plan file), a dog
+bone plunged with a drill, an own blank, a template with a finishing
+pass.
+
 ## In the preview
 
 The nest view's CAM layer (`design/preview.md`; key `c`) draws the chosen
@@ -410,14 +548,18 @@ straight contour in the plan, both right].
 
 ## Still open
 
-- The Fusion emitter (stage 4b, `proposals/cam.md`): the setups from the
-  plan, each operation from its template, its geometry bound by position,
-  the tab sketch before the first operation, each blank's thickness a user
-  parameter the stock and the stock-bottom heights follow.
-- Manufacturing groups and their shared gaps
-  (`cam.smallest_cutter` is there for them), the holding model calibrated
-  (the release order and the tabs' neighbour weights would follow it), a
-  slot as wide as its cutter cut along its line (Fusion's 2D Slot).
+- Posting each setup's NC program (with the post Florian uses, `masso.cps`)
+  beside the plan, with a record of what was posted, for a Fusion-free
+  check of the material the programs remove against the plan and the
+  layout (`proposals/gcode.md` on the branch
+  `claude/fusion-cam-dependency-2e0017`, step 1): after the toolpaths are
+  generated, once Fusion's future says they are done; not built in stage
+  4b, whose brief left posting out.
+- A rest in Fusion (In Fusion, above); manufacturing groups and their
+  shared gaps (`cam.smallest_cutter` is there for them), the holding model
+  calibrated (the release order and the tabs' neighbour weights would
+  follow it), a slot as wide as its cutter cut along its line (Fusion's 2D
+  Slot).
 - Keys of the proposal's table not built: `cam.tab_edges`,
   `cam.finishing_stepdown`, Auto Setup's rule constants as keys
   (`bore_clearance`, `tight_cut_depth`, ...), the holding calibration.

@@ -29,13 +29,24 @@ after the part's), and so are an own blank's openings; "the strongest
 neighbour across the kerf" is three classes for now (still held by its
 skin, released before, nothing), and a hidden edge is one another part's
 box reaches across; `cam.waste_area` defaults to the tabs' 10 cm², measured
-as they are. The plan in the preview built the same day (stage 4c,
-`design/preview.md`, the CAM layer): on the nest's drawing, the parts by
-their release order with their holds and tabs, the tabs as marks, an
-operation's features in its tool's colour from a legend of the setup's
-operations, what is left out and the problems listed, a plan stale when its
-nest was written again, and Plan again from the page. Still to come, kept
-below: the CAM emitter in the compiler add-in, manufacturing groups, the
+as they are. The CAM emitter (stage 4b) built the same day (`design/cam.md`,
+In Fusion): Compile Layout takes a `cam.json`, draws the nest beside it and
+builds a setup per blank, each operation from its template, its geometry
+bound by position, the tab sketch before the first operation; built
+otherwise than written here: the stock is a fixed box whose height the
+operator sets to the measured thickness (a direct document has no user
+parameters), with its bottom offset following the height so its top stays
+the parts' top; through the API every chain is turned for its tool to run
+on the waste, as Fusion puts it on the left of a chain's first edge; and a
+rest's region needs a cutter's diameter of room, not its radius, for a
+pocket bounded by it to cut (found in Fusion, since so in the plan). The
+plan in the preview built the same day (stage 4c, `design/preview.md`, the
+CAM layer): on the nest's drawing, the parts by their release order with
+their holds and tabs, the tabs as marks, an operation's features in its
+tool's colour from a legend of the setup's operations, what is left out
+and the problems listed, a plan stale when its nest was written again, and
+Plan again from the page. Still to come, kept below: manufacturing groups,
+the
 holding model's calibration and the lift margin, a slot cut along its
 line.
 
