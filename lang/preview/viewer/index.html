@@ -207,7 +207,7 @@ import { LineGeometry } from 'three/addons/lines/LineGeometry.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { attachSpaceMouse } from './spacemouse.js';
 import { AXIS, ISO, UP, share, disposeTree, clearGroup } from './scene-utils.js';
-import { layoutVersionProblem, splitWhere, logPieces, setHidden as markHidden, toggleHides, isolate as isolatePaths, LoadTracker, nestStatusText, chosenNest, settingsText, sheetNames, sheetMade, fixable, LevelChoice, untilLevel } from './state.js';
+import { layoutVersionProblem, splitWhere, logPieces, TreeOpen, setHidden as markHidden, toggleHides, isolate as isolatePaths, LoadTracker, nestStatusText, chosenNest, settingsText, sheetNames, sheetMade, fixable, LevelChoice, untilLevel } from './state.js';
 import { planVersionProblem, planStatusText, toolColors, setupLabel, legend, chosenOperation, releaseRanks, releaseList, holdText, partText, releaseColors, setupOverlay, planNotes } from './cam.js';
 
 const $ = (id) => document.getElementById(id);
@@ -902,7 +902,7 @@ function isolate(paths, toggle = false) {
 
 function select(path) {
   selectedPath = path;
-  if (path) revealInList(path);
+  tree.select(path);              // opened to it, the rest closed; a deselection leaves the tree
   meshes((o) => {
     const on = o.userData.path === path;
     o.material.emissive = new THREE.Color(on ? 0xc0502c : 0x000000);
@@ -1035,19 +1035,12 @@ function pathsUnder(node) {
   return [...node.leaves.map((l) => l.path), ...[...node.groups.values()].flatMap(pathsUnder)];
 }
 
-// Open or closed per group path; groups below the modules start closed.
-const openGroups = stored('open', {});
-function isOpen(group) { return openGroups[group.path] ?? group.depth < 2; }
-function setOpen(group, open, below) {
-  openGroups[group.path] = open;
-  if (below) for (const g of group.groups.values()) setOpen(g, open, true);
-}
-
-function revealInList(path) {
-  const segments = path.split('.');
-  for (let i = 1; i < segments.length; i++) openGroups[segments.slice(0, i).join('.')] = true;
-  store('open', openGroups);
-}
+// The open groups follow the selection (`TreeOpen` in state.js): all closed
+// at first; a selection closes them and opens those above the part; a caret
+// click opens or closes one (with alt the ones below it) until the next.
+const tree = new TreeOpen();
+function isOpen(group) { return tree.isOpen(group.path); }
+function groupsUnder(group) { return [group.path, ...[...group.groups.values()].flatMap(groupsUnder)]; }
 
 function row(kind, name, caret) {
   const div = document.createElement('div');
@@ -1093,8 +1086,7 @@ function renderNode(node, ul) {
     div.title = group.path;
     div.querySelector('.caret').onclick = (e) => {
       e.stopPropagation();
-      setOpen(group, !open, e.altKey);
-      store('open', openGroups);
+      tree.set(e.altKey ? groupsUnder(group) : [group.path], !open);
       renderList();
     };
     div.onclick = () => toggleHidden(paths);
@@ -1590,6 +1582,8 @@ function openDesign(name) {
   hidden.clear();
   for (const path of view?.hidden ?? []) hidden.add(path);
   selectedPath = view?.selected ?? null;
+  tree.collapse();
+  tree.select(selectedPath);
   Object.assign(section, { on: false, axis: 'z', pos: 0.5, flip: false }, view?.section);
   clearScene();
   applySection();

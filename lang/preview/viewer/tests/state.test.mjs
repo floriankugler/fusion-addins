@@ -1,9 +1,9 @@
 // The page's bookkeeping (state.js): the layout version, the build file's
-// lines, hidden parts, the levels asked for, and the promises of preview.loaded(), preview.open()
+// lines, the parts tree, hidden parts, the levels asked for, and the promises of preview.loaded(), preview.open()
 // and preview.level().
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { LAYOUT_VERSION, layoutVersionProblem, splitWhere, logPieces, setHidden, toggleHides, isolate, LoadTracker, nestStatusText, chosenNest, settingsText, sheetNames, sheetMade, fixable, LEVELS, LevelChoice, untilLevel } from '../state.js';
+import { LAYOUT_VERSION, layoutVersionProblem, splitWhere, logPieces, openedTo, TreeOpen, setHidden, toggleHides, isolate, LoadTracker, nestStatusText, chosenNest, settingsText, sheetNames, sheetMade, fixable, LEVELS, LevelChoice, untilLevel } from '../state.js';
 
 // Whether a promise settled, without waiting for it: 'pending', or
 // ['resolved', value] / ['rejected', message].
@@ -66,6 +66,34 @@ test('the build log links every file line in it', () => {
     { text: '/Users/f/designs/van.py:3', file: '/Users/f/designs/van.py', line: 3 }, { text: ': x' }]]);
   assert.equal(logPieces(rows.map((r) => r.map((p) => p.text).join('')).join('\n')).length, 5);
   assert.deepEqual(logPieces(undefined), [[{ text: '' }]]);
+});
+
+test('the groups above a path open to it', () => {
+  assert.deepEqual(openedTo('kitchen.drawer1.left'), ['kitchen', 'kitchen.drawer1']);
+  assert.deepEqual(openedTo('kitchen.drawer1.runners.left'), ['kitchen', 'kitchen.drawer1', 'kitchen.drawer1.runners']);
+  assert.deepEqual(openedTo('floor.batten3'), ['floor']);
+  assert.deepEqual(openedTo('loose'), []);
+});
+
+test('the parts tree follows the selection', () => {
+  const tree = new TreeOpen();
+  assert.equal(tree.isOpen('kitchen'), false, 'collapsed at first');
+  tree.select('kitchen.drawer1.left');
+  assert.deepEqual([...tree.open], ['kitchen', 'kitchen.drawer1']);
+  tree.set(['floor'], true);                                    // opened by hand
+  assert.ok(tree.isOpen('floor'));
+  tree.select(null);                                            // deselected: left as it is
+  assert.deepEqual([...tree.open].sort(), ['floor', 'kitchen', 'kitchen.drawer1']);
+  tree.select('kitchen.drawer2.front');                         // the first chain and the hand's open close
+  assert.deepEqual([...tree.open], ['kitchen', 'kitchen.drawer2']);
+  tree.set(['kitchen', 'kitchen.drawer2'], false);              // closed by hand, with alt the group below too
+  assert.deepEqual([...tree.open], []);
+  tree.select('kitchen.drawer2.front');                         // the same part again opens to it again
+  assert.deepEqual([...tree.open], ['kitchen', 'kitchen.drawer2']);
+  tree.collapse();
+  assert.deepEqual([...tree.open], []);
+  tree.select('loose');
+  assert.deepEqual([...tree.open], []);
 });
 
 test('the nest state as the side panel says it', () => {

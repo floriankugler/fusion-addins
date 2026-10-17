@@ -80,6 +80,11 @@ might write about them next, every line copied by a click [Florian,
   with its own lines, and then what relates them: the distance between two
   faces, the gap between two parts, with the code for it (Snippets to
   copy).
+- The parts tree follows the selection: collapsed by default and opened to
+  what is selected, and it grows below the boards as faces, edges and
+  operations become selectable, listing them under their part [Florian,
+  2026-10-17]. Built for parts and bought parts on 2026-10-17
+  (`design/preview.md`, The viewer).
 - From code: `preview.selection()` gives the same as data, with each
   item's world point and line.
 

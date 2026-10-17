@@ -88,8 +88,14 @@ for a check, too slow for the loop. [decided as a need]
 ## The viewer
 
 - A static three.js page: orbit, a collapsible part tree by path (hardware
-  bodies included; clicking a group hides or shows all of it), click to
-  select, hide and isolate, display modes, a capped section plane, a floor
+  bodies included; clicking a group hides or shows all of it) that follows
+  the selection [Florian, 2026-10-17]: collapsed at first, a part selected
+  in the scene, the list or the nest drawing closes every group and opens
+  those above it, so it shows and earlier opens do not pile up; a caret
+  click opens or closes a group by hand (with alt the ones below it) until
+  the next selection, and a deselection (`esc`) leaves the tree as it is
+  (`TreeOpen` in `state.js`, with node tests); click to select, hide and
+  isolate, display modes, a capped section plane, a floor
   grid, the master's ghost boxes and contour lines (`m`), hardware on or off
   (`w`), labels with the parts' names (`n`) and their faces' names (`d`) as
   the build file writes them (a cabinet's own front and left, inner and outer

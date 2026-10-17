@@ -1,7 +1,7 @@
 // The preview page's bookkeeping that needs no three.js and no DOM, so that
 // `node --test lang/preview/viewer/tests/` can check it: the layout version
-// the page reads, the build file's lines it links to the editor, the hidden
-// parts, the level each design is meshed at, and the promises of
+// the page reads, the build file's lines it links to the editor, the parts
+// tree's open groups, the hidden parts, the level each design is meshed at, and the promises of
 // `preview.loaded()`, `preview.open()` and `preview.level()`.
 
 // The layout file version this page draws (lang/core/layout_types.py
@@ -157,6 +157,50 @@ export async function untilLevel(tracker, levelOf, name) {
   let version = await tracker.loaded();
   while (levelOf() !== name) version = await tracker.loaded(version);
   return version;
+}
+
+// -- the parts tree --------------------------------------------------------
+
+/** The groups of the parts tree above a path, outermost first: `kitchen`,
+ * `kitchen.drawer1` for `kitchen.drawer1.left`. */
+export function openedTo(path) {
+  const segments = String(path).split('.');
+  return segments.slice(0, -1).map((_, i) => segments.slice(0, i + 1).join('.'));
+}
+
+/**
+ * The parts tree's open groups, which follow the selection [Florian,
+ * 2026-10-17]: none at first; selecting a part closes every group and opens
+ * those above it, so it shows and earlier opens do not pile up; a caret
+ * click opens or closes groups by hand until the next selection; a
+ * deselection leaves the tree as it is.
+ */
+export class TreeOpen {
+  constructor() {
+    this.open = new Set();
+  }
+
+  isOpen(group) {
+    return this.open.has(group);
+  }
+
+  /** The tree opened to a part, every other group closed; null (deselecting) changes nothing. */
+  select(path) {
+    if (path === null || path === undefined) return;
+    this.open = new Set(openedTo(path));
+  }
+
+  /** Opens or closes groups by hand: a caret click's group, with alt the groups below it too. */
+  set(groups, open) {
+    for (const group of groups) {
+      if (open) this.open.add(group); else this.open.delete(group);
+    }
+  }
+
+  /** Every group closed: a design shown afresh. */
+  collapse() {
+    this.open.clear();
+  }
 }
 
 // -- hidden parts ----------------------------------------------------------
