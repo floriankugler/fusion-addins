@@ -519,6 +519,13 @@ a drill, an own blank, a template with a finishing pass.
 
 ## Still open
 
+- Posting each setup's NC program (with the post Florian uses, `masso.cps`)
+  beside the plan, with a record of what was posted, for a Fusion-free
+  check of the material the programs remove against the plan and the
+  layout (`proposals/gcode.md` on the branch
+  `claude/fusion-cam-dependency-2e0017`, step 1): after the toolpaths are
+  generated, once Fusion's future says they are done; not built in stage
+  4b, whose brief left posting out.
 - A rest's room (In Fusion, above); the plan in the preview,
   manufacturing groups and their shared gaps (`cam.smallest_cutter` is
   there for them), the holding model calibrated (the release order and the

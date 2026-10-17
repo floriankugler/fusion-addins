@@ -324,16 +324,17 @@ class CamEmitter:
                 # the top corner the stock's x and y run away from (Auto Setup measured it)
                 ("wcs_origin_boxPoint", "'top 1'"),
                 ("job_groundStockModelOrigin", "true"),
-                ("job_stockFixedX", f"{w:.6g} mm"), ("job_stockFixedY", f"{h:.6g} mm"), ("job_stockFixedZ", f"{t:.6g} mm"),
-                ("job_stockFixedXMode", "'model'"), ("job_stockFixedXOffset", f"{x:.6g} mm"),
-                ("job_stockFixedYMode", "'model'"), ("job_stockFixedYOffset", f"{y:.6g} mm"),
+                ("job_stockFixedX", f"{w:.10g} mm"), ("job_stockFixedY", f"{h:.10g} mm"), ("job_stockFixedZ", f"{t:.10g} mm"),
+                ("job_stockFixedXMode", "'model'"), ("job_stockFixedXOffset", f"{x:.10g} mm"),
+                ("job_stockFixedYMode", "'model'"), ("job_stockFixedYOffset", f"{y:.10g} mm"),
                 # grounded, the box's bottom lies where its offset says: its top stays at the parts' top
                 # whatever height the operator gives it
-                ("job_stockFixedZMode", "'model'"), ("job_stockFixedZOffset", f"{setup.top:.6g} mm - job_stockFixedZ")):
+                ("job_stockFixedZMode", "'model'"), ("job_stockFixedZOffset", f"{setup.top:.10g} mm - job_stockFixedZ")):
             inp.parameters.itemByName(name).expression = expression
         fusion_setup = cam.setups.add(inp)
         if fusion_setup.name != setup.name:
-            # (written again where it was not taken: Fusion makes a name it takes for another's unique)
+            # (only where the input's was not taken: written again, a name Fusion already has, its own too,
+            # gets a digit appended, '1.1' became '1.11')
             fusion_setup.name = setup.name
         # where Fusion put the stock: the blank, its top at the parts' top
         params = fusion_setup.parameters

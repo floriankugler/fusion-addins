@@ -441,7 +441,7 @@ def template_path(cam: CamFile, stem: str, repo: str) -> str:
 # -- what is written on an operation ------------------------------------------------------------------------
 
 def _mm(v: float) -> str:
-    return f"{v:.6g} mm" if v != 0 else "0 mm"
+    return f"{v:.10g} mm" if v != 0 else "0 mm"
 
 
 def _bool(v: bool) -> str:
