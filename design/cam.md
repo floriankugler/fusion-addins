@@ -334,9 +334,10 @@ tests and fuzz tests require it to find nothing:
   material the outline's contours take) at least once, every ring of the
   outline exactly once (a release cuts again what a roughing cut, a rest
   what a pocket's cutter left);
-- every cutter reaches its region: what each cutter of a pocket leaves
-  where it works, a narrower one's rest takes (its cutter kept inside the
-  rest, as Fusion's pocket bounded by it is), or a problem says; a contour
+- every cutter reaches its region: what a pocket's cutter leaves, one of
+  its rests' narrower cutters reaches, kept inside that rest as Fusion's
+  pocket bounded by it is (where rests overlap, the one that takes it), or
+  a problem says; a contour
   on its waste side; a dog bone's cutter is narrower than it. The check is
   lenient by a hundredth (a cutter 0.01 mm narrower, a fillet's zone that
   much wider, slivers under 0.05 mm noise), so a decision on the edge for

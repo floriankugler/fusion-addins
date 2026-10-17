@@ -202,7 +202,7 @@ def _reach(setup: SetupOut, placed: dict[str, Placed], by_stem: dict[str, Templa
     for t, f, op in mains:
         excused = _discs(placed[f["part"]], f) if f["part"] in placed else None
         if f["what"] == "pocket":
-            # what each of the pocket's cutters leaves where it works, a narrower one's rest takes
+            # what the pocket's cutter leaves, one of its rests' cutters reaches
             region = _region(f["rings"])
             near = region.buffer(10 * CLEAN)                 # a piece of a pocket of several: its own rests
             mine = sorted([e for e in rests.get((f["part"], _key(f)), []) if e[1].difference(near).area < MINUTE],
@@ -211,21 +211,17 @@ def _reach(setup: SetupOut, placed: dict[str, Placed], by_stem: dict[str, Templa
                 if rt.narrowest >= t.narrowest:
                     problems.append(f"a rest of {f['part']} takes a cutter no narrower than its pocket's")
             left = unreached(region, t.narrowest / 2, excused, lenient=True)
-            for k, (tool, works) in enumerate([(t, region)] + mine):
-                if k == 0:
-                    pieces = left
-                else:
-                    # a rest's cutter kept inside the rest, as a pocket bounded by it is in Fusion [found in
-                    # Fusion, 2026-10-17: a rest a cutter's radius around what was left had no room for it]
-                    inside = unary_union(unreached(works, tool.narrowest / 2, excused, lenient=True))
-                    pieces = [q for p in left for q in polygons_of(p.intersection(works).intersection(inside))]
-                after = unary_union([g for rt, g in mine[k:] if rt.narrowest < tool.narrowest])
-                for piece in [p for p in pieces if p.area > MINUTE]:
-                    if not after.is_empty and piece.difference(after.buffer(10 * CLEAN)).area < MINUTE:
+            # each rest's cutter kept inside the rest, as a pocket bounded by it is in Fusion [found in Fusion,
+            # 2026-10-17: a rest a cutter's radius around what was left had no room for it]; where one rest's
+            # region overlaps what another's cutter takes, that one reaches it [found by fuzzing, 2026-10-17]
+            reached = unary_union([g.difference(unary_union(unreached(g, rt.narrowest / 2, excused, lenient=True)))
+                                   for rt, g in mine]).buffer(10 * CLEAN) if mine else Polygon()
+            regions = unary_union([g for _rt, g in mine]) if mine else Polygon()
+            for p in left:
+                for piece in polygons_of(p.difference(reached) if not reached.is_empty else p):
+                    if piece.area <= MINUTE or "no pocket cutter reaches" in reported:
                         continue
-                    if "no pocket cutter reaches" in reported:
-                        continue
-                    what = "a pocket" if k == 0 else "a rest"
+                    what = "a rest" if piece.intersection(regions).area > MINUTE else "a pocket"
                     problems.append(f"{op['name']}: {what} of {f['part']} is not reached by its cutter "
                                     f"({piece.area:.2f} mm²)")
         elif f["what"] == "outer" or f["what"] == "inner":
