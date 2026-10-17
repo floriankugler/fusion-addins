@@ -206,13 +206,16 @@ class Shape:
     # -- export ---------------------------------------------------------------------
 
     def polygons(self) -> list[Polygon]:
+        """The shape's polygons; none for an empty shape (an empty polygon
+        is not one of them: it would give a ring without points [found by
+        fuzzing, 2026-10-17])."""
         g = self.geometry
+        if g.is_empty:
+            return []
         if isinstance(g, MultiPolygon):
             return list(g.geoms)
         if isinstance(g, Polygon):
             return [g]
-        if g.is_empty:
-            return []
         raise LangError(f"Shape is not an area: {g.geom_type}.")
 
     def rings(self) -> list[Ring]:

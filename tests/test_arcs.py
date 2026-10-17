@@ -301,3 +301,11 @@ def test_an_arc_end_moved_onto_the_next_vertex_leaves_no_line_of_no_length():
     curves = fit(ring)
     assert min(math.dist(c.a, c.b) for c in curves if isinstance(c, Line2)) > 1e-4
     assert len(fit([(x, y + 1) for x, y in ring])) == len(curves)
+
+
+def test_an_empty_ring_fits_to_nothing():
+    """Found by fuzzing (2026-10-17): a cutout recorded with an empty shape
+    put an empty ring into the layout, and `fit` raised IndexError on it
+    instead of giving no curves."""
+    assert fit([]) == []
+    assert fit([(1.0, 2.0)]) == [Line2((1.0, 2.0), (1.0, 2.0))]
