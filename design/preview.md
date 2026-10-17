@@ -246,14 +246,20 @@ for a check, too slow for the loop. [decided as a need]
   (`error: examples/van.py:45: floor.batten3 reads material, ...`), and the
   stack below it leaves that line out.
 - The editor: `POST /open?file=examples/van.py&line=45` runs the command
-  `--editor` gives, `code --goto {file}:{line}` by default (`{file}` the
-  file's whole path, `{line}` the line; split like a shell's words and run
-  without a shell), for a file in the folder served or in the repo; a
+  `--editor` gives, VS Code's `code --goto {file}:{line}` by default
+  (Florian's editor; `{file}` the file's whole path, `{line}` the line;
+  split like a shell's words and run without a shell), for a file in the
+  folder served or in the repo; a
   relative file is the repo's, where the builds run. It refuses other
   files, and a request whose `Origin` is not the preview's own page. The
-  page's `o`, its line links and `preview.openEditor()` post it; a failure
-  (an editor that is not installed: `code` must be on the server's PATH)
-  shows under the selection.
+  page's `o`, its line links and `preview.openEditor()` post it. The VS
+  Code app does not put `code` on the PATH by itself, so without one there
+  the server runs the one in the app bundle (`/Applications/Visual Studio
+  Code.app/Contents/Resources/app/bin/code`); only with neither does the
+  answer say the editor did not start, and name `--editor`, under the
+  selection. Verified 2026-10-17: `o` on `kitchen.left` in the van opened
+  `examples/drawer_cabinet.py` in VS Code at line 35, its `carcass(...)`
+  call, through the bundle's `code`.
 - The hash carries the design (`#design=van&eye=…`); without one the page
   opens the folder's first design alphabetically [decided]. Each design keeps
   its own camera, hidden parts, selection and section while the page is

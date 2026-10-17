@@ -22,6 +22,7 @@ from urllib.parse import urlsplit
 import pytest
 
 from lang.cam.plan_types import CAM_VERSION
+from lang.preview import __main__ as server
 from lang.preview.__main__ import (VIEWER_DIR, Designs, _Handler, nest_state, rebuild, renest, replan,  # type: ignore[reportPrivateUsage]
                                    scan)
 
@@ -451,6 +452,37 @@ def test_the_editor_opens_at_a_line_of_the_folder_or_the_repo_only(tmp_path: Pat
     assert designs.open_editor("examples/van.py", "x")[0] == 400
     assert designs.open_editor("", "3")[0] == 400
     status, text = Designs(folder, tmp_path / "out", "no-such-editor-here {file}").open_editor("examples/van.py", "1")
+    assert status == 500 and "the editor did not start" in text and "--editor" in text
+
+
+def test_code_comes_from_vs_codes_app_bundle_when_the_path_has_none(tmp_path: Path,
+                                                                    monkeypatch: pytest.MonkeyPatch):
+    """The default editor is VS Code's `code`, which the app does not put
+    on the PATH: without one there, the app bundle's runs; with neither,
+    the answer says the editor did not start and names --editor."""
+    (tmp_path / "designs").mkdir()
+    folder = folder_of_files(tmp_path / "designs")
+    log = tmp_path / "opened.txt"
+    bundle = tmp_path / "code"
+    bundle.write_text(f"#!/bin/sh\necho \"$0 $*\" > '{log}'\n")
+    bundle.chmod(0o755)
+    empty = tmp_path / "bin"
+    empty.mkdir()
+    monkeypatch.setenv("PATH", str(empty))
+    monkeypatch.setattr(server, "VSCODE_BUNDLE", str(bundle))
+    designs = Designs(folder, tmp_path / "out")
+    assert designs.editor == "code --goto {file}:{line}"
+    assert designs.open_editor("examples/van.py", "45") == (200, "opened examples/van.py:45")
+    assert _opened(log).strip() == f"{bundle} --goto {EXAMPLES / 'van.py'}:45"
+    log.unlink()
+    on_path = empty / "code"                     # a code on the PATH wins over the bundle's
+    on_path.write_text(f"#!/bin/sh\necho \"path $*\" > '{log}'\n")
+    on_path.chmod(0o755)
+    assert designs.open_editor("examples/van.py", "7")[0] == 200
+    assert _opened(log).strip() == f"path --goto {EXAMPLES / 'van.py'}:7"
+    on_path.unlink()
+    monkeypatch.setattr(server, "VSCODE_BUNDLE", str(tmp_path / "missing" / "code"))
+    status, text = designs.open_editor("examples/van.py", "45")
     assert status == 500 and "the editor did not start" in text and "--editor" in text
 
 

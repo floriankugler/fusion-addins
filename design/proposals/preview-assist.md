@@ -28,8 +28,9 @@ Every item serves both ways of writing: a click or key for the hand, and a
 Built 2026-10-17: layout version 10, `lang/core/where.py`, the viewer's
 `o`, line links and `preview.openEditor()`, the server's `POST /open` and
 `--editor`; `design/preview.md`, The viewer and Serving a folder, says how
-it works and what it costs on the van (nothing measurable). The editor
-stays `code --goto {file}:{line}` by default until Florian names his.
+it works and what it costs on the van (nothing measurable). The editor is
+VS Code [Florian]: `code --goto {file}:{line}` by default, the `code` in
+VS Code's app bundle when the PATH has none; `o` verified with it.
 
 Everything below that links the picture to the text needs the layout to say
 where each thing was written.
@@ -49,8 +50,8 @@ where each thing was written.
   `examples/van.py:45: board("batten3", ...): no material along its chain`.
 - The selection panel shows the line, and `o` asks the server to open the
   editor there (`POST /open?file=&line=`; the server runs a command given at
-  start, `--editor 'code --goto {file}:{line}'` the default [open: Florian's
-  editor]). The build log's `file:line:` lines become the same links.
+  start, `--editor 'code --goto {file}:{line}'` the default [Florian's editor
+  is VS Code]). The build log's `file:line:` lines become the same links.
 - From code: `preview.parts()` and `preview.ops()` carry the line, and so
   does `preview.selection()` (below).
 

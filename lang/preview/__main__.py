@@ -61,7 +61,8 @@ The editor: the layout names the build file's line of every part, module,
 hardware item and operation (`where`, `examples/van.py:45`, relative to
 the repo, where the builds run), and the build log names lines too. POST
 /open?file=examples/van.py&line=45 runs the command `--editor` gives
-(`code --goto {file}:{line}` by default; `{file}` becomes the file's whole
+(`code --goto {file}:{line}` by default, VS Code's, its `code` taken from
+the app bundle when the PATH has none; `{file}` becomes the file's whole
 path, `{line}` the line) for a file in the folder served or in the repo,
 and refuses any other file and a request another site's page sends.
 """
@@ -93,8 +94,11 @@ REPO = Path(__file__).resolve().parents[2]
 SHOWN = 3.0     # seconds a page counts as open after it last asked for its design
 TIMEOUT = 120.0  # seconds a build may take before it is stopped and counts as failed
 NEST_TIMEOUT = 900.0  # seconds a nest may take
-#: The command that opens the editor at a line, `{file}` and `{line}` filled in.
+#: The command that opens the editor at a line, `{file}` and `{line}` filled in: VS Code's.
 EDITOR = "code --goto {file}:{line}"
+#: VS Code's `code` command in its app bundle (macOS), run for `code` when the PATH has none: the
+#: app does not put it on the PATH by itself.
+VSCODE_BUNDLE = "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code"
 
 # Read as text, not parsed, so that a file stays listed while an edit
 # leaves it unparsable.
@@ -291,7 +295,8 @@ class Designs:
             return 403, f"{file} is neither in the folder served nor in the repo"
         if not path.is_file():
             return 404, f"no file {file}"
-        command = [arg.replace("{file}", str(path)).replace("{line}", line) for arg in shlex.split(self.editor)]
+        command = _program([arg.replace("{file}", str(path)).replace("{line}", line)
+                            for arg in shlex.split(self.editor)])
         try:
             editor = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                                       stderr=subprocess.DEVNULL, cwd=str(REPO), start_new_session=True)
@@ -343,6 +348,15 @@ class Designs:
             with self.cond:
                 design.building, design.ok = False, ok
                 design.builds += 1
+
+
+def _program(command: list[str]) -> list[str]:
+    """The editor's command as it runs: `code` from VS Code's app bundle
+    (`VSCODE_BUNDLE`) when the PATH has no `code` and the bundle has one,
+    else as given."""
+    if command and command[0] == "code" and shutil.which("code") is None and Path(VSCODE_BUNDLE).is_file():
+        return [VSCODE_BUNDLE, *command[1:]]
+    return command
 
 
 def _nests(design: Design) -> list[dict[str, Any]]:
@@ -721,7 +735,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--editor", default=EDITOR,
                         help="the command the page's o key and line links run, {file} and {line} filled in "
-                             f"(default: {EDITOR!r})")
+                             f"(default: {EDITOR!r}, VS Code's `code` from its app bundle when the PATH has none)")
     args = parser.parse_args(argv)
     source = Path(args.source).resolve()
     if not source.exists():
