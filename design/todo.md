@@ -81,6 +81,13 @@ done.
   another bed) do not count as a change: a nest compares its parts'
   fingerprints only. The preview could say when the values a nest would
   run with differ from those in its file.
+- **A CAM plan whose settings changed in the build** is not shown as stale
+  in the preview: only one planned for another nest file is. The server
+  could resolve the nest's CAM settings from the build (`lang.cam.resolve`)
+  and compare them with the plan's `settings.values`.
+- **The nest view's zoom**: a 2 mm hole or a Domino slot is a speck on a
+  whole sheet; the CAM layer's strokes are in screen pixels, but a zoom to
+  the blank or to the chosen operation's features would show them.
 - **`nest(False)` boards no nest names** are still only listed as not
   nested; the cut list (`design/nesting.md`, Still open) is where they go.
 - **The CAM plan's choices to review** (`design/cam.md`, marked [chosen]):

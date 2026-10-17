@@ -38,6 +38,7 @@ import machining  # noqa: E402
 import nesting  # noqa: E402
 import nests  # noqa: E402
 import pinning  # noqa: E402
+import plan_views  # noqa: E402
 import placement  # noqa: E402
 import settings  # noqa: E402
 import slats  # noqa: E402
@@ -120,6 +121,7 @@ CHECKS: dict[str, Check] = {
     "ledgers": (nests.ledger_cases(), nests.ledger_problems),
     "pinning": (pinning.pin_cases(), pinning.pinning_problems),
     "plans": (machining.plan_cases(), machining.run_plan),
+    "plan_views": (machining.plan_cases(), plan_views.run_view),
     "settings": (settings.chain_cases(), settings.chain_problems),
     "setting_orders": (settings.order_cases(), settings.order_problems),
 }
