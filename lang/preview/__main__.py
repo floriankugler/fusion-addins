@@ -250,11 +250,7 @@ class Designs:
 
 def _nests(design: Design) -> list[dict[str, Any]]:
     """The nests the design's last layout lists that have parts."""
-    try:
-        layout = json.loads((design.out / "layout.json").read_text())
-        return [n for m in layout["modules"] for n in m.get("nests", []) if n["parts"]]
-    except (OSError, ValueError, KeyError, TypeError):
-        return []
+    return _built(design.out / "layout.json")[0]
 
 
 def _folders(design: Design) -> list[tuple[str, str]]:
@@ -391,25 +387,39 @@ def _nest_file(path: Path) -> Any:
     return cached[1]
 
 
-_prints: dict[Path, tuple[int, dict[str, str]]] = {}
+_layouts: dict[Path, tuple[tuple[int, int], list[dict[str, Any]], dict[str, str]]] = {}
+
+
+def _built(path: Path) -> tuple[list[dict[str, Any]], dict[str, str]]:
+    """What the page's status needs of a built layout: the nests it lists
+    that have parts, and its parts' fingerprints (`lang.nesting.fingerprint`).
+    Kept while the file is unchanged, as every open page asks every 0.7 s
+    and parsing the van's layout alone takes 50 ms."""
+    from lang.nesting.fingerprint import fingerprints
+    try:
+        stat = path.stat()
+    except OSError:
+        return [], {}
+    stamp = (stat.st_mtime_ns, stat.st_size)
+    cached = _layouts.get(path)
+    if cached is None or cached[0] != stamp:
+        try:
+            layout = json.loads(path.read_text())
+            nests = [n for m in layout["modules"] for n in m.get("nests", []) if n["parts"]]
+        except (OSError, ValueError, KeyError, TypeError):
+            layout, nests = None, []
+        try:
+            prints = fingerprints(layout) if layout is not None else {}
+        except (ValueError, KeyError, TypeError):
+            prints = {}
+        cached = (stamp, nests, prints)
+        _layouts[path] = cached
+    return cached[1], cached[2]
 
 
 def _fingerprints(path: Path) -> dict[str, str]:
-    """The parts' fingerprints of a built layout (`lang.nesting.fingerprint`),
-    kept while the file is unchanged."""
-    from lang.nesting.fingerprint import fingerprints
-    try:
-        mtime = path.stat().st_mtime_ns
-    except OSError:
-        return {}
-    cached = _prints.get(path)
-    if cached is None or cached[0] != mtime:
-        try:
-            cached = (mtime, fingerprints(json.loads(path.read_text())))
-        except (OSError, ValueError, KeyError, TypeError):
-            cached = (mtime, {})
-        _prints[path] = cached
-    return cached[1]
+    """The parts' fingerprints of a built layout (`lang.nesting.fingerprint`)."""
+    return _built(path)[1]
 
 
 def _read(path: Path) -> str:

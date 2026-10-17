@@ -4,6 +4,9 @@ ones it builds, a build that fails or runs too long keeping the last good
 one, and the files it serves."""
 import os
 from pathlib import Path
+from typing import Any
+
+import pytest
 
 from lang.preview.__main__ import VIEWER_DIR, Designs, _Handler, nest_state, rebuild, renest, scan  # type: ignore[reportPrivateUsage]
 
@@ -192,6 +195,29 @@ def test_the_nests_listed_say_what_changed_since_by_their_parts(tmp_path: Path):
     assert rebuild(path, design.out)
     state = nest_state(design)[0]
     assert state["state"] == "changed" and state["changed"] == ["cabinet.left"]
+
+
+def test_the_status_reads_a_built_layout_once_however_often_the_page_asks(tmp_path: Path,
+                                                                          monkeypatch: pytest.MonkeyPatch):
+    path = write(tmp_path, "cabinet.py", NESTED)
+    designs = Designs(path, tmp_path / "out")
+    design = designs.designs["cabinet"]
+    assert rebuild(path, design.out)
+    reads: list[Path] = []
+    read_text = Path.read_text
+
+    def counted(self: Path, *args: Any, **kwargs: Any) -> str:
+        if self.name == "layout.json":
+            reads.append(self)
+        return read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", counted)
+    for _ in range(3):
+        status = designs.status("cabinet")["design"]
+        assert [n["path"] for n in status["nests"]] == ["cabinet.sides", "cabinet.birch_15"]
+    assert len(reads) == 1
+    assert rebuild(path, design.out)        # the same layout written again is read again
+    assert len(designs.status("cabinet")["design"]["nests"]) == 2 and len(reads) == 2
 
 
 def test_marks_go_through_the_server_and_the_nests_say_what_is_made(tmp_path: Path):
