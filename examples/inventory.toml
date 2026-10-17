@@ -6,3 +6,13 @@
 [[stock]]
 material = "birch 15"
 size = [1250, 600]
+
+# kept from drawercab.birch_12 birch 12 sheet 1, marked made 2026-10-17
+[[stock]]
+material = "birch 12"
+size = [539, 593]
+
+# kept from drawercab.birch_12-2 birch 12 sheet 1, marked made 2026-10-17
+[[stock]]
+material = "birch 12"
+size = [1953, 653]

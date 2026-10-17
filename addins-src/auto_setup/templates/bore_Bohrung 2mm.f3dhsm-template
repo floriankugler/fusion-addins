@@ -32,11 +32,11 @@
           <parameter expression="'disabled'" key="tool_coolant" value="disabled"/>
           <parameter expression="24000 rpm" key="tool_spindleSpeed" value="24000"/>
           <parameter key="tool_rampSpindleSpeed" value="24000"/>
-          <parameter expression="1500 mmpm" key="tool_feedCutting" value="1500"/>
-          <parameter key="tool_feedEntry" value="1500"/>
-          <parameter key="tool_feedExit" value="1500"/>
+          <parameter expression="2000 mmpm" key="tool_feedCutting" value="2000"/>
+          <parameter key="tool_feedEntry" value="2000"/>
+          <parameter key="tool_feedExit" value="2000"/>
           <parameter expression="800 mmpm" key="tool_feedPlunge" value="800"/>
-          <parameter key="tool_feedTransition" value="1500"/>
+          <parameter key="tool_feedTransition" value="2000"/>
           <parameter expression="800 mmpm" key="tool_feedRamp" value="800"/>
           <parameter key="tool_presetMaterialCategory" value="all"/>
           <parameter key="tool_presetMaterialQuery" value=""/>
@@ -78,7 +78,7 @@
     <parameter expression="''" name="tool_productLink"/>
     <parameter expression="2." name="tool_diameter"/>
     <parameter expression="tool_diameter + 2*tool_fluteLength*Math.tan(tool_taperAngle)" name="tool_maximumCuttingDiameter"/>
-    <parameter expression="0.0" name="tool_tipDiameter"/>
+    <parameter expression="2." name="tool_tipDiameter"/>
     <parameter expression="0.0" name="tool_tipOffset"/>
     <parameter expression="0.0" name="tool_cornerRadius"/>
     <parameter expression="0.0" name="tool_taperAngle"/>
@@ -119,7 +119,7 @@
     <parameter expression="tool_isTurning ? (tool_unit == 'millimeters' ? 25mm : 1.0in) : tool_diameter" name="tool_stockDiameter"/>
     <parameter expression="tool_diameter * Math.PI * tool_spindleSpeed" name="tool_surfaceSpeed"/>
     <parameter expression="tool_spindleSpeed" name="tool_rampSpindleSpeed"/>
-    <parameter expression="400.00 mm/min" name="tool_feedCutting"/>
+    <parameter expression="400." name="tool_feedCutting"/>
     <parameter expression="tool_spindleSpeed > 0 ? tool_feedCutting/(tool_spindleSpeed * tool_numberOfFlutes) : 0.0" name="tool_feedPerTooth"/>
     <parameter expression="tool_type == 'probe' || tool_isDepositing ? 1000mmpm : tool_feedCutting" name="tool_feedEntry"/>
     <parameter expression="tool_isDepositing ? 1000mmpm : tool_feedCutting" name="tool_feedExit"/>

@@ -10,7 +10,7 @@
   <iconID id="0"/>
 
   <template description="Bohrung 1/8&quot; (2)" isFallback="0" strategy="bore" toolPresetId="{de5941c9-276b-442b-a914-61c700b240ac}" unit="millimeters" version="190">
-    <tool guid="4a0f6b62-caca-48fb-9584-8ad1c37ac050" tool-library-version="37" type="flat end mill" unit="inches" version="1.5">
+    <tool guid="4a0f6b62-caca-48fb-9584-8ad1c37ac050" tool-library-version="37" type="flat end mill" unit="millimeters" version="1.5">
       <description>1/8 Spiral Down-Cut</description>
       <expressions>
         <expression parameterKey="tool_bodyLength" value="17mm"/>
@@ -19,24 +19,24 @@
         <expression parameterKey="tool_fluteLength" value="17mm"/>
         <expression parameterKey="tool_numberOfFlutes" value="2"/>
         <expression parameterKey="tool_shoulderLength" value="17mm"/>
-        <expression parameterKey="tool_unit" value="'inches'"/>
+        <expression parameterKey="tool_unit" value="'millimeters'"/>
       </expressions>
       <nc break-control="0" diameter-offset="12" length-offset="12" live-tool="1" manual-tool-change="0" number="12" turret="0"/>
       <coolant mode="disabled"/>
       <material name="hss"/>
-      <body assembly-gauge-length="0.6692913" body-length="0.6692913" coolant-support="no" diameter="0.125" flute-length="0.6692913" number-of-flutes="2" overall-length="1.417323" shaft-diameter="0.125" shoulder-diameter="0.125" shoulder-length="0.6692913" thread-pitch="0" thread-profile-angle="60"/>
-      <motion clockwise="yes" cutting-feedrate="15.748031496063" entry-feedrate="15.748031496063" exit-feedrate="15.748031496063" feed-mode="per-minute" plunge-feedrate="32.283464566929" ramp-angle="8" ramp-feedrate="19.685039370079" ramp-spindle-rpm="24000" retract-feedrate="0" spindle-rpm="24000" transition-feedrate="15.748031496063"/>
+      <body assembly-gauge-length="17" body-length="17" coolant-support="no" diameter="3.175" flute-length="17" number-of-flutes="2" overall-length="36.000004" shaft-diameter="3.175" shoulder-diameter="3.175" shoulder-length="17" thread-pitch="0" thread-profile-angle="60"/>
+      <motion clockwise="yes" cutting-feedrate="400" entry-feedrate="400" exit-feedrate="400" feed-mode="per-minute" plunge-feedrate="820" ramp-angle="203.2" ramp-feedrate="500" ramp-spindle-rpm="24000" retract-feedrate="0" spindle-rpm="24000" transition-feedrate="400"/>
       <presets>
         <preset description="" id="{de5941c9-276b-442b-a914-61c700b240ac}" name="Default preset">
           <parameter expression="'disabled'" key="tool_coolant" value="disabled"/>
           <parameter expression="24000 rpm" key="tool_spindleSpeed" value="24000"/>
           <parameter expression="24000 rpm" key="tool_rampSpindleSpeed" value="24000"/>
-          <parameter expression="1500mm/min" key="tool_feedCutting" value="1500.0000000000002"/>
-          <parameter key="tool_feedEntry" value="1500.0000000000002"/>
-          <parameter key="tool_feedExit" value="1500.0000000000002"/>
-          <parameter expression="820mm/min" key="tool_feedPlunge" value="820.00000000000011"/>
-          <parameter key="tool_feedTransition" value="1500.0000000000002"/>
-          <parameter expression="500mm/min" key="tool_feedRamp" value="500"/>
+          <parameter expression="2500 mm/min" key="tool_feedCutting" value="2500"/>
+          <parameter key="tool_feedEntry" value="2500"/>
+          <parameter key="tool_feedExit" value="2500"/>
+          <parameter expression="820mm/min" key="tool_feedPlunge" value="820"/>
+          <parameter key="tool_feedTransition" value="2500"/>
+          <parameter expression="800mm/min" key="tool_feedRamp" value="800"/>
           <parameter key="tool_presetMaterialCategory" value="all"/>
           <parameter key="tool_presetMaterialQuery" value=""/>
           <parameter expression="8 degrees" key="tool_rampAngle" value="8"/>
@@ -60,7 +60,7 @@
     <parameter expression="tool_diameter / 4" name="tool_maxCornerRadius"/>
     <parameter expression="'flat end mill'" name="tool_type"/>
     <parameter expression="'tapered_bull_nose'" name="tool_taperedType"/>
-    <parameter expression="'inches'" name="tool_unit"/>
+    <parameter expression="'millimeters'" name="tool_unit"/>
     <parameter expression="12" name="tool_number"/>
     <parameter expression="tool_number" name="tool_diameterOffset"/>
     <parameter expression="tool_number" name="tool_lengthOffset"/>
@@ -75,29 +75,29 @@
     <parameter expression="''" name="tool_vendor"/>
     <parameter expression="''" name="tool_productId"/>
     <parameter expression="''" name="tool_productLink"/>
-    <parameter expression="0.125in" name="tool_diameter"/>
+    <parameter expression="3.175" name="tool_diameter"/>
     <parameter expression="tool_diameter + 2*tool_fluteLength*Math.tan(tool_taperAngle)" name="tool_maximumCuttingDiameter"/>
-    <parameter expression="0.0in" name="tool_tipDiameter"/>
-    <parameter expression="0.0in" name="tool_tipOffset"/>
-    <parameter expression="0.0in" name="tool_cornerRadius"/>
+    <parameter expression="3.175" name="tool_tipDiameter"/>
+    <parameter expression="0.0" name="tool_tipOffset"/>
+    <parameter expression="0.0" name="tool_cornerRadius"/>
     <parameter expression="0.0" name="tool_taperAngle"/>
     <parameter expression="(tool_type == 'counter sink') ? 90.0deg : ((tool_type == 'spot drill') ? 120deg : 118.0deg)" name="tool_tipAngle"/>
     <parameter expression="tool_type == 'thread mill' ? 'point' : 'round'" name="tool_threadTipType"/>
     <parameter expression="tool_type == 'thread mill' ? tool_threadPitch / 4 : tool_maximumThreadPitch / 8" name="tool_threadTipWidth"/>
     <parameter expression="(((tool_type == 'thread mill' ? tool_threadPitch / 4 : tool_maximumThreadPitch / (tool_internalThread ? 8 : 4))) / 2) / Math.cos(tool_threadProfileAngle / 2 radians)" name="tool_threadTipRadius"/>
     <parameter expression="60." name="tool_threadProfileAngle"/>
-    <parameter expression="0.0in" name="tool_tipLength"/>
-    <parameter expression="0.6692913in" name="tool_fluteLength"/>
+    <parameter expression="0.0" name="tool_tipLength"/>
+    <parameter expression="17." name="tool_fluteLength"/>
     <parameter expression="tool_fluteLength" name="tool_shoulderLength"/>
     <parameter expression="tool_shoulderLength" name="tool_bodyLength"/>
-    <parameter expression="1.417323in" name="tool_overallLength"/>
+    <parameter expression="36.000004" name="tool_overallLength"/>
     <parameter expression="tool_diameter" name="tool_shaftDiameter"/>
-    <parameter expression="0.0in" name="tool_threadPitch"/>
+    <parameter expression="0.0" name="tool_threadPitch"/>
     <parameter expression="1.0mm" name="tool_maximumThreadPitch"/>
     <parameter expression="1.0mm" name="tool_minimumThreadPitch"/>
     <parameter expression="1" name="tool_numberOfTeeth"/>
     <parameter expression="2" name="tool_numberOfFlutes"/>
-    <parameter expression="0.125in" name="tool_shoulderDiameter"/>
+    <parameter expression="3.175" name="tool_shoulderDiameter"/>
     <parameter expression="(tool_type == 'circle segment barrel' ? (tool_diameter / 12) : (tool_type == 'circle segment taper' ? (tool_diameter / 2) : 0mm))" name="tool_upperRadius"/>
     <parameter expression="(tool_type == 'circle segment taper' ? (tool_diameter * 31.25) : (tool_type == 'circle segment oval' ? (tool_diameter * 15) : (tool_type == 'circle segment barrel' ? (tool_diameter * 4) : (tool_diameter * 0.6))))" name="tool_profileRadius"/>
     <parameter expression="(tool_type == 'circle segment taper' ? (tool_upperRadius / 2) : ((tool_type == 'circle segment barrel' ? tool_upperRadius : ((tool_type == 'circle segment lens' ? (tool_diameter): (tool_diameter / 6))))))" name="tool_lowerRadius"/>
@@ -110,21 +110,21 @@
     <parameter expression="''" name="holder_productId"/>
     <parameter expression="''" name="holder_productLink"/>
     <parameter expression="''" name="holder_libraryName"/>
-    <parameter expression="0.0in" name="tool_holderGaugeLength"/>
-    <parameter expression="0.6692913in" name="tool_assemblyGaugeLength"/>
+    <parameter expression="0.0" name="tool_holderGaugeLength"/>
+    <parameter expression="17." name="tool_assemblyGaugeLength"/>
     <parameter expression="'default'" name="preset_search"/>
     <parameter expression="''" name="preset_contains"/>
     <parameter expression="24000." name="tool_spindleSpeed"/>
     <parameter expression="tool_isTurning ? (tool_unit == 'millimeters' ? 25mm : 1.0in) : tool_diameter" name="tool_stockDiameter"/>
     <parameter expression="tool_diameter * Math.PI * tool_spindleSpeed" name="tool_surfaceSpeed"/>
     <parameter expression="tool_spindleSpeed" name="tool_rampSpindleSpeed"/>
-    <parameter expression="400.00 mm/min" name="tool_feedCutting"/>
+    <parameter expression="400." name="tool_feedCutting"/>
     <parameter expression="tool_spindleSpeed > 0 ? tool_feedCutting/(tool_spindleSpeed * tool_numberOfFlutes) : 0.0" name="tool_feedPerTooth"/>
     <parameter expression="tool_type == 'probe' || tool_isDepositing ? 1000mmpm : tool_feedCutting" name="tool_feedEntry"/>
     <parameter expression="tool_isDepositing ? 1000mmpm : tool_feedCutting" name="tool_feedExit"/>
     <parameter expression="tool_feedCutting" name="tool_feedTransition"/>
-    <parameter expression="19.68503937007874in/min" name="tool_feedRamp"/>
-    <parameter expression="32.28346456692914in/min" name="tool_feedPlunge"/>
+    <parameter expression="499.99999999999983" name="tool_feedRamp"/>
+    <parameter expression="820.00000000000011" name="tool_feedPlunge"/>
     <parameter expression="tool_spindleSpeed > 0 ? tool_feedPlunge/tool_spindleSpeed : 0.0" name="tool_feedPerRevolution"/>
     <parameter expression="tool_feedPlunge" name="tool_feedRetract"/>
     <parameter expression="true" name="tool_clockwise"/>
@@ -312,7 +312,7 @@
     <parameter expression="tool_diameter * 0.3" name="tool_stepover"/>
     <parameter expression="tool_diameter * 0.1" name="tool_finishingStepover"/>
     <parameter expression="'helix'" name="tool_rampType"/>
-    <parameter expression="8." name="tool_rampAngle"/>
+    <parameter expression="203.19999999999999" name="tool_rampAngle"/>
     <parameter expression="false" name="associatedView"/>
   </template>
 

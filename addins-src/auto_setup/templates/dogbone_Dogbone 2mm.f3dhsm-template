@@ -26,17 +26,17 @@
       <coolant mode="disabled"/>
       <material name="hss"/>
       <body assembly-gauge-length="20" body-length="20" coolant-support="no" diameter="2" flute-length="17" number-of-flutes="2" overall-length="38.1" shaft-diameter="3.175" shoulder-diameter="2" shoulder-length="17" thread-pitch="0" thread-profile-angle="60"/>
-      <motion clockwise="yes" cutting-feedrate="800" entry-feedrate="800" exit-feedrate="800" feed-mode="per-minute" plunge-feedrate="800" ramp-angle="2" ramp-feedrate="800" ramp-spindle-rpm="24000" retract-feedrate="0" spindle-rpm="24000" transition-feedrate="800"/>
+      <motion clockwise="yes" cutting-feedrate="1500" entry-feedrate="1500" exit-feedrate="1500" feed-mode="per-minute" plunge-feedrate="800" ramp-angle="2" ramp-feedrate="800" ramp-spindle-rpm="24000" retract-feedrate="0" spindle-rpm="24000" transition-feedrate="1500"/>
       <presets>
         <preset description="" id="{753cbff2-c1c2-4cbb-a332-777667770c20}" name="Default preset">
           <parameter expression="'disabled'" key="tool_coolant" value="disabled"/>
           <parameter expression="24000 rpm" key="tool_spindleSpeed" value="24000"/>
           <parameter key="tool_rampSpindleSpeed" value="24000"/>
-          <parameter expression="1500 mmpm" key="tool_feedCutting" value="1500"/>
-          <parameter key="tool_feedEntry" value="1500"/>
-          <parameter key="tool_feedExit" value="1500"/>
+          <parameter expression="2000 mmpm" key="tool_feedCutting" value="2000"/>
+          <parameter key="tool_feedEntry" value="2000"/>
+          <parameter key="tool_feedExit" value="2000"/>
           <parameter expression="800 mmpm" key="tool_feedPlunge" value="800"/>
-          <parameter key="tool_feedTransition" value="1500"/>
+          <parameter key="tool_feedTransition" value="2000"/>
           <parameter expression="800 mmpm" key="tool_feedRamp" value="800"/>
           <parameter key="tool_presetMaterialCategory" value="all"/>
           <parameter key="tool_presetMaterialQuery" value=""/>
@@ -81,7 +81,7 @@
     <parameter expression="''" name="tool_productLink"/>
     <parameter expression="2." name="tool_diameter"/>
     <parameter expression="tool_diameter + 2*tool_fluteLength*Math.tan(tool_taperAngle)" name="tool_maximumCuttingDiameter"/>
-    <parameter expression="0.0" name="tool_tipDiameter"/>
+    <parameter expression="2." name="tool_tipDiameter"/>
     <parameter expression="0.0" name="tool_tipOffset"/>
     <parameter expression="0.0" name="tool_cornerRadius"/>
     <parameter expression="0.0" name="tool_taperAngle"/>
@@ -122,7 +122,7 @@
     <parameter expression="tool_isTurning ? (tool_unit == 'millimeters' ? 25mm : 1.0in) : tool_diameter" name="tool_stockDiameter"/>
     <parameter expression="tool_diameter * Math.PI * tool_spindleSpeed" name="tool_surfaceSpeed"/>
     <parameter expression="tool_spindleSpeed" name="tool_rampSpindleSpeed"/>
-    <parameter expression="800.00 mm/min" name="tool_feedCutting"/>
+    <parameter expression="1500.00 mm/min" name="tool_feedCutting"/>
     <parameter expression="tool_spindleSpeed > 0 ? tool_feedCutting/(tool_spindleSpeed * tool_numberOfFlutes) : 0.0" name="tool_feedPerTooth"/>
     <parameter expression="tool_type == 'probe' || tool_isDepositing ? 1000mmpm : tool_feedCutting" name="tool_feedEntry"/>
     <parameter expression="tool_isDepositing ? 1000mmpm : tool_feedCutting" name="tool_feedExit"/>
@@ -299,7 +299,7 @@
     <parameter expression="20 deg" name="reducedFeedChange"/>
     <parameter expression="2mm" name="reducedFeedRadius"/>
     <parameter expression="3 mm" name="reducedFeedDistance"/>
-    <parameter expression="tool_feedCutting * 0.25" name="reducedFeedrate"/>
+    <parameter expression="800.00 mm/min" name="reducedFeedrate"/>
     <parameter expression="false" name="reduceOnlyInnerCorners"/>
     <parameter expression="false" name="surfaceSpeedOnArcs"/>
     <parameter expression="100" name="maximumReducedFeedrateInternalArcFinishing"/>
