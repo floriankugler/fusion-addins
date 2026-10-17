@@ -15,12 +15,31 @@ The layout is read as the emitter's plan reads it (`lang.emit.plan`:
 `LayoutFrame`, `PartFrame`, `named_ops`, `chamfer_target`), so the preview
 shows the faces, depths and chamfers Fusion gets. A boolean that fails
 leaves the board uncut and is reported, not hidden.
+
+Meshes are made at a level (`lang.preview.levels`): at `FINE` from the
+layout's polygons as they are, at `NORMAL` with the arcs and circles of
+outlines, pocket shapes and chamfered regions recovered (`arcs.fit`, as
+the plan recovers them for Fusion) and drawn again with fewer segments,
+their chords at most the level's tolerance inside them. Lines and
+everything that is not an arc stay as the layout has them.
+
+A part is meshed in its own (u, v, t) frame and placed last, so its mesh
+before the placement depends on its own entry alone. Given a folder
+(`MeshCache`), the scene keeps each part's mesh there by the hash of what
+it comes from (`part_key`) and takes it from there next time: a build after
+an edit meshes only the parts that changed.
 """
 from __future__ import annotations
 
+import functools
+import hashlib
+import json
 import math
+import os
 import sys
+import zipfile
 from collections.abc import Callable
+from importlib.metadata import version
 from pathlib import Path
 from typing import Any
 
@@ -35,8 +54,13 @@ from trimesh.creation import extrude_polygon, triangulate_polygon
 from ..core.geometry import polygons_of
 from ..core.layout_types import (BoxDict, ChamferLayout, EdgeOpLayout, HardwareLayout, Layout, OpLayout, PartLayout,
                                  Rings, VGrooveLayout)
+from ..emit.arcs import Arc2, Circle2, Line2, fit
 from ..emit.plan import (EdgeTarget, LayoutFrame, OpTarget, OutlineTarget, PartFrame, chamfer_target, check_version,
                          named_ops, pieces)
+from .levels import FINE, LEVELS, NORMAL, Level
+
+__all__ = ["FINE", "LEVELS", "NORMAL", "Level", "MeshCache", "build_scene", "mesh_hardware", "mesh_part", "part_key",
+           "write_scene"]
 
 AXES = ("x", "y", "z")
 #: How far a tool reaches past the face it starts from, and past the far
@@ -66,9 +90,97 @@ def _polygon(rings: Rings) -> Polygon:
     return out if out.is_valid and not out.is_empty else poly
 
 
-def _extruded(rings: Rings, height: float) -> Any:
+#: The widest step (radians) of an arc drawn again, however large its
+#: radius is against the level's tolerance.
+_MAX_ARC_STEP = math.radians(30.0)
+
+
+def _segments(radius: float, sweep: float, tolerance: float) -> int:
+    """How many chords draw an arc of `radius` turning `sweep` (radians)
+    with none lying more than `tolerance` inside it and none turning more
+    than `_MAX_ARC_STEP`."""
+    step = _MAX_ARC_STEP if tolerance >= radius else min(_MAX_ARC_STEP, 2 * math.acos(1 - tolerance / radius))
+    return max(1, math.ceil(sweep / step - 1e-9))
+
+
+def _shape_polygon(rings: Rings, level: Level) -> Polygon:
+    """A polygon of a layout shape (an exterior ring and its holes) at the
+    level, its arcs drawn again (`_redrawn`); the layout's polygon where
+    the level draws no arcs again, where no arc gets fewer segments, or
+    where the polygon drawn again is not valid or differs from the
+    layout's by more than its chords allow."""
+    polygon = _polygon(rings)
+    if level.tolerance is None:
+        return polygon
+    redrawn = [_redrawn(ring, level.tolerance) for ring in rings]
+    if all(new is old for new, old in zip(redrawn, rings)):
+        return polygon
+    coarse = _polygon(redrawn)
+    if not coarse.is_valid or coarse.is_empty or abs(coarse.area - polygon.area) > 2 * level.tolerance * polygon.length:
+        return polygon
+    return coarse
+
+
+def _redrawn(ring: list[list[float]], tolerance: float) -> list[list[float]]:
+    """The ring with its arcs and circles (`arcs.fit`) drawn again with
+    chords at most `tolerance` inside them, in the ring's direction, each
+    arc between the ends `fit` gives it; the ring itself (the same list)
+    when no arc gets fewer segments than the ring has on it."""
+    curves = fit(ring)
+    if all(isinstance(c, Line2) for c in curves):
+        return ring
+    points = np.asarray(ring, dtype=float)
+    if len(curves) == 1 and isinstance(curves[0], Circle2):
+        circle = curves[0]
+        n = _segments(circle.radius, 2 * math.pi, tolerance)
+        if n >= len(points):
+            return ring
+        x, y = points[:, 0], points[:, 1]
+        turn = 1.0 if float(np.dot(x, np.roll(y, -1)) - np.dot(np.roll(x, -1), y)) > 0 else -1.0
+        angles = turn * np.linspace(0.0, 2 * math.pi, n, endpoint=False)
+        (cx, cy), r = circle.center, circle.radius
+        return np.column_stack([cx + r * np.cos(angles), cy + r * np.sin(angles)]).tolist()
+    out: list[list[float]] = []
+    coarser = False
+    for curve in curves:
+        if isinstance(curve, Circle2):          # (only ever the whole ring)
+            return ring
+        out.append([curve.a[0], curve.a[1]])
+        if isinstance(curve, Arc2):
+            between = _between(curve, points, tolerance)
+            if between is None:
+                return ring
+            inner, fewer = between
+            out += inner
+            coarser = coarser or fewer
+    return out if coarser else ring
+
+
+def _between(arc: Arc2, ring: Any, tolerance: float) -> tuple[list[list[float]], bool] | None:
+    """The points an arc is drawn through between its ends: drawn again
+    with chords at most `tolerance` inside it where that takes fewer
+    segments than the ring's own vertices on the arc (True), else those
+    vertices (False); None for an arc that ends where it starts."""
+    (ax, ay), (mx, my), (bx, by) = arc.a, arc.mid, arc.b
+    if math.dist(arc.a, arc.b) <= 1e-9:
+        return None
+    (cx, cy), r = arc.center, arc.radius
+    turn = 1.0 if (mx - ax) * (by - ay) - (my - ay) * (bx - ax) > 0 else -1.0
+    start = math.atan2(ay - cy, ax - cx)
+    sweep = (turn * (math.atan2(by - cy, bx - cx) - start)) % (2 * math.pi)
+    # the ring's vertices on the arc, by how far along it they lie
+    along = (turn * (np.arctan2(ring[:, 1] - cy, ring[:, 0] - cx) - start)) % (2 * math.pi)
+    on = (np.abs(np.hypot(ring[:, 0] - cx, ring[:, 1] - cy) - r) <= 1e-6) & (along > 1e-9) & (along < sweep - 1e-9)
+    n = _segments(r, sweep, tolerance)
+    if n >= int(on.sum()) + 1:
+        return ring[on][np.argsort(along[on])].tolist(), False
+    angles = start + turn * sweep * np.arange(1, n) / n
+    return np.column_stack([cx + r * np.cos(angles), cy + r * np.sin(angles)]).tolist(), True
+
+
+def _extruded(rings: Rings, height: float, level: Level) -> Any:
     """Each polygon of a layout shape extruded by `height`."""
-    meshes = [_extruded_polygon(_polygon(piece), height) for piece in pieces(rings)]
+    meshes = [_extruded_polygon(_shape_polygon(piece, level), height) for piece in pieces(rings)]
     return meshes[0] if len(meshes) == 1 else trimesh.util.concatenate(meshes)
 
 
@@ -175,7 +287,7 @@ def _edge_transform(pf: PartFrame, op: EdgeOpLayout) -> Any:
     return m
 
 
-def _edge_tools(pf: PartFrame, op: EdgeOpLayout) -> list[Any]:
+def _edge_tools(pf: PartFrame, op: EdgeOpLayout, level: Level) -> list[Any]:
     """A pocket or hole in a narrow face and its chamfer, in the part's
     (u, v, t) frame: its shape (or circle) in the face's (s, t) frame,
     extruded along the face's axis from a little in front of where it
@@ -186,27 +298,27 @@ def _edge_tools(pf: PartFrame, op: EdgeOpLayout) -> list[Any]:
     extent = pf.extent(face)
     height = _reach(extent if depth is None else depth, extent)
     if inner["kind"] == "pocket":
-        tool = _extruded(inner["shape"], height)
+        tool = _extruded(inner["shape"], height, level)
     else:
         tool = _cylinder(inner["d"], height)
     tool.apply_translation([0.0, 0.0, -_PAST])
     tools = [tool]
     if inner["chamfer"] > 0:
-        tools += _edge_chamfers(op, inner["chamfer"])
+        tools += _edge_chamfers(op, inner["chamfer"], level)
     m = _edge_transform(pf, op)
     for tool in tools:
         tool.apply_transform(m)
     return tools
 
 
-def _edge_chamfers(op: EdgeOpLayout, size: float) -> list[Any]:
+def _edge_chamfers(op: EdgeOpLayout, size: float, level: Level) -> list[Any]:
     """The chamfer of a narrow-face operation's rim, in its own frame (see
     `_edge_transform`): a frustum along a pocket's contour, a countersink
     on a hole."""
     inner = op["op"]
     if inner["kind"] == "hole":
         return [_countersink(inner["d"], size)]
-    tools = [tool for region in _regions(inner["shape"]) for tool in _contour_chamfer(region, size, -1.0, 0.0)]
+    tools = [tool for region in _regions(inner["shape"], level) for tool in _contour_chamfer(region, size, -1.0, 0.0)]
     return [tool for tool in tools if tool is not None]
 
 
@@ -359,7 +471,7 @@ def _edge_chamfer(pf: PartFrame, a: str, b: str, size: float) -> Any | None:
     return trimesh.convex.convex_hull(np.array(points))
 
 
-def _chamfer_tools(part: PartLayout, pf: PartFrame) -> list[Any]:
+def _chamfer_tools(part: PartLayout, pf: PartFrame, level: Level) -> list[Any]:
     """The tools for the part's chamfers along cuts, pockets, outlines and
     edges, and along the operations a chamfer names (a hole's own chamfer
     is its countersink, a narrow-face operation's goes with it)."""
@@ -369,11 +481,11 @@ def _chamfer_tools(part: PartLayout, pf: PartFrame) -> list[Any]:
     tools: list[Any] = []
     for op in part["ops"]:
         if op["kind"] == "cut" and op["chamfer"] > 0:
-            jobs.append((_regions(op["shape"]), part["show"], op["chamfer"]))
+            jobs.append((_regions(op["shape"], level), part["show"], op["chamfer"]))
         elif op["kind"] == "pocket" and op["chamfer"] > 0:
-            jobs.append((_regions(op["shape"]), op["face"], op["chamfer"]))
+            jobs.append((_regions(op["shape"], level), op["face"], op["chamfer"]))
         elif op["kind"] == "chamfer":
-            tools += _named_chamfer(part, pf, op, named, jobs)
+            tools += _named_chamfer(part, pf, op, named, jobs, level)
     for regions, face, size in jobs:
         out = _big_face(pf, face)
         if out is None:
@@ -383,12 +495,12 @@ def _chamfer_tools(part: PartLayout, pf: PartFrame) -> list[Any]:
     return tools
 
 
-def _regions(rings: Rings) -> list[Polygon]:
-    return [_polygon(piece) for piece in pieces(rings)]
+def _regions(rings: Rings, level: Level) -> list[Polygon]:
+    return [_shape_polygon(piece, level) for piece in pieces(rings)]
 
 
 def _named_chamfer(part: PartLayout, pf: PartFrame, op: ChamferLayout, named: dict[str, OpLayout],
-                   jobs: list[tuple[list[Polygon], str, float]]) -> list[Any]:
+                   jobs: list[tuple[list[Polygon], str, float]], level: Level) -> list[Any]:
     """A chamfer op: along the outline of a face, along a named operation,
     or along an edge named by two faces (`plan.chamfer_target`). Contours
     on big faces go to `jobs`; the other tools are returned."""
@@ -396,7 +508,7 @@ def _named_chamfer(part: PartLayout, pf: PartFrame, op: ChamferLayout, named: di
     target = chamfer_target(op, named, pf.frame)
     if isinstance(target, OutlineTarget):
         # what lies around the outline, out to a frame beyond its chamfer
-        outline = _polygon(pieces(part["outline"])[0])
+        outline = _shape_polygon(pieces(part["outline"])[0], level)
         b = outline.bounds
         margin = 2 * size + 1
         around = shapely_box(b[0] - margin, b[1] - margin, b[2] + margin, b[3] + margin)
@@ -413,22 +525,38 @@ def _named_chamfer(part: PartLayout, pf: PartFrame, op: ChamferLayout, named: di
         return [] if out is None else [
             _big_countersink(named_op["u"], named_op["v"], named_op["d"], size, out, part["thickness"])]
     if named_op["kind"] == "edge":
-        tools = _edge_chamfers(named_op, size)
+        tools = _edge_chamfers(named_op, size, level)
         m = _edge_transform(pf, named_op)
         for tool in tools:
             tool.apply_transform(m)
         return tools
     if named_op["kind"] == "cut" or named_op["kind"] == "pocket":
-        jobs.append((_regions(named_op["shape"]), face, size))
+        jobs.append((_regions(named_op["shape"], level), face, size))
     return []
 
 
-def mesh_part(part: PartLayout, frame: dict[str, str], report: Report | None = None) -> Any:
-    """The part as a mesh in world coordinates, its operations cut. When
-    the boolean fails the board is left uncut and `report` (or stderr) is
-    told so."""
+def mesh_part(part: PartLayout, frame: dict[str, str], report: Report | None = None, level: Level = NORMAL) -> Any:
+    """The part as a mesh in world coordinates, its operations cut, at the
+    level. When the boolean fails the board is left uncut and `report` (or
+    stderr) is told so."""
+    mesh = _own_mesh(part, frame, report, level)
+    return None if mesh is None else _placed(mesh, part)
+
+
+def _placed(mesh: Any, part: PartLayout) -> Any:
+    """A part's mesh moved from its own frame into the world, named by its path."""
+    mesh.apply_transform(_part_transform(part))
+    mesh.metadata["path"] = part["path"]
+    return mesh
+
+
+def _own_mesh(part: PartLayout, frame: dict[str, str], report: Report | None, level: Level) -> Any:
+    """The part as a mesh in its own (u, v, t) frame, its operations cut;
+    None for an empty outline. It reads the part's outline, ops,
+    thickness, axes, box and show face, the frame and the level, as
+    `part_key` lists them."""
     t = part["thickness"]
-    outline = _polygon(part["outline"])
+    outline = _shape_polygon(part["outline"], level)
     if outline.is_empty:
         return None
     pf = PartFrame(part, LayoutFrame(frame))
@@ -441,7 +569,7 @@ def mesh_part(part: PartLayout, frame: dict[str, str], report: Report | None = N
                 continue
             depth = min(op["depth"], t)
             if op["kind"] == "pocket":
-                tools.append(_from_face(_extruded(op["shape"], _reach(depth, t)), out, t, depth))
+                tools.append(_from_face(_extruded(op["shape"], _reach(depth, t), level), out, t, depth))
             else:
                 tool = _cylinder(op["d"], _reach(depth, t))
                 tool.apply_translation([op["u"], op["v"], 0.0])
@@ -453,8 +581,8 @@ def mesh_part(part: PartLayout, frame: dict[str, str], report: Report | None = N
             if out is not None:
                 tools.append(_vgroove_tool(op, out, t))
         elif op["kind"] == "edge":
-            tools += _edge_tools(pf, op)
-    tools += _chamfer_tools(part, pf)
+            tools += _edge_tools(pf, op, level)
+    tools += _chamfer_tools(part, pf, level)
     tools = [tool for tool in tools if len(tool.faces)]
     if tools:
         try:
@@ -462,9 +590,98 @@ def mesh_part(part: PartLayout, frame: dict[str, str], report: Report | None = N
         except Exception as error:
             _report(report, f"{part['path']}: the preview could not cut its operations ({error}); "
                             "it shows the board uncut.")
-    mesh.apply_transform(_part_transform(part))
-    mesh.metadata["path"] = part["path"]
     return mesh
+
+
+#: What of a part's entry its mesh in its own frame comes from (`_own_mesh`).
+_MESHED_FROM = ("outline", "ops", "thickness", "axes", "box", "show")
+#: The code a part's mesh comes from, by file: a mesh cached by other code is
+#: not taken.
+_MESHER_CODE = [Path(__file__), Path(__file__).with_name("levels.py"),
+                *(Path(__file__).parents[1] / name for name in ("emit/plan.py", "emit/arcs.py", "core/geometry.py"))]
+
+
+@functools.cache
+def _code_hash() -> str:
+    """A hash of the mesher's code and of the libraries it meshes with."""
+    digest = hashlib.sha256()
+    for path in _MESHER_CODE:
+        digest.update(path.read_bytes())
+    for library in ("trimesh", "manifold3d", "shapely", "numpy"):
+        digest.update(f"{library} {version(library)}".encode())
+    return digest.hexdigest()
+
+
+def part_key(part: PartLayout, frame: dict[str, str], level: Level) -> str:
+    """The hash of everything a part's mesh in its own frame comes from:
+    its outline, ops, thickness, axes, box and show face, the layout's
+    frame, the level, and the mesher's code. A part moved (its box, or its
+    outline in its plane) is meshed anew; its path and the rest of its
+    entry do not count."""
+    entry = {name: part[name] for name in _MESHED_FROM}
+    data = {"part": entry, "frame": frame, "level": [level.name, level.tolerance], "code": _code_hash()}
+    return hashlib.sha256(json.dumps(data, sort_keys=True, separators=(",", ":")).encode()).hexdigest()[:32]
+
+
+class MeshCache:
+    """Parts' meshes in their own frame, kept in `folder` as one `.npz`
+    file each (vertices, faces and the mesh's metadata), named by
+    `part_key`. `mesh` takes a part's mesh from there, or meshes it and
+    keeps it (unless meshing it reported a problem: such a part is meshed
+    again each time, and says so each time); `prune` removes the files not
+    used since the cache was made, so the folder holds the last build's
+    meshes only. A mesh from the cache is the one meshing the part gives,
+    to the bit."""
+
+    def __init__(self, folder: str | Path):
+        self.folder = Path(folder)
+        self.used: set[str] = set()
+        self.meshed = 0                 # parts meshed anew
+
+    def mesh(self, part: PartLayout, frame: dict[str, str], report: Report | None = None,
+             level: Level = NORMAL) -> Any:
+        """The part as a mesh in world coordinates, as `mesh_part` gives it."""
+        key = part_key(part, frame, level)
+        self.used.add(key)
+        path = self.folder / f"{key}.npz"
+        try:
+            with np.load(path) as data:
+                mesh = trimesh.Trimesh(data["vertices"], data["faces"], process=False)
+                metadata = json.loads(str(data["metadata"]))
+            mesh.metadata.clear()
+            mesh.metadata.update(metadata)
+            return _placed(mesh, part)
+        except (OSError, KeyError, ValueError, zipfile.BadZipFile):
+            pass                        # not kept yet, or unreadable: mesh it
+        problems: list[str] = []
+        mesh = _own_mesh(part, frame, problems.append, level)
+        self.meshed += 1
+        for problem in problems:
+            _report(report, problem)
+        if mesh is None:
+            return None
+        if not problems:
+            self._keep(path, mesh)
+        return _placed(mesh, part)
+
+    def _keep(self, path: Path, mesh: Any) -> None:
+        try:
+            metadata = json.dumps(mesh.metadata)
+        except TypeError:
+            return                      # (metadata a file cannot give back as it was)
+        scratch = path.with_name(f"{path.stem}.{os.getpid()}.part.npz")
+        try:
+            self.folder.mkdir(parents=True, exist_ok=True)
+            np.savez(scratch, vertices=np.asarray(mesh.vertices), faces=np.asarray(mesh.faces), metadata=metadata)
+            os.replace(scratch, path)
+        except OSError:
+            scratch.unlink(missing_ok=True)
+
+    def prune(self) -> None:
+        """Removes the meshes kept that this cache did not use."""
+        for path in self.folder.glob("*.npz"):
+            if len(path.stem) == 32 and path.stem not in self.used:
+                path.unlink(missing_ok=True)
 
 
 def mesh_hardware(item: HardwareLayout, report: Report | None = None) -> list[tuple[str, Any]]:
@@ -498,14 +715,19 @@ def _box_mesh(box: BoxDict) -> Any:
     return mesh
 
 
-def build_scene(layout: Layout, report: Report | None = None) -> Any:
-    """Every part and hardware body of the layout as one scene; a ValueError
-    for a layout of another version."""
+def build_scene(layout: Layout, report: Report | None = None, level: Level = NORMAL,
+                cache: MeshCache | None = None) -> Any:
+    """Every part and hardware body of the layout as one scene, at the
+    level, the parts' meshes taken from `cache` where it has them; a
+    ValueError for a layout of another version."""
     check_version(layout)
     scene = trimesh.Scene()
     for module in layout["modules"]:
         for part in module["parts"]:
-            mesh = mesh_part(part, layout["frame"], report)
+            if cache is not None:
+                mesh = cache.mesh(part, layout["frame"], report, level)
+            else:
+                mesh = mesh_part(part, layout["frame"], report, level)
             if mesh is not None and len(mesh.faces):
                 scene.add_geometry(mesh, node_name=part["path"], geom_name=part["path"])
         for item in module["hardware"]:
@@ -514,10 +736,16 @@ def build_scene(layout: Layout, report: Report | None = None) -> Any:
     return scene
 
 
-def write_scene(layout: Layout, path: str | Path) -> list[str]:
-    """Writes the scene as glTF; returns the problems meshing it ran into."""
+def write_scene(layout: Layout, path: str | Path, level: Level = NORMAL, cache: str | Path | None = None) -> list[str]:
+    """Writes the scene at the level as glTF; returns the problems meshing
+    it ran into. Given a `cache` folder, the parts' meshes are taken from
+    there where they are unchanged, and it is left holding this scene's
+    (`MeshCache`)."""
     problems: list[str] = []
-    scene = build_scene(layout, problems.append)
+    store = MeshCache(cache) if cache is not None else None
+    scene = build_scene(layout, problems.append, level, store)
+    if store is not None:
+        store.prune()
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     scene.export(str(path))
     return problems
