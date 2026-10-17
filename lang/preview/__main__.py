@@ -534,13 +534,15 @@ class _Handler(http.server.SimpleHTTPRequestHandler):
 
 def rebuild(build_file: Path, out_dir: Path, timeout: float = TIMEOUT, level: str = NORMAL.name) -> bool:
     """Builds into a scratch directory, its scene meshed at the level
-    named, and moves the result into `out_dir`, the version last, so that
+    named (the parts' meshes kept in `out_dir/.mesh` for the next build),
+    and moves the result into `out_dir`, the version last, so that
     the page never reads a file half written. A failed build, or one
     stopped after `timeout` seconds (an endless loop in a build file would
     otherwise hold up every design), leaves the last good one in place."""
     scratch = out_dir / ".build"
     shutil.rmtree(scratch, ignore_errors=True)
-    command = [sys.executable, "-m", "lang.build", str(build_file), "--out", str(scratch), "--level", level]
+    command = [sys.executable, "-m", "lang.build", str(build_file), "--out", str(scratch), "--level", level,
+               "--mesh-cache", str(out_dir / ".mesh")]
     try:
         result = subprocess.run(command, capture_output=True, text=True, cwd=str(REPO), timeout=timeout)
     except subprocess.TimeoutExpired as expired:

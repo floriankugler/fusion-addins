@@ -13,8 +13,9 @@ from lang import *
 from lang.build import run_build
 from lang.core import layout_types
 from lang.core.layout import build_layout
+from lang.core.scope import registry
 from lang.emit import plan
-from lang.preview.mesh import FINE, NORMAL, build_scene, mesh_hardware, mesh_part, write_scene
+from lang.preview.mesh import FINE, NORMAL, MeshCache, build_scene, mesh_hardware, mesh_part, part_key, write_scene
 from helpers import ply15
 
 
@@ -198,3 +199,94 @@ def test_the_build_meshes_at_the_level_asked_and_says_which(tmp_path: Path):
     assert faces[0] > 10 * faces[1]
     with pytest.raises(SystemExit):
         main([str(build), "--level", "rough"])
+
+
+def _workshop(depth: float = 5) -> None:
+    """Two modules with the operations a part's mesh is made of: holes,
+    pockets, a cut, chamfers, V-grooves' and narrow faces' work."""
+    with module("m", Box.from_size(width=600, depth=400, height=300)) as m:
+        bottom = board("bottom", ply15).on(m.bottom)
+        bottom.pocket(circle(20), at=bottom.top.center, depth=depth, chamfer=1)
+        bottom.hole(8, at=bottom.top.front(50), depth=10)
+        bottom.cut(rect(width=100, depth=60), at=bottom.top.back)
+        side = board("left", ply15).on(m.left)
+        side.hole(5, at=side.front.center, depth=20)
+        side.chamfer(side.outer.outline, 1)
+        side.chamfer(side.front.top, 2)
+        board("right", ply15).on(m.right)
+    with module("n", Box.from_size(width=300, depth=300, height=200)) as n:
+        board("top", ply15).on(n.top).pocket(rect(width=50, depth=50), at=n["top"].bottom.center, depth=3)
+
+
+def test_a_scene_from_the_mesh_cache_is_the_one_meshed_anew(tmp_path: Path):
+    """The second build takes every part's mesh from the cache and writes
+    the same file to the bit; after one part changed it meshes that one
+    alone, and the cache holds the last build's meshes only."""
+    _workshop()
+    layout = build_layout()
+    count = sum(len(m["parts"]) for m in layout["modules"])
+    first = MeshCache(tmp_path / "cache")
+    build_scene(layout, cache=first).export(str(tmp_path / "first.glb"))
+    assert first.meshed == count and len(list((tmp_path / "cache").glob("*.npz"))) == count
+    second = MeshCache(tmp_path / "cache")
+    build_scene(layout, cache=second).export(str(tmp_path / "second.glb"))
+    assert second.meshed == 0
+    write_scene(layout, tmp_path / "anew.glb")
+    assert (tmp_path / "first.glb").read_bytes() == (tmp_path / "second.glb").read_bytes() \
+        == (tmp_path / "anew.glb").read_bytes()
+    for level in (FINE, NORMAL):        # a level of its own
+        assert write_scene(layout, tmp_path / f"{level.name}.glb", level, tmp_path / "cache") == []
+        write_scene(layout, tmp_path / f"{level.name}-anew.glb", level)
+        assert (tmp_path / f"{level.name}.glb").read_bytes() == (tmp_path / f"{level.name}-anew.glb").read_bytes()
+    registry.reset()
+    _workshop(depth=7)                  # the bottom's pocket deeper
+    changed = build_layout()
+    third = MeshCache(tmp_path / "cache")
+    build_scene(changed, cache=third).export(str(tmp_path / "third.glb"))
+    third.prune()
+    assert third.meshed == 1 and len(list((tmp_path / "cache").glob("*.npz"))) == count
+    write_scene(changed, tmp_path / "changed.glb")
+    assert (tmp_path / "third.glb").read_bytes() == (tmp_path / "changed.glb").read_bytes()
+
+
+def test_a_part_s_key_is_what_its_mesh_comes_from():
+    _workshop()
+    layout = build_layout()
+    part = layout["modules"][0]["parts"][0]
+    frame = layout["frame"]
+    key = part_key(part, frame, NORMAL)
+    renamed = part.copy()
+    renamed["path"], renamed["material"], renamed["settings"] = "x.y", "oak", {}
+    assert part_key(renamed, frame, NORMAL) == key
+    moved, turned = part.copy(), part.copy()
+    moved["box"] = {"min": [0.0, 0.0, 1.0], "max": part["box"]["max"]}
+    turned["show"] = "top" if part["show"] != "top" else "bottom"
+    assert len({key, part_key(moved, frame, NORMAL), part_key(turned, frame, NORMAL), part_key(part, frame, FINE),
+                part_key(part, {**frame, "top": "-z", "bottom": "+z"}, NORMAL)}) == 5
+
+
+def test_a_part_whose_boolean_failed_is_not_kept_and_says_so_each_time(monkeypatch: pytest.MonkeyPatch,
+                                                                        tmp_path: Path):
+    _panel()
+    layout = build_layout()
+    monkeypatch.setattr(trimesh.boolean, "difference", _failing)
+    for _ in range(2):
+        assert write_scene(layout, tmp_path / "scene.glb", cache=tmp_path / "cache") == [
+            "m.p: the preview could not cut its operations (manifold gave up); it shows the board uncut."]
+        assert list((tmp_path / "cache").glob("*.npz")) == []
+
+
+def test_the_build_keeps_its_meshes_beside_the_scene(tmp_path: Path):
+    build = tmp_path / "build.py"
+    build.write_text("from lang import *\n"
+                     "with module('m', Box.from_size(width=300, depth=200, height=100)) as m:\n"
+                     "    p = board('p', sheet_material('birch', t=15)).on(m.bottom)\n"
+                     "    p.pocket(circle(6), at=p.top.center, depth=5)\n")
+    from lang.build import main
+    assert main([str(build), "--out", str(tmp_path / "out")]) == 0
+    assert len(list((tmp_path / "out" / ".mesh").glob("*.npz"))) == 1
+    assert main([str(build), "--out", str(tmp_path / "other"), "--mesh-cache", str(tmp_path / "meshes")]) == 0
+    assert len(list((tmp_path / "meshes").glob("*.npz"))) == 1 and not (tmp_path / "other" / ".mesh").exists()
+    assert main([str(build), "--out", str(tmp_path / "none"), "--no-mesh-cache"]) == 0
+    assert not (tmp_path / "none" / ".mesh").exists()
+    assert (tmp_path / "out" / "scene.glb").read_bytes() == (tmp_path / "none" / "scene.glb").read_bytes()

@@ -22,7 +22,10 @@ have their middle on `pos` and their side on the edge the anchor names
 
 `run_levels` meshes such a board, its cutout made, at the preview's normal
 level and at the fine one (`lang.preview.levels`): as closed, and as much
-material within what drawing its curves again allows (`level_slack`)."""
+material within what drawing its curves again allows (`level_slack`).
+`run_cache` meshes it through the preview's mesh cache (`MeshCache`), which
+must give the mesh meshing gives, kept and taken back, under one key
+however the part is named."""
 from __future__ import annotations
 
 import math
@@ -52,7 +55,7 @@ from lang.core.shapes import slot_shape
 from lang.core.layout_types import PartLayout, Rings
 from lang.emit.plan import LayoutFrame, PartFrame, plan_layout
 from lang.master import Plane
-from lang.preview.mesh import FINE, NORMAL, mesh_part
+from lang.preview.mesh import FINE, NORMAL, MeshCache, mesh_part, part_key
 
 Place = Literal["bottom", "left", "back"]
 OutlineKind = Literal["rect", "rounded", "taper", "slot"]
@@ -552,7 +555,8 @@ def _touching(rings: list[list[list[float]]]) -> bool:
         lines[i].distance(lines[j]) < 1e-6 for i in range(len(lines)) for j in range(i + 1, len(lines)))
 
 
-__all__ = ["BoardCase", "CutoutCall", "Feature", "board_cases", "level_slack", "rings_of", "run_cutout", "run_levels"]
+__all__ = ["BoardCase", "CutoutCall", "Feature", "board_cases", "level_slack", "rings_of", "run_cache", "run_cutout",
+           "run_levels"]
 
 
 # -- a shape centred on a position ---------------------------------------------------------------
@@ -749,3 +753,43 @@ def level_slack(part: PartLayout, frame: dict[str, str], tolerance: float) -> fl
         elif op["kind"] == "chamfer":
             chamfers += op["size"]
     return 2 * tolerance * (total + shapes * chamfers) + 1e-6
+
+
+def run_cache(case: BoardCase) -> list[str]:
+    """What is wrong with the case's board (its cutout made) meshed through
+    the mesh cache: kept on the first build, taken back on the second, it
+    must be the mesh meshing gives, vertex for vertex and face for face,
+    with its metadata; renamed, the part must keep its key."""
+    import tempfile
+    import numpy as np
+    with fresh():
+        try:
+            _run_cutout(case, pipeline=False)
+            layout = build_layout()
+        except LangError:
+            return []
+    problems: list[str] = []
+    with tempfile.TemporaryDirectory() as folder:
+        for level in (FINE, NORMAL):
+            for module_layout in layout["modules"]:
+                for part in module_layout["parts"]:
+                    meshed = mesh_part(part, layout["frame"], lambda _: None, level)
+                    kept = MeshCache(folder).mesh(part, layout["frame"], lambda _: None, level)
+                    again = MeshCache(folder)
+                    taken = again.mesh(part, layout["frame"], lambda _: None, level)
+                    if meshed is None:
+                        if kept is not None or taken is not None:
+                            problems.append(f"{level.name}: the cache made a mesh of an empty outline")
+                        continue
+                    for name, mesh in (("kept", kept), ("taken back", taken)):
+                        if mesh is None or not (np.array_equal(mesh.vertices, meshed.vertices)
+                                                and np.array_equal(mesh.faces, meshed.faces)
+                                                and mesh.metadata == meshed.metadata):
+                            problems.append(f"{level.name}: the mesh {name} is not the one meshed")
+                    if again.meshed:
+                        problems.append(f"{level.name}: the second build meshed the part again")
+                    renamed = part.copy()
+                    renamed["path"] = part["path"] + "_renamed"
+                    if part_key(renamed, layout["frame"], level) != part_key(part, layout["frame"], level):
+                        problems.append(f"{level.name}: renamed, the part has another key")
+    return problems

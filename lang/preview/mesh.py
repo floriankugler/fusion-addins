@@ -22,12 +22,24 @@ outlines, pocket shapes and chamfered regions recovered (`arcs.fit`, as
 the plan recovers them for Fusion) and drawn again with fewer segments,
 their chords at most the level's tolerance inside them. Lines and
 everything that is not an arc stay as the layout has them.
+
+A part is meshed in its own (u, v, t) frame and placed last, so its mesh
+before the placement depends on its own entry alone. Given a folder
+(`MeshCache`), the scene keeps each part's mesh there by the hash of what
+it comes from (`part_key`) and takes it from there next time: a build after
+an edit meshes only the parts that changed.
 """
 from __future__ import annotations
 
+import functools
+import hashlib
+import json
 import math
+import os
 import sys
+import zipfile
 from collections.abc import Callable
+from importlib.metadata import version
 from pathlib import Path
 from typing import Any
 
@@ -47,7 +59,8 @@ from ..emit.plan import (EdgeTarget, LayoutFrame, OpTarget, OutlineTarget, PartF
                          named_ops, pieces)
 from .levels import FINE, LEVELS, NORMAL, Level
 
-__all__ = ["FINE", "LEVELS", "NORMAL", "Level", "build_scene", "mesh_hardware", "mesh_part", "write_scene"]
+__all__ = ["FINE", "LEVELS", "NORMAL", "Level", "MeshCache", "build_scene", "mesh_hardware", "mesh_part", "part_key",
+           "write_scene"]
 
 AXES = ("x", "y", "z")
 #: How far a tool reaches past the face it starts from, and past the far
@@ -526,6 +539,22 @@ def mesh_part(part: PartLayout, frame: dict[str, str], report: Report | None = N
     """The part as a mesh in world coordinates, its operations cut, at the
     level. When the boolean fails the board is left uncut and `report` (or
     stderr) is told so."""
+    mesh = _own_mesh(part, frame, report, level)
+    return None if mesh is None else _placed(mesh, part)
+
+
+def _placed(mesh: Any, part: PartLayout) -> Any:
+    """A part's mesh moved from its own frame into the world, named by its path."""
+    mesh.apply_transform(_part_transform(part))
+    mesh.metadata["path"] = part["path"]
+    return mesh
+
+
+def _own_mesh(part: PartLayout, frame: dict[str, str], report: Report | None, level: Level) -> Any:
+    """The part as a mesh in its own (u, v, t) frame, its operations cut;
+    None for an empty outline. It reads the part's outline, ops,
+    thickness, axes, box and show face, the frame and the level, as
+    `part_key` lists them."""
     t = part["thickness"]
     outline = _shape_polygon(part["outline"], level)
     if outline.is_empty:
@@ -561,9 +590,98 @@ def mesh_part(part: PartLayout, frame: dict[str, str], report: Report | None = N
         except Exception as error:
             _report(report, f"{part['path']}: the preview could not cut its operations ({error}); "
                             "it shows the board uncut.")
-    mesh.apply_transform(_part_transform(part))
-    mesh.metadata["path"] = part["path"]
     return mesh
+
+
+#: What of a part's entry its mesh in its own frame comes from (`_own_mesh`).
+_MESHED_FROM = ("outline", "ops", "thickness", "axes", "box", "show")
+#: The code a part's mesh comes from, by file: a mesh cached by other code is
+#: not taken.
+_MESHER_CODE = [Path(__file__), Path(__file__).with_name("levels.py"),
+                *(Path(__file__).parents[1] / name for name in ("emit/plan.py", "emit/arcs.py", "core/geometry.py"))]
+
+
+@functools.cache
+def _code_hash() -> str:
+    """A hash of the mesher's code and of the libraries it meshes with."""
+    digest = hashlib.sha256()
+    for path in _MESHER_CODE:
+        digest.update(path.read_bytes())
+    for library in ("trimesh", "manifold3d", "shapely", "numpy"):
+        digest.update(f"{library} {version(library)}".encode())
+    return digest.hexdigest()
+
+
+def part_key(part: PartLayout, frame: dict[str, str], level: Level) -> str:
+    """The hash of everything a part's mesh in its own frame comes from:
+    its outline, ops, thickness, axes, box and show face, the layout's
+    frame, the level, and the mesher's code. A part moved (its box, or its
+    outline in its plane) is meshed anew; its path and the rest of its
+    entry do not count."""
+    entry = {name: part[name] for name in _MESHED_FROM}
+    data = {"part": entry, "frame": frame, "level": [level.name, level.tolerance], "code": _code_hash()}
+    return hashlib.sha256(json.dumps(data, sort_keys=True, separators=(",", ":")).encode()).hexdigest()[:32]
+
+
+class MeshCache:
+    """Parts' meshes in their own frame, kept in `folder` as one `.npz`
+    file each (vertices, faces and the mesh's metadata), named by
+    `part_key`. `mesh` takes a part's mesh from there, or meshes it and
+    keeps it (unless meshing it reported a problem: such a part is meshed
+    again each time, and says so each time); `prune` removes the files not
+    used since the cache was made, so the folder holds the last build's
+    meshes only. A mesh from the cache is the one meshing the part gives,
+    to the bit."""
+
+    def __init__(self, folder: str | Path):
+        self.folder = Path(folder)
+        self.used: set[str] = set()
+        self.meshed = 0                 # parts meshed anew
+
+    def mesh(self, part: PartLayout, frame: dict[str, str], report: Report | None = None,
+             level: Level = NORMAL) -> Any:
+        """The part as a mesh in world coordinates, as `mesh_part` gives it."""
+        key = part_key(part, frame, level)
+        self.used.add(key)
+        path = self.folder / f"{key}.npz"
+        try:
+            with np.load(path) as data:
+                mesh = trimesh.Trimesh(data["vertices"], data["faces"], process=False)
+                metadata = json.loads(str(data["metadata"]))
+            mesh.metadata.clear()
+            mesh.metadata.update(metadata)
+            return _placed(mesh, part)
+        except (OSError, KeyError, ValueError, zipfile.BadZipFile):
+            pass                        # not kept yet, or unreadable: mesh it
+        problems: list[str] = []
+        mesh = _own_mesh(part, frame, problems.append, level)
+        self.meshed += 1
+        for problem in problems:
+            _report(report, problem)
+        if mesh is None:
+            return None
+        if not problems:
+            self._keep(path, mesh)
+        return _placed(mesh, part)
+
+    def _keep(self, path: Path, mesh: Any) -> None:
+        try:
+            metadata = json.dumps(mesh.metadata)
+        except TypeError:
+            return                      # (metadata a file cannot give back as it was)
+        scratch = path.with_name(f"{path.stem}.{os.getpid()}.part.npz")
+        try:
+            self.folder.mkdir(parents=True, exist_ok=True)
+            np.savez(scratch, vertices=np.asarray(mesh.vertices), faces=np.asarray(mesh.faces), metadata=metadata)
+            os.replace(scratch, path)
+        except OSError:
+            scratch.unlink(missing_ok=True)
+
+    def prune(self) -> None:
+        """Removes the meshes kept that this cache did not use."""
+        for path in self.folder.glob("*.npz"):
+            if len(path.stem) == 32 and path.stem not in self.used:
+                path.unlink(missing_ok=True)
 
 
 def mesh_hardware(item: HardwareLayout, report: Report | None = None) -> list[tuple[str, Any]]:
@@ -597,14 +715,19 @@ def _box_mesh(box: BoxDict) -> Any:
     return mesh
 
 
-def build_scene(layout: Layout, report: Report | None = None, level: Level = NORMAL) -> Any:
+def build_scene(layout: Layout, report: Report | None = None, level: Level = NORMAL,
+                cache: MeshCache | None = None) -> Any:
     """Every part and hardware body of the layout as one scene, at the
-    level; a ValueError for a layout of another version."""
+    level, the parts' meshes taken from `cache` where it has them; a
+    ValueError for a layout of another version."""
     check_version(layout)
     scene = trimesh.Scene()
     for module in layout["modules"]:
         for part in module["parts"]:
-            mesh = mesh_part(part, layout["frame"], report, level)
+            if cache is not None:
+                mesh = cache.mesh(part, layout["frame"], report, level)
+            else:
+                mesh = mesh_part(part, layout["frame"], report, level)
             if mesh is not None and len(mesh.faces):
                 scene.add_geometry(mesh, node_name=part["path"], geom_name=part["path"])
         for item in module["hardware"]:
@@ -613,11 +736,16 @@ def build_scene(layout: Layout, report: Report | None = None, level: Level = NOR
     return scene
 
 
-def write_scene(layout: Layout, path: str | Path, level: Level = NORMAL) -> list[str]:
+def write_scene(layout: Layout, path: str | Path, level: Level = NORMAL, cache: str | Path | None = None) -> list[str]:
     """Writes the scene at the level as glTF; returns the problems meshing
-    it ran into."""
+    it ran into. Given a `cache` folder, the parts' meshes are taken from
+    there where they are unchanged, and it is left holding this scene's
+    (`MeshCache`)."""
     problems: list[str] = []
-    scene = build_scene(layout, problems.append, level)
+    store = MeshCache(cache) if cache is not None else None
+    scene = build_scene(layout, problems.append, level, store)
+    if store is not None:
+        store.prune()
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     scene.export(str(path))
     return problems

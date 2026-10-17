@@ -1,6 +1,10 @@
 """Runs a build file and writes its layout, and optionally the preview scene.
 
-    python -m lang.build examples/drawer_cabinet.py --out out/ [--level fine|normal]
+    python -m lang.build examples/drawer_cabinet.py --out out/ [--level fine|normal] [--mesh-cache DIR]
+
+The scene's part meshes are kept in `<out>/.mesh` (or `--mesh-cache`), so
+the next build meshes only the parts that changed (`lang.preview.mesh`,
+`MeshCache`).
 
 A build file is ordinary Python that creates modules with `from lang import *`.
 The build runs in a fresh registry and the default world frame every time,
@@ -56,17 +60,20 @@ def run(build_file: str | Path) -> None:
         _forget_modules_in(build_path.parent, before)
 
 
-def run_build(build_file: str | Path, out_dir: str | Path, scene: bool = True, level: Level = NORMAL) -> Layout:
+def run_build(build_file: str | Path, out_dir: str | Path, scene: bool = True, level: Level = NORMAL,
+              mesh_cache: str | Path | None = None) -> Layout:
     """Runs the build file, writes its layout (and with `scene` the
     preview's glTF scene at the level, and the level's name in level.txt)
-    into `out_dir`, and returns the layout. Problems meshing the scene are
-    printed to stderr as `preview: ...`."""
+    into `out_dir`, and returns the layout. The scene takes the parts'
+    meshes from the `mesh_cache` folder where they are unchanged and
+    leaves it holding its own. Problems meshing the scene are printed to
+    stderr as `preview: ...`."""
     run(build_file)
     out_path = Path(out_dir)
     layout = write_layout(out_path / "layout.json")
     if scene:
         from .preview.mesh import write_scene
-        for problem in write_scene(layout, out_path / "scene.glb", level):
+        for problem in write_scene(layout, out_path / "scene.glb", level, mesh_cache):
             print(f"preview: {problem}", file=sys.stderr)
         (out_path / "level.txt").write_text(level.name)
     (out_path / "version.txt").write_text(str(time.time_ns()))
@@ -130,10 +137,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--level", choices=list(LEVELS), default=NORMAL.name,
                         help="how exactly the scene is meshed: fine, the layout's polygons as they are; normal "
                              "(the default), arcs drawn again with chords at most 0.05 mm inside them")
+    parser.add_argument("--mesh-cache", metavar="DIR",
+                        help="where the parts' meshes are kept for the next build (default: OUT/.mesh)")
+    parser.add_argument("--no-mesh-cache", action="store_true", help="mesh every part anew and keep nothing")
     parser.add_argument("--traceback", action="store_true", help="print an error's whole stack")
     args = parser.parse_args(argv)
     try:
-        layout = run_build(args.build_file, args.out, scene=not args.no_scene, level=LEVELS[args.level])
+        cache = None if args.no_mesh_cache else args.mesh_cache or Path(args.out) / ".mesh"
+        layout = run_build(args.build_file, args.out, scene=not args.no_scene, level=LEVELS[args.level], mesh_cache=cache)
     except Exception as error:
         if args.traceback:
             raise

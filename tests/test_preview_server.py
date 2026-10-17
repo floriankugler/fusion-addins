@@ -151,7 +151,7 @@ def test_a_failed_build_keeps_the_last_good_one(tmp_path: Path):
     out = tmp_path / "out"
     assert rebuild(path, out)
     version = (out / "version.txt").read_text()
-    assert {p.name for p in out.iterdir()} == {"build.log", "layout.json", "scene.glb", "level.txt", "version.txt"}
+    assert {p.name for p in out.iterdir()} == {".mesh", "build.log", "layout.json", "scene.glb", "level.txt", "version.txt"}
     assert "1 parts" in (out / "build.log").read_text()
     path.write_text(CABINET + "    undefined_name()\n")
     assert not rebuild(path, out)

@@ -62,6 +62,22 @@ for a check, too slow for the loop. [decided as a need]
   the same closed meshes, the volumes within each shape's length times the
   tolerance over its height. A level that leaves operations out (rough,
   `design/proposals/detail-levels.md`) is not built.
+- The mesh cache (`MeshCache` in `lang/preview/mesh.py`): a part is meshed
+  in its own (u, v, t) frame and placed last, so its mesh before the
+  placement depends on its entry alone. The build keeps each part's mesh
+  in `out/<design>/.mesh/<hash>.npz` (`--mesh-cache DIR`, or
+  `--no-mesh-cache`), the hash (`part_key`) of exactly what the mesh comes
+  from: the outline, ops, thickness, axes, box and show face, the layout's
+  frame, the level, and the mesher's code and libraries. The next build
+  takes the unchanged parts from there and meshes the rest, and the
+  folder keeps only what the last build used. A part whose meshing
+  reported a problem is not kept, so it says so on every build. A scene
+  from the cache is the scene meshed anew to the bit (tested on every
+  example at both levels, and fuzzed: `run_cache`, check `mesh_cache`). A
+  part moved (its box, or its outline in its plane) is meshed anew; a part
+  renamed is not. On the van, a build after one part changed takes 1.0 s
+  (the scene 0.1 s of it, the rest the imports and the build file), a
+  cold one 1.5 s.
 
 ## The viewer
 
@@ -148,7 +164,8 @@ for a check, too slow for the loop. [decided as a need]
   shared module or a snapshot in the folder) all of them, and a stale design
   builds when a page shows it. The folder is rescanned on every change, so
   new build files appear without a restart.
-- A build goes to a scratch directory and moves in when it went through, so
+- A build goes to a scratch directory (its part meshes kept in the
+  design's `.mesh` beside it) and moves in when it went through, so
   a failed one shows its log and leaves the last good scene; a build still
   running after 120 s is stopped and counts as failed. The log holds the
   error and the lines of the build files it passed through
